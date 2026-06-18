@@ -1,0 +1,24 @@
+﻿# Secrets - NEVER commit these
+*.env
+.env
+.env.local
+.env.*.local
+keys.txt
+keys*.txt
+*keys*.txt
+*secret*
+*.pem
+
+# Dependencies and build output
+node_modules/
+.next/
+dist/
+build/
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.claude/
+
+# Internal docs
+*.pdf

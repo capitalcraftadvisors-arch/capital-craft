@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Same CSS variables as www.capitalcraft.in ─────────────────────────────
+   These exist so that any third-party widget or future raw CSS we drop in
+   can use var(--blue) / var(--text) / etc. without remembering tailwind class
+   names. They're the same values as the tailwind config above. */
+:root {
+  --blue:       #0066FF;
+  --blue-dark:  #0052CC;
+  --blue-50:    #EBF3FF;
+  --green:      #00B86B;
+  --green-dark: #008F52;
+  --green-50:   #E6F8EF;
+  --gold:       #F5B800;
+  --gold-50:    #FFF5D6;
+
+  --bg:         #FFFFFF;
+  --bg-soft:    #F6FBFA;
+  --bg-card:    #FFFFFF;
+  --bg-tint:    #F0F7FF;
+
+  --text:       #0A1F2E;
+  --text-mid:   #3D5566;
+  --muted:      #6B8294;
+  --line:       #E3EDF2;
+  --line-soft:  #F0F4F7;
+
+  --shadow-sm:    0 1px 3px rgba(10,31,46,0.04), 0 1px 2px rgba(10,31,46,0.06);
+  --shadow-md:    0 4px 12px rgba(10,31,46,0.06), 0 2px 4px rgba(10,31,46,0.04);
+  --shadow-lg:    0 12px 32px rgba(10,31,46,0.08), 0 4px 8px rgba(10,31,46,0.04);
+  --shadow-blue:  0 12px 32px rgba(0,102,255,0.18);
+  --shadow-green: 0 12px 32px rgba(0,184,107,0.18);
+
+  --grad-bg:     linear-gradient(90deg, var(--blue), var(--green));
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Match the scrollbar treatment from the marketing site */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-soft); }
+::-webkit-scrollbar-thumb { background: var(--grad-bg); border-radius: 3px; }
+
+h1, h2, h3, h4 {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  color: var(--text);
+}
+
+/* Brand-gradient text utility (matches .grad-text on marketing site) */
+.grad-text {
+  background: var(--grad-bg);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}

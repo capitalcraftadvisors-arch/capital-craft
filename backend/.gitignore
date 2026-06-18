@@ -1,0 +1,23 @@
+# ─── Secrets (NEVER commit) ─────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+capitalcraft-build/keys.txt
+keys backup.txt
+**/keys.txt
+
+# ─── Supabase CLI local state ───────────────────────────────────────
+.supabase/
+supabase/.branches/
+supabase/.temp/
+
+# ─── Deno / Edge Function build artifacts ───────────────────────────
+**/.deno/
+**/node_modules/
+
+# ─── OS / editor ────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

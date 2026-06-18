@@ -1,0 +1,232 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { supabase } from "@/lib/supabase";
+import { uploadDocument, getSignedUrl, deleteStorageFile } from "@/lib/storage";
+import { isAcceptedFileType } from "@/lib/validators";
+
+type EpcCategory =
+  | "pan_business" | "gstin" | "extra_doc"
+  | "stakeholder_pan" | "stakeholder_aadhaar"
+  | "cancelled_cheque"
+  | "office_exterior" | "office_interior" | "office_selfie";
+
+type LoanCategory =
+  | "borrower_pan" | "borrower_aadhaar" | "borrower_photo"
+  | "bank_statement" | "income_proof" | "electricity_bill"
+  | "property_doc" | "quotation" | "other";
+
+type Props = {
+  // EPC docs path: pass businessId (+ optional stakeholderId).
+  // Loan docs path: pass applicationId.
+  businessId?: string;
+  stakeholderId?: string;
+  applicationId?: string;
+  category: EpcCategory | LoanCategory;
+  table: "epc_documents" | "user_application_docs";
+  maxFiles?: number; // 1 (default 1) or Infinity-ish
+  uploadedBy?: "epc" | "admin"; // only for loan docs
+  // Optional callback fired after a file uploads successfully, with the OCR-eligible File.
+  onUploaded?: (info: { docId: string; storagePath: string; file: File }) => void;
+  // For office_* photos: capture GPS and stuff into metadata
+  captureGps?: boolean;
+  label?: string;
+  hint?: string;
+};
+
+type DocRow = {
+  id: string;
+  storage_path: string;
+  mime_type: string | null;
+  file_name: string | null;
+};
+
+export default function FileUpload(props: Props) {
+  const {
+    businessId, stakeholderId, applicationId,
+    category, table, maxFiles = 1, uploadedBy,
+    onUploaded, captureGps = false, label, hint,
+  } = props;
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [docs, setDocs] = useState<DocRow[]>([]);
+  const [thumbs, setThumbs] = useState<Record<string, string>>({});
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Load existing docs for this category
+  useEffect(() => {
+    (async () => {
+      const q = supabase().from(table).select("id, storage_path, mime_type, file_name").eq("category", category);
+      const final = table === "epc_documents"
+        ? q.eq("business_id", businessId!).eq(stakeholderId ? "stakeholder_id" : "category", stakeholderId ?? category)
+        : q.eq("application_id", applicationId!);
+      const { data } = await final;
+      const rows = (data ?? []) as DocRow[];
+      setDocs(rows);
+
+      // Generate signed thumbnails for images
+      const t: Record<string, string> = {};
+      for (const d of rows) {
+        if ((d.mime_type || "").startsWith("image/")) {
+          const u = await getSignedUrl(d.storage_path);
+          if (u) t[d.id] = u;
+        }
+      }
+      setThumbs(t);
+    })();
+  }, [businessId, stakeholderId, applicationId, category, table]);
+
+  async function handleFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
+    if (docs.length + files.length > maxFiles) {
+      setError(`Only ${maxFiles} file${maxFiles > 1 ? "s" : ""} allowed in this slot.`);
+      return;
+    }
+    setError(null);
+    setUploading(true);
+
+    let gps: { lat: number; lng: number; captured_at: string } | null = null;
+    if (captureGps && "geolocation" in navigator) {
+      gps = await new Promise((resolve) => {
+        navigator.geolocation.getCurrentPosition(
+          (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, captured_at: new Date().toISOString() }),
+          () => resolve(null),
+          { timeout: 6000 },
+        );
+      });
+    }
+
+    for (const file of Array.from(files)) {
+      if (!isAcceptedFileType(file.type)) {
+        setError("Only JPG, PNG, WEBP, or PDF files are allowed.");
+        continue;
+      }
+      const docUuid = crypto.randomUUID();
+      const finalPath =
+        table === "epc_documents"
+          ? stakeholderId
+            ? `${businessId}/${stakeholderId}/${category}/${docUuid}_${safeName(file.name)}`
+            : `${businessId}/${category}/${docUuid}_${safeName(file.name)}`
+          : `applications/${applicationId}/${category}/${docUuid}_${safeName(file.name)}`;
+
+      const r = await uploadDocument(file, finalPath);
+      if (!r.ok) {
+        setError(r.error);
+        continue;
+      }
+
+      const insertRow: Record<string, unknown> = {
+        category,
+        storage_path: r.storage_path,
+        file_name: file.name,
+        mime_type: r.mime_type,
+        original_size_bytes: r.original_size_bytes,
+        stored_size_bytes: r.stored_size_bytes,
+        metadata: gps ? { gps } : null,
+      };
+      if (table === "epc_documents") {
+        insertRow.business_id = businessId;
+        if (stakeholderId) insertRow.stakeholder_id = stakeholderId;
+      } else {
+        insertRow.application_id = applicationId;
+        if (uploadedBy) insertRow.uploaded_by = uploadedBy;
+      }
+
+      const { data: inserted, error: insertErr } = await supabase()
+        .from(table)
+        .insert(insertRow)
+        .select("id, storage_path, mime_type, file_name")
+        .single();
+
+      if (insertErr) {
+        setError(insertErr.message);
+        continue;
+      }
+      const row = inserted as DocRow;
+      setDocs((d) => [...d, row]);
+      if ((row.mime_type || "").startsWith("image/")) {
+        const u = await getSignedUrl(row.storage_path);
+        if (u) setThumbs((t) => ({ ...t, [row.id]: u }));
+      }
+      onUploaded?.({ docId: row.id, storagePath: row.storage_path, file });
+    }
+
+    setUploading(false);
+    if (inputRef.current) inputRef.current.value = "";
+  }
+
+  async function removeDoc(d: DocRow) {
+    await deleteStorageFile(d.storage_path);
+    await supabase().from(table).delete().eq("id", d.id);
+    setDocs((arr) => arr.filter((x) => x.id !== d.id));
+    setThumbs((t) => { const c = { ...t }; delete c[d.id]; return c; });
+  }
+
+  const canUploadMore = docs.length < maxFiles;
+
+  return (
+    <div>
+      {label && <p className="text-[13px] font-medium text-text-mid mb-2">{label}</p>}
+
+      {docs.length > 0 && (
+        <ul className="space-y-2 mb-3">
+          {docs.map((d) => (
+            <li
+              key={d.id}
+              className="flex items-center gap-3 bg-white border border-line rounded-input px-3 py-2"
+            >
+              {thumbs[d.id] ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={thumbs[d.id]} alt="" className="w-10 h-10 object-cover rounded-md" />
+              ) : (
+                <div className="w-10 h-10 bg-bg-tint rounded-md grid place-items-center text-blue text-xs font-bold">
+                  PDF
+                </div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] text-text truncate">{d.file_name || "Document"}</p>
+                <p className="text-[11px] text-text-muted">Uploaded</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => removeDoc(d)}
+                className="text-[12px] text-text-muted hover:text-red-500 transition-colors"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {canUploadMore && (
+        <label
+          className={[
+            "block border-2 border-dashed border-line rounded-input bg-white",
+            "px-4 py-6 text-center cursor-pointer hover:border-blue transition-colors",
+          ].join(" ")}
+        >
+          <input
+            ref={inputRef}
+            type="file"
+            className="hidden"
+            accept="image/jpeg,image/png,image/webp,application/pdf"
+            multiple={maxFiles > 1}
+            onChange={(e) => handleFiles(e.target.files)}
+          />
+          <p className="text-[13px] text-text-mid">
+            {uploading ? "Uploading…" : "Click to upload"}
+          </p>
+          <p className="text-[11px] text-text-muted mt-1">JPG, PNG, WEBP or PDF</p>
+        </label>
+      )}
+
+      {hint && !error && <p className="mt-1.5 text-[12px] text-text-muted">{hint}</p>}
+      {error && <p className="mt-1.5 text-[12px] text-red-500">{error}</p>}
+    </div>
+  );
+}
+
+function safeName(s: string) {
+  return s.replace(/[^\w.\-]+/g, "_").slice(0, 80);
+}
