@@ -9,7 +9,7 @@ import Input from "@/components/ui/Input";
 import StatusBadge from "@/components/StatusBadge";
 import FileUpload from "@/components/FileUpload";
 import { supabase } from "@/lib/supabase";
-import { getSignedUrl } from "@/lib/storage";
+import { getDocumentUrl } from "@/lib/storage";
 import { getBusiness } from "@/lib/auth";
 
 type App = Record<string, any>;
@@ -56,7 +56,7 @@ function Inner() {
     const t: Record<string, string> = {};
     for (const r of rows) {
       if ((r.mime_type || "").startsWith("image/")) {
-        const u = await getSignedUrl(r.storage_path);
+        const u = await getDocumentUrl(r.id);
         if (u) t[r.id] = u;
       }
     }

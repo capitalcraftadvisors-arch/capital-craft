@@ -6,7 +6,7 @@ import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import StatusBadge from "@/components/StatusBadge";
 import { supabase } from "@/lib/supabase";
-import { getSignedUrl } from "@/lib/storage";
+import { getDocumentUrl } from "@/lib/storage";
 
 type App = Record<string, any>;
 type Doc = { id: string; category: string; storage_path: string; mime_type: string | null; file_name: string | null };
@@ -37,7 +37,7 @@ function Inner() {
       const t: Record<string, string> = {};
       for (const row of rows) {
         if ((row.mime_type || "").startsWith("image/")) {
-          const u = await getSignedUrl(row.storage_path);
+          const u = await getDocumentUrl(row.id);
           if (u) t[row.id] = u;
         }
       }
@@ -109,7 +109,7 @@ function Inner() {
                     <p className="text-[11px] text-text-muted">{d.category}</p>
                   </div>
                   <button onClick={async () => {
-                    const u = await getSignedUrl(d.storage_path);
+                    const u = await getDocumentUrl(d.id);
                     if (u) window.open(u, "_blank");
                   }} className="text-[12px] text-blue hover:underline">View</button>
                 </li>

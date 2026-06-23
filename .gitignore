@@ -1,24 +1,69 @@
-﻿# Secrets - NEVER commit these
-*.env
+# =============================================================================
+# Secrets — NEVER commit these
+# =============================================================================
+
+# Any env file (real values). Templates use .example suffix and ARE allowed.
 .env
-.env.local
-.env.*.local
+.env.*
+*.env
+!.env.example
+!.env.local.example
+
+# Keys files — anything that even smells like keys
 keys.txt
 keys*.txt
 *keys*.txt
 *secret*
-*.pem
 
+# Private signing keys (added during the ES256 / JWT signing migration)
+*.jwk
+*.jwk.json
+*.pem
+*.p12
+*.pfx
+*.key
+id_rsa*
+id_ecdsa*
+id_ed25519*
+known_hosts
+
+# Google Cloud / GCS service-account key files (we use ADC, no key files in repo)
+gcs-key.json
+gcs-*.json
+service-account*.json
+*service-account*.json
+*-sa-key.json
+
+# Temp files from key-handling work
+temp_jwk*
+temp_key*
+
+# Whole-directory denylist: master-prompt spec folder contains keys.txt
+capitalcraft-build/
+
+# Defensive: never commit a keys/ folder anywhere in the tree
+keys/
+
+# =============================================================================
 # Dependencies and build output
+# =============================================================================
 node_modules/
 .next/
 dist/
 build/
+out/
+.supabase/
 
+# =============================================================================
 # OS / editor junk
+# =============================================================================
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/
 .claude/
 
-# Internal docs
+# =============================================================================
+# Internal docs that shouldn't be in the public repo
+# =============================================================================
 *.pdf

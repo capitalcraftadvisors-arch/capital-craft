@@ -1,57 +1,69 @@
-import { supabase, FUNCTIONS_URL } from "./supabase";
+// Client-side wrappers around the Next.js API routes.
+// The actual work (compression, GCS upload, signed URLs) happens on the server
+// in /api/upload and /api/document/[id].
+
 import { getToken } from "./auth";
 
-const BUCKET = "epc-docs";
+type UploadMeta = {
+  table: "epc_documents" | "user_application_docs";
+  category: string;
+  business_id?: string;       // EPC docs — admins may pass another business
+  stakeholder_id?: string;    // EPC stakeholder docs
+  application_id?: string;    // loan app docs
+  uploaded_by?: "epc" | "admin";
+  gps?: { lat: number; lng: number; captured_at: string } | null;
+};
 
-// Uploads `file` to staging/{uuid}, then calls the store-document Edge Function
-// which compresses images and moves the file to `finalPath`. Returns the final
-// storage path + the original/stored sizes so the caller can insert a doc row.
-export async function uploadDocument(file: File, finalPath: string): Promise<{
+export type UploadOk = {
   ok: true;
+  id: string;
   storage_path: string;
   mime_type: string;
   original_size_bytes: number;
   stored_size_bytes: number;
-} | { ok: false; error: string }> {
-  const id = crypto.randomUUID();
-  const stagingPath = `staging/${id}`;
+};
 
-  const upload = await supabase().storage.from(BUCKET).upload(stagingPath, file, {
-    contentType: file.type,
-    upsert: false,
-  });
-  if (upload.error) return { ok: false, error: upload.error.message };
+export type UploadErr = { ok: false; error: string };
 
-  const res = await fetch(`${FUNCTIONS_URL}/store-document`, {
+export async function uploadDocument(
+  file: File,
+  meta: UploadMeta,
+): Promise<UploadOk | UploadErr> {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("table", meta.table);
+  form.append("category", meta.category);
+  if (meta.business_id) form.append("business_id", meta.business_id);
+  if (meta.stakeholder_id) form.append("stakeholder_id", meta.stakeholder_id);
+  if (meta.application_id) form.append("application_id", meta.application_id);
+  if (meta.uploaded_by) form.append("uploaded_by", meta.uploaded_by);
+  if (meta.gps) form.append("gps", JSON.stringify(meta.gps));
+
+  const res = await fetch("/api/upload", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken() ?? ""}`,
-    },
-    body: JSON.stringify({
-      staging_path: stagingPath,
-      final_path: finalPath,
-      mime_type: file.type,
-    }),
+    headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+    body: form,
   });
-  const data = await res.json();
-  if (!data.ok) return { ok: false, error: data.error || "store_failed" };
-  return {
-    ok: true,
-    storage_path: data.storage_path,
-    mime_type: data.mime_type,
-    original_size_bytes: data.original_size_bytes,
-    stored_size_bytes: data.stored_size_bytes,
-  };
+  return res.json();
 }
 
-export async function getSignedUrl(storagePath: string, expiresInSec = 3600): Promise<string | null> {
-  const { data, error } = await supabase().storage.from(BUCKET).createSignedUrl(storagePath, expiresInSec);
-  if (error) return null;
-  return data?.signedUrl ?? null;
+// New signature: takes a doc id, not a storage path. The server looks up the
+// path via RLS-protected query, then mints a signed GCS URL.
+export async function getDocumentUrl(docId: string): Promise<string | null> {
+  const res = await fetch(`/api/document/${docId}`, {
+    headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { ok: boolean; url?: string };
+  return data.ok && data.url ? data.url : null;
 }
 
-export async function deleteStorageFile(storagePath: string): Promise<boolean> {
-  const { error } = await supabase().storage.from(BUCKET).remove([storagePath]);
-  return !error;
+export async function deleteDocument(docId: string): Promise<boolean> {
+  const res = await fetch(`/api/document/${docId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+  });
+  if (!res.ok) return false;
+  const data = (await res.json()) as { ok: boolean };
+  return data.ok === true;
 }

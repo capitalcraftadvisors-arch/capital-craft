@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { uploadDocument, getSignedUrl, deleteStorageFile } from "@/lib/storage";
+import { uploadDocument, getDocumentUrl, deleteDocument } from "@/lib/storage";
 import { isAcceptedFileType } from "@/lib/validators";
 
 type EpcCategory =
@@ -17,18 +17,16 @@ type LoanCategory =
   | "property_doc" | "quotation" | "other";
 
 type Props = {
-  // EPC docs path: pass businessId (+ optional stakeholderId).
-  // Loan docs path: pass applicationId.
   businessId?: string;
   stakeholderId?: string;
   applicationId?: string;
   category: EpcCategory | LoanCategory;
   table: "epc_documents" | "user_application_docs";
-  maxFiles?: number; // 1 (default 1) or Infinity-ish
-  uploadedBy?: "epc" | "admin"; // only for loan docs
-  // Optional callback fired after a file uploads successfully, with the OCR-eligible File.
+  maxFiles?: number;
+  uploadedBy?: "epc" | "admin";
+  // Fired after a successful upload. The File is the ORIGINAL (uncompressed)
+  // file — exactly what Step 4 needs to feed to extract-cheque.
   onUploaded?: (info: { docId: string; storagePath: string; file: File }) => void;
-  // For office_* photos: capture GPS and stuff into metadata
   captureGps?: boolean;
   label?: string;
   hint?: string;
@@ -53,22 +51,31 @@ export default function FileUpload(props: Props) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load existing docs for this category
+  // Load existing docs for this slot. (We still query Supabase directly here
+  // because RLS protects access — no API round-trip needed for metadata.)
   useEffect(() => {
     (async () => {
-      const q = supabase().from(table).select("id, storage_path, mime_type, file_name").eq("category", category);
+      const q = supabase()
+        .from(table)
+        .select("id, storage_path, mime_type, file_name")
+        .eq("category", category);
+
       const final = table === "epc_documents"
-        ? q.eq("business_id", businessId!).eq(stakeholderId ? "stakeholder_id" : "category", stakeholderId ?? category)
+        ? q.eq("business_id", businessId!).eq(
+            stakeholderId ? "stakeholder_id" : "category",
+            stakeholderId ?? category,
+          )
         : q.eq("application_id", applicationId!);
+
       const { data } = await final;
       const rows = (data ?? []) as DocRow[];
       setDocs(rows);
 
-      // Generate signed thumbnails for images
+      // Sign thumbnails for images
       const t: Record<string, string> = {};
       for (const d of rows) {
         if ((d.mime_type || "").startsWith("image/")) {
-          const u = await getSignedUrl(d.storage_path);
+          const u = await getDocumentUrl(d.id);
           if (u) t[d.id] = u;
         }
       }
@@ -89,7 +96,11 @@ export default function FileUpload(props: Props) {
     if (captureGps && "geolocation" in navigator) {
       gps = await new Promise((resolve) => {
         navigator.geolocation.getCurrentPosition(
-          (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, captured_at: new Date().toISOString() }),
+          (p) => resolve({
+            lat: p.coords.latitude,
+            lng: p.coords.longitude,
+            captured_at: new Date().toISOString(),
+          }),
           () => resolve(null),
           { timeout: 6000 },
         );
@@ -101,53 +112,38 @@ export default function FileUpload(props: Props) {
         setError("Only JPG, PNG, WEBP, or PDF files are allowed.");
         continue;
       }
-      const docUuid = crypto.randomUUID();
-      const finalPath =
-        table === "epc_documents"
-          ? stakeholderId
-            ? `${businessId}/${stakeholderId}/${category}/${docUuid}_${safeName(file.name)}`
-            : `${businessId}/${category}/${docUuid}_${safeName(file.name)}`
-          : `applications/${applicationId}/${category}/${docUuid}_${safeName(file.name)}`;
 
-      const r = await uploadDocument(file, finalPath);
+      const r = await uploadDocument(file, {
+        table,
+        category,
+        business_id: businessId,
+        stakeholder_id: stakeholderId,
+        application_id: applicationId,
+        uploaded_by: uploadedBy,
+        gps,
+      });
+
       if (!r.ok) {
         setError(r.error);
         continue;
       }
 
-      const insertRow: Record<string, unknown> = {
-        category,
+      const row: DocRow = {
+        id: r.id,
         storage_path: r.storage_path,
-        file_name: file.name,
         mime_type: r.mime_type,
-        original_size_bytes: r.original_size_bytes,
-        stored_size_bytes: r.stored_size_bytes,
-        metadata: gps ? { gps } : null,
+        file_name: file.name,
       };
-      if (table === "epc_documents") {
-        insertRow.business_id = businessId;
-        if (stakeholderId) insertRow.stakeholder_id = stakeholderId;
-      } else {
-        insertRow.application_id = applicationId;
-        if (uploadedBy) insertRow.uploaded_by = uploadedBy;
-      }
-
-      const { data: inserted, error: insertErr } = await supabase()
-        .from(table)
-        .insert(insertRow)
-        .select("id, storage_path, mime_type, file_name")
-        .single();
-
-      if (insertErr) {
-        setError(insertErr.message);
-        continue;
-      }
-      const row = inserted as DocRow;
       setDocs((d) => [...d, row]);
+
       if ((row.mime_type || "").startsWith("image/")) {
-        const u = await getSignedUrl(row.storage_path);
+        const u = await getDocumentUrl(row.id);
         if (u) setThumbs((t) => ({ ...t, [row.id]: u }));
       }
+
+      // Note: pass the ORIGINAL file (not the compressed JPEG). This is what
+      // Step 4's onUploaded handler base64-encodes and sends to extract-cheque,
+      // so OCR keeps working unchanged.
       onUploaded?.({ docId: row.id, storagePath: row.storage_path, file });
     }
 
@@ -156,8 +152,11 @@ export default function FileUpload(props: Props) {
   }
 
   async function removeDoc(d: DocRow) {
-    await deleteStorageFile(d.storage_path);
-    await supabase().from(table).delete().eq("id", d.id);
+    const ok = await deleteDocument(d.id);
+    if (!ok) {
+      setError("Could not delete this file.");
+      return;
+    }
     setDocs((arr) => arr.filter((x) => x.id !== d.id));
     setThumbs((t) => { const c = { ...t }; delete c[d.id]; return c; });
   }
@@ -225,8 +224,4 @@ export default function FileUpload(props: Props) {
       {error && <p className="mt-1.5 text-[12px] text-red-500">{error}</p>}
     </div>
   );
-}
-
-function safeName(s: string) {
-  return s.replace(/[^\w.\-]+/g, "_").slice(0, 80);
 }
