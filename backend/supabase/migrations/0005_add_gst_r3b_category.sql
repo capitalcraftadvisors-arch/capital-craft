@@ -1,0 +1,25 @@
+-- =========================================================
+-- 0005 — Add 'gst_r3b' to the epc_doc_category enum.
+--
+-- Why a dedicated migration:
+--   ALTER TYPE ... ADD VALUE has historical restrictions about
+--   transactional use of the newly-added value in the SAME tx.
+--   Keeping this statement isolated in its own migration file
+--   guarantees later migrations can reference 'gst_r3b' freely
+--   (e.g. partial indexes, RLS policies in 0006).
+--
+-- Safety:
+--   ADD VALUE is additive and idempotent in spirit — re-running
+--   a deploy will fail with "value already exists", but that's a
+--   loud, harmless error you can ignore on re-push. Supabase CLI
+--   tracks applied migrations so this only runs once.
+--
+-- After this migration runs, the enum contains:
+--   pan_business, gstin, extra_doc,
+--   stakeholder_pan, stakeholder_aadhaar,
+--   cancelled_cheque,
+--   office_exterior, office_interior, office_selfie,
+--   gst_r3b   <-- new
+-- =========================================================
+
+alter type epc_doc_category add value 'gst_r3b';

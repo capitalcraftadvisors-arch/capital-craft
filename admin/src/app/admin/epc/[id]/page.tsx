@@ -6,6 +6,7 @@ import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import StatusBadge from "@/components/StatusBadge";
+import GstR3bSection from "@/components/GstR3bSection";
 import { supabase } from "@/lib/supabase";
 import { getDocumentUrl } from "@/lib/storage";
 
@@ -107,8 +108,13 @@ function Inner() {
         </Section>
 
         <Section title="Documents">
-          <DocList docs={docs.filter((d) => !d.stakeholder_id)} thumbs={thumbs} />
+          <DocList docs={docs.filter((d) => !d.stakeholder_id && d.category !== "gst_r3b")} thumbs={thumbs} />
         </Section>
+
+        {/* Admin-only GST R3B section. Server-side enforces admin-only at
+            upload/view/delete routes; RLS also excludes gst_r3b from EPC
+            queries. This component is safe to render anywhere admin-only. */}
+        <GstR3bSection businessId={params.id} />
 
         <Card className="p-6">
           <h3 className="font-display font-semibold text-[16px] mb-3">Review actions</h3>

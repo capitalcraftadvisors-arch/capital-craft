@@ -12,6 +12,9 @@ type UploadMeta = {
   application_id?: string;    // loan app docs
   uploaded_by?: "epc" | "admin";
   gps?: { lat: number; lng: number; captured_at: string } | null;
+  // Generic metadata bag — server merges into row.metadata. Used by GST R3B
+  // to pass { period_type: "present" | "previous" }.
+  extraMetadata?: Record<string, unknown>;
 };
 
 export type UploadOk = {
@@ -38,6 +41,7 @@ export async function uploadDocument(
   if (meta.application_id) form.append("application_id", meta.application_id);
   if (meta.uploaded_by) form.append("uploaded_by", meta.uploaded_by);
   if (meta.gps) form.append("gps", JSON.stringify(meta.gps));
+  if (meta.extraMetadata) form.append("extraMetadata", JSON.stringify(meta.extraMetadata));
 
   const res = await fetch("/api/upload", {
     method: "POST",

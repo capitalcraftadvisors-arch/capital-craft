@@ -55,6 +55,15 @@ export async function POST(req: NextRequest) {
     }
     const allowedTable = table as AllowedTable;
 
+    // ── Admin-only categories ──────────────────────────────────────────
+    // gst_r3b documents are admin-only at every layer (RLS, this route,
+    // and the document GET route). Reject non-admin uploads outright so
+    // a bug in a future admin-side caller can't accidentally let an EPC
+    // create one.
+    if (category === "gst_r3b" && claims.business_type !== "admin") {
+      return err("admin_only", 403);
+    }
+
     const stakeholderId = (form.get("stakeholder_id") as string) || null;
     const applicationId = (form.get("application_id") as string) || null;
     const uploadedBy = (form.get("uploaded_by") as string) || null;
@@ -62,6 +71,15 @@ export async function POST(req: NextRequest) {
     let gps: { lat: number; lng: number; captured_at: string } | null = null;
     if (gpsRaw) {
       try { gps = JSON.parse(gpsRaw); } catch { gps = null; }
+    }
+
+    // Generic metadata bag the client can pass — used by GST R3B for
+    // { period_type: "present" | "previous" }. Merged into row.metadata
+    // alongside gps below.
+    const extraMetaRaw = (form.get("extraMetadata") as string) || null;
+    let extraMetadata: Record<string, unknown> | null = null;
+    if (extraMetaRaw) {
+      try { extraMetadata = JSON.parse(extraMetaRaw); } catch { extraMetadata = null; }
     }
 
     // EPC docs always belong to the JWT's business; only admins may upload
@@ -126,6 +144,11 @@ export async function POST(req: NextRequest) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
+    // Build metadata: merge GPS (if present) with caller-supplied extra fields.
+    const mergedMeta: Record<string, unknown> = {};
+    if (gps) mergedMeta.gps = gps;
+    if (extraMetadata) Object.assign(mergedMeta, extraMetadata);
+
     const row: Record<string, unknown> = {
       category,
       storage_path: finalPath,
@@ -133,7 +156,7 @@ export async function POST(req: NextRequest) {
       mime_type: outMime,
       original_size_bytes: originalSize,
       stored_size_bytes: output.length,
-      metadata: gps ? { gps } : null,
+      metadata: Object.keys(mergedMeta).length > 0 ? mergedMeta : null,
     };
     if (allowedTable === "epc_documents") {
       row.business_id = targetBusinessId;
