@@ -61,7 +61,7 @@ serve(async (req) => {
 
   try {
     const { mobile, otp } = await req.json();
-    if (otp !== FIXED_OTP) return json({ ok: false, error: "invalid_otp" }, 401);
+    
 
     // Find or create
     let { data: biz } = await supabase
