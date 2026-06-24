@@ -1,0 +1,48 @@
+# =============================================================================
+# Capital Craft — Cloud Build config for auto-deploy of the Next.js app.
+#
+# Triggered on push to `main` when files under admin/** change.
+# (Trigger itself is configured in Phase 5.)
+#
+# Self-healing properties — DO NOT REMOVE these flags:
+#   --service-account  Pins the runtime SA on every deploy. This is the SA
+#                      that has objectAdmin on the capitalcraft-docs GCS
+#                      bucket. If a manual console change ever swaps the
+#                      runtime SA, the next push restores the correct one.
+#   --update-secrets   Reasserts APP_JWT_SECRET as a Secret Manager
+#                      reference (not an inline env var). Even if someone
+#                      pastes an inline value into the console, next push
+#                      flips it back to the secret reference.
+#
+# Manual deploy (fallback while auto-deploy is being proven, or for emergency):
+#   cd "D:\capital craft\capitalcraft-repo\admin"
+#   gcloud run deploy capitalcraft-app --source=. --region=asia-southeast1 `
+#     --service-account=50204473772-compute@developer.gserviceaccount.com `
+#     --update-secrets=APP_JWT_SECRET=APP_JWT_SECRET:latest `
+#     --allow-unauthenticated
+# =============================================================================
+
+steps:
+  - id: deploy
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:latest'
+    dir: 'admin'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'capitalcraft-app'
+      - '--source=.'
+      - '--region=asia-southeast1'
+      - '--platform=managed'
+      - '--service-account=50204473772-compute@developer.gserviceaccount.com'
+      - '--update-secrets=APP_JWT_SECRET=APP_JWT_SECRET:latest'
+      - '--allow-unauthenticated'
+      - '--quiet'
+
+# Route build logs to Cloud Logging only (no GCS bucket required).
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+# 20 min cap. npm install + next build + container push + Cloud Run rollout
+# typically takes 5-8 min; this gives headroom for slow npm days.
+timeout: '1200s'
