@@ -2,10 +2,18 @@ import { FUNCTIONS_URL } from "./supabase";
 import { getToken } from "./auth";
 
 export type ChequeOcrResult =
-  | { ok: true; raw: string; ifsc: string | null; accountNumber: string | null }
+  | {
+      ok: true;
+      raw: string;
+      ifsc: string | null;
+      accountNumber: string | null;
+      bankName: string | null;
+    }
   | { ok: false; error: string };
 
-// Converts a File (image) to base64 (no data: prefix) and calls extract-cheque.
+// Converts a File (image or PDF) to base64 and calls extract-cheque.
+// mimeType is forwarded so PDFs route to Vision's files:annotate endpoint
+// instead of images:annotate.
 export async function extractCheque(file: File): Promise<ChequeOcrResult> {
   const base64 = await fileToBase64(file);
   const res = await fetch(`${FUNCTIONS_URL}/extract-cheque`, {
@@ -14,7 +22,7 @@ export async function extractCheque(file: File): Promise<ChequeOcrResult> {
       "Content-Type": "application/json",
       Authorization: `Bearer ${getToken() ?? ""}`,
     },
-    body: JSON.stringify({ imageBase64: base64 }),
+    body: JSON.stringify({ imageBase64: base64, mimeType: file.type }),
   });
   return res.json();
 }
