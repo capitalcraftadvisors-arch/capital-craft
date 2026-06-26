@@ -144,11 +144,13 @@ function parseGstR3b(text: string): Parsed {
 
   return {
     gstin: matchGstin(text),
-    legal_name: matchAfterLabel(
+    // Form-label matcher: skips "2(a)."-style prefix lines and strips
+    // prefixes from candidate values. See matchAfterFormLabel comments.
+    legal_name: matchAfterFormLabel(
       text,
       /Legal\s+name\s+of\s+the\s+registered\s+person/i,
     ),
-    trade_name: matchAfterLabel(text, /Trade\s+name(?:[\s,]+if\s+any)?/i),
+    trade_name: matchAfterFormLabel(text, /Trade\s+name(?:[\s,]+if\s+any)?/i),
     total_taxable_value: parseTotalTaxableValue(text),
     month,
     quarter,
@@ -185,6 +187,84 @@ function matchAfterLabel(text: string, labelRe: RegExp): string | null {
 
 function cap(s: string, n = 200): string {
   return s.length > n ? s.slice(0, n) : s;
+}
+
+// ── Form-label matcher (legal_name, trade_name) ────────────────────────────
+//
+// GSTR-3B PDFs label many fields with a numeric prefix like "2(a).", "2(b).",
+// "3.1(a)." etc. Vision OCR can scatter that prefix across separate lines
+// from the label text, which made the generic matchAfterLabel grab the
+// prefix itself as the value. Fix: skip prefix-only lines, strip leading
+// prefixes from value lines, and stop walking if we hit a sibling label.
+
+// "2(a).", " 2 (a) . ", "3.1(b)", "1(c)." — matches a section prefix at the
+// start of a string. Used both to TEST whether a whole line is just a
+// prefix, and to STRIP a prefix from the head of a value line.
+const SECTION_PREFIX_RE =
+  /^\s*\d+(?:\.\d+)?\s*\(\s*[a-z]\s*\)\s*\.?\s*/i;
+const SECTION_PREFIX_ONLY_RE =
+  /^\s*\d+(?:\.\d+)?\s*\(\s*[a-z]\s*\)\s*\.?\s*$/i;
+
+function stripSectionPrefix(s: string): string {
+  return s.replace(SECTION_PREFIX_RE, "").trim();
+}
+
+function isJustSectionPrefix(s: string): boolean {
+  return SECTION_PREFIX_ONLY_RE.test(s);
+}
+
+// Lines that look like another GSTR-3B form label. We use this to STOP the
+// search window so legal_name's matcher doesn't pick up "Trade name, if any"
+// as its value (and vice versa).
+const OTHER_FORM_LABEL_RE =
+  /^(?:\s*\d+(?:\.\d+)?\s*\(\s*[a-z]\s*\)\s*\.?\s*)?(?:Legal\s+name|Trade\s+name|GSTIN|Period|(?:Financial\s+)?Year|Status|ARN|Date\s+of\s+filing)\b/i;
+
+function isOtherFormLabel(s: string, currentLabelRe: RegExp): boolean {
+  if (!OTHER_FORM_LABEL_RE.test(s)) return false;
+  // If the line matches the label we ARE looking for, it's not "other".
+  return !currentLabelRe.test(s);
+}
+
+// Specialized matcher for legal_name + trade_name.
+//
+// Strategy:
+//   1. Find the label line.
+//   2. Try same-line: strip the label substring, then strip a leading
+//      section prefix from what's left. If non-empty, that's the value.
+//   3. Otherwise walk forward up to 6 lines:
+//      - skip empty lines
+//      - skip lines that are JUST a section prefix ("2(a).")
+//      - skip duplicate occurrences of the same label
+//      - STOP at a different known form label (avoid siblings)
+//      - first surviving line, after a final prefix strip, is the value
+//   4. If nothing survives, return null. The frontend leaves the field
+//      blank and admin types it manually — never returns garbage like
+//      "2(a)." as a fake value.
+function matchAfterFormLabel(text: string, labelRe: RegExp): string | null {
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    if (!labelRe.test(lines[i])) continue;
+
+    // Same-line attempt.
+    const sameLineRemainder = lines[i].replace(labelRe, "");
+    const trimmed = sameLineRemainder.replace(/^[\s:.\-,]+/, "").trim();
+    const sameLineVal = stripSectionPrefix(trimmed);
+    if (sameLineVal) return cap(sameLineVal);
+
+    // Forward window.
+    for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+      const raw = lines[j].trim();
+      if (!raw) continue;
+      if (isJustSectionPrefix(raw)) continue;
+      if (labelRe.test(raw)) continue;            // skip a duplicate of OUR label
+      if (isOtherFormLabel(raw, labelRe)) break;  // stop at a sibling label
+
+      const candidate = stripSectionPrefix(raw);
+      if (candidate) return cap(candidate);
+    }
+    return null;
+  }
+  return null;
 }
 
 // ── New: month / quarter / year parsers ────────────────────────────────────
