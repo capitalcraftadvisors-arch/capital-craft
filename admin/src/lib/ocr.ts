@@ -34,7 +34,10 @@ export type GstR3bOcrResult =
       legal_name: string | null;
       trade_name: string | null;
       total_taxable_value: number | null;
-      period: string | null;
+      month: string | null;        // "Jan" | "Feb" | ... | "Dec" or null
+      quarter: string | null;      // "Apr-Jun" | "Jul-Sep" | "Oct-Dec" | "Jan-Mar" or null
+      year: number | null;         // 4-digit, e.g. 2024
+      period_raw: string | null;   // raw text after "Period" label (debug)
       raw_text: string;
     }
   | { ok: false; error: string };

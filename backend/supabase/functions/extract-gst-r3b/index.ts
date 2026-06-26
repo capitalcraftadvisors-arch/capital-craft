@@ -5,36 +5,32 @@
 //   -> {
 //        ok: true,
 //        gstin, legal_name, trade_name,
-//        total_taxable_value,        // number, from row 3.1(a) Total taxable value
-//        period,                     // free text e.g. "Jul-Sep", "August 2024"
-//        raw_text                    // truncated full OCR (4000 char cap, for audit)
+//        total_taxable_value,           // number, from row 3.1(a)
+//        month:   "Apr" | ... | null,   // normalized 3-letter month if detected
+//        quarter: "Apr-Jun" | "Jul-Sep" | "Oct-Dec" | "Jan-Mar" | null,
+//        year:    2024 | null,          // 4-digit calendar year
+//        period_raw: string | null,     // raw text after "Period" label, for debugging
+//        raw_text                        // truncated full OCR (4000 char cap)
 //      }
 //   or { ok: false, error }
 //
-// Mirrors the pattern of `extract-cheque`:
-//   - Frontend converts the file to base64 and POSTs here.
-//   - We call Google Vision DOCUMENT_TEXT_DETECTION.
-//   - Parsing is regex over the OCR text — best-effort, never blocks.
-//   - On any failure, return { ok: false, error } and the admin UI
-//     falls back to manual entry / lets the admin correct the values.
+// What changed in the redesign:
+//   - Removed: single `period` free-text field
+//   - Added: `month`, `quarter`, `year` (normalized), plus `period_raw`
+//   - Quarter takes precedence: if the period text contains both a month
+//     and a quarter range (common in quarterly forms), we return only the
+//     quarter and leave month null. The frontend's mode (monthly/quarterly)
+//     decides which one to display.
 //
-// Supports BOTH images (jpeg/png/webp) and PDFs (typical GSTR-3B
-// is a 1-2 page PDF). PDF uses the files:annotate endpoint;
-// image uses images:annotate (same as extract-cheque).
-//
-// Reads only one secret: GOOGLE_VISION_API_KEY (already configured
-// from the cheque OCR work).
-//
-// IMPORTANT: this function performs NO auth check. Like extract-cheque,
-// it's called from the admin UI with the file's base64. Admin-only
-// enforcement happens at /api/upload (which rejects gst_r3b uploads
-// from non-admins). Frontend never calls this for non-admin users.
+// Supports BOTH images (jpeg/png/webp) and PDFs.
+// No auth check; admin-only enforcement is at /api/upload (rejects
+// gst_r3b uploads from non-admins).
 // =========================================================
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 
 const VISION_API_KEY = Deno.env.get("GOOGLE_VISION_API_KEY")!;
-const RAW_TEXT_CAP = 4000; // chars stored in metadata — enough for audit, not bloat
+const RAW_TEXT_CAP = 4000;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -56,9 +52,7 @@ serve(async (req) => {
       ? await ocrPdf(imageBase64, mimeType ?? "application/pdf")
       : await ocrImage(imageBase64);
 
-    if (!text) {
-      return json({ ok: false, error: "ocr_returned_empty" });
-    }
+    if (!text) return json({ ok: false, error: "ocr_returned_empty" });
 
     const parsed = parseGstR3b(text);
     return json({
@@ -67,7 +61,10 @@ serve(async (req) => {
       legal_name: parsed.legal_name,
       trade_name: parsed.trade_name,
       total_taxable_value: parsed.total_taxable_value,
-      period: parsed.period,
+      month: parsed.month,
+      quarter: parsed.quarter,
+      year: parsed.year,
+      period_raw: parsed.period_raw,
       raw_text: text.slice(0, RAW_TEXT_CAP),
     });
   } catch (e) {
@@ -117,7 +114,6 @@ async function ocrPdf(base64: string, mimeType: string): Promise<string> {
   if (data?.responses?.[0]?.error) {
     throw new Error("vision_pdf_error: " + JSON.stringify(data.responses[0].error));
   }
-  // files:annotate wraps per-page responses in an inner `responses` array
   const pages: Array<{ fullTextAnnotation?: { text?: string } }> =
     data?.responses?.[0]?.responses ?? [];
   return pages.map((p) => p.fullTextAnnotation?.text ?? "").join("\n\n");
@@ -130,10 +126,22 @@ type Parsed = {
   legal_name: string | null;
   trade_name: string | null;
   total_taxable_value: number | null;
-  period: string | null;
+  month: string | null;
+  quarter: string | null;
+  year: number | null;
+  period_raw: string | null;
 };
 
 function parseGstR3b(text: string): Parsed {
+  const periodRaw = matchAfterLabel(text, /(?:^|\b)Period\b/i);
+  const monthFromPeriod = parseMonth(periodRaw);
+  const quarterFromPeriod = parseQuarter(periodRaw);
+
+  // Precedence: if the period text is a quarter range, prefer quarter and
+  // leave month null (the frontend's mode controls which one is shown).
+  const month = quarterFromPeriod ? null : monthFromPeriod;
+  const quarter = quarterFromPeriod;
+
   return {
     gstin: matchGstin(text),
     legal_name: matchAfterLabel(
@@ -142,7 +150,10 @@ function parseGstR3b(text: string): Parsed {
     ),
     trade_name: matchAfterLabel(text, /Trade\s+name(?:[\s,]+if\s+any)?/i),
     total_taxable_value: parseTotalTaxableValue(text),
-    period: matchAfterLabel(text, /(?:^|\b)Period\b/i),
+    month,
+    quarter,
+    year: parseYear(text),
+    period_raw: periodRaw,
   };
 }
 
@@ -153,20 +164,16 @@ function matchGstin(text: string): string | null {
   return m ? m[0] : null;
 }
 
-// Generic "label : value" or "label\nvalue" extractor.
-// Tries same-line first (after any : - or , separator), then the next
-// 1-3 non-empty lines.
+// Generic "label : value" / "label\nvalue" extractor (same as before).
 function matchAfterLabel(text: string, labelRe: RegExp): string | null {
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     if (!labelRe.test(lines[i])) continue;
 
-    // Try same line: strip the label off and grab whatever's left.
     const sameLine = lines[i].replace(labelRe, "");
     const sameLineVal = sameLine.replace(/^[\s:.\-,]+/, "").trim();
     if (sameLineVal) return cap(sameLineVal);
 
-    // Otherwise take the first non-empty line within a small window.
     for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
       const next = lines[j].trim();
       if (next) return cap(next);
@@ -180,18 +187,96 @@ function cap(s: string, n = 200): string {
   return s.length > n ? s.slice(0, n) : s;
 }
 
-// Extract the "Total taxable value" cell from row 3.1(a).
-//
-// Strategy:
-//   1. Find the row by either "(a) Outward taxable supplies" or "3.1(a)".
-//   2. Within the same line + next 5 lines, find the first number that
-//      looks like a monetary amount (has a decimal portion).
-//   3. Skip row-identifier patterns like "3.1" so we don't pick the label.
-//
-// OCR mangles tabular layouts in unpredictable ways — sometimes the
-// columns end up on separate lines, sometimes inline. This 6-line
-// window handles both. If parsing fails, the admin UI shows the field
-// blank and the admin types the value manually.
+// ── New: month / quarter / year parsers ────────────────────────────────────
+
+// Normalize an OCR Period string to a 3-letter month name, or null.
+// Tries longer names first so "september" → "Sep", not "Sep" then "tember".
+function parseMonth(s: string | null): string | null {
+  if (!s) return null;
+  // Order matters: longest forms first.
+  const table: Array<[RegExp, string]> = [
+    [/\bjanuary\b/i, "Jan"],   [/\bjan\b/i, "Jan"],
+    [/\bfebruary\b/i, "Feb"],  [/\bfeb\b/i, "Feb"],
+    [/\bmarch\b/i, "Mar"],     [/\bmar\b/i, "Mar"],
+    [/\bapril\b/i, "Apr"],     [/\bapr\b/i, "Apr"],
+    [/\bmay\b/i, "May"],
+    [/\bjune\b/i, "Jun"],      [/\bjun\b/i, "Jun"],
+    [/\bjuly\b/i, "Jul"],      [/\bjul\b/i, "Jul"],
+    [/\baugust\b/i, "Aug"],    [/\baug\b/i, "Aug"],
+    [/\bseptember\b/i, "Sep"], [/\bsept\b/i, "Sep"],  [/\bsep\b/i, "Sep"],
+    [/\boctober\b/i, "Oct"],   [/\boct\b/i, "Oct"],
+    [/\bnovember\b/i, "Nov"],  [/\bnov\b/i, "Nov"],
+    [/\bdecember\b/i, "Dec"],  [/\bdec\b/i, "Dec"],
+  ];
+  for (const [re, label] of table) {
+    if (re.test(s)) return label;
+  }
+  return null;
+}
+
+// Normalize an OCR Period string to one of the 4 Indian fiscal quarters.
+// Matches "Apr-Jun", "April - June", "Apr/Jun", "Q1" (= Apr-Jun), etc.
+function parseQuarter(s: string | null): string | null {
+  if (!s) return null;
+  const upper = s.toUpperCase();
+
+  // Hyphen/slash separated month-pair patterns.
+  // The pattern allows extra letters between the two anchor months
+  // (e.g. "JULY-SEPTEMBER" matches the JUL..SEP rule).
+  const ranges: Array<{ from: string; to: string; label: string }> = [
+    { from: "APR", to: "JUN", label: "Apr-Jun" },
+    { from: "JUL", to: "SEP", label: "Jul-Sep" },
+    { from: "OCT", to: "DEC", label: "Oct-Dec" },
+    { from: "JAN", to: "MAR", label: "Jan-Mar" },
+  ];
+  for (const r of ranges) {
+    // {FROM}[letters][- /][letters]{TO}  e.g. APR-JUN, APRIL-JUNE, APR/JUN
+    const re = new RegExp(`\\b${r.from}[A-Z]*\\s*[-/]+\\s*[A-Z]*${r.to}\\b`);
+    if (re.test(upper)) return r.label;
+  }
+
+  // Q1..Q4 notation (Indian fiscal year starts in April).
+  if (/\bQ\s*1\b/.test(upper)) return "Apr-Jun";
+  if (/\bQ\s*2\b/.test(upper)) return "Jul-Sep";
+  if (/\bQ\s*3\b/.test(upper)) return "Oct-Dec";
+  if (/\bQ\s*4\b/.test(upper)) return "Jan-Mar";
+
+  // "Quarter 1..4" spelled out.
+  if (/\bQUARTER\s*1\b/.test(upper)) return "Apr-Jun";
+  if (/\bQUARTER\s*2\b/.test(upper)) return "Jul-Sep";
+  if (/\bQUARTER\s*3\b/.test(upper)) return "Oct-Dec";
+  if (/\bQUARTER\s*4\b/.test(upper)) return "Jan-Mar";
+
+  return null;
+}
+
+// Extract a 4-digit year. Prefers a value next to a "Year"/"Financial Year"
+// label; falls back to the first plausible 4-digit year anywhere in the doc.
+// Handles "2024", "2024-25", "2024-2025", "FY 2024-25", etc. — always
+// returns the starting year (e.g. 2024 for "2024-25").
+function parseYear(text: string): number | null {
+  const labeled = matchAfterLabel(text, /(?:Financial\s+)?Year\b/i);
+  const fromLabel = labeled ? extractYear(labeled) : null;
+  if (fromLabel !== null) return fromLabel;
+
+  // Fallback: scan entire OCR text for the first plausible year.
+  const all = text.match(/\b(20\d{2})\b/g);
+  if (!all) return null;
+  for (const cand of all) {
+    const y = parseInt(cand, 10);
+    if (y >= 2017 && y <= 2050) return y;
+  }
+  return null;
+}
+
+function extractYear(s: string): number | null {
+  const m = s.match(/\b(20\d{2})\b/);
+  if (!m) return null;
+  const y = parseInt(m[1], 10);
+  return y >= 2017 && y <= 2050 ? y : null;
+}
+
+// Extract the "Total taxable value" cell from row 3.1(a). Unchanged.
 function parseTotalTaxableValue(text: string): number | null {
   const lines = text.split(/\r?\n/);
   let startIdx = -1;
@@ -207,13 +292,10 @@ function parseTotalTaxableValue(text: string): number | null {
   if (startIdx === -1) return null;
 
   for (let i = startIdx; i < Math.min(startIdx + 6, lines.length); i++) {
-    // Matches Indian-format (62,55,464.39), Western-format (6,255,464.39),
-    // or plain decimals (6255464.39). Requires at least one decimal digit.
     const matches = [
       ...lines[i].matchAll(/\b(\d{1,3}(?:,\d{2,3})*\.\d{1,2}|\d+\.\d{1,2})\b/g),
     ];
     for (const m of matches) {
-      // Skip the row identifier itself if it happens to match (e.g. "3.1").
       if (/^3\.10?$/.test(m[1])) continue;
       const val = parseFloat(m[1].replace(/,/g, ""));
       if (!isNaN(val)) return val;
