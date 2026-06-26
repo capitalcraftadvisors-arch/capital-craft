@@ -142,15 +142,33 @@ function parseGstR3b(text: string): Parsed {
   const month = quarterFromPeriod ? null : monthFromPeriod;
   const quarter = quarterFromPeriod;
 
+  const gstin = matchGstin(text);
+
+  // Step 1: try the in-place (same-line / next-line) matcher first. This
+  // handles PDFs where the value sits next to the label, e.g.
+  //   "2(a). Legal name of the registered person   PRABHU DAYAL"
+  let legal_name = matchAfterFormLabel(
+    text,
+    /Legal\s+name\s+of\s+the\s+registered\s+person/i,
+  );
+  let trade_name = matchAfterFormLabel(text, /Trade\s+name(?:[\s,]+if\s+any)?/i);
+
+  // Step 2: if either field came back null OR as garbage (a label/prefix
+  // scrap), fall back to the columnar layout used by GSTN-portal PDFs.
+  // GSTIN is the anchor; the next two value lines = legal_name + trade_name.
+  const needsFallback =
+    !legal_name || isLikelyLabelOrPrefix(legal_name) ||
+    !trade_name || isLikelyLabelOrPrefix(trade_name);
+  if (needsFallback) {
+    const fb = parseColumnarHeader(text, gstin);
+    if (!legal_name || isLikelyLabelOrPrefix(legal_name)) legal_name = fb.legal_name;
+    if (!trade_name || isLikelyLabelOrPrefix(trade_name)) trade_name = fb.trade_name;
+  }
+
   return {
-    gstin: matchGstin(text),
-    // Form-label matcher: skips "2(a)."-style prefix lines and strips
-    // prefixes from candidate values. See matchAfterFormLabel comments.
-    legal_name: matchAfterFormLabel(
-      text,
-      /Legal\s+name\s+of\s+the\s+registered\s+person/i,
-    ),
-    trade_name: matchAfterFormLabel(text, /Trade\s+name(?:[\s,]+if\s+any)?/i),
+    gstin,
+    legal_name,
+    trade_name,
     total_taxable_value: parseTotalTaxableValue(text),
     month,
     quarter,
@@ -265,6 +283,85 @@ function matchAfterFormLabel(text: string, labelRe: RegExp): string | null {
     return null;
   }
   return null;
+}
+
+// ── Columnar header fallback (GSTN-portal PDFs) ────────────────────────────
+//
+// The GSTN-portal PDF lays out the header as a label block followed by a
+// value block in the same order:
+//
+//   GSTIN of the supplier
+//   2(a). Legal name of the registered person
+//   2(b). Trade name, if any
+//   2(c). ARN
+//   2(d). Date of ARN
+//   08AAPCA5334F1ZM                          <- GSTIN value (anchor)
+//   AR RUBY SOLAR POWER PRIVATE LIMITED      <- Legal name
+//   AR RUBY SOLAR POWER PRIVATE LIMITED      <- Trade name (often = Legal)
+//   AB0806255034563                          <- ARN value (stop here)
+//
+// In this layout matchAfterFormLabel returns null because each label is
+// immediately followed by ANOTHER label (which is_other_form_label breaks on),
+// so the in-place matcher correctly refuses to guess. This fallback uses
+// the GSTIN value line as a reliable anchor and reads the next two
+// plausible value lines as legal_name and trade_name.
+
+// True if a string looks like a form-label scrap or a section prefix —
+// i.e. NOT a real value. Used to decide whether the in-place matcher's
+// result needs to be replaced by the columnar fallback.
+function isLikelyLabelOrPrefix(s: string | null): boolean {
+  if (!s) return false;
+  if (isJustSectionPrefix(s)) return true;
+  if (OTHER_FORM_LABEL_RE.test(s)) return true;
+  return false;
+}
+
+// Anchor on the GSTIN value line, then read the next 2 plausible value
+// lines. Returns null for either field if it can't be determined cleanly.
+function parseColumnarHeader(
+  text: string,
+  gstin: string | null,
+): { legal_name: string | null; trade_name: string | null } {
+  if (!gstin) return { legal_name: null, trade_name: null };
+
+  const lines = text.split(/\r?\n/);
+
+  // Find the line whose trimmed content is exactly the GSTIN (the value
+  // line, not the label line "GSTIN of the supplier").
+  let gstinValueIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() === gstin) {
+      gstinValueIdx = i;
+      break;
+    }
+  }
+  if (gstinValueIdx === -1) return { legal_name: null, trade_name: null };
+
+  // Collect up to 2 candidate value lines after the GSTIN. Stop at anything
+  // that's clearly NOT a name (label, ARN, date, section prefix).
+  const collected: string[] = [];
+  for (
+    let j = gstinValueIdx + 1;
+    j < lines.length && collected.length < 2;
+    j++
+  ) {
+    const raw = lines[j].trim();
+    if (!raw) continue;
+
+    // Stop conditions:
+    if (OTHER_FORM_LABEL_RE.test(raw)) break;          // hit a form label
+    if (/^[A-Z]{2}\d{12,16}$/.test(raw)) break;        // ARN value (e.g. AB0806255034563)
+    if (/^\d{1,2}[-/]\d{1,2}[-/]\d{2,4}$/.test(raw)) break;  // date value
+    if (isJustSectionPrefix(raw)) break;               // stray "2(c)." etc.
+
+    const candidate = stripSectionPrefix(raw);
+    if (candidate) collected.push(cap(candidate));
+  }
+
+  return {
+    legal_name: collected[0] ?? null,
+    trade_name: collected[1] ?? null,
+  };
 }
 
 // ── New: month / quarter / year parsers ────────────────────────────────────
