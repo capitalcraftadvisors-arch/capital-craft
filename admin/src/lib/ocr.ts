@@ -58,6 +58,25 @@ export async function extractGstR3b(file: File): Promise<GstR3bOcrResult> {
   return res.json();
 }
 
+export type PanOcrResult =
+  | { ok: true; raw_text: string; pan: string | null }
+  | { ok: false; error: string };
+
+// Mirrors extractCheque / extractGstR3b. Forwards mimeType so PDFs route
+// to Vision's files:annotate endpoint and images go to images:annotate.
+export async function extractPan(file: File): Promise<PanOcrResult> {
+  const base64 = await fileToBase64(file);
+  const res = await fetch(`${FUNCTIONS_URL}/extract-pan`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken() ?? ""}`,
+    },
+    body: JSON.stringify({ imageBase64: base64, mimeType: file.type }),
+  });
+  return res.json();
+}
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();

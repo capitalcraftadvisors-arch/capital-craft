@@ -11,6 +11,7 @@ import WizardProgress from "@/components/WizardProgress";
 import FileUpload from "@/components/FileUpload";
 import { getBusiness, setBusiness } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
+import { extractPan } from "@/lib/ocr";
 import { PAN_RE } from "@/lib/validators";
 
 type Form = {
@@ -37,6 +38,7 @@ export default function Step2Page() {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [businessId, setBusinessId] = useState<string | null>(null);
+  const [panOcrToast, setPanOcrToast] = useState<string | null>(null);
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<Form>({
     defaultValues: { business_type: "", pan_number: "" },
@@ -60,6 +62,27 @@ export default function Step2Page() {
       });
     })();
   }, [reset]);
+
+  // Triggered by FileUpload's onUploaded for the PAN document. Runs Vision
+  // OCR on the original file (cleaner bytes than the compressed JPEG that
+  // landed in GCS), auto-fills the PAN field on success, leaves it
+  // untouched on failure. PAN field stays editable in both cases.
+  async function handlePanUploaded({ file }: { file: File }) {
+    setPanOcrToast("Reading PAN…");
+    const r = await extractPan(file);
+    if (!r.ok) {
+      setPanOcrToast("Couldn't read PAN automatically — please type it in.");
+      return;
+    }
+    if (r.pan) {
+      setValue("pan_number", r.pan, { shouldValidate: true });
+      setPanOcrToast("PAN auto-filled — verify and edit if needed.");
+    } else {
+      setPanOcrToast(
+        "We read the document but couldn't find a PAN number — please type it in.",
+      );
+    }
+  }
 
   async function onSubmit(values: Form) {
     const biz = getBusiness();
@@ -88,11 +111,14 @@ export default function Step2Page() {
 
       <div className="mb-6">
         <h1 className="font-display text-[24px] sm:text-[28px] font-bold">Business details</h1>
-        <p className="text-text-mid mt-1">Tell us about your EPC entity. Document uploads are optional.</p>
+        <p className="text-text-mid mt-1">
+          Tell us about your EPC entity. Document uploads are optional.
+        </p>
       </div>
 
       <Card className="p-6 sm:p-7">
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+          {/* 1. Business type — unchanged */}
           <Select
             label="Business type"
             placeholder="Select…"
@@ -101,20 +127,9 @@ export default function Step2Page() {
             error={errors.business_type?.message}
           />
 
-          <Input
-            label="PAN number"
-            placeholder="ABCDE1234F"
-            maxLength={10}
-            {...register("pan_number", {
-              required: "PAN is required",
-              pattern: { value: PAN_RE, message: "Invalid PAN format (AAAAA9999A)" },
-              onChange: (e) => setValue("pan_number", e.target.value.toUpperCase()),
-            })}
-            error={errors.pan_number?.message}
-          />
-
           {businessId && (
-            <div className="grid gap-5 sm:grid-cols-2">
+            <>
+              {/* 2. PAN document upload — triggers OCR on success */}
               <div className="p-4 bg-bg-soft rounded-input border border-line">
                 <FileUpload
                   businessId={businessId}
@@ -122,9 +137,17 @@ export default function Step2Page() {
                   category="pan_business"
                   maxFiles={1}
                   label="PAN document (optional)"
-                  hint="Upload a clear scan or photo."
+                  hint="Upload a clear scan or photo. We'll read the PAN number for you."
+                  onUploaded={handlePanUploaded}
                 />
+                {panOcrToast && (
+                  <div className="mt-3 px-3.5 py-2.5 rounded-input bg-blue-50 border border-blue/15 text-[12px] text-text-mid">
+                    {panOcrToast}
+                  </div>
+                )}
               </div>
+
+              {/* 3. GSTIN document upload */}
               <div className="p-4 bg-bg-soft rounded-input border border-line">
                 <FileUpload
                   businessId={businessId}
@@ -135,22 +158,40 @@ export default function Step2Page() {
                   hint="Skip if you don't have GSTIN."
                 />
               </div>
-              {extraLabel && (
-                <div className="p-4 bg-bg-soft rounded-input border border-line sm:col-span-2">
-                  <FileUpload
-                    businessId={businessId}
-                    table="epc_documents"
-                    category="extra_doc"
-                    maxFiles={1}
-                    label={`${extraLabel} (optional)`}
-                  />
-                </div>
-              )}
+            </>
+          )}
+
+          {/* 4. PAN number — auto-filled by OCR, stays editable */}
+          <Input
+            label="PAN number"
+            placeholder="ABCDE1234F"
+            maxLength={10}
+            {...register("pan_number", {
+              required: "PAN is required",
+              pattern: { value: PAN_RE, message: "Invalid PAN format (AAAAA9999A)" },
+              onChange: (e) => setValue("pan_number", e.target.value.toUpperCase()),
+            })}
+            error={errors.pan_number?.message}
+            hint="Auto-filled from the PAN document if you uploaded one. Edit if needed."
+          />
+
+          {/* 5. Extra doc (conditional on business type) */}
+          {businessId && extraLabel && (
+            <div className="p-4 bg-bg-soft rounded-input border border-line">
+              <FileUpload
+                businessId={businessId}
+                table="epc_documents"
+                category="extra_doc"
+                maxFiles={1}
+                label={`${extraLabel} (optional)`}
+              />
             </div>
           )}
 
           <div className="flex justify-end pt-2">
-            <Button type="submit" variant="primary" loading={saving}>Save & continue</Button>
+            <Button type="submit" variant="primary" loading={saving}>
+              Save &amp; continue
+            </Button>
           </div>
         </form>
       </Card>
