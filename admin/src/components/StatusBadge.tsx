@@ -24,11 +24,30 @@ const LABELS: Record<AllStatus, string> = {
   disbursed:    "Disbursed",
 };
 
-export default function StatusBadge({ status }: { status: AllStatus | string }) {
+const PILL_BASE =
+  "inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide";
+
+export default function StatusBadge({
+  status,
+  updated,
+}: {
+  status: AllStatus | string;
+  // When true, render a second "Updated" pill next to the status. Used to
+  // surface the EPC's one-time self-edit having happened.
+  updated?: boolean;
+}) {
   const s = (status as AllStatus) in STYLES ? (status as AllStatus) : "draft";
   return (
-    <span className={["inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide", STYLES[s]].join(" ")}>
-      {LABELS[s]}
+    <span className="inline-flex items-center gap-1.5">
+      <span className={[PILL_BASE, STYLES[s]].join(" ")}>{LABELS[s]}</span>
+      {updated && (
+        <span
+          className={[PILL_BASE, "bg-gold-50 text-[#8a6500]"].join(" ")}
+          title="EPC used their one-time self-edit"
+        >
+          Updated
+        </span>
+      )}
     </span>
   );
 }

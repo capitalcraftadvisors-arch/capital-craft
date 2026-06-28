@@ -18,7 +18,7 @@ const SUPABASE_ANON =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
 
-type FoundRow = { id: string; storage_path: string; category: string };
+type FoundRow = { id: string; storage_path: string; category: string; business_id?: string };
 type Found =
   | ({ table: "epc_documents" } & FoundRow)
   | ({ table: "user_application_docs" } & FoundRow);
@@ -26,7 +26,7 @@ type Found =
 async function findDoc(supabase: SupabaseClient, id: string): Promise<Found | null> {
   const e = await supabase
     .from("epc_documents")
-    .select("id, storage_path, category")
+    .select("id, storage_path, category, business_id")
     .eq("id", id)
     .maybeSingle();
   if (e.data) return { table: "epc_documents", ...(e.data as FoundRow) };
@@ -122,6 +122,22 @@ export async function DELETE(
 
     // Then remove the GCS object. Best-effort: an orphan is harmless.
     await deleteObject(doc.storage_path);
+
+    // Audit (epc_documents only).
+    if (doc.table === "epc_documents" && doc.business_id) {
+      try {
+        await supabase.from("admin_edit_log").insert({
+          business_id: doc.business_id,
+          actor: claims.business_type === "admin" ? "admin" : "epc",
+          actor_id: claims.business_id,
+          action: "doc_delete",
+          field: doc.category,
+        });
+      } catch (e) {
+        console.warn("[document DELETE] audit insert failed:", e);
+      }
+    }
+
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);

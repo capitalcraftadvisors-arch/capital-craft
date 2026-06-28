@@ -1,6 +1,7 @@
 import { FUNCTIONS_URL } from "./supabase";
 
-// Shape returned by the `auth` Edge Function.
+// Shape returned by the `auth` Edge Function (plus epc_self_edited which
+// AuthGuard re-fetches on every page mount so we can gate the wizard).
 export type Business = {
   id: string;
   status: "draft" | "under_review" | "approved" | "on_hold" | "rejected";
@@ -13,6 +14,8 @@ export type Business = {
     | null;
   current_step: number;
   contact_name: string | null;
+  epc_self_edited?: boolean;
+  epc_self_edited_at?: string | null;
 };
 
 const TOKEN_KEY = "cc_token";

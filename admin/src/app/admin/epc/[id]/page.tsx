@@ -1,17 +1,53 @@
 "use client";
 
+// Admin EPC detail page with inline edit on every field except contact_mobile
+// (which is the login key — read-only by spec).
+//
+// Sections:
+//   Personal · Business · Bank · Members · Office · References · Documents
+//   plus the unchanged GstR3bSection (admin-only) and Review actions card.
+//
+// Edits flow:
+//   - Per-field "Edit" affordance via <EditableField/> → onSave updates
+//     epc_business via PostgREST (admin's JWT → admin_all_business RLS)
+//     and writes one admin_edit_log row via lib/auditLog.
+//   - Members and References (JSONB arrays) use a section-level Save with a
+//     coarse 'members_edited' / 'references_edited' audit entry per the spec.
+//   - Documents use <AdminDocSlot/> per category. Upload / View / Replace
+//     / Remove. The replace path uses /api/upload?replace=true so per-
+//     category unique indexes don't trip.
+
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import StatusBadge from "@/components/StatusBadge";
 import GstR3bSection from "@/components/GstR3bSection";
+import EditableField from "@/components/EditableField";
+import AdminDocSlot from "@/components/AdminDocSlot";
 import { supabase } from "@/lib/supabase";
-import { getDocumentUrl } from "@/lib/storage";
+import { logAudit } from "@/lib/auditLog";
+import { EMAIL_RE, PAN_RE, MOBILE_RE, IFSC_RE, ACCOUNT_RE } from "@/lib/validators";
 
 type Biz = Record<string, any>;
-type Doc = { id: string; category: string; stakeholder_id: string | null; storage_path: string; mime_type: string | null; file_name: string | null };
+type Stakeholder = { id: string; name: string; designation: string };
+type Reference = { type: "customer" | "supplier"; name: string; mobile: string };
+
+const BUSINESS_TYPE_OPTIONS = [
+  { value: "proprietorship", label: "Proprietorship" },
+  { value: "pvt_ltd",        label: "Private Limited" },
+  { value: "partnership",    label: "Partnership" },
+  { value: "llp",            label: "LLP" },
+];
+
+const DESIGNATION_OPTIONS = [
+  { value: "Partner",    label: "Partner" },
+  { value: "Director",   label: "Director" },
+  { value: "Proprietor", label: "Proprietor" },
+  { value: "Owner",      label: "Owner" },
+  { value: "Manager",    label: "Manager" },
+];
 
 export default function AdminEpcDetailPage() {
   return (
@@ -23,41 +59,73 @@ export default function AdminEpcDetailPage() {
 
 function Inner() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const [biz, setBiz] = useState<Biz | null>(null);
-  const [docs, setDocs] = useState<Doc[]>([]);
-  const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => { void load(); }, [params.id]);
+
   async function load() {
     const { data: b } = await supabase().from("epc_business").select("*").eq("id", params.id).maybeSingle();
     setBiz(b);
-    const { data: d } = await supabase().from("epc_documents")
-      .select("id, category, stakeholder_id, storage_path, mime_type, file_name")
-      .eq("business_id", params.id);
-    const rows = (d ?? []) as Doc[];
-    setDocs(rows);
-    const t: Record<string, string> = {};
-    for (const r of rows) {
-      if ((r.mime_type || "").startsWith("image/")) {
-        const u = await getDocumentUrl(r.id);
-        if (u) t[r.id] = u;
-      }
-    }
-    setThumbs(t);
+  }
+
+  // Generic field-update helper used by EditableField onSave callbacks.
+  // Saves the new value via PostgREST, writes one audit row, refreshes
+  // local state.
+  function saveField(column: string) {
+    return async (next: string) => {
+      const oldVal = biz?.[column] ?? null;
+      const newVal = next === "" ? null : next;
+      const { error } = await supabase()
+        .from("epc_business")
+        .update({ [column]: newVal })
+        .eq("id", params.id);
+      if (error) throw error;
+      await logAudit(params.id, "field_edit", column, oldVal, newVal);
+      setBiz((b) => (b ? { ...b, [column]: newVal } : b));
+    };
+  }
+
+  // Members and References use coarse section-level saves per spec.
+  async function saveStakeholders(next: Stakeholder[]) {
+    const { error } = await supabase()
+      .from("epc_business")
+      .update({ stakeholders: next })
+      .eq("id", params.id);
+    if (error) throw error;
+    await logAudit(params.id, "members_edited", "stakeholders");
+    setBiz((b) => (b ? { ...b, stakeholders: next } : b));
+  }
+  async function saveReferences(next: Reference[]) {
+    const { error } = await supabase()
+      .from("epc_business")
+      .update({ business_references: next })
+      .eq("id", params.id);
+    if (error) throw error;
+    await logAudit(params.id, "references_edited", "business_references");
+    setBiz((b) => (b ? { ...b, business_references: next } : b));
   }
 
   async function changeStatus(next: "approved" | "on_hold" | "rejected" | "under_review") {
     if (!biz) return;
     setBusy(true);
-    await supabase().from("epc_business").update({ status: next, ...(notes ? { /* no notes column on epc_business per schema; keep in mind */ } : {}) }).eq("id", biz.id);
+    await supabase().from("epc_business").update({ status: next }).eq("id", biz.id);
+    await logAudit(biz.id, "field_edit", "status", biz.status, next);
     setBusy(false);
     void load();
   }
 
   if (!biz) return null;
+
+  const isPartnership = biz.business_type === "partnership";
+  const isPvtLtd      = biz.business_type === "pvt_ltd";
+  const isLlp         = biz.business_type === "llp";
+  const extraDocLabel =
+    isPartnership ? "Partnership Deed"
+    : isPvtLtd    ? "Certificate of Incorporation"
+    : isLlp       ? "LLP Agreement"
+    : null;
 
   return (
     <main className="min-h-screen bg-bg-soft">
@@ -69,51 +137,112 @@ function Inner() {
       </header>
 
       <section className="max-w-[1000px] mx-auto px-5 sm:px-7 py-10 space-y-5">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h1 className="font-display text-[26px] sm:text-[30px] font-bold">{biz.contact_name || "EPC"}</h1>
             <p className="text-text-mid mt-1">+91 {biz.contact_mobile} · {biz.business_type || "—"}</p>
           </div>
-          <StatusBadge status={biz.status} />
+          <StatusBadge status={biz.status} updated={biz.epc_self_edited === true} />
         </div>
 
-        <Section title="Profile">
-          <Row k="PAN" v={biz.pan_number} />
-          <Row k="Designation" v={biz.contact_designation} />
+        <Section title="Personal">
+          <EditableField
+            label="Point of contact"
+            value={biz.contact_name}
+            onSave={saveField("contact_name")}
+            validate={(v) => (v.length < 2 ? "Name is too short" : v.length > 80 ? "Too long" : null)}
+          />
+          <EditableField
+            label="Email"
+            value={biz.contact_email}
+            type="email"
+            onSave={saveField("contact_email")}
+            validate={(v) => (!v ? "Email required" : EMAIL_RE.test(v) ? null : "Invalid email")}
+          />
+          <EditableField
+            label="Mobile (login key)"
+            value={biz.contact_mobile}
+            readOnly
+            onSave={async () => {}}
+          />
+          <EditableField
+            label="Designation"
+            value={biz.contact_designation}
+            options={DESIGNATION_OPTIONS}
+            onSave={saveField("contact_designation")}
+          />
+        </Section>
+
+        <Section title="Business">
+          <EditableField
+            label="Business type"
+            value={biz.business_type}
+            display={(v) => v ? (BUSINESS_TYPE_OPTIONS.find((o) => o.value === v)?.label ?? v) : ""}
+            options={BUSINESS_TYPE_OPTIONS}
+            onSave={saveField("business_type")}
+          />
+          <EditableField
+            label="PAN"
+            value={biz.pan_number}
+            onSave={async (v) => saveField("pan_number")(v.toUpperCase())}
+            validate={(v) => (!v ? null : PAN_RE.test(v.toUpperCase()) ? null : "Invalid PAN (AAAAA9999A)")}
+          />
         </Section>
 
         <Section title="Bank">
-          <Row k="Account" v={biz.bank_account_number} />
-          <Row k="IFSC" v={biz.bank_ifsc} />
-          <Row k="Branch" v={biz.bank_branch} />
-          <Row k="Holder" v={biz.bank_account_holder} />
+          <EditableField
+            label="Account number"
+            value={biz.bank_account_number}
+            onSave={saveField("bank_account_number")}
+            validate={(v) => (!v ? null : ACCOUNT_RE.test(v) ? null : "9-18 digits")}
+          />
+          <EditableField
+            label="IFSC"
+            value={biz.bank_ifsc}
+            onSave={async (v) => saveField("bank_ifsc")(v.toUpperCase())}
+            validate={(v) => (!v ? null : IFSC_RE.test(v.toUpperCase()) ? null : "Invalid IFSC")}
+          />
+          <EditableField label="Branch" value={biz.bank_branch} onSave={saveField("bank_branch")} />
+          <EditableField label="Bank name" value={biz.bank_name} onSave={saveField("bank_name")} />
+          <EditableField label="Account holder" value={biz.bank_account_holder} onSave={saveField("bank_account_holder")} />
+          <div className="mt-3">
+            <AdminDocSlot businessId={params.id} category="cancelled_cheque" label="Cancelled cheque" />
+          </div>
         </Section>
 
         <Section title="Members">
-          {(biz.stakeholders ?? []).length === 0 ? <Empty /> : (biz.stakeholders ?? []).map((s: any) => {
-            const sd = docs.filter((d) => d.stakeholder_id === s.id);
-            return (
-              <div key={s.id} className="py-3 border-t border-line first:border-0 first:pt-0">
-                <p className="text-[14px] font-semibold">{s.name} <span className="text-text-muted font-normal">— {s.designation}</span></p>
-                {sd.length > 0 && <DocList docs={sd} thumbs={thumbs} />}
-              </div>
-            );
-          })}
+          <MembersEditor
+            value={(biz.stakeholders ?? []) as Stakeholder[]}
+            onSave={saveStakeholders}
+            businessId={params.id}
+          />
+        </Section>
+
+        <Section title="Office verification">
+          <div className="grid sm:grid-cols-3 gap-3">
+            <AdminDocSlot businessId={params.id} category="office_exterior" label="Exterior (signboard)" />
+            <AdminDocSlot businessId={params.id} category="office_interior" label="Interior" />
+            <AdminDocSlot businessId={params.id} category="office_selfie"   label="Selfie at office" />
+          </div>
         </Section>
 
         <Section title="References">
-          {(biz.business_references ?? []).length === 0 ? <Empty /> : (biz.business_references ?? []).map((r: any, i: number) => (
-            <Row key={i} k={`${r.type} — ${r.name}`} v={r.mobile} />
-          ))}
+          <ReferencesEditor
+            value={(biz.business_references ?? []) as Reference[]}
+            onSave={saveReferences}
+          />
         </Section>
 
         <Section title="Documents">
-          <DocList docs={docs.filter((d) => !d.stakeholder_id && d.category !== "gst_r3b")} thumbs={thumbs} />
+          <div className="grid sm:grid-cols-2 gap-3">
+            <AdminDocSlot businessId={params.id} category="pan_business" label="PAN document" />
+            <AdminDocSlot businessId={params.id} category="gstin"        label="GSTIN document" />
+            {extraDocLabel && (
+              <AdminDocSlot businessId={params.id} category="extra_doc" label={extraDocLabel} />
+            )}
+          </div>
         </Section>
 
-        {/* Admin-only GST R3B section. Server-side enforces admin-only at
-            upload/view/delete routes; RLS also excludes gst_r3b from EPC
-            queries. This component is safe to render anywhere admin-only. */}
         <GstR3bSection businessId={params.id} />
 
         <Card className="p-6">
@@ -121,7 +250,7 @@ function Inner() {
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="Internal review notes (optional)"
+            placeholder="Internal review notes (optional — not persisted yet)"
             className="w-full border border-line rounded-input px-3.5 py-3 text-[14px] mb-3 min-h-[80px] focus:border-blue outline-none"
           />
           <div className="flex flex-wrap gap-3">
@@ -146,46 +275,242 @@ function Inner() {
   );
 }
 
-function DocList({ docs, thumbs }: { docs: Doc[]; thumbs: Record<string, string> }) {
-  if (docs.length === 0) return <p className="text-[13px] text-text-muted">No documents.</p>;
-  return (
-    <ul className="grid gap-3 sm:grid-cols-2 mt-2">
-      {docs.map((d) => (
-        <li key={d.id} className="flex items-center gap-3 bg-white border border-line rounded-input px-3 py-2.5">
-          {thumbs[d.id] ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img src={thumbs[d.id]} alt="" className="w-10 h-10 object-cover rounded-md" />
-          ) : (
-            <div className="w-10 h-10 bg-bg-tint rounded-md grid place-items-center text-blue text-xs font-bold">PDF</div>
-          )}
-          <div className="flex-1 min-w-0">
-            <p className="text-[13px] truncate">{d.file_name || d.category}</p>
-            <p className="text-[11px] text-text-muted">{d.category}</p>
-          </div>
-          <button onClick={async () => {
-            const u = await getDocumentUrl(d.id);
-            if (u) window.open(u, "_blank");
-          }} className="text-[12px] text-blue hover:underline">View</button>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
+// ── Section wrapper ──────────────────────────────────────────────────────
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <Card className="p-6">
       <h3 className="font-display font-semibold text-[16px] mb-3">{title}</h3>
-      <div className="space-y-1.5">{children}</div>
+      <div className="space-y-1">{children}</div>
     </Card>
   );
 }
-function Row({ k, v }: { k: string; v: any }) {
+
+// ── Members editor (edit-only per spec; no add/delete) ────────────────────
+function MembersEditor({
+  value, onSave, businessId,
+}: {
+  value: Stakeholder[];
+  onSave: (next: Stakeholder[]) => Promise<void>;
+  businessId: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<Stakeholder[]>(value);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => { setDraft(value); }, [value]);
+
+  async function save() {
+    setSaving(true);
+    try {
+      await onSave(draft);
+      setEditing(false);
+      setError(null);
+    } catch (e) {
+      setError((e as Error)?.message ?? "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (value.length === 0) {
+    return <p className="text-[13px] text-text-muted">No members.</p>;
+  }
+
+  if (!editing) {
+    return (
+      <div>
+        {value.map((s) => (
+          <div key={s.id} className="py-3 border-t border-line first:border-0 first:pt-0">
+            <p className="text-[14px] font-semibold">
+              {s.name} <span className="text-text-muted font-normal">— {s.designation}</span>
+            </p>
+            <div className="grid sm:grid-cols-2 gap-3 mt-2">
+              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_pan"     label="Member PAN" />
+              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_aadhaar" label="Member Aadhaar" />
+            </div>
+          </div>
+        ))}
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => { setDraft(value); setEditing(true); }}
+            className="text-[12px] text-blue hover:underline"
+          >
+            Edit members
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex gap-4 text-[13px]">
-      <dt className="text-text-muted min-w-[140px]">{k}</dt>
-      <dd className="text-text">{v || <span className="text-text-muted">—</span>}</dd>
+    <div className="space-y-3">
+      {draft.map((s, i) => (
+        <div key={s.id} className="border border-line rounded-input p-3 bg-bg-soft">
+          <p className="text-[11px] text-text-muted mb-2">Member {i + 1}</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input
+              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
+              placeholder="Name"
+              value={s.name}
+              onChange={(e) => {
+                const next = [...draft]; next[i] = { ...next[i], name: e.target.value };
+                setDraft(next);
+              }}
+            />
+            <input
+              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
+              placeholder="Designation"
+              value={s.designation}
+              onChange={(e) => {
+                const next = [...draft]; next[i] = { ...next[i], designation: e.target.value };
+                setDraft(next);
+              }}
+            />
+          </div>
+        </div>
+      ))}
+      {error && <p className="text-[12px] text-red-500">{error}</p>}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="px-3 py-1.5 bg-blue text-white rounded text-[12px] font-semibold hover:bg-blue-dark disabled:opacity-60"
+        >
+          {saving ? "Saving…" : "Save members"}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setEditing(false); setError(null); }}
+          disabled={saving}
+          className="px-3 py-1.5 border border-line rounded text-[12px] hover:border-blue"
+        >
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
-function Empty() { return <p className="text-[13px] text-text-muted">Nothing added.</p>; }
+
+// ── References editor — customer + supplier (slots) ─────────────────────
+function ReferencesEditor({
+  value, onSave,
+}: {
+  value: Reference[];
+  onSave: (next: Reference[]) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const cust = value.find((r) => r.type === "customer") ?? { type: "customer" as const, name: "", mobile: "" };
+  const supp = value.find((r) => r.type === "supplier") ?? { type: "supplier" as const, name: "", mobile: "" };
+  const [draftCust, setDraftCust] = useState<Reference>(cust);
+  const [draftSupp, setDraftSupp] = useState<Reference>(supp);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraftCust(value.find((r) => r.type === "customer") ?? { type: "customer", name: "", mobile: "" });
+    setDraftSupp(value.find((r) => r.type === "supplier") ?? { type: "supplier", name: "", mobile: "" });
+  }, [value]);
+
+  async function save() {
+    for (const r of [draftCust, draftSupp]) {
+      if ((r.name || r.mobile) && !(r.name && MOBILE_RE.test(r.mobile))) {
+        setError(`${r.type} reference needs both a name and a valid 10-digit mobile`);
+        return;
+      }
+    }
+    const out: Reference[] = [];
+    if (draftCust.name && draftCust.mobile) out.push(draftCust);
+    if (draftSupp.name && draftSupp.mobile) out.push(draftSupp);
+    setSaving(true);
+    try {
+      await onSave(out);
+      setEditing(false);
+      setError(null);
+    } catch (e) {
+      setError((e as Error)?.message ?? "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div>
+        {value.length === 0 ? (
+          <p className="text-[13px] text-text-muted">No references.</p>
+        ) : (
+          value.map((r, i) => (
+            <div key={i} className="flex gap-4 text-[13px] py-1">
+              <dt className="text-text-muted min-w-[140px] capitalize">{r.type}</dt>
+              <dd className="text-text">{r.name} <span className="text-text-muted">· {r.mobile}</span></dd>
+            </div>
+          ))
+        )}
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="text-[12px] text-blue hover:underline"
+          >
+            Edit references
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {[draftCust, draftSupp].map((r, idx) => (
+        <div key={r.type} className="border border-line rounded-input p-3 bg-bg-soft">
+          <p className="text-[11px] text-text-muted mb-2 capitalize">{r.type} reference</p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <input
+              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
+              placeholder="Name"
+              value={r.name}
+              onChange={(e) => {
+                const next = { ...r, name: e.target.value };
+                idx === 0 ? setDraftCust(next) : setDraftSupp(next);
+              }}
+            />
+            <input
+              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
+              placeholder="Mobile (10 digits)"
+              inputMode="numeric"
+              maxLength={10}
+              value={r.mobile}
+              onChange={(e) => {
+                const v = e.target.value.replace(/\D/g, "");
+                const next = { ...r, mobile: v };
+                idx === 0 ? setDraftCust(next) : setDraftSupp(next);
+              }}
+            />
+          </div>
+        </div>
+      ))}
+      {error && <p className="text-[12px] text-red-500">{error}</p>}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="px-3 py-1.5 bg-blue text-white rounded text-[12px] font-semibold hover:bg-blue-dark disabled:opacity-60"
+        >
+          {saving ? "Saving…" : "Save references"}
+        </button>
+        <button
+          type="button"
+          onClick={() => { setEditing(false); setError(null); }}
+          disabled={saving}
+          className="px-3 py-1.5 border border-line rounded text-[12px] hover:border-blue"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}

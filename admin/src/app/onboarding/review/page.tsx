@@ -65,7 +65,41 @@ export default function ReviewPage() {
     }
     const b = getBusiness();
     if (!b) return;
+
+    // Two paths:
+    //   1. Initial submit (status='draft' coming in) — flip status to
+    //      under_review + submitted_at, redirect to /status as before.
+    //   2. Self-edit submit (status='under_review' AND a snapshot exists in
+    //      localStorage from the "Edit Dashboard" click) — call
+    //      /api/epc/submit-self-edit which writes audit rows for whatever
+    //      changed and flips epc_self_edited=true. Status stays.
+    const isSelfEdit = b.status === "under_review";
     setSubmitting(true);
+
+    if (isSelfEdit) {
+      const snap = localStorage.getItem("cc_self_edit_snapshot");
+      const before = snap ? JSON.parse(snap) : {};
+      const res = await fetch("/api/epc/submit-self-edit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("cc_token") ?? ""}`,
+        },
+        body: JSON.stringify({ before }),
+      });
+      const data = await res.json();
+      setSubmitting(false);
+      if (!data.ok) {
+        return alert("Couldn't save your changes: " + (data.error ?? "unknown"));
+      }
+      localStorage.removeItem("cc_self_edit_snapshot");
+      // Update cached business so AuthGuard reflects the lock.
+      setBusiness({ ...b, status: "under_review", epc_self_edited: true } as any);
+      router.push("/status");
+      return;
+    }
+
+    // Initial submit — preserves the original behavior.
     const { error } = await supabase()
       .from("epc_business")
       .update({ status: "under_review", submitted_at: new Date().toISOString() })
@@ -138,7 +172,7 @@ export default function ReviewPage() {
           Edit details
         </Button>
         <Button type="button" variant="grad" loading={submitting} onClick={submit}>
-          Submit for verification
+          {getBusiness()?.status === "under_review" ? "Submit changes" : "Submit for verification"}
         </Button>
       </div>
     </>

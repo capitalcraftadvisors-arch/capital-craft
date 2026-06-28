@@ -2,14 +2,23 @@
 // inserts the doc row in Supabase using the user's JWT (so RLS still enforces
 // access). Same compression as before: images resized to 2000px longest side,
 // JPEG quality 75; PDFs pass through unchanged.
+//
+// Admin-only features:
+//   - replace=true  → before insert, delete the existing same-category row
+//     (and its GCS object) for this business/stakeholder/application.
+//     Lets admin overwrite a doc that hits a per-category unique index
+//     (pan_business, gstin, cancelled_cheque, stakeholder_pan).
+//   - business_id form field → admin acts on behalf of a different EPC.
+//
+// Audit: every successful epc_documents change writes one admin_edit_log
+// row (doc_upload or doc_replace).
 
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { uploadBuffer, deleteObject } from "@/lib/gcs";
-import { verifyJwt, getBearerToken } from "@/lib/jwt";
+import { verifyJwt, getBearerToken, type JwtClaims } from "@/lib/jwt";
 
-// Node runtime — sharp + @google-cloud/storage are native/Node-only.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -41,6 +50,11 @@ export async function POST(req: NextRequest) {
     if (!token) return err("unauthorized", 401);
     const claims = await verifyJwt(token);
 
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
     // ── parse multipart ────────────────────────────────────────────────
     const form = await req.formData();
     const file = form.get("file") as File | null;
@@ -55,11 +69,7 @@ export async function POST(req: NextRequest) {
     }
     const allowedTable = table as AllowedTable;
 
-    // ── Admin-only categories ──────────────────────────────────────────
-    // gst_r3b documents are admin-only at every layer (RLS, this route,
-    // and the document GET route). Reject non-admin uploads outright so
-    // a bug in a future admin-side caller can't accidentally let an EPC
-    // create one.
+    // Admin-only category gate (gst_r3b).
     if (category === "gst_r3b" && claims.business_type !== "admin") {
       return err("admin_only", 403);
     }
@@ -73,17 +83,13 @@ export async function POST(req: NextRequest) {
       try { gps = JSON.parse(gpsRaw); } catch { gps = null; }
     }
 
-    // Generic metadata bag the client can pass — used by GST R3B for
-    // { period_type: "present" | "previous" }. Merged into row.metadata
-    // alongside gps below.
     const extraMetaRaw = (form.get("extraMetadata") as string) || null;
     let extraMetadata: Record<string, unknown> | null = null;
     if (extraMetaRaw) {
       try { extraMetadata = JSON.parse(extraMetaRaw); } catch { extraMetadata = null; }
     }
 
-    // EPC docs always belong to the JWT's business; only admins may upload
-    // on behalf of a different EPC. (RLS will block lies anyway.)
+    // ── target business (admin-on-behalf) ─────────────────────────────
     const requestedBusinessId = (form.get("business_id") as string) || null;
     const targetBusinessId =
       claims.business_type === "admin" && requestedBusinessId
@@ -92,6 +98,31 @@ export async function POST(req: NextRequest) {
 
     if (allowedTable === "user_application_docs" && !applicationId) {
       return err("missing_application_id");
+    }
+
+    // ── replace=true: admin-only delete-existing-then-insert ──────────
+    const replaceFlag = (form.get("replace") as string) === "true";
+    if (replaceFlag && claims.business_type !== "admin") {
+      return err("admin_only_replace", 403);
+    }
+
+    if (replaceFlag) {
+      let q = supabase.from(allowedTable).select("id, storage_path").eq("category", category);
+      if (allowedTable === "epc_documents") {
+        q = q.eq("business_id", targetBusinessId);
+        q = stakeholderId
+          ? q.eq("stakeholder_id", stakeholderId)
+          : q.is("stakeholder_id", null);
+      } else {
+        q = q.eq("application_id", applicationId);
+      }
+      const { data: existing } = await q;
+      if (existing && existing.length > 0) {
+        for (const e of existing as { id: string; storage_path: string }[]) {
+          await deleteObject(e.storage_path);
+          await supabase.from(allowedTable).delete().eq("id", e.id);
+        }
+      }
     }
 
     // ── path ───────────────────────────────────────────────────────────
@@ -118,10 +149,7 @@ export async function POST(req: NextRequest) {
     let outMime: string = file.type;
 
     if (file.type.startsWith("image/")) {
-      // Sharp: resize so the longest side <= MAX_DIMENSION, then JPEG q75.
-      // `fit: "inside"` + `withoutEnlargement: true` makes it a no-op when
-      // the image is already small enough.
-      const pipeline = sharp(input).rotate(); // honor EXIF orientation
+      const pipeline = sharp(input).rotate();
       output = await pipeline
         .resize({
           width: MAX_DIMENSION,
@@ -133,18 +161,11 @@ export async function POST(req: NextRequest) {
         .toBuffer();
       outMime = "image/jpeg";
     }
-    // PDFs: leave bytes unchanged.
 
     // ── upload to GCS ──────────────────────────────────────────────────
     await uploadBuffer(finalPath, output, outMime);
 
-    // ── insert doc row using the USER's token so RLS still applies ─────
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
-
-    // Build metadata: merge GPS (if present) with caller-supplied extra fields.
+    // ── insert doc row ─────────────────────────────────────────────────
     const mergedMeta: Record<string, unknown> = {};
     if (gps) mergedMeta.gps = gps;
     if (extraMetadata) Object.assign(mergedMeta, extraMetadata);
@@ -174,17 +195,23 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (insertErr || !inserted) {
-      // RLS rejected (or other DB error). Clean up the GCS file.
       await deleteObject(finalPath);
       return err(insertErr?.message || "db_insert_failed", 403);
     }
 
-    // ── verification log (visible in Cloud Run logs) ───────────────────
-    // Lets the team confirm compression actually happened in production.
+    // ── audit (epc_documents only; loan docs have status_history) ─────
+    if (allowedTable === "epc_documents") {
+      await writeAudit(supabase, claims, {
+        business_id: targetBusinessId,
+        action: replaceFlag ? "doc_replace" : "doc_upload",
+        field: category,
+      });
+    }
+
     console.log(
       `[upload] ${file.type} → ${outMime} | original=${originalSize}B stored=${output.length}B reduction=${(
         ((originalSize - output.length) / Math.max(1, originalSize)) * 100
-      ).toFixed(1)}% path=${finalPath}`,
+      ).toFixed(1)}% path=${finalPath} replace=${replaceFlag}`,
     );
 
     return NextResponse.json({
@@ -199,5 +226,26 @@ export async function POST(req: NextRequest) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[upload] error:", msg);
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+  }
+}
+
+// Best-effort audit write. Failure logs but does not block the upload.
+async function writeAudit(
+  supabase: SupabaseClient,
+  claims: JwtClaims,
+  row: { business_id: string; action: string; field?: string; old_value?: string | null; new_value?: string | null },
+) {
+  try {
+    await supabase.from("admin_edit_log").insert({
+      business_id: row.business_id,
+      actor: claims.business_type === "admin" ? "admin" : "epc",
+      actor_id: claims.business_id,
+      action: row.action,
+      field: row.field ?? null,
+      old_value: row.old_value ?? null,
+      new_value: row.new_value ?? null,
+    });
+  } catch (e) {
+    console.warn("[upload] audit insert failed:", e);
   }
 }

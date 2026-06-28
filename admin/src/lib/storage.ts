@@ -15,6 +15,11 @@ type UploadMeta = {
   // Generic metadata bag — server merges into row.metadata. Used by GST R3B
   // to pass { period_type: "present" | "previous" }.
   extraMetadata?: Record<string, unknown>;
+  // Admin-only. When true, server deletes the existing same-category row
+  // (and its GCS object) for this business/stakeholder/application before
+  // inserting the new one. Lets admin replace docs that hit per-category
+  // unique indexes (pan_business, gstin, cancelled_cheque, stakeholder_pan).
+  replace?: boolean;
 };
 
 export type UploadOk = {
@@ -42,6 +47,7 @@ export async function uploadDocument(
   if (meta.uploaded_by) form.append("uploaded_by", meta.uploaded_by);
   if (meta.gps) form.append("gps", JSON.stringify(meta.gps));
   if (meta.extraMetadata) form.append("extraMetadata", JSON.stringify(meta.extraMetadata));
+  if (meta.replace) form.append("replace", "true");
 
   const res = await fetch("/api/upload", {
     method: "POST",
