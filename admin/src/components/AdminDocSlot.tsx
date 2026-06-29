@@ -162,7 +162,7 @@ export default function AdminDocSlot({
           <input
             ref={inputRef}
             type="file"
-            accept="image/jpeg,image/png,image/webp,application/pdf"
+            accept="image/*,application/pdf"
             className="hidden"
             onChange={(e) => handleFiles(e.target.files, false)}
           />

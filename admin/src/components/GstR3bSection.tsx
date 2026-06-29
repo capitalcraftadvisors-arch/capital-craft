@@ -531,7 +531,7 @@ function Uploader({
         ref={inputRef}
         type="file"
         className="hidden"
-        accept="image/jpeg,image/png,image/webp,application/pdf"
+        accept="image/*,application/pdf"
         multiple
         disabled={disabled}
         onChange={(e) => {

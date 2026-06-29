@@ -107,6 +107,13 @@ export default function Step2Page() {
 
   return (
     <>
+      <button
+        type="button"
+        onClick={() => router.push("/onboarding/step-1" as any)}
+        className="inline-flex items-center gap-1 text-[13px] text-text-mid hover:text-text mb-4"
+      >
+        <span aria-hidden>←</span> Back
+      </button>
       <div className="mb-8"><WizardProgress current={2} /></div>
 
       <div className="mb-6">
@@ -136,7 +143,7 @@ export default function Step2Page() {
                   table="epc_documents"
                   category="pan_business"
                   maxFiles={1}
-                  label="PAN document (optional)"
+                  label="PAN card (optional)"
                   hint="Upload a clear scan or photo. We'll read the PAN number for you."
                   onUploaded={handlePanUploaded}
                 />
@@ -154,7 +161,7 @@ export default function Step2Page() {
                   table="epc_documents"
                   category="gstin"
                   maxFiles={1}
-                  label="GSTIN document (optional)"
+                  label="GST registration document (optional)"
                   hint="Skip if you don't have GSTIN."
                 />
               </div>

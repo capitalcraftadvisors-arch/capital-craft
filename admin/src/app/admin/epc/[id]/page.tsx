@@ -235,8 +235,8 @@ function Inner() {
 
         <Section title="Documents">
           <div className="grid sm:grid-cols-2 gap-3">
-            <AdminDocSlot businessId={params.id} category="pan_business" label="PAN document" />
-            <AdminDocSlot businessId={params.id} category="gstin"        label="GSTIN document" />
+            <AdminDocSlot businessId={params.id} category="pan_business" label="PAN card" />
+            <AdminDocSlot businessId={params.id} category="gstin"        label="GST registration document" />
             {extraDocLabel && (
               <AdminDocSlot businessId={params.id} category="extra_doc" label={extraDocLabel} />
             )}
@@ -326,8 +326,8 @@ function MembersEditor({
               {s.name} <span className="text-text-muted font-normal">— {s.designation}</span>
             </p>
             <div className="grid sm:grid-cols-2 gap-3 mt-2">
-              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_pan"     label="Member PAN" />
-              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_aadhaar" label="Member Aadhaar" />
+              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_pan"     label="Member PAN card" />
+              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_aadhaar" label="Member Aadhaar card" />
             </div>
           </div>
         ))}

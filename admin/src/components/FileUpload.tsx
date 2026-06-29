@@ -209,14 +209,18 @@ export default function FileUpload(props: Props) {
             ref={inputRef}
             type="file"
             className="hidden"
-            accept="image/jpeg,image/png,image/webp,application/pdf"
+            // image/* lets mobile browsers surface the camera + photo library
+            // + scanner/file-picker options. Backend ACCEPTED set still
+            // restricts to JPEG/PNG/WEBP/PDF; iOS Safari converts HEIC → JPEG
+            // at upload time so most camera shots arrive as image/jpeg.
+            accept="image/*,application/pdf"
             multiple={maxFiles > 1}
             onChange={(e) => handleFiles(e.target.files)}
           />
           <p className="text-[13px] text-text-mid">
             {uploading ? "Uploading…" : "Click to upload"}
           </p>
-          <p className="text-[11px] text-text-muted mt-1">JPG, PNG, WEBP or PDF</p>
+          <p className="text-[11px] text-text-muted mt-1">Photo, scan, or PDF</p>
         </label>
       )}
 

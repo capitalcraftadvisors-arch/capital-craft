@@ -138,6 +138,13 @@ export default function Step4Page() {
 
   return (
     <>
+      <button
+        type="button"
+        onClick={() => router.push("/onboarding/step-3" as any)}
+        className="inline-flex items-center gap-1 text-[13px] text-text-mid hover:text-text mb-4"
+      >
+        <span aria-hidden>←</span> Back
+      </button>
       <div className="mb-8"><WizardProgress current={4} /></div>
 
       <div className="mb-6">

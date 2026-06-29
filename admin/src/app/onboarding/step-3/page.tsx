@@ -1,5 +1,24 @@
 "use client";
 
+// Step 3 — Directors / Partners / Proprietor / generic Members.
+//
+// All labels and the section heading branch on epc_business.business_type
+// (which was saved in Step 2):
+//
+//   proprietorship  → "Proprietor details"  + single editable row whose
+//                     name + designation are pre-seeded from Step 1's
+//                     contact_name / contact_designation. No add button.
+//                     If the JSONB has multiple rows (e.g. user switched
+//                     here from Pvt Ltd), we DESTRUCTIVELY TRIM to the
+//                     first on save and delete the dropped rows' docs.
+//   pvt_ltd         → "Director details"    + "Director N" rows, "+ Add Director"
+//   partnership/llp → "Partner details"     + "Partner N" rows, "+ Add Partner"
+//   null/unset      → "Member details"      + "Member N" rows, "+ Add Member"
+//
+// Stakeholders JSONB shape is UNCHANGED: { id, name, designation }.
+// Existing saved data is preserved verbatim; auto-fill only happens on
+// new rows or when seeding the proprietor row for the first time.
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Button from "@/components/ui/Button";
@@ -11,12 +30,38 @@ import { getBusiness, setBusiness } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 
 type Stakeholder = { id: string; name: string; designation: string };
+type BizType = "proprietorship" | "pvt_ltd" | "partnership" | "llp" | null;
+
+type RoleConfig = {
+  heading: string;
+  roleLabel: string;        // for per-row title: "Director 1"
+  addButtonLabel: string | null; // null = hide
+  defaultDesignation: string;
+  maxRows: number;          // Infinity for unlimited
+};
+
+function configFor(bt: BizType): RoleConfig {
+  switch (bt) {
+    case "proprietorship":
+      return { heading: "Proprietor details", roleLabel: "Proprietor", addButtonLabel: null, defaultDesignation: "Proprietor", maxRows: 1 };
+    case "pvt_ltd":
+      return { heading: "Director details", roleLabel: "Director", addButtonLabel: "+ Add Director", defaultDesignation: "Director", maxRows: Infinity };
+    case "partnership":
+    case "llp":
+      return { heading: "Partner details", roleLabel: "Partner", addButtonLabel: "+ Add Partner", defaultDesignation: "Partner", maxRows: Infinity };
+    default:
+      return { heading: "Member details", roleLabel: "Member", addButtonLabel: "+ Add Member", defaultDesignation: "", maxRows: Infinity };
+  }
+}
 
 export default function Step3Page() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
+  const [businessType, setBusinessType] = useState<BizType>(null);
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
   const [saving, setSaving] = useState(false);
+
+  const cfg = configFor(businessType);
 
   useEffect(() => {
     const biz = getBusiness();
@@ -25,20 +70,43 @@ export default function Step3Page() {
     (async () => {
       const { data } = await supabase()
         .from("epc_business")
-        .select("stakeholders")
+        .select("stakeholders, business_type, contact_name, contact_designation")
         .eq("id", biz.id)
         .maybeSingle();
+
+      const bt = ((data?.business_type as BizType) ?? null) as BizType;
+      const c = configFor(bt);
+      setBusinessType(bt);
+
       const existing = (data?.stakeholders as Stakeholder[] | null) ?? [];
+
       if (existing.length === 0) {
-        setStakeholders([{ id: crypto.randomUUID(), name: "", designation: "" }]);
+        // Seed first row:
+        //   proprietorship → from Step 1 fields (editable)
+        //   others         → empty name + role-default designation (editable)
+        const seeded: Stakeholder =
+          bt === "proprietorship"
+            ? {
+                id: crypto.randomUUID(),
+                name: (data?.contact_name as string | null) ?? "",
+                designation:
+                  ((data?.contact_designation as string | null) ?? "") ||
+                  c.defaultDesignation,
+              }
+            : {
+                id: crypto.randomUUID(),
+                name: "",
+                designation: c.defaultDesignation,
+              };
+        setStakeholders([seeded]);
       } else {
         setStakeholders(existing);
       }
     })();
   }, []);
 
-  // Persist the JSONB array on every edit so docs uploaded against a member id
-  // never become orphans if the user closes the tab.
+  // Persist on every keystroke so docs uploaded against a stakeholder.id are
+  // never orphans if the user closes the tab.
   async function persistJsonb(next: Stakeholder[]) {
     if (!businessId) return;
     await supabase().from("epc_business").update({ stakeholders: next }).eq("id", businessId);
@@ -52,17 +120,17 @@ export default function Step3Page() {
     });
   }
 
-  function addMember() {
+  function addPerson() {
     setStakeholders((arr) => {
-      const next = [...arr, { id: crypto.randomUUID(), name: "", designation: "" }];
+      const next = [...arr, { id: crypto.randomUUID(), name: "", designation: cfg.defaultDesignation }];
       void persistJsonb(next);
       return next;
     });
   }
 
-  async function removeMember(id: string) {
+  async function removePerson(id: string) {
     if (!businessId) return;
-    // Delete any docs tied to this stakeholder first
+    // Delete this stakeholder's docs (rows + GCS) first to avoid orphans.
     const { data: docs } = await supabase()
       .from("epc_documents")
       .select("storage_path")
@@ -80,15 +148,36 @@ export default function Step3Page() {
     });
   }
 
+  // Proprietorship view: render only the first row; trim the rest on save.
+  const displayed = businessType === "proprietorship" ? stakeholders.slice(0, 1) : stakeholders;
+  const trimmed   = businessType === "proprietorship" ? stakeholders.slice(1)   : [];
+
   async function handleContinue() {
     const biz = getBusiness();
-    if (!biz) return;
-    const valid = stakeholders.filter((s) => s.name.trim() && s.designation.trim());
+    if (!biz || !businessId) return;
+
+    const valid = displayed.filter((s) => s.name.trim() && s.designation.trim());
     if (valid.length === 0) {
-      alert("Add at least one member with a name and designation.");
+      alert(`Please add ${businessType === "proprietorship" ? "the proprietor's" : "at least one " + cfg.roleLabel.toLowerCase() + "'s"} name and designation.`);
       return;
     }
+
     setSaving(true);
+
+    // Destructive trim for proprietorship — delete dropped stakeholders' docs.
+    for (const t of trimmed) {
+      const { data: docs } = await supabase()
+        .from("epc_documents")
+        .select("storage_path")
+        .eq("business_id", businessId)
+        .eq("stakeholder_id", t.id);
+      if (docs && docs.length) {
+        const paths = (docs as { storage_path: string }[]).map((d) => d.storage_path);
+        await supabase().storage.from("epc-docs").remove(paths);
+        await supabase().from("epc_documents").delete().eq("business_id", businessId).eq("stakeholder_id", t.id);
+      }
+    }
+
     const { error } = await supabase()
       .from("epc_business")
       .update({ stakeholders: valid, current_step: 4 })
@@ -101,24 +190,37 @@ export default function Step3Page() {
 
   return (
     <>
+      <button
+        type="button"
+        onClick={() => router.push("/onboarding/step-2" as any)}
+        className="inline-flex items-center gap-1 text-[13px] text-text-mid hover:text-text mb-4"
+      >
+        <span aria-hidden>←</span> Back
+      </button>
       <div className="mb-8"><WizardProgress current={3} /></div>
 
       <div className="mb-6">
-        <h1 className="font-display text-[24px] sm:text-[28px] font-bold">Directors / members</h1>
+        <h1 className="font-display text-[24px] sm:text-[28px] font-bold">{cfg.heading}</h1>
         <p className="text-text-mid mt-1">
-          At least one member is required. Document uploads are optional.
+          {businessType === "proprietorship"
+            ? "Confirm or correct the proprietor's details. Document uploads are optional."
+            : `At least one ${cfg.roleLabel.toLowerCase()} is required. Document uploads are optional.`}
         </p>
       </div>
 
       <div className="space-y-5">
-        {stakeholders.map((s, i) => (
+        {displayed.map((s, i) => (
           <Card key={s.id} className="p-6 sm:p-7">
             <div className="flex items-start justify-between mb-5">
-              <h3 className="font-display font-semibold text-[18px]">Member {i + 1}</h3>
-              {stakeholders.length > 1 && (
+              <h3 className="font-display font-semibold text-[18px]">
+                {businessType === "proprietorship" ? cfg.roleLabel : `${cfg.roleLabel} ${i + 1}`}
+              </h3>
+              {/* Delete row: only shown when there's >1 row AND we're not in
+                  proprietorship mode (proprietor is a single-row slot). */}
+              {displayed.length > 1 && businessType !== "proprietorship" && (
                 <button
                   type="button"
-                  onClick={() => removeMember(s.id)}
+                  onClick={() => removePerson(s.id)}
                   className="text-[13px] text-text-muted hover:text-red-500 transition-colors"
                 >
                   Delete
@@ -135,7 +237,7 @@ export default function Step3Page() {
               />
               <Input
                 label="Designation"
-                placeholder="e.g. Director, Partner"
+                placeholder={`e.g. ${cfg.defaultDesignation || "Director, Partner"}`}
                 value={s.designation}
                 onChange={(e) => updateField(s.id, "designation", e.target.value)}
               />
@@ -150,7 +252,7 @@ export default function Step3Page() {
                     table="epc_documents"
                     category="stakeholder_aadhaar"
                     maxFiles={4}
-                    label="Aadhaar document (optional)"
+                    label="Aadhaar card (optional)"
                     hint="One or many."
                   />
                 </div>
@@ -161,7 +263,7 @@ export default function Step3Page() {
                     table="epc_documents"
                     category="stakeholder_pan"
                     maxFiles={1}
-                    label="PAN document (optional)"
+                    label="PAN card (optional)"
                   />
                 </div>
               </div>
@@ -171,7 +273,11 @@ export default function Step3Page() {
       </div>
 
       <div className="mt-5 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-        <Button type="button" variant="outline" onClick={addMember}>+ Add member</Button>
+        {cfg.addButtonLabel && stakeholders.length < cfg.maxRows ? (
+          <Button type="button" variant="outline" onClick={addPerson}>{cfg.addButtonLabel}</Button>
+        ) : (
+          <span /> /* spacer to keep Continue right-aligned on desktop */
+        )}
         <Button type="button" variant="primary" loading={saving} onClick={handleContinue}>
           Save & continue
         </Button>

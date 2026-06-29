@@ -118,8 +118,22 @@ export default function Step1Page() {
     router.push("/onboarding/step-2");
   }
 
+  // Step 1 is the first step; back only makes sense if the EPC is in
+  // self-edit mode (status='under_review'), where back returns to /status.
+  // During initial onboarding (status='draft'), no back button.
+  const inSelfEdit = getBusiness()?.status === "under_review";
+
   return (
     <>
+      {inSelfEdit && (
+        <button
+          type="button"
+          onClick={() => router.push("/status")}
+          className="inline-flex items-center gap-1 text-[13px] text-text-mid hover:text-text mb-4"
+        >
+          <span aria-hidden>←</span> Back to status
+        </button>
+      )}
       <div className="mb-8"><WizardProgress current={1} /></div>
 
       <div className="mb-6">
