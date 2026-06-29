@@ -81,14 +81,18 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
     if (fetchErr || !current) return err("not_found", 404);
 
-    if ((current as { epc_self_edited?: boolean }).epc_self_edited === true) {
+    // Narrow once through unknown so subsequent per-field indexing typechecks
+    // regardless of Supabase's GenericStringError union variants.
+    const currentRow = current as unknown as Record<string, unknown>;
+
+    if (currentRow.epc_self_edited === true) {
       return err("already_self_edited", 403);
     }
 
     // ── Per-field text diffs ──────────────────────────────────────────
     for (const f of TRACKED_TEXT_FIELDS) {
       const oldVal = normalize((before as Record<string, unknown>)[f]);
-      const newVal = normalize((current as Record<string, unknown>)[f]);
+      const newVal = normalize(currentRow[f]);
       if (oldVal !== newVal) {
         await audit(supabase, claims, {
           action: "field_edit",
@@ -102,7 +106,7 @@ export async function POST(req: NextRequest) {
     // ── Members (stakeholders JSONB) diff ─────────────────────────────
     if (
       JSON.stringify((before as { stakeholders?: unknown }).stakeholders ?? []) !==
-      JSON.stringify((current as { stakeholders?: unknown }).stakeholders ?? [])
+      JSON.stringify(currentRow.stakeholders ?? [])
     ) {
       await audit(supabase, claims, {
         action: "members_edited",
@@ -114,7 +118,7 @@ export async function POST(req: NextRequest) {
     // ── References (business_references JSONB) diff ───────────────────
     if (
       JSON.stringify((before as { business_references?: unknown }).business_references ?? []) !==
-      JSON.stringify((current as { business_references?: unknown }).business_references ?? [])
+      JSON.stringify(currentRow.business_references ?? [])
     ) {
       await audit(supabase, claims, {
         action: "references_edited",
