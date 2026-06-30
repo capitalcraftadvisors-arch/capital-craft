@@ -65,35 +65,129 @@ function TabBtn({ active, children, ...rest }: any) {
   );
 }
 
+// ── EPCs tab ────────────────────────────────────────────────────────────────
+
+const BUSINESS_TYPE_LABEL: Record<string, string> = {
+  proprietorship: "Proprietorship",
+  pvt_ltd:        "Private Limited",
+  partnership:    "Partnership",
+  llp:            "LLP",
+};
+
+type Lender = "creditfair" | "aerem" | "solfin";
+const LENDERS: { key: Lender; label: string }[] = [
+  { key: "creditfair", label: "CreditFair" },
+  { key: "aerem",      label: "Aerem" },
+  { key: "solfin",     label: "Solfin" },
+];
+
+type LenderState = { docs_given: boolean; approved: boolean };
+type LenderMap = Partial<Record<Lender, LenderState>>;
+
 function EpcsTab() {
   const router = useRouter();
-  type Row = { id: string; contact_name: string | null; contact_mobile: string | null; business_type: string | null; status: string; submitted_at: string | null };
+  type Row = {
+    id: string;
+    legal_name: string | null;
+    contact_name: string | null;
+    contact_mobile: string | null;
+    contact_email: string | null;
+    business_type: string | null;
+    status: string;
+    submitted_at: string | null;
+    epc_self_edited: boolean | null;
+  };
   const [rows, setRows] = useState<Row[]>([]);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  // business_id → lender_name → state. Missing key = both false.
+  const [lenderState, setLenderState] = useState<Record<string, LenderMap>>({});
 
-  useEffect(() => {
-    (async () => {
-      let query = supabase().from("epc_business")
-        .select("id, contact_name, contact_mobile, business_type, status, submitted_at")
-        .neq("business_type", "admin")
-        .order("submitted_at", { ascending: false, nullsFirst: false });
-      if (statusFilter) query = query.eq("status", statusFilter);
-      const { data } = await query;
-      setRows((data ?? []) as Row[]);
-    })();
-  }, [statusFilter]);
+  async function load() {
+    let query = supabase().from("epc_business")
+      .select("id, legal_name, contact_name, contact_mobile, contact_email, business_type, status, submitted_at, epc_self_edited")
+      .neq("business_type", "admin")
+      .order("submitted_at", { ascending: false, nullsFirst: false });
+    if (statusFilter) query = query.eq("status", statusFilter);
+    const { data } = await query;
+    const rs = (data ?? []) as Row[];
+    setRows(rs);
+
+    // Batch-fetch lender state for all EPCs in view.
+    if (rs.length > 0) {
+      const ids = rs.map((r) => r.id);
+      const { data: lenderRows } = await supabase()
+        .from("epc_lender_status")
+        .select("business_id, lender, docs_given, approved")
+        .in("business_id", ids);
+      const map: Record<string, LenderMap> = {};
+      for (const lr of (lenderRows ?? []) as { business_id: string; lender: Lender; docs_given: boolean; approved: boolean }[]) {
+        if (!map[lr.business_id]) map[lr.business_id] = {};
+        map[lr.business_id][lr.lender] = { docs_given: lr.docs_given, approved: lr.approved };
+      }
+      setLenderState(map);
+    } else {
+      setLenderState({});
+    }
+  }
+
+  useEffect(() => { void load(); }, [statusFilter]);
 
   const filtered = q.trim()
     ? rows.filter((r) =>
+        (r.legal_name || "").toLowerCase().includes(q.toLowerCase()) ||
         (r.contact_name || "").toLowerCase().includes(q.toLowerCase()) ||
-        (r.contact_mobile || "").includes(q))
+        (r.contact_mobile || "").includes(q) ||
+        (r.contact_email || "").toLowerCase().includes(q.toLowerCase()))
     : rows;
+
+  // Lazy upsert: if no row exists, insert; otherwise update.
+  async function toggleLender(epcId: string, lender: Lender, field: "docs_given" | "approved", value: boolean) {
+    // Optimistic UI update.
+    const prevState = lenderState;
+    setLenderState((s) => {
+      const next = { ...s };
+      const cur = (next[epcId] ?? {}) as LenderMap;
+      const lenderCur = (cur[lender] ?? { docs_given: false, approved: false }) as LenderState;
+      next[epcId] = { ...cur, [lender]: { ...lenderCur, [field]: value } };
+      return next;
+    });
+
+    try {
+      const { data: existing } = await supabase()
+        .from("epc_lender_status")
+        .select("id")
+        .eq("business_id", epcId)
+        .eq("lender", lender)
+        .maybeSingle();
+
+      if (existing) {
+        await supabase()
+          .from("epc_lender_status")
+          .update({ [field]: value })
+          .eq("id", (existing as { id: string }).id);
+      } else {
+        // Lazy insert. The other boolean defaults to false.
+        const row: Record<string, unknown> = {
+          business_id: epcId,
+          lender,
+          docs_given: false,
+          approved: false,
+        };
+        row[field] = value;
+        await supabase().from("epc_lender_status").insert(row);
+      }
+    } catch (e) {
+      // Revert on failure.
+      setLenderState(prevState);
+      alert("Couldn't save lender state: " + (e as Error).message);
+    }
+  }
 
   return (
     <>
       <div className="grid sm:grid-cols-[1fr_220px] gap-3 mb-5">
-        <Input placeholder="Search by name or mobile…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Input placeholder="Search by legal name, POC, mobile, or email…" value={q} onChange={(e) => setQ(e.target.value)} />
         <Select
           placeholder="All statuses"
           options={[
@@ -108,28 +202,50 @@ function EpcsTab() {
         />
       </div>
 
-      <Card className="overflow-hidden">
-        <table className="w-full text-[14px]">
+      <Card className="overflow-x-auto">
+        <table className="w-full text-[14px] min-w-[1000px]">
           <thead className="bg-bg-soft border-b border-line text-left text-text-muted">
             <tr>
-              <th className="px-5 py-3 font-medium">EPC name</th>
-              <th className="px-5 py-3 font-medium">Mobile</th>
-              <th className="px-5 py-3 font-medium">Type</th>
-              <th className="px-5 py-3 font-medium">Status</th>
-              <th className="px-5 py-3 font-medium">Submitted</th>
+              <th className="px-4 py-3 font-medium">EPC details</th>
+              <th className="px-4 py-3 font-medium">Email ID</th>
+              <th className="px-4 py-3 font-medium">Type of business</th>
+              <th className="px-4 py-3 font-medium">Status</th>
+              <th className="px-4 py-3 font-medium">Submitted on</th>
+              <th className="px-4 py-3 font-medium">Lenders</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={5} className="px-5 py-10 text-center text-text-muted">No EPCs match.</td></tr>
+              <tr><td colSpan={6} className="px-5 py-10 text-center text-text-muted">No EPCs match.</td></tr>
             ) : filtered.map((r) => (
-              <tr key={r.id} onClick={() => router.push(`/admin/epc/${r.id}` as any)}
-                  className="border-b border-line cursor-pointer hover:bg-bg-soft transition-colors">
-                <td className="px-5 py-4">{r.contact_name || "—"}</td>
-                <td className="px-5 py-4">+91 {r.contact_mobile}</td>
-                <td className="px-5 py-4 capitalize">{r.business_type || "—"}</td>
-                <td className="px-5 py-4"><StatusBadge status={r.status} /></td>
-                <td className="px-5 py-4 text-text-muted">{r.submitted_at ? new Date(r.submitted_at).toLocaleDateString("en-IN") : "—"}</td>
+              <tr
+                key={r.id}
+                onClick={() => router.push(`/admin/epc/${r.id}` as any)}
+                className="border-b border-line cursor-pointer hover:bg-bg-soft transition-colors align-top"
+              >
+                <td className="px-4 py-3">
+                  <div className="space-y-0.5 min-w-[180px]">
+                    <p className="text-[13px] font-semibold text-text">
+                      {r.legal_name || <span className="text-text-muted font-normal">—</span>}
+                    </p>
+                    <p className="text-[12px] text-text-mid">{r.contact_name || "—"}</p>
+                    <p className="text-[12px] text-text-muted">+91 {r.contact_mobile || "—"}</p>
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-[13px]">{r.contact_email || <span className="text-text-muted">—</span>}</td>
+                <td className="px-4 py-3 text-[13px]">{BUSINESS_TYPE_LABEL[r.business_type ?? ""] ?? "—"}</td>
+                <td className="px-4 py-3">
+                  <StatusBadge status={r.status} updated={r.epc_self_edited === true} />
+                </td>
+                <td className="px-4 py-3 text-[13px] text-text-muted">
+                  {r.submitted_at ? new Date(r.submitted_at).toLocaleDateString("en-IN") : "—"}
+                </td>
+                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                  <LenderCell
+                    state={lenderState[r.id] ?? {}}
+                    onToggle={(lender, field, v) => toggleLender(r.id, lender, field, v)}
+                  />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -138,6 +254,46 @@ function EpcsTab() {
     </>
   );
 }
+
+function LenderCell({
+  state, onToggle,
+}: {
+  state: LenderMap;
+  onToggle: (lender: Lender, field: "docs_given" | "approved", value: boolean) => void;
+}) {
+  return (
+    <div className="space-y-1.5 min-w-[220px]">
+      {LENDERS.map((l) => {
+        const s = state[l.key] ?? { docs_given: false, approved: false };
+        return (
+          <div key={l.key} className="flex items-center gap-3 text-[11px]">
+            <span className="min-w-[64px] font-medium text-text-mid">{l.label}</span>
+            <label className="flex items-center gap-1 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={s.docs_given}
+                onChange={(e) => onToggle(l.key, "docs_given", e.target.checked)}
+                className="h-3.5 w-3.5 accent-blue"
+              />
+              <span className="text-text-mid">Docs</span>
+            </label>
+            <label className="flex items-center gap-1 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={s.approved}
+                onChange={(e) => onToggle(l.key, "approved", e.target.checked)}
+                className="h-3.5 w-3.5 accent-green"
+              />
+              <span className="text-text-mid">Approved</span>
+            </label>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Loan applications tab (unchanged) ──────────────────────────────────────
 
 function AppsTab() {
   const router = useRouter();

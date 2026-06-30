@@ -11,12 +11,17 @@ import WizardProgress from "@/components/WizardProgress";
 import FileUpload from "@/components/FileUpload";
 import { getBusiness, setBusiness } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
-import { extractPan } from "@/lib/ocr";
+import { extractPan, extractGstLegalName } from "@/lib/ocr";
 import { PAN_RE } from "@/lib/validators";
+
+type SuryaGhar = "yes" | "no" | "other" | "";
 
 type Form = {
   business_type: "proprietorship" | "pvt_ltd" | "partnership" | "llp" | "";
   pan_number: string;
+  legal_name: string;
+  pm_surya_ghar: SuryaGhar;
+  pm_surya_ghar_other: string;
 };
 
 const BUSINESS_OPTIONS = [
@@ -26,12 +31,17 @@ const BUSINESS_OPTIONS = [
   { value: "llp",            label: "LLP" },
 ];
 
-// Per spec §Step 2: the extra-doc label depends on business type.
+const SURYA_GHAR_OPTIONS = [
+  { value: "yes",   label: "Yes" },
+  { value: "no",    label: "No" },
+  { value: "other", label: "Other" },
+];
+
 function extraDocLabel(bt: Form["business_type"]): string | null {
   if (bt === "partnership") return "Partnership Deed";
   if (bt === "pvt_ltd")     return "Certificate of Incorporation (COI)";
   if (bt === "llp")         return "LLP Agreement";
-  return null; // proprietorship -> hidden
+  return null;
 }
 
 export default function Step2Page() {
@@ -39,12 +49,23 @@ export default function Step2Page() {
   const [saving, setSaving] = useState(false);
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [panOcrToast, setPanOcrToast] = useState<string | null>(null);
+  const [gstOcrToast, setGstOcrToast] = useState<string | null>(null);
 
-  const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<Form>({
-    defaultValues: { business_type: "", pan_number: "" },
+  const {
+    register, handleSubmit, reset, watch, setValue,
+    formState: { errors },
+  } = useForm<Form>({
+    defaultValues: {
+      business_type: "",
+      pan_number: "",
+      legal_name: "",
+      pm_surya_ghar: "",
+      pm_surya_ghar_other: "",
+    },
   });
 
   const bt = watch("business_type");
+  const suryaGhar = watch("pm_surya_ghar");
 
   useEffect(() => {
     const biz = getBusiness();
@@ -53,20 +74,21 @@ export default function Step2Page() {
     (async () => {
       const { data } = await supabase()
         .from("epc_business")
-        .select("business_type, pan_number")
+        .select(
+          "business_type, pan_number, legal_name, pm_surya_ghar, pm_surya_ghar_other",
+        )
         .eq("id", biz.id)
         .maybeSingle();
       reset({
         business_type: (data?.business_type as Form["business_type"]) ?? "",
         pan_number: data?.pan_number ?? "",
+        legal_name: data?.legal_name ?? "",
+        pm_surya_ghar: ((data?.pm_surya_ghar as SuryaGhar) ?? "") as SuryaGhar,
+        pm_surya_ghar_other: data?.pm_surya_ghar_other ?? "",
       });
     })();
   }, [reset]);
 
-  // Triggered by FileUpload's onUploaded for the PAN document. Runs Vision
-  // OCR on the original file (cleaner bytes than the compressed JPEG that
-  // landed in GCS), auto-fills the PAN field on success, leaves it
-  // untouched on failure. PAN field stays editable in both cases.
   async function handlePanUploaded({ file }: { file: File }) {
     setPanOcrToast("Reading PAN…");
     const r = await extractPan(file);
@@ -84,16 +106,66 @@ export default function Step2Page() {
     }
   }
 
+  async function handleGstUploaded({ file }: { file: File }) {
+    setGstOcrToast("Reading GST registration…");
+    const r = await extractGstLegalName(file);
+    if (!r.ok) {
+      setGstOcrToast("Couldn't read the GST document automatically — please type the legal name.");
+      return;
+    }
+    if (r.legal_name) {
+      setValue("legal_name", r.legal_name, { shouldValidate: true });
+      setGstOcrToast("Legal name auto-filled — verify and edit if needed.");
+    } else {
+      setGstOcrToast(
+        "We read the document but couldn't find a Legal Name — please type it.",
+      );
+    }
+  }
+
   async function onSubmit(values: Form) {
     const biz = getBusiness();
     if (!biz) return;
     if (!values.business_type) return alert("Please pick a business type.");
+
+    const isDraft = biz.status === "draft";
+
+    // GST registration required for new onboarding only.
+    if (isDraft) {
+      const { data: gstDocs } = await supabase()
+        .from("epc_documents")
+        .select("id")
+        .eq("business_id", biz.id)
+        .eq("category", "gstin")
+        .limit(1);
+      if (!gstDocs || gstDocs.length === 0) {
+        return alert("Please upload the GST registration document to continue.");
+      }
+    }
+
+    // PM Surya Ghar required for new onboarding only.
+    if (isDraft) {
+      if (!values.pm_surya_ghar) {
+        return alert("Please answer the PM Surya Ghar Yojana question.");
+      }
+      if (values.pm_surya_ghar === "other" && !values.pm_surya_ghar_other.trim()) {
+        return alert("Please specify which entity you're registered with.");
+      }
+    }
+
     setSaving(true);
     const { error } = await supabase()
       .from("epc_business")
       .update({
         business_type: values.business_type,
         pan_number: values.pan_number.toUpperCase(),
+        legal_name: values.legal_name.trim() || null,
+        pm_surya_ghar: values.pm_surya_ghar || null,
+        // Only persist the "Other" text when Other is the choice; clear it otherwise.
+        pm_surya_ghar_other:
+          values.pm_surya_ghar === "other"
+            ? values.pm_surya_ghar_other.trim() || null
+            : null,
         current_step: 3,
       })
       .eq("id", biz.id);
@@ -104,6 +176,7 @@ export default function Step2Page() {
   }
 
   const extraLabel = extraDocLabel(bt);
+  const isDraft = getBusiness()?.status === "draft";
 
   return (
     <>
@@ -119,13 +192,13 @@ export default function Step2Page() {
       <div className="mb-6">
         <h1 className="font-display text-[24px] sm:text-[28px] font-bold">Business details</h1>
         <p className="text-text-mid mt-1">
-          Tell us about your EPC entity. Document uploads are optional.
+          Tell us about your EPC entity. {isDraft ? "GST registration is required." : "Document uploads are optional."}
         </p>
       </div>
 
       <Card className="p-6 sm:p-7">
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-          {/* 1. Business type — unchanged */}
+          {/* 1. Business type */}
           <Select
             label="Business type"
             placeholder="Select…"
@@ -134,9 +207,36 @@ export default function Step2Page() {
             error={errors.business_type?.message}
           />
 
+          {/* 2. PM Surya Ghar Yojana (REQUIRED for draft) */}
+          <Select
+            label="Are you registered with PM Surya Ghar Yojana?"
+            placeholder="Select…"
+            options={SURYA_GHAR_OPTIONS}
+            {...register("pm_surya_ghar", {
+              required: isDraft ? "Please answer this question" : false,
+            })}
+            error={errors.pm_surya_ghar?.message}
+          />
+          {suryaGhar === "other" && (
+            <Input
+              label="Which entity are you registered with?"
+              placeholder="Entity / scheme name"
+              {...register("pm_surya_ghar_other", {
+                validate: (v) => {
+                  if (!isDraft) return true;
+                  if (suryaGhar !== "other") return true;
+                  if (!v || !v.trim()) return "Please specify the entity";
+                  if (v.trim().length > 120) return "Too long";
+                  return true;
+                },
+              })}
+              error={errors.pm_surya_ghar_other?.message}
+            />
+          )}
+
           {businessId && (
             <>
-              {/* 2. PAN document upload — triggers OCR on success */}
+              {/* 3. PAN card upload */}
               <div className="p-4 bg-bg-soft rounded-input border border-line">
                 <FileUpload
                   businessId={businessId}
@@ -154,21 +254,38 @@ export default function Step2Page() {
                 )}
               </div>
 
-              {/* 3. GSTIN document upload */}
+              {/* 4. GST registration document — REQUIRED for draft */}
               <div className="p-4 bg-bg-soft rounded-input border border-line">
                 <FileUpload
                   businessId={businessId}
                   table="epc_documents"
                   category="gstin"
                   maxFiles={1}
-                  label="GST registration document (optional)"
-                  hint="Skip if you don't have GSTIN."
+                  label={isDraft ? "GST registration document (required)" : "GST registration document (optional)"}
+                  hint="We'll read your business's legal name from this document."
+                  onUploaded={handleGstUploaded}
                 />
+                {gstOcrToast && (
+                  <div className="mt-3 px-3.5 py-2.5 rounded-input bg-blue-50 border border-blue/15 text-[12px] text-text-mid">
+                    {gstOcrToast}
+                  </div>
+                )}
               </div>
             </>
           )}
 
-          {/* 4. PAN number — auto-filled by OCR, stays editable */}
+          {/* 5. Legal name — auto-filled from GST OCR, editable */}
+          <Input
+            label="Legal name of business"
+            placeholder="e.g. Acme Solar Pvt Ltd"
+            {...register("legal_name", {
+              maxLength: { value: 120, message: "Too long" },
+            })}
+            error={errors.legal_name?.message}
+            hint="Auto-filled from the GST registration document. Edit if needed."
+          />
+
+          {/* 6. PAN number — auto-filled from PAN OCR, editable */}
           <Input
             label="PAN number"
             placeholder="ABCDE1234F"
@@ -179,10 +296,10 @@ export default function Step2Page() {
               onChange: (e) => setValue("pan_number", e.target.value.toUpperCase()),
             })}
             error={errors.pan_number?.message}
-            hint="Auto-filled from the PAN document if you uploaded one. Edit if needed."
+            hint="Auto-filled from the PAN card if you uploaded one. Edit if needed."
           />
 
-          {/* 5. Extra doc (conditional on business type) */}
+          {/* 7. Extra doc (conditional on business type) */}
           {businessId && extraLabel && (
             <div className="p-4 bg-bg-soft rounded-input border border-line">
               <FileUpload

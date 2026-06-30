@@ -28,6 +28,11 @@ type Props = {
   // file — exactly what Step 4 needs to feed to extract-cheque.
   onUploaded?: (info: { docId: string; storagePath: string; file: File }) => void;
   captureGps?: boolean;
+  // Pre-captured metadata to attach to the upload (e.g. a GPS fix taken
+  // ONCE by the caller, then reused across multiple uploads in the same
+  // session). If `extraMetadata.gps` is set, it overrides `captureGps`
+  // and no second geolocation prompt is shown.
+  extraMetadata?: { gps?: { lat: number; lng: number; captured_at: string } | null };
   label?: string;
   hint?: string;
 };
@@ -43,7 +48,7 @@ export default function FileUpload(props: Props) {
   const {
     businessId, stakeholderId, applicationId,
     category, table, maxFiles = 1, uploadedBy,
-    onUploaded, captureGps = false, label, hint,
+    onUploaded, captureGps = false, extraMetadata, label, hint,
   } = props;
   const inputRef = useRef<HTMLInputElement>(null);
   const [docs, setDocs] = useState<DocRow[]>([]);
@@ -92,8 +97,11 @@ export default function FileUpload(props: Props) {
     setError(null);
     setUploading(true);
 
-    let gps: { lat: number; lng: number; captured_at: string } | null = null;
-    if (captureGps && "geolocation" in navigator) {
+    // Pre-captured gps from caller wins. Falls back to on-upload capture
+    // if `captureGps` was set and no extraMetadata.gps was supplied.
+    let gps: { lat: number; lng: number; captured_at: string } | null =
+      extraMetadata?.gps ?? null;
+    if (!gps && captureGps && "geolocation" in navigator) {
       gps = await new Promise((resolve) => {
         navigator.geolocation.getCurrentPosition(
           (p) => resolve({

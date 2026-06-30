@@ -182,6 +182,12 @@ function Inner() {
             onSave={saveField("business_type")}
           />
           <EditableField
+            label="Legal name"
+            value={biz.legal_name}
+            onSave={saveField("legal_name")}
+            hint="Auto-filled from the EPC's GST registration document. Edit if OCR misread."
+          />
+          <EditableField
             label="PAN"
             value={biz.pan_number}
             onSave={async (v) => saveField("pan_number")(v.toUpperCase())}

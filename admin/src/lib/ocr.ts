@@ -77,6 +77,31 @@ export async function extractPan(file: File): Promise<PanOcrResult> {
   return res.json();
 }
 
+export type GstLegalNameOcrResult =
+  | {
+      ok: true;
+      gstin: string | null;
+      legal_name: string | null;
+      trade_name: string | null;
+      raw_text: string;
+    }
+  | { ok: false; error: string };
+
+// Mirrors extractPan / extractGstR3b. PDFs and images both supported via
+// the Edge Function's internal mimeType branching.
+export async function extractGstLegalName(file: File): Promise<GstLegalNameOcrResult> {
+  const base64 = await fileToBase64(file);
+  const res = await fetch(`${FUNCTIONS_URL}/extract-gst-legalname`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${getToken() ?? ""}`,
+    },
+    body: JSON.stringify({ imageBase64: base64, mimeType: file.type }),
+  });
+  return res.json();
+}
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
