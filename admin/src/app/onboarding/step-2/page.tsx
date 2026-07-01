@@ -109,7 +109,7 @@ export default function Step2Page() {
     }
   }
 
-  async function handleGstUploaded({ file }: { file: File }) {
+  async function handleGstUploaded({ docId, file }: { docId: string; storagePath: string; file: File }) {
     setGstOcrToast("Reading GST registration…");
     const r = await extractGstLegalName(file);
     if (!r.ok) {
@@ -119,6 +119,26 @@ export default function Step2Page() {
     // Set whichever we found; leave the rest for manual entry.
     if (r.legal_name) setValue("legal_name", r.legal_name, { shouldValidate: true });
     if (r.trade_name) setValue("trade_name", r.trade_name, { shouldValidate: true });
+
+    // Persist the OCR audit trail onto the doc row so admins can later verify
+    // what the OCR actually saw. Same shape GstR3bSection uses for gst_r3b:
+    //   metadata: { ocr_raw_text, gstin, legal_name, trade_name }
+    // Best-effort — failure here doesn't block the upload or the form.
+    try {
+      await supabase()
+        .from("epc_documents")
+        .update({
+          metadata: {
+            ocr_raw_text: r.raw_text ?? null,
+            gstin: r.gstin ?? null,
+            legal_name: r.legal_name ?? null,
+            trade_name: r.trade_name ?? null,
+          },
+        })
+        .eq("id", docId);
+    } catch (e) {
+      console.warn("[step-2] gstin metadata write failed:", e);
+    }
 
     const filled: string[] = [];
     if (r.legal_name) filled.push("legal name");

@@ -281,12 +281,13 @@ function EpcsTab() {
               >
                 <td className="px-4 py-3">
                   <div className="space-y-0.5 min-w-[180px]">
+                    {/* Trade name is the primary identifier. Falls back to
+                        legal_name so the 40 legacy EPCs (onboarded before
+                        trade_name existed) don't all render blank. */}
                     <p className="text-[13px] font-semibold text-text">
-                      {r.legal_name || <span className="text-text-muted font-normal">—</span>}
+                      {r.trade_name || r.legal_name ||
+                        <span className="text-text-muted font-normal">—</span>}
                     </p>
-                    {r.trade_name && (
-                      <p className="text-[12px] text-text-mid italic">{r.trade_name}</p>
-                    )}
                     <p className="text-[12px] text-text-mid">{r.contact_name || "—"}</p>
                     <p className="text-[12px] text-text-muted">+91 {maskMobile(r.contact_mobile)}</p>
                   </div>
