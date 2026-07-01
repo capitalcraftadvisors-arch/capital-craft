@@ -8,7 +8,7 @@ import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
 import StatusBadge from "@/components/StatusBadge";
 import { supabase } from "@/lib/supabase";
-import { logout } from "@/lib/auth";
+import { logout, getToken } from "@/lib/auth";
 
 type Tab = "epcs" | "apps";
 
@@ -110,6 +110,7 @@ function EpcsTab() {
   const [statusFilter, setStatusFilter] = useState("");
   // business_id → lender_name → state. Missing key = both false.
   const [lenderState, setLenderState] = useState<Record<string, LenderMap>>({});
+  const [downloading, setDownloading] = useState<Record<string, boolean>>({});
 
   async function load() {
     let query = supabase().from("epc_business")
@@ -198,6 +199,46 @@ function EpcsTab() {
     }
   }
 
+  // Streams the ZIP from /api/epc/[id]/download-zip and triggers a browser
+  // download. Per-row spinner while fetching; alert on failure.
+  async function downloadZip(row: Row) {
+    if (downloading[row.id]) return;
+    setDownloading((d) => ({ ...d, [row.id]: true }));
+    try {
+      const res = await fetch(`/api/epc/${row.id}/download-zip`, {
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const j = await res.json();
+          if (j?.error) msg = j.error;
+        } catch { /* body wasn't JSON — keep HTTP status */ }
+        throw new Error(msg);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const cd = res.headers.get("content-disposition") || "";
+      const m = /filename="?([^"]+)"?/.exec(cd);
+      const fallback = `EPC_${row.id.slice(0, 8)}.zip`;
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = m?.[1] || fallback;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Download failed: " + ((e as Error)?.message ?? String(e)));
+    } finally {
+      setDownloading((d) => {
+        const next = { ...d };
+        delete next[row.id];
+        return next;
+      });
+    }
+  }
+
   return (
     <>
       <div className="grid sm:grid-cols-[1fr_220px] gap-3 mb-5">
@@ -226,11 +267,12 @@ function EpcsTab() {
               <th className="px-4 py-3 font-medium">Status</th>
               <th className="px-4 py-3 font-medium">Submitted on</th>
               <th className="px-4 py-3 font-medium">Lenders</th>
+              <th className="px-4 py-3 font-medium">Download</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={6} className="px-5 py-10 text-center text-text-muted">No EPCs match.</td></tr>
+              <tr><td colSpan={7} className="px-5 py-10 text-center text-text-muted">No EPCs match.</td></tr>
             ) : filtered.map((r) => (
               <tr
                 key={r.id}
@@ -262,6 +304,22 @@ function EpcsTab() {
                     state={lenderState[r.id] ?? {}}
                     onToggle={(lender, field, v) => toggleLender(r.id, lender, field, v)}
                   />
+                </td>
+                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    disabled={!!downloading[r.id]}
+                    onClick={() => downloadZip(r)}
+                    className={[
+                      "text-[12px] font-semibold px-3 py-1.5 rounded-input border transition-colors",
+                      downloading[r.id]
+                        ? "border-line bg-bg-soft text-text-muted cursor-not-allowed"
+                        : "border-blue/30 bg-white text-blue hover:bg-blue/5",
+                    ].join(" ")}
+                    title={downloading[r.id] ? "Preparing ZIP…" : "Download all documents + profile summary as a ZIP"}
+                  >
+                    {downloading[r.id] ? "Preparing…" : "Download ZIP"}
+                  </button>
                 </td>
               </tr>
             ))}

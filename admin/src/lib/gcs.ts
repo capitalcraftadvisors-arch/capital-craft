@@ -47,3 +47,11 @@ export async function deleteObject(path: string): Promise<void> {
     // best effort
   }
 }
+
+// Downloads the object at `path` to an in-memory Buffer. Throws if the object
+// is missing or unreadable — callers (e.g. /api/epc/[id]/download-zip) catch
+// and skip so a single missing file doesn't fail the whole ZIP.
+export async function downloadBuffer(path: string): Promise<Buffer> {
+  const [buf] = await bucket.file(path).download();
+  return buf;
+}
