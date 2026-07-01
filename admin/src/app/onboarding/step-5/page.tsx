@@ -5,12 +5,11 @@ import { useRouter } from "next/navigation";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import WizardProgress from "@/components/WizardProgress";
-import FileUpload from "@/components/FileUpload";
+import GeoOfficeUpload from "@/components/GeoOfficeUpload";
 import { getBusiness, setBusiness } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 
 type BusinessType = "proprietorship" | "pvt_ltd" | "partnership" | "llp" | null;
-type Gps = { lat: number; lng: number; captured_at: string };
 
 function selfieLabel(bt: BusinessType): string {
   switch (bt) {
@@ -27,8 +26,6 @@ export default function Step5Page() {
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [businessType, setBusinessType] = useState<BusinessType>(null);
   const [saving, setSaving] = useState(false);
-  const [gps, setGps] = useState<Gps | null>(null);
-  const [gpsState, setGpsState] = useState<"idle" | "capturing" | "denied" | "unsupported">("idle");
 
   useEffect(() => {
     const biz = getBusiness();
@@ -44,26 +41,6 @@ export default function Step5Page() {
     })();
   }, []);
 
-  function captureLocation() {
-    if (!("geolocation" in navigator)) {
-      setGpsState("unsupported");
-      return;
-    }
-    setGpsState("capturing");
-    navigator.geolocation.getCurrentPosition(
-      (p) => {
-        setGps({
-          lat: p.coords.latitude,
-          lng: p.coords.longitude,
-          captured_at: new Date().toISOString(),
-        });
-        setGpsState("idle");
-      },
-      () => setGpsState("denied"),
-      { timeout: 8000, enableHighAccuracy: true },
-    );
-  }
-
   async function advance() {
     const biz = getBusiness();
     if (!biz) return;
@@ -75,7 +52,6 @@ export default function Step5Page() {
   }
 
   const selfie = selfieLabel(businessType);
-  const extraMeta = gps ? { gps } : undefined;
 
   return (
     <>
@@ -91,67 +67,40 @@ export default function Step5Page() {
       <div className="mb-6">
         <h1 className="font-display text-[24px] sm:text-[28px] font-bold">Office verification</h1>
         <p className="text-text-mid mt-1">
-          Three photos, all optional. Tap “Add location” once to tag every upload below with your office GPS.
+          Three photos, all optional. If you upload one, it must be geo-tagged.
         </p>
       </div>
 
-      {/* Optional one-tap geo-tag */}
-      <div className="mb-5 flex flex-col sm:flex-row sm:items-center gap-3">
-        <Button
-          type="button"
-          variant={gps ? "outline" : "primary"}
-          onClick={captureLocation}
-          loading={gpsState === "capturing"}
-        >
-          {gps ? "Re-capture location" : "Add location (optional)"}
-        </Button>
-        {gps && (
-          <span className="text-[12px] text-text-mid">
-            Location captured · {gps.lat.toFixed(5)}, {gps.lng.toFixed(5)}
-          </span>
-        )}
-        {gpsState === "denied" && (
-          <span className="text-[12px] text-red-500">
-            Location permission denied — you can still upload without it.
-          </span>
-        )}
-        {gpsState === "unsupported" && (
-          <span className="text-[12px] text-red-500">
-            Geolocation not available on this device.
-          </span>
-        )}
+      {/* Formal notice — sits between heading and the 3 cards. */}
+      <div className="mb-5 px-4 py-3 rounded-input bg-blue-50 border border-blue/15 text-[13px] text-text-mid">
+        <p className="font-medium text-text mb-1">Office photos must be geo-tagged.</p>
+        <p>
+          Use your device camera to capture your location automatically, or upload an image
+          that already contains location metadata. Photos without a location cannot be accepted.
+        </p>
       </div>
 
       {businessId && (
         <div className="grid gap-5 sm:grid-cols-3">
           <Card className="p-5">
-            <FileUpload
+            <GeoOfficeUpload
               businessId={businessId}
-              table="epc_documents"
               category="office_exterior"
-              maxFiles={1}
               label="Exterior (signboard)"
-              extraMetadata={extraMeta}
             />
           </Card>
           <Card className="p-5">
-            <FileUpload
+            <GeoOfficeUpload
               businessId={businessId}
-              table="epc_documents"
               category="office_interior"
-              maxFiles={1}
               label="Interior"
-              extraMetadata={extraMeta}
             />
           </Card>
           <Card className="p-5">
-            <FileUpload
+            <GeoOfficeUpload
               businessId={businessId}
-              table="epc_documents"
               category="office_selfie"
-              maxFiles={1}
               label={selfie}
-              extraMetadata={extraMeta}
             />
           </Card>
         </div>

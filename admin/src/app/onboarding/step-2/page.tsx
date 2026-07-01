@@ -20,6 +20,7 @@ type Form = {
   business_type: "proprietorship" | "pvt_ltd" | "partnership" | "llp" | "";
   pan_number: string;
   legal_name: string;
+  trade_name: string;
   pm_surya_ghar: SuryaGhar;
   pm_surya_ghar_other: string;
 };
@@ -59,6 +60,7 @@ export default function Step2Page() {
       business_type: "",
       pan_number: "",
       legal_name: "",
+      trade_name: "",
       pm_surya_ghar: "",
       pm_surya_ghar_other: "",
     },
@@ -75,7 +77,7 @@ export default function Step2Page() {
       const { data } = await supabase()
         .from("epc_business")
         .select(
-          "business_type, pan_number, legal_name, pm_surya_ghar, pm_surya_ghar_other",
+          "business_type, pan_number, legal_name, trade_name, pm_surya_ghar, pm_surya_ghar_other",
         )
         .eq("id", biz.id)
         .maybeSingle();
@@ -83,6 +85,7 @@ export default function Step2Page() {
         business_type: (data?.business_type as Form["business_type"]) ?? "",
         pan_number: data?.pan_number ?? "",
         legal_name: data?.legal_name ?? "",
+        trade_name: data?.trade_name ?? "",
         pm_surya_ghar: ((data?.pm_surya_ghar as SuryaGhar) ?? "") as SuryaGhar,
         pm_surya_ghar_other: data?.pm_surya_ghar_other ?? "",
       });
@@ -110,15 +113,21 @@ export default function Step2Page() {
     setGstOcrToast("Reading GST registration…");
     const r = await extractGstLegalName(file);
     if (!r.ok) {
-      setGstOcrToast("Couldn't read the GST document automatically — please type the legal name.");
+      setGstOcrToast("Couldn't read the GST document automatically — please type the legal name and trade name.");
       return;
     }
-    if (r.legal_name) {
-      setValue("legal_name", r.legal_name, { shouldValidate: true });
-      setGstOcrToast("Legal name auto-filled — verify and edit if needed.");
+    // Set whichever we found; leave the rest for manual entry.
+    if (r.legal_name) setValue("legal_name", r.legal_name, { shouldValidate: true });
+    if (r.trade_name) setValue("trade_name", r.trade_name, { shouldValidate: true });
+
+    const filled: string[] = [];
+    if (r.legal_name) filled.push("legal name");
+    if (r.trade_name) filled.push("trade name");
+    if (filled.length > 0) {
+      setGstOcrToast(`${filled.join(" and ")} auto-filled — verify and edit if needed.`);
     } else {
       setGstOcrToast(
-        "We read the document but couldn't find a Legal Name — please type it.",
+        "We read the document but couldn't find a Legal Name or Trade Name — please type them.",
       );
     }
   }
@@ -160,6 +169,7 @@ export default function Step2Page() {
         business_type: values.business_type,
         pan_number: values.pan_number.toUpperCase(),
         legal_name: values.legal_name.trim() || null,
+        trade_name: values.trade_name.trim() || null,
         pm_surya_ghar: values.pm_surya_ghar || null,
         // Only persist the "Other" text when Other is the choice; clear it otherwise.
         pm_surya_ghar_other:
@@ -283,6 +293,17 @@ export default function Step2Page() {
             })}
             error={errors.legal_name?.message}
             hint="Auto-filled from the GST registration document. Edit if needed."
+          />
+
+          {/* 5b. Trade name — auto-filled from GST OCR, editable, optional */}
+          <Input
+            label="Trade name (optional)"
+            placeholder="e.g. Acme Solar"
+            {...register("trade_name", {
+              maxLength: { value: 120, message: "Too long" },
+            })}
+            error={errors.trade_name?.message}
+            hint="Auto-filled from the GST registration document. Leave blank if none."
           />
 
           {/* 6. PAN number — auto-filled from PAN OCR, editable */}

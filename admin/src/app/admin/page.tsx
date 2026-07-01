@@ -84,11 +84,19 @@ const LENDERS: { key: Lender; label: string }[] = [
 type LenderState = { docs_given: boolean; approved: boolean };
 type LenderMap = Partial<Record<Lender, LenderState>>;
 
+// Display-only mask for the admin LIST table. Full number still shows on
+// the admin EPC detail page. Non-10-digit numbers pass through unchanged.
+function maskMobile(m: string | null): string {
+  if (!m) return "—";
+  return m.length === 10 ? "•••••" + m.slice(5) : m;
+}
+
 function EpcsTab() {
   const router = useRouter();
   type Row = {
     id: string;
     legal_name: string | null;
+    trade_name: string | null;
     contact_name: string | null;
     contact_mobile: string | null;
     contact_email: string | null;
@@ -105,7 +113,7 @@ function EpcsTab() {
 
   async function load() {
     let query = supabase().from("epc_business")
-      .select("id, legal_name, contact_name, contact_mobile, contact_email, business_type, status, submitted_at, epc_self_edited")
+      .select("id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, submitted_at, epc_self_edited")
       .neq("business_type", "admin")
       .order("submitted_at", { ascending: false, nullsFirst: false });
     if (statusFilter) query = query.eq("status", statusFilter);
@@ -136,6 +144,7 @@ function EpcsTab() {
   const filtered = q.trim()
     ? rows.filter((r) =>
         (r.legal_name || "").toLowerCase().includes(q.toLowerCase()) ||
+        (r.trade_name || "").toLowerCase().includes(q.toLowerCase()) ||
         (r.contact_name || "").toLowerCase().includes(q.toLowerCase()) ||
         (r.contact_mobile || "").includes(q) ||
         (r.contact_email || "").toLowerCase().includes(q.toLowerCase()))
@@ -143,6 +152,11 @@ function EpcsTab() {
 
   // Lazy upsert: if no row exists, insert; otherwise update.
   async function toggleLender(epcId: string, lender: Lender, field: "docs_given" | "approved", value: boolean) {
+    // Approve-ON requires an admin confirmation. Approve-OFF and any
+    // docs_given toggle proceed silently.
+    if (field === "approved" && value === true) {
+      if (!window.confirm("Are you sure for this approval?")) return;
+    }
     // Optimistic UI update.
     const prevState = lenderState;
     setLenderState((s) => {
@@ -228,8 +242,11 @@ function EpcsTab() {
                     <p className="text-[13px] font-semibold text-text">
                       {r.legal_name || <span className="text-text-muted font-normal">—</span>}
                     </p>
+                    {r.trade_name && (
+                      <p className="text-[12px] text-text-mid italic">{r.trade_name}</p>
+                    )}
                     <p className="text-[12px] text-text-mid">{r.contact_name || "—"}</p>
-                    <p className="text-[12px] text-text-muted">+91 {r.contact_mobile || "—"}</p>
+                    <p className="text-[12px] text-text-muted">+91 {maskMobile(r.contact_mobile)}</p>
                   </div>
                 </td>
                 <td className="px-4 py-3 text-[13px]">{r.contact_email || <span className="text-text-muted">—</span>}</td>

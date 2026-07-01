@@ -6,8 +6,9 @@
 // (which was saved in Step 2):
 //
 //   proprietorship  → "Proprietor details"  + single editable row whose
-//                     name + designation are pre-seeded from Step 1's
-//                     contact_name / contact_designation. No add button.
+//                     name + designation + mobile + email are pre-seeded
+//                     from Step 1's contact_name / contact_designation /
+//                     contact_mobile / contact_email. No add button.
 //                     If the JSONB has multiple rows (e.g. user switched
 //                     here from Pvt Ltd), we DESTRUCTIVELY TRIM to the
 //                     first on save and delete the dropped rows' docs.
@@ -15,9 +16,10 @@
 //   partnership/llp → "Partner details"     + "Partner N" rows, "+ Add Partner"
 //   null/unset      → "Member details"      + "Member N" rows, "+ Add Member"
 //
-// Stakeholders JSONB shape is UNCHANGED: { id, name, designation }.
-// Existing saved data is preserved verbatim; auto-fill only happens on
-// new rows or when seeding the proprietor row for the first time.
+// Stakeholders JSONB shape (v2): { id, name, designation, mobile, email }.
+// Backward-compatible read: legacy rows without mobile/email surface as "".
+// Mobile is REQUIRED (10-digit Indian mobile). Email is OPTIONAL but
+// validated when non-empty (EMAIL_RE).
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -28,16 +30,24 @@ import WizardProgress from "@/components/WizardProgress";
 import FileUpload from "@/components/FileUpload";
 import { getBusiness, setBusiness } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
+import { MOBILE_RE, EMAIL_RE } from "@/lib/validators";
 
-type Stakeholder = { id: string; name: string; designation: string };
+type Stakeholder = {
+  id: string;
+  name: string;
+  designation: string;
+  mobile: string;
+  email: string;
+};
+
 type BizType = "proprietorship" | "pvt_ltd" | "partnership" | "llp" | null;
 
 type RoleConfig = {
   heading: string;
-  roleLabel: string;        // for per-row title: "Director 1"
-  addButtonLabel: string | null; // null = hide
+  roleLabel: string;
+  addButtonLabel: string | null;
   defaultDesignation: string;
-  maxRows: number;          // Infinity for unlimited
+  maxRows: number;
 };
 
 function configFor(bt: BizType): RoleConfig {
@@ -54,12 +64,26 @@ function configFor(bt: BizType): RoleConfig {
   }
 }
 
+// Backward-compat: coerce raw JSONB rows (which may be missing mobile/email
+// on legacy EPCs) into the current Stakeholder shape.
+function normalizeStakeholder(raw: unknown): Stakeholder {
+  const r = raw as Record<string, unknown>;
+  return {
+    id: (r.id as string) ?? crypto.randomUUID(),
+    name: (r.name as string) ?? "",
+    designation: (r.designation as string) ?? "",
+    mobile: (r.mobile as string) ?? "",
+    email: (r.email as string) ?? "",
+  };
+}
+
 export default function Step3Page() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [businessType, setBusinessType] = useState<BizType>(null);
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
   const [saving, setSaving] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const cfg = configFor(businessType);
 
@@ -70,7 +94,9 @@ export default function Step3Page() {
     (async () => {
       const { data } = await supabase()
         .from("epc_business")
-        .select("stakeholders, business_type, contact_name, contact_designation")
+        .select(
+          "stakeholders, business_type, contact_name, contact_designation, contact_mobile, contact_email",
+        )
         .eq("id", biz.id)
         .maybeSingle();
 
@@ -78,12 +104,13 @@ export default function Step3Page() {
       const c = configFor(bt);
       setBusinessType(bt);
 
-      const existing = (data?.stakeholders as Stakeholder[] | null) ?? [];
+      const rawExisting = (data?.stakeholders as unknown[] | null) ?? [];
+      const existing = rawExisting.map(normalizeStakeholder);
 
       if (existing.length === 0) {
         // Seed first row:
         //   proprietorship → from Step 1 fields (editable)
-        //   others         → empty name + role-default designation (editable)
+        //   others         → empty name+mobile+email + role-default designation
         const seeded: Stakeholder =
           bt === "proprietorship"
             ? {
@@ -92,11 +119,15 @@ export default function Step3Page() {
                 designation:
                   ((data?.contact_designation as string | null) ?? "") ||
                   c.defaultDesignation,
+                mobile: (data?.contact_mobile as string | null) ?? "",
+                email:  (data?.contact_email as string | null) ?? "",
               }
             : {
                 id: crypto.randomUUID(),
                 name: "",
                 designation: c.defaultDesignation,
+                mobile: "",
+                email: "",
               };
         setStakeholders([seeded]);
       } else {
@@ -105,24 +136,33 @@ export default function Step3Page() {
     })();
   }, []);
 
-  // Persist on every keystroke so docs uploaded against a stakeholder.id are
-  // never orphans if the user closes the tab.
   async function persistJsonb(next: Stakeholder[]) {
     if (!businessId) return;
     await supabase().from("epc_business").update({ stakeholders: next }).eq("id", businessId);
   }
 
-  function updateField(id: string, key: "name" | "designation", value: string) {
+  function updateField(id: string, key: keyof Omit<Stakeholder, "id">, value: string) {
     setStakeholders((arr) => {
       const next = arr.map((s) => (s.id === id ? { ...s, [key]: value } : s));
       void persistJsonb(next);
       return next;
     });
+    // Clear that field's error on edit.
+    if (errors[`${id}.${key}`]) {
+      setErrors((e) => {
+        const c = { ...e };
+        delete c[`${id}.${key}`];
+        return c;
+      });
+    }
   }
 
   function addPerson() {
     setStakeholders((arr) => {
-      const next = [...arr, { id: crypto.randomUUID(), name: "", designation: cfg.defaultDesignation }];
+      const next = [
+        ...arr,
+        { id: crypto.randomUUID(), name: "", designation: cfg.defaultDesignation, mobile: "", email: "" },
+      ];
       void persistJsonb(next);
       return next;
     });
@@ -130,7 +170,6 @@ export default function Step3Page() {
 
   async function removePerson(id: string) {
     if (!businessId) return;
-    // Delete this stakeholder's docs (rows + GCS) first to avoid orphans.
     const { data: docs } = await supabase()
       .from("epc_documents")
       .select("storage_path")
@@ -148,23 +187,41 @@ export default function Step3Page() {
     });
   }
 
-  // Proprietorship view: render only the first row; trim the rest on save.
   const displayed = businessType === "proprietorship" ? stakeholders.slice(0, 1) : stakeholders;
   const trimmed   = businessType === "proprietorship" ? stakeholders.slice(1)   : [];
+
+  function validateRows(rows: Stakeholder[]): Record<string, string> {
+    const errs: Record<string, string> = {};
+    rows.forEach((s) => {
+      if (!s.name.trim())        errs[`${s.id}.name`]        = "Required";
+      if (!s.designation.trim()) errs[`${s.id}.designation`] = "Required";
+      if (!s.mobile.trim())      errs[`${s.id}.mobile`]      = "Required";
+      else if (!MOBILE_RE.test(s.mobile)) errs[`${s.id}.mobile`] = "Invalid 10-digit mobile";
+      if (s.email.trim() && !EMAIL_RE.test(s.email.trim())) {
+        errs[`${s.id}.email`] = "Invalid email";
+      }
+    });
+    return errs;
+  }
 
   async function handleContinue() {
     const biz = getBusiness();
     if (!biz || !businessId) return;
 
-    const valid = displayed.filter((s) => s.name.trim() && s.designation.trim());
-    if (valid.length === 0) {
-      alert(`Please add ${businessType === "proprietorship" ? "the proprietor's" : "at least one " + cfg.roleLabel.toLowerCase() + "'s"} name and designation.`);
+    if (displayed.length === 0) {
+      alert(`Please add ${businessType === "proprietorship" ? "the proprietor's" : "at least one " + cfg.roleLabel.toLowerCase() + "'s"} details.`);
+      return;
+    }
+
+    const errs = validateRows(displayed);
+    setErrors(errs);
+    if (Object.keys(errs).length > 0) {
+      alert("Please fix the highlighted fields.");
       return;
     }
 
     setSaving(true);
 
-    // Destructive trim for proprietorship — delete dropped stakeholders' docs.
     for (const t of trimmed) {
       const { data: docs } = await supabase()
         .from("epc_documents")
@@ -178,9 +235,17 @@ export default function Step3Page() {
       }
     }
 
+    const cleaned = displayed.map((s) => ({
+      ...s,
+      name: s.name.trim(),
+      designation: s.designation.trim(),
+      mobile: s.mobile.trim(),
+      email: s.email.trim(),
+    }));
+
     const { error } = await supabase()
       .from("epc_business")
-      .update({ stakeholders: valid, current_step: 4 })
+      .update({ stakeholders: cleaned, current_step: 4 })
       .eq("id", biz.id);
     setSaving(false);
     if (error) return alert(error.message);
@@ -215,8 +280,6 @@ export default function Step3Page() {
               <h3 className="font-display font-semibold text-[18px]">
                 {businessType === "proprietorship" ? cfg.roleLabel : `${cfg.roleLabel} ${i + 1}`}
               </h3>
-              {/* Delete row: only shown when there's >1 row AND we're not in
-                  proprietorship mode (proprietor is a single-row slot). */}
               {displayed.length > 1 && businessType !== "proprietorship" && (
                 <button
                   type="button"
@@ -234,12 +297,31 @@ export default function Step3Page() {
                 placeholder="Full name"
                 value={s.name}
                 onChange={(e) => updateField(s.id, "name", e.target.value)}
+                error={errors[`${s.id}.name`]}
               />
               <Input
                 label="Designation"
                 placeholder={`e.g. ${cfg.defaultDesignation || "Director, Partner"}`}
                 value={s.designation}
                 onChange={(e) => updateField(s.id, "designation", e.target.value)}
+                error={errors[`${s.id}.designation`]}
+              />
+              <Input
+                label="Mobile"
+                placeholder="10-digit mobile"
+                inputMode="numeric"
+                maxLength={10}
+                value={s.mobile}
+                onChange={(e) => updateField(s.id, "mobile", e.target.value.replace(/\D/g, ""))}
+                error={errors[`${s.id}.mobile`]}
+              />
+              <Input
+                label="Email (optional)"
+                type="email"
+                placeholder="name@example.com"
+                value={s.email}
+                onChange={(e) => updateField(s.id, "email", e.target.value)}
+                error={errors[`${s.id}.email`]}
               />
             </div>
 
@@ -276,7 +358,7 @@ export default function Step3Page() {
         {cfg.addButtonLabel && stakeholders.length < cfg.maxRows ? (
           <Button type="button" variant="outline" onClick={addPerson}>{cfg.addButtonLabel}</Button>
         ) : (
-          <span /> /* spacer to keep Continue right-aligned on desktop */
+          <span />
         )}
         <Button type="button" variant="primary" loading={saving} onClick={handleContinue}>
           Save & continue
