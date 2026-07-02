@@ -22,6 +22,7 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 
 const VISION_API_KEY = Deno.env.get("GOOGLE_VISION_API_KEY")!;
+const RAW_TEXT_CAP = 4000;
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -55,7 +56,17 @@ serve(async (req) => {
     const accountNumber = findAccountByLabel(text);
     const bankName = bankFromIfsc(ifsc) ?? bankFromText(text);
 
-    return json({ ok: true, raw: text, ifsc, accountNumber, bankName });
+    return json({
+      ok: true,
+      // Capped audit copy of the OCR text — matches extract-gst-r3b /
+      // extract-gst-legalname. Written to epc_documents.metadata.ocr_raw_text
+      // by the Step 4 upload handler so future misreads can be diagnosed
+      // without re-running Vision.
+      raw: text.slice(0, RAW_TEXT_CAP),
+      ifsc,
+      accountNumber,
+      bankName,
+    });
   } catch (e) {
     console.error("[extract-cheque] error:", e);
     return json({ ok: false, error: String(e) }, 500);

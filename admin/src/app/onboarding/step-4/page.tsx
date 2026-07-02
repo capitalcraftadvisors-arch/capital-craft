@@ -56,8 +56,19 @@ export default function Step4Page() {
   const acctConfirm = watch("confirm_account_number");
   const acctMatches =
     acct.length > 0 && acctConfirm.length > 0 && acct === acctConfirm;
+
+  // Mismatch signal only fires when the user has "committed" the re-enter
+  // value — either by blurring the box or by typing enough characters to
+  // reach/exceed the fetched value's length. Typing "43" or "8" or "85"
+  // partway through should NOT show a red error / unmask the top box.
+  // Save & continue does its own strict compare regardless, so this is
+  // purely a UI-timing signal.
+  const [acctConfirmBlurred, setAcctConfirmBlurred] = useState(false);
+  const acctConfirmComplete =
+    acctConfirmBlurred ||
+    (acct.length > 0 && acctConfirm.length >= acct.length);
   const acctMismatch =
-    acctConfirm.length > 0 && acct !== acctConfirm;
+    acctConfirmComplete && acctConfirm.length > 0 && acct !== acctConfirm;
 
   // TOP-BOX behavior (the OCR-filled "Account number" field):
   //
@@ -98,7 +109,13 @@ export default function Step4Page() {
   }, [reset]);
 
   // OCR runs silently in the background. No user-facing feedback strings.
-  async function handleChequeUploaded({ file }: { file: File }) {
+  //
+  // We also persist the OCR audit trail (raw Vision text + extracted values)
+  // onto the just-inserted cancelled_cheque doc row's `metadata`. This lets
+  // an admin later run `select metadata->>'ocr_raw_text'…` to see exactly
+  // what Vision saw on a cheque whose account number came back wrong —
+  // same debug pattern used for gstin uploads.
+  async function handleChequeUploaded({ docId, file }: { docId: string; storagePath: string; file: File }) {
     try {
       const r = await extractCheque(file);
       if (!r.ok) return;
@@ -111,6 +128,24 @@ export default function Step4Page() {
       }
       if (r.bankName) setValue("bank_name", r.bankName);
       setOcrRaw(r);
+
+      // Persist audit trail on the doc row. Best-effort — failure here
+      // logs a warning but doesn't disturb the form.
+      try {
+        await supabase()
+          .from("epc_documents")
+          .update({
+            metadata: {
+              ocr_raw_text: r.raw ?? null,
+              accountNumber: r.accountNumber ?? null,
+              ifsc: r.ifsc ?? null,
+              bankName: r.bankName ?? null,
+            },
+          })
+          .eq("id", docId);
+      } catch (e) {
+        console.warn("[step-4] cheque metadata write failed:", e);
+      }
     } catch (e) {
       console.warn("[step-4] cheque OCR silent failure:", e);
     }
@@ -208,8 +243,8 @@ export default function Step4Page() {
               table="epc_documents"
               category="cancelled_cheque"
               maxFiles={1}
-              label="Cancelled cheque"
-              hint="JPG, PNG, WEBP, or PDF. Make sure all details are clearly visible."
+              label="Empty cheque copy / picture"
+              hint="JPG, PNG, WEBP, or PDF. No pen marks. Make sure all details are clearly visible."
               onUploaded={handleChequeUploaded}
             />
           </Card>
@@ -244,24 +279,42 @@ export default function Step4Page() {
               className={acctReadOnly ? "bg-bg-soft cursor-not-allowed" : undefined}
             />
             {/* Bottom box: user re-enters, always visible, always editable. */}
-            <Input
-              label="Re-enter account number"
-              placeholder=""
-              inputMode="numeric"
-              {...register("confirm_account_number")}
-              error={
-                acctMismatch
-                  ? "OCR may have read the wrong value — please edit the account number."
-                  : undefined
-              }
-              hint={
-                !acctMismatch && acctMatches
-                  ? "Matches."
-                  : !acctMismatch && acct.length > 0 && acctConfirm.length === 0
-                  ? "Please type the account number again to confirm."
-                  : undefined
-              }
-            />
+            {/* Mismatch is not shown until the user commits their re-entry  */}
+            {/* (blur, or length matches/exceeds the fetched value) — no    */}
+            {/* red error on every keystroke.                                */}
+            {(() => {
+              const confirmReg = register("confirm_account_number");
+              return (
+                <Input
+                  label="Re-enter account number"
+                  placeholder=""
+                  inputMode="numeric"
+                  {...confirmReg}
+                  onChange={(e) => {
+                    // A new keystroke means the user is typing again — reset
+                    // the "blurred" commit flag so we hide any stale error.
+                    setAcctConfirmBlurred(false);
+                    void confirmReg.onChange(e);
+                  }}
+                  onBlur={(e) => {
+                    setAcctConfirmBlurred(true);
+                    void confirmReg.onBlur(e);
+                  }}
+                  error={
+                    acctMismatch
+                      ? "Account numbers don't match — please check both boxes."
+                      : undefined
+                  }
+                  hint={
+                    !acctMismatch && acctMatches
+                      ? "Matches."
+                      : !acctMismatch && acct.length > 0 && acctConfirm.length === 0
+                      ? "Please type the account number again to confirm."
+                      : undefined
+                  }
+                />
+              );
+            })()}
 
             <Input
               label="IFSC code"
