@@ -1,23 +1,25 @@
 // GET /api/epc/[id]/download-zip
 //
 // Admin-only. Streams a fresh ZIP for the given EPC containing:
-//   - summary.html            (self-contained profile snapshot, styled)
+//   - summary.xlsx            (Excel workbook: all profile data as
+//                              label + value rows on a single sheet.
+//                              Documents are intentionally OMITTED
+//                              from the workbook — the files themselves
+//                              are in the ZIP folders.)
 //   - documents/<category>/…  (pan_business, gstin, extra_doc, cancelled_cheque, office_*)
-//   - documents/members/<Member N - name>/{pan,aadhaar}/…
+//   - documents/members/<Member N - name>/{pan,aadhaar_front,aadhaar_back,aadhaar_legacy}/…
 //   - gst_r3b/…               (admin-only R3B files, prefixed by period-year)
 //
-// Response is streamed (archiver → Node Readable → Web ReadableStream) so the
-// ZIP is never fully buffered — no Cloud Run 32MB response cap, no OOM risk on
-// large document sets.
-//
-// Missing GCS files (row exists, object gone) are skipped and reported in the
-// summary's "Missing files" table. Never crashes on individual failures.
+// Response is streamed (archiver → Node Readable → Web ReadableStream) so
+// the ZIP is never fully buffered. Missing GCS files are logged and
+// skipped — the workbook doesn't record them, but the ZIP still succeeds.
 //
 // No caching — every request regenerates a fresh ZIP with current data.
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import archiver from "archiver";
+import ExcelJS from "exceljs";
 import { Readable } from "node:stream";
 import { downloadBuffer } from "@/lib/gcs";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
@@ -113,8 +115,7 @@ export async function GET(
       .eq("business_id", params.id);
     const lender = (lenderData ?? []) as LenderRow[];
 
-    // ── Admin info (Batch 1; may not exist yet) ───────────────────────
-    // Best-effort — swallow errors so this works before/after Batch 1 lands.
+    // ── Admin info (may not exist yet) ────────────────────────────────
     let adminInfo: Record<string, unknown> | null = null;
     try {
       const r = await supabase
@@ -138,15 +139,10 @@ export async function GET(
     const filename = `EPC_${nameForFile}_${dateStr}.zip`;
 
     // ── Archive ───────────────────────────────────────────────────────
-    // level 3: JPEG/PDF barely compress, favor speed over ratio.
     const archive = archiver("zip", { zlib: { level: 3 } });
-
-    // Log any low-level archive error (e.g. output stream closed by client).
     archive.on("warning", (e) => console.warn("[download-zip] archive warning:", e));
     archive.on("error",   (e) => console.error("[download-zip] archive error:", e));
 
-    // Kick off appending in the background. We return the streaming Response
-    // immediately below; the runtime keeps consuming the stream until finalize.
     void (async () => {
       try {
         const stakeholders = ((biz.stakeholders ?? []) as unknown[]).map(
@@ -158,14 +154,8 @@ export async function GET(
           memberLabelById.set(s.id, `Member ${i + 1}${nameBit}`);
         });
 
-        const included: Array<{
-          path: string; category: string; file_name: string; size: number | null;
-        }> = [];
-        const missing: Array<{
-          category: string; file_name: string; storage_path: string; error: string;
-        }> = [];
-
-        // Download + append each doc.
+        // Download + append each document. Missing files are silently
+        // skipped (logged); the workbook doesn't mention them.
         for (const doc of docs) {
           const zipPath = pathInZip(doc, memberLabelById);
           try {
@@ -174,33 +164,21 @@ export async function GET(
               name: zipPath,
               date: doc.created_at ? new Date(doc.created_at) : undefined,
             });
-            included.push({
-              path: zipPath,
-              category: doc.category,
-              file_name: doc.file_name ?? "(unnamed)",
-              size: doc.stored_size_bytes ?? null,
-            });
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             console.warn(
               `[download-zip] missing/failed: ${doc.storage_path} — ${msg}`,
             );
-            missing.push({
-              category: doc.category,
-              file_name: doc.file_name ?? "(unnamed)",
-              storage_path: doc.storage_path,
-              error: msg,
-            });
           }
         }
 
-        // Append the summary AFTER downloads — so its manifest reflects
-        // what's actually in the ZIP.
-        const html = renderSummaryHtml({
+        // Excel summary — one sheet, label + value rows, no documents list.
+        const xlsx = await buildSummaryXlsx({
           biz: biz as Record<string, unknown>,
-          docs, lender, adminInfo, included, missing,
+          lender,
+          adminInfo,
         });
-        archive.append(html, { name: "summary.html" });
+        archive.append(xlsx, { name: "summary.xlsx" });
 
         await archive.finalize();
       } catch (e) {
@@ -226,14 +204,11 @@ export async function GET(
 
 // ── Filename / path helpers ───────────────────────────────────────────
 
-// For the OUTER ZIP filename (safe across shells and file systems).
 function sanitizeName(s: string): string {
   const trimmed = (s || "").replace(/[^\w\-]+/g, "_").slice(0, 60);
   return trimmed || "epc";
 }
 
-// For a SINGLE PATH SEGMENT inside the ZIP. Keeps spaces + hyphens + dots.
-// Blocks path-traversal characters and control chars.
 function sanitizeSegment(s: string): string {
   const cleaned = (s || "").replace(/[<>:"|?*\\/\x00-\x1F]+/g, "_").trim();
   return cleaned || "file";
@@ -287,19 +262,17 @@ function pathInZip(doc: Doc, memberLabelById: Map<string, string>): string {
   return `documents/${sanitizeSegment(doc.category)}/${fname}`;
 }
 
-// ── HTML summary ──────────────────────────────────────────────────────
+// ── Excel summary ─────────────────────────────────────────────────────
 
-function esc(v: unknown): string {
-  if (v === null || v === undefined) return "—";
-  const s = String(v);
-  if (!s.trim()) return "—";
-  return s.replace(/[&<>"']/g, (c) =>
-    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!),
-  );
-}
+const BUSINESS_TYPE_LABEL: Record<string, string> = {
+  proprietorship: "Proprietorship",
+  pvt_ltd:        "Private Limited",
+  partnership:    "Partnership",
+  llp:            "LLP",
+};
 
 function fmtDate(v: unknown): string {
-  if (!v) return "—";
+  if (!v) return "";
   try {
     return new Date(String(v)).toLocaleString("en-IN", {
       dateStyle: "medium", timeStyle: "short",
@@ -309,227 +282,167 @@ function fmtDate(v: unknown): string {
   }
 }
 
-function fmtBytes(n: number | null): string {
-  if (n == null) return "—";
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(2)} MB`;
+function maskAccount(a: unknown): string {
+  const s = a === null || a === undefined ? "" : String(a);
+  if (!s) return "";
+  if (s.length <= 4) return "•".repeat(6) + s;
+  return "•".repeat(Math.max(6, s.length - 4)) + s.slice(-4);
 }
 
-const BUSINESS_TYPE_LABEL: Record<string, string> = {
-  proprietorship: "Proprietorship",
-  pvt_ltd:        "Private Limited",
-  partnership:    "Partnership",
-  llp:            "LLP",
-};
+function display(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  const s = String(v);
+  return s.trim();
+}
 
-function renderSummaryHtml(data: {
+async function buildSummaryXlsx(data: {
   biz: Record<string, unknown>;
-  docs: Doc[];
   lender: LenderRow[];
   adminInfo: Record<string, unknown> | null;
-  included: Array<{ path: string; category: string; file_name: string; size: number | null }>;
-  missing: Array<{ category: string; file_name: string; storage_path: string; error: string }>;
-}): string {
-  const { biz, lender, adminInfo, included, missing } = data;
+}): Promise<Buffer> {
+  const { biz, lender, adminInfo } = data;
 
-  const stakeholders = ((biz.stakeholders ?? []) as unknown[]).map(
-    (s) => s as Stakeholder,
-  );
-  const refs = ((biz.business_references ?? []) as unknown[]).map(
-    (r) => r as Reference,
-  );
+  const stakeholders = ((biz.stakeholders ?? []) as unknown[]).map((s) => s as Stakeholder);
+  const refs = ((biz.business_references ?? []) as unknown[]).map((r) => r as Reference);
   const customers = refs.filter((r) => r.type === "customer");
   const suppliers = refs.filter((r) => r.type === "supplier");
 
-  const btLabel = BUSINESS_TYPE_LABEL[(biz.business_type as string) ?? ""] ?? biz.business_type;
-
+  const btLabel = BUSINESS_TYPE_LABEL[(biz.business_type as string) ?? ""] ?? String(biz.business_type ?? "");
   const suryaGhar = biz.pm_surya_ghar as string | null;
   const suryaGharDisplay = suryaGhar === "other"
-    ? `Other — ${esc(biz.pm_surya_ghar_other)}`
+    ? `Other — ${display(biz.pm_surya_ghar_other)}`
     : suryaGhar
-      ? esc(suryaGhar.charAt(0).toUpperCase() + suryaGhar.slice(1))
-      : "—";
+      ? suryaGhar.charAt(0).toUpperCase() + suryaGhar.slice(1)
+      : "";
 
-  const now = new Date().toLocaleString("en-IN", {
-    dateStyle: "medium", timeStyle: "short",
-  });
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Capital Craft — admin export";
+  wb.created = new Date();
 
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>EPC profile — ${esc(biz.trade_name || biz.legal_name || biz.contact_name)}</title>
-<style>
-  * { box-sizing: border-box; }
-  body { font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-         color: #1a1f2c; background: #f7f8fb; margin: 0; padding: 32px; }
-  .wrap { max-width: 900px; margin: 0 auto; }
-  header { border-bottom: 1px solid #d0d5dd; padding-bottom: 20px; margin-bottom: 24px; }
-  h1 { font-size: 24px; margin: 0 0 4px; color: #0b1120; }
-  h1 small { font-weight: 400; color: #667085; font-size: 13px; margin-left: 8px; }
-  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.08em; color: #475467;
-       margin: 28px 0 12px; padding-bottom: 6px; border-bottom: 1px solid #e4e7ec; }
-  h3 { font-size: 13px; margin: 16px 0 6px; color: #344054; }
-  table { width: 100%; border-collapse: collapse; margin: 6px 0 12px; background: #fff;
-          border: 1px solid #e4e7ec; border-radius: 8px; overflow: hidden; }
-  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid #f2f4f7;
-           font-size: 13px; vertical-align: top; }
-  tr:last-child td { border-bottom: 0; }
-  th { color: #667085; font-weight: 600; background: #f9fafb; width: 32%; }
-  td.mono, .mono { font-family: SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; }
-  .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px;
-          font-weight: 600; background: #eff4ff; color: #1849a9; }
-  .pill.warn { background: #fef3c7; color: #92400e; }
-  .pill.danger { background: #fee4e2; color: #b42318; }
-  .pill.ok { background: #d1fadf; color: #027a48; }
-  .kv { display: grid; grid-template-columns: 200px 1fr; gap: 8px 16px; margin: 8px 0; }
-  .kv dt { color: #667085; font-size: 13px; }
-  .kv dd { margin: 0; color: #1a1f2c; font-size: 13px; }
-  .muted { color: #98a2b3; }
-  footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid #e4e7ec;
-           color: #98a2b3; font-size: 12px; }
-</style>
-</head>
-<body>
-<div class="wrap">
+  const ws = wb.addWorksheet("Profile");
+  ws.columns = [
+    { header: "", key: "label", width: 34 },
+    { header: "", key: "value", width: 60 },
+  ];
 
-<header>
-  <h1>${esc(biz.trade_name || biz.legal_name || biz.contact_name)}
-    <small>EPC profile snapshot · generated ${esc(now)}</small></h1>
-  <div class="kv" style="margin-top:12px;">
-    <dt>Status</dt><dd><span class="pill">${esc(biz.status)}</span>${biz.epc_self_edited ? ' <span class="pill warn">Updated</span>' : ""}</dd>
-    <dt>Current step</dt><dd>${esc(biz.current_step)}</dd>
-    <dt>Submitted</dt><dd>${esc(fmtDate(biz.submitted_at))}</dd>
-    <dt>Created</dt><dd>${esc(fmtDate(biz.created_at))}</dd>
-    <dt>Last updated</dt><dd>${esc(fmtDate(biz.updated_at))}</dd>
-    <dt>EPC ID</dt><dd class="mono">${esc(biz.id)}</dd>
-  </div>
-</header>
+  // Header row.
+  const titleText = String(biz.trade_name || biz.legal_name || biz.contact_name || "EPC");
+  const titleRow = ws.addRow([titleText, ""]);
+  titleRow.getCell(1).font = { bold: true, size: 16, color: { argb: "FF0F3D2E" } };
+  ws.mergeCells(titleRow.number, 1, titleRow.number, 2);
+  const generated = ws.addRow([`Generated ${new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}`, ""]);
+  generated.getCell(1).font = { italic: true, color: { argb: "FF5A8A76" }, size: 10 };
+  ws.mergeCells(generated.number, 1, generated.number, 2);
+  ws.addRow([]);
 
-<h2>Personal</h2>
-<table>
-  <tr><th>Point of contact</th><td>${esc(biz.contact_name)}</td></tr>
-  <tr><th>Email</th><td>${esc(biz.contact_email)}</td></tr>
-  <tr><th>Mobile (login)</th><td>+91 ${esc(biz.contact_mobile)}</td></tr>
-  <tr><th>Designation</th><td>${esc(biz.contact_designation)}</td></tr>
-</table>
+  // Utility to add a section heading and a set of key-value rows.
+  const section = (name: string, rows: Array<[string, unknown]>) => {
+    const headingRow = ws.addRow([name.toUpperCase(), ""]);
+    headingRow.getCell(1).font = { bold: true, size: 11, color: { argb: "FF178A5C" } };
+    headingRow.getCell(1).alignment = { vertical: "middle" };
+    ws.mergeCells(headingRow.number, 1, headingRow.number, 2);
+    for (const [label, value] of rows) {
+      const r = ws.addRow([label, display(value) || "—"]);
+      r.getCell(1).font = { bold: true, color: { argb: "FF5A8A76" } };
+      r.getCell(2).alignment = { wrapText: true, vertical: "top" };
+    }
+    ws.addRow([]);
+  };
 
-<h2>Business</h2>
-<table>
-  <tr><th>Legal name</th><td>${esc(biz.legal_name)}</td></tr>
-  <tr><th>Trade name</th><td>${esc(biz.trade_name)}</td></tr>
-  <tr><th>Business type</th><td>${esc(btLabel)}</td></tr>
-  <tr><th>PAN</th><td class="mono">${esc(biz.pan_number)}</td></tr>
-  <tr><th>GSTIN</th><td class="mono">${esc(biz.gstin_number)}</td></tr>
-  <tr><th>PM Surya Ghar</th><td>${suryaGharDisplay}</td></tr>
-</table>
+  // ── META ─────────────────────────────────────────────────────────
+  section("Meta", [
+    ["EPC Display ID", biz.epc_display_id],
+    ["Internal status", biz.status],
+    ["Loan-app unlocked", biz.loan_app_unlocked === true ? "Yes" : "No"],
+    ["Grandfathered", biz.loan_app_grandfathered === true ? "Yes" : "No"],
+    ["Source", biz.source],
+    ["Current step", biz.current_step],
+    ["EPC self-edited", biz.epc_self_edited === true ? "Yes" : "No"],
+    ["Created", fmtDate(biz.created_at)],
+    ["Submitted", fmtDate(biz.submitted_at)],
+    ["Last updated", fmtDate(biz.updated_at)],
+    ["Row ID (uuid)", biz.id],
+  ]);
 
-<h2>Bank</h2>
-<table>
-  <tr><th>Account holder</th><td>${esc(biz.bank_account_holder)}</td></tr>
-  <tr><th>Account number</th><td class="mono">${esc(biz.bank_account_number)}</td></tr>
-  <tr><th>IFSC</th><td class="mono">${esc(biz.bank_ifsc)}</td></tr>
-  <tr><th>Bank name</th><td>${esc(biz.bank_name)}</td></tr>
-  <tr><th>Branch</th><td>${esc(biz.bank_branch)}</td></tr>
-</table>
+  // ── PERSONAL ─────────────────────────────────────────────────────
+  section("Personal", [
+    ["Point of contact", biz.contact_name],
+    ["Email", biz.contact_email],
+    ["Mobile (login)", biz.contact_mobile ? `+91 ${display(biz.contact_mobile)}` : ""],
+    ["Designation", biz.contact_designation],
+  ]);
 
-<h2>Members (${stakeholders.length})</h2>
-${stakeholders.length === 0 ? '<p class="muted">No members recorded.</p>' : `
-<table>
-  <thead>
-    <tr><th style="width:auto;">Name</th><th>Designation</th><th>Mobile</th><th>Email</th></tr>
-  </thead>
-  <tbody>
-    ${stakeholders.map((s) => `
-      <tr>
-        <td>${esc(s.name)}</td>
-        <td>${esc(s.designation)}</td>
-        <td>${s.mobile ? "+91 " + esc(s.mobile) : "—"}</td>
-        <td>${esc(s.email)}</td>
-      </tr>
-    `).join("")}
-  </tbody>
-</table>`}
+  // ── BUSINESS ─────────────────────────────────────────────────────
+  section("Business", [
+    ["Legal name", biz.legal_name],
+    ["Trade name", biz.trade_name],
+    ["Business type", btLabel],
+    ["PAN", biz.pan_number],
+    ["GSTIN", biz.gstin_number],
+    ["PM Surya Ghar", suryaGharDisplay],
+  ]);
 
-<h2>References (${refs.length})</h2>
-${refs.length === 0 ? '<p class="muted">No references recorded.</p>' : `
-${customers.length > 0 ? `
-<h3>Customer (${customers.length})</h3>
-<table><thead><tr><th style="width:auto;">Name</th><th>Mobile</th></tr></thead>
-  <tbody>${customers.map((r) => `<tr><td>${esc(r.name)}</td><td>+91 ${esc(r.mobile)}</td></tr>`).join("")}</tbody>
-</table>` : ""}
-${suppliers.length > 0 ? `
-<h3>Supplier (${suppliers.length})</h3>
-<table><thead><tr><th style="width:auto;">Name</th><th>Mobile</th></tr></thead>
-  <tbody>${suppliers.map((r) => `<tr><td>${esc(r.name)}</td><td>+91 ${esc(r.mobile)}</td></tr>`).join("")}</tbody>
-</table>` : ""}`}
+  // ── BANK (account masked) ────────────────────────────────────────
+  section("Bank", [
+    ["Account holder", biz.bank_account_holder],
+    ["Account number (masked)", maskAccount(biz.bank_account_number)],
+    ["IFSC", biz.bank_ifsc],
+    ["Bank name", biz.bank_name],
+  ]);
 
-${adminInfo ? `
-<h2>Admin business info</h2>
-<table>
-  <tr><th>Team size</th><td>${esc(adminInfo.team_size)}</td></tr>
-  <tr><th>Installed capacity (Residential)</th>
-      <td>${esc(adminInfo.capacity_residential)} ${esc(adminInfo.capacity_residential_unit)}</td></tr>
-  <tr><th>Installed capacity (Commercial)</th>
-      <td>${esc(adminInfo.capacity_commercial)} ${esc(adminInfo.capacity_commercial_unit)}</td></tr>
-  <tr><th>Turnover (last FY)</th><td>${esc(adminInfo.turnover_last_fy)}</td></tr>
-</table>` : ""}
+  // ── MEMBERS ──────────────────────────────────────────────────────
+  const memberRows: Array<[string, unknown]> = [];
+  if (stakeholders.length === 0) {
+    memberRows.push(["(none)", ""]);
+  } else {
+    stakeholders.forEach((s, i) => {
+      const prefix = `${i + 1}.`;
+      memberRows.push([`${prefix} Name`, s.name]);
+      memberRows.push([`${prefix} Designation`, s.designation]);
+      memberRows.push([`${prefix} Mobile`, s.mobile ? `+91 ${s.mobile}` : ""]);
+      memberRows.push([`${prefix} Email`, s.email]);
+    });
+  }
+  section(`Members (${stakeholders.length})`, memberRows);
 
-<h2>Lender status <span class="muted" style="font-size:11px; text-transform:none;">(admin-only)</span></h2>
-${lender.length === 0 ? '<p class="muted">No lender rows.</p>' : `
-<table>
-  <thead><tr><th style="width:auto;">Lender</th><th>Docs given</th><th>Approved</th><th>Updated</th></tr></thead>
-  <tbody>
-    ${lender.map((l) => `
-      <tr>
-        <td>${esc(l.lender)}</td>
-        <td>${l.docs_given ? '<span class="pill ok">Yes</span>' : '<span class="pill">No</span>'}</td>
-        <td>${l.approved   ? '<span class="pill ok">Yes</span>' : '<span class="pill">No</span>'}</td>
-        <td>${esc(fmtDate(l.updated_at))}</td>
-      </tr>`).join("")}
-  </tbody>
-</table>`}
+  // ── REFERENCES ───────────────────────────────────────────────────
+  const refRows: Array<[string, unknown]> = [];
+  if (refs.length === 0) {
+    refRows.push(["(none)", ""]);
+  } else {
+    customers.forEach((r, i) => {
+      refRows.push([`Customer ${i + 1} name`, r.name]);
+      refRows.push([`Customer ${i + 1} mobile`, r.mobile ? `+91 ${r.mobile}` : ""]);
+    });
+    suppliers.forEach((r, i) => {
+      refRows.push([`Supplier ${i + 1} name`, r.name]);
+      refRows.push([`Supplier ${i + 1} mobile`, r.mobile ? `+91 ${r.mobile}` : ""]);
+    });
+  }
+  section(`References (${refs.length})`, refRows);
 
-<h2>Documents included (${included.length})</h2>
-${included.length === 0 ? '<p class="muted">No documents included.</p>' : `
-<table>
-  <thead>
-    <tr><th style="width:auto;">Category</th><th>File</th><th>Size</th><th>Path in ZIP</th></tr>
-  </thead>
-  <tbody>
-    ${included.map((f) => `
-      <tr>
-        <td>${esc(f.category)}</td>
-        <td>${esc(f.file_name)}</td>
-        <td>${esc(fmtBytes(f.size))}</td>
-        <td class="mono">${esc(f.path)}</td>
-      </tr>`).join("")}
-  </tbody>
-</table>`}
+  // ── ADMIN INFO ───────────────────────────────────────────────────
+  if (adminInfo) {
+    section("Admin business info", [
+      ["Team size", adminInfo.team_size],
+      ["Installed capacity (Residential)", `${display(adminInfo.capacity_residential)} ${display(adminInfo.capacity_residential_unit)}`.trim()],
+      ["Installed capacity (Commercial)",  `${display(adminInfo.capacity_commercial)} ${display(adminInfo.capacity_commercial_unit)}`.trim()],
+      ["Turnover (last FY)", adminInfo.turnover_last_fy],
+    ]);
+  }
 
-${missing.length > 0 ? `
-<h2>Missing files (${missing.length}) <span class="pill danger">Attention</span></h2>
-<p class="muted" style="margin-top:0;">These document rows exist in the database but the underlying GCS object was
-  not found or unreadable. Nothing was crashed; the summary above reflects only what was successfully archived.</p>
-<table>
-  <thead><tr><th style="width:auto;">Category</th><th>File</th><th>Storage path</th><th>Error</th></tr></thead>
-  <tbody>
-    ${missing.map((f) => `
-      <tr>
-        <td>${esc(f.category)}</td>
-        <td>${esc(f.file_name)}</td>
-        <td class="mono">${esc(f.storage_path)}</td>
-        <td class="mono">${esc(f.error)}</td>
-      </tr>`).join("")}
-  </tbody>
-</table>` : ""}
+  // ── LENDER STATUS ────────────────────────────────────────────────
+  const lenderRows: Array<[string, unknown]> = [];
+  const LENDERS = ["creditfair", "aerem", "solfin"] as const;
+  const label = (k: string) => k === "creditfair" ? "CreditFair" : k === "aerem" ? "Aerem" : "Solfin";
+  for (const k of LENDERS) {
+    const l = lender.find((x) => x.lender === k);
+    lenderRows.push([`${label(k)} — docs given`, l?.docs_given ? "Yes" : "No"]);
+    lenderRows.push([`${label(k)} — approved`,   l?.approved   ? "Yes" : "No"]);
+    lenderRows.push([`${label(k)} — updated`,    l ? fmtDate(l.updated_at) : ""]);
+  }
+  section("Lender status (admin-only)", lenderRows);
 
-<footer>
-  Capital Craft &middot; admin export &middot; ${esc(now)}
-</footer>
-
-</div>
-</body>
-</html>`;
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.from(buf as ArrayBuffer);
 }

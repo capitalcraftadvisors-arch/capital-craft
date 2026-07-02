@@ -155,7 +155,6 @@ function EpcsTab() {
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [lenderState, setLenderState] = useState<Record<string, LenderMap>>({});
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
-  const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [addOpen, setAddOpen] = useState(false);
 
   async function load() {
@@ -222,8 +221,11 @@ function EpcsTab() {
   }
 
   async function toggleLender(epcId: string, lender: Lender, field: "docs_given" | "approved", value: boolean) {
-    if (field === "approved" && value === true) {
-      if (!window.confirm("Are you sure for this approval?")) return;
+    if (field === "approved") {
+      const msg = value === true
+        ? "Are you sure for this approval?"
+        : "Are you sure you want to un-approve this?";
+      if (!window.confirm(msg)) return;
     }
     const prevState = lenderState;
     setLenderState((s) => {
@@ -333,7 +335,7 @@ function EpcsTab() {
               </th>
               <th className="px-4 py-3 font-medium text-[12px] uppercase tracking-wide">
                 <button type="button" onClick={() => toggleSort("status")} className="inline-flex items-center gap-1 uppercase tracking-wide">
-                  Status
+                  Internal status
                   <SortMark active={sortKey === "status"} dir={sortDir} />
                 </button>
               </th>
@@ -351,13 +353,6 @@ function EpcsTab() {
               >
                 <td className="px-4 py-3">
                   <div className="flex items-start gap-3 min-w-[240px]">
-                    <input
-                      type="checkbox"
-                      checked={!!selected[r.id]}
-                      onChange={(e) => setSelected((s) => ({ ...s, [r.id]: e.target.checked }))}
-                      className="mt-1 h-3.5 w-3.5 accent-[#178a5c] shrink-0"
-                      onClick={(e) => e.stopPropagation()}
-                    />
                     <div
                       className="w-9 h-9 rounded-md bg-[#d6efe3] text-[#178a5c] grid place-items-center shrink-0 cursor-pointer"
                       onClick={() => router.push(`/admin/epc/${r.id}/view` as any)}

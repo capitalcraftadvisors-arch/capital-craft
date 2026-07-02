@@ -214,32 +214,32 @@ function Inner() {
   return (
     <main className="min-h-screen bg-white">
       <header className="border-b border-[#cdeadd] bg-white sticky top-0 z-30">
-        <div className="max-w-container mx-auto px-5 sm:px-7 h-14 flex items-center justify-between">
+        <div className="w-full px-5 sm:px-8 h-14 flex items-center justify-between">
           <button
             onClick={() => router.push("/admin")}
-            className="text-[13px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1"
+            className="text-[14px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1"
           >
             ← Back
           </button>
-          <span className="font-display font-bold text-[16px] text-[#0f3d2e]">Capital Craft</span>
+          <span className="font-display font-bold text-[18px] text-[#0f3d2e]">Capital Craft</span>
         </div>
       </header>
 
-      <div className="max-w-container mx-auto px-4 sm:px-6 py-4" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
+      <div className="w-full px-5 sm:px-8 py-6" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
 
-        {/* ── HEADER CARD + PROGRESS ─────────────────────────────────── */}
-        <div className="rounded-[10px] border border-[#cdeadd] bg-[#f0faf5] p-3 sm:p-4 mb-3">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-[9px] bg-[#d6efe3] text-[#178a5c] grid place-items-center shrink-0">
+        {/* ── HEADER CARD ─────────────────────────────────────────── */}
+        <div className="rounded-[12px] border border-[#cdeadd] bg-[#f0faf5] p-5 sm:p-6 mb-4">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="w-14 h-14 rounded-[12px] bg-[#d6efe3] text-[#178a5c] grid place-items-center shrink-0" style={{ transform: "scale(1.3)", transformOrigin: "left center" }}>
                 {I.building}
               </div>
               <div className="min-w-0">
-                <div className="text-[17px] font-medium text-[#0f3d2e] truncate">{trade}</div>
-                {legalSub && <div className="text-[11px] text-[#5a8a76] truncate">{legalSub}</div>}
+                <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">{trade}</div>
+                {legalSub && <div className="text-[14px] text-[#5a8a76] truncate mt-0.5">{legalSub}</div>}
               </div>
             </div>
-            <div className="flex gap-1.5 items-center flex-wrap">
+            <div className="flex gap-2 items-center flex-wrap">
               {biz.epc_display_id && (
                 <Pill tint="blue" icon={I.id}>{biz.epc_display_id}</Pill>
               )}
@@ -258,35 +258,38 @@ function Inner() {
               </Pill>
             </div>
           </div>
+        </div>
 
-          {/* Progress tracker */}
-          <div className="flex items-center gap-1 mt-3">
-            <ProgressStep
+        {/* ── PROGRESS TRACKER — prominent standalone band ─────────── */}
+        <div className="rounded-[12px] border border-[#cdeadd] bg-white p-6 sm:p-8 mb-4">
+          <div className="flex items-center gap-3 sm:gap-6">
+            <BigProgressStep
               icon={I.check}
               done={biz.status !== "draft"}
               label="Docs uploaded"
+              sub={biz.status !== "draft" ? "Complete" : "Pending"}
             />
-            <div className={["flex-none w-6 h-[2px]", biz.status !== "draft" ? "bg-[#9dcbe8]" : "bg-[#d6e6dd]"].join(" ")} />
-            <ProgressStep
+            <BigConnector active={biz.status !== "draft"} />
+            <BigProgressStep
               icon={I.send}
               done={docsGivenCount === 3}
               inProgress={docsGivenCount > 0 && docsGivenCount < 3}
-              label={
-                <>Sent to lenders <span className="text-[#5a8a76] font-normal">{docsGivenCount}/3</span></>
-              }
+              label="Sent to lenders"
+              sub={`${docsGivenCount}/3 sent`}
             />
-            <div className={["flex-none w-6 h-[2px]", anyApproved ? "bg-[#9dcbe8]" : "bg-[#d6e6dd]"].join(" ")} />
-            <ProgressStep
+            <BigConnector active={docsGivenCount > 0} />
+            <BigProgressStep
               icon={I.circleCheck}
               done={anyApproved}
               label={anyApproved ? "Approved" : "Approval pending"}
+              sub={anyApproved ? "Loan-app unlocked" : "Awaiting a lender"}
               mutedIfPending
             />
           </div>
         </div>
 
         {/* ── 3-COLUMN GRID ──────────────────────────────────────────── */}
-        <div className="grid gap-2.5 lg:grid-cols-3">
+        <div className="grid gap-4 lg:grid-cols-3">
 
           {/* COL 1 */}
           <div className="flex flex-col gap-2.5">
@@ -304,17 +307,17 @@ function Inner() {
 
             <SectionCard title={peopleHeading(biz.business_type)} accent="green" icon={I.users}>
               {stakeholders.length === 0 ? (
-                <p className="text-[12px] text-[#5a8a76]">No members recorded.</p>
+                <p className="text-[13px] text-[#5a8a76]">No members recorded.</p>
               ) : (
-                <div className="space-y-1.5">
+                <div className="space-y-2">
                   {stakeholders.map((s, i) => (
-                    <div key={s.id ?? i} className="px-2.5 py-2 bg-[#f0faf5] rounded-[7px] text-[12px]">
-                      <div className="font-medium text-[#0f3d2e]">{s.name || "—"}</div>
-                      <div className="text-[#5a8a76]">
+                    <div key={s.id ?? i} className="px-3 py-2.5 bg-[#f0faf5] rounded-[8px] text-[14px]">
+                      <div className="font-semibold text-[#0f3d2e]">{s.name || "—"}</div>
+                      <div className="text-[13px] text-[#5a8a76] mt-0.5">
                         {s.designation || roleLabel(biz.business_type)}
                         {s.mobile ? ` · +91 ${s.mobile}` : ""}
                       </div>
-                      {s.email && <div className="text-[#185fa5] text-[11px] truncate">{s.email}</div>}
+                      {s.email && <div className="text-[#185fa5] text-[12px] mt-0.5 truncate">{s.email}</div>}
                     </div>
                   ))}
                 </div>
@@ -336,18 +339,18 @@ function Inner() {
               icon={I.files}
             >
               {nonR3bDocs.length === 0 ? (
-                <p className="text-[12px] text-[#5a8a76]">No documents uploaded.</p>
+                <p className="text-[13px] text-[#5a8a76]">No documents uploaded.</p>
               ) : (
-                <div className="grid grid-cols-2 gap-1.5">
+                <div className="grid grid-cols-2 gap-2">
                   {nonR3bDocs.map((d) => (
                     <button
                       key={d.id}
                       type="button"
                       onClick={() => openDoc(d.id)}
-                      className="border border-[#e0f0e8] bg-[#f7fcfa] hover:bg-[#f0faf5] rounded-[7px] px-2 py-1.5 text-[11px] flex items-center justify-between gap-1 min-w-0"
+                      className="border border-[#e0f0e8] bg-[#f7fcfa] hover:bg-[#f0faf5] rounded-[8px] px-3 py-2.5 text-[13px] flex items-center justify-between gap-2 min-w-0"
                     >
-                      <span className="text-[#0f3d2e] truncate">{DOC_LABEL(d.category)}</span>
-                      <span className="text-[#185fa5] shrink-0">{I.eye}</span>
+                      <span className="text-[#0f3d2e] font-medium truncate">{DOC_LABEL(d.category)}</span>
+                      <span className="text-[#185fa5] shrink-0" style={{ transform: "scale(1.2)" }}>{I.eye}</span>
                     </button>
                   ))}
                 </div>
@@ -356,21 +359,21 @@ function Inner() {
 
             <SectionCard title="References" accent="green" icon={I.star}>
               {refs.length === 0 ? (
-                <p className="text-[12px] text-[#5a8a76]">No references.</p>
+                <p className="text-[13px] text-[#5a8a76]">No references.</p>
               ) : (
                 <>
                   {customers.length > 0 && (
                     <>
-                      <div className="text-[11px] text-[#5a8a76]">Customers</div>
-                      <div className="text-[12px] text-[#0f3d2e] mb-1.5 leading-snug">
+                      <div className="text-[12px] font-semibold text-[#5a8a76] uppercase tracking-wide mt-0.5">Customers</div>
+                      <div className="text-[14px] text-[#0f3d2e] mb-2 mt-1 leading-snug">
                         {customers.map((c) => c.name).join(" · ") || "—"}
                       </div>
                     </>
                   )}
                   {suppliers.length > 0 && (
                     <>
-                      <div className="text-[11px] text-[#5a8a76]">Suppliers</div>
-                      <div className="text-[12px] text-[#0f3d2e] leading-snug">
+                      <div className="text-[12px] font-semibold text-[#5a8a76] uppercase tracking-wide">Suppliers</div>
+                      <div className="text-[14px] text-[#0f3d2e] mt-1 leading-snug">
                         {suppliers.map((s) => s.name).join(" · ") || "—"}
                       </div>
                     </>
@@ -395,8 +398,8 @@ function Inner() {
                 const label = key === "creditfair" ? "CreditFair" : key === "aerem" ? "Aerem" : "Solfin";
                 const state = l ? (l.approved ? "approved" : l.docs_given ? "docs" : "none") : "none";
                 return (
-                  <div key={key} className="flex items-center justify-between text-[12px] py-0.5">
-                    <span className="text-[#0f3d2e]">{label}</span>
+                  <div key={key} className="flex items-center justify-between text-[14px] py-1">
+                    <span className="text-[#0f3d2e] font-medium">{label}</span>
                     <LenderStatePill state={state} />
                   </div>
                 );
@@ -404,16 +407,16 @@ function Inner() {
             </SectionCard>
 
             <SectionCard title="GST R3B" tint icon={I.invoice} adminOnly>
-              <div className="text-[11px] text-[#5a8a76]">
+              <div className="text-[12px] text-[#5a8a76]">
                 {r3bDocs.length} file{r3bDocs.length === 1 ? "" : "s"} · Grand total taxable
               </div>
-              <div className="text-[15px] font-medium text-[#0f3d2e]">
+              <div className="text-[20px] font-semibold text-[#0f3d2e] mt-1">
                 ₹{r3bTotal.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
               </div>
               <button
                 type="button"
                 onClick={() => router.push(`/admin/epc/${biz.id}` as any)}
-                className="w-full mt-2 text-[11px] py-1.5 px-2 bg-white border border-[#cdeadd] rounded-[6px] text-[#178a5c] hover:bg-[#f0faf5] inline-flex items-center justify-center gap-1"
+                className="w-full mt-3 text-[13px] font-medium py-2 px-3 bg-white border border-[#cdeadd] rounded-[8px] text-[#178a5c] hover:bg-[#f0faf5] inline-flex items-center justify-center gap-1.5"
               >
                 {I.eye} View R3B
               </button>
@@ -422,11 +425,11 @@ function Inner() {
         </div>
 
         {/* ── Actions ────────────────────────────────────────────────── */}
-        <div className="flex gap-2 mt-2.5">
+        <div className="flex gap-3 mt-4">
           <button
             type="button"
             onClick={() => router.push(`/admin/epc/${biz.id}` as any)}
-            className="flex-1 py-2.5 text-[12px] font-medium bg-[#178a5c] text-white rounded-[8px] hover:bg-[#12734c] inline-flex items-center justify-center gap-1.5"
+            className="flex-1 py-3.5 text-[15px] font-semibold bg-[#178a5c] text-white rounded-[10px] hover:bg-[#12734c] inline-flex items-center justify-center gap-2"
           >
             {I.edit} Edit profile
           </button>
@@ -434,7 +437,7 @@ function Inner() {
             type="button"
             onClick={downloadZip}
             disabled={downloading}
-            className="flex-1 py-2.5 text-[12px] font-medium bg-[#185fa5] text-white rounded-[8px] hover:bg-[#144d84] disabled:opacity-70 inline-flex items-center justify-center gap-1.5"
+            className="flex-1 py-3.5 text-[15px] font-semibold bg-[#185fa5] text-white rounded-[10px] hover:bg-[#144d84] disabled:opacity-70 inline-flex items-center justify-center gap-2"
           >
             {I.download} {downloading ? "Preparing…" : "Download ZIP"}
           </button>
@@ -453,30 +456,52 @@ function Pill({ children, tint, icon }: {
   icon?: React.ReactNode;
 }) {
   const cls = tint === "amber"
-    ? "bg-[#fef0d6] text-[#854f0b] font-medium"
-    : "bg-[#dceffb] text-[#185fa5]";
+    ? "bg-[#fef0d6] text-[#854f0b] font-semibold"
+    : "bg-[#dceffb] text-[#185fa5] font-medium";
   return (
-    <span className={["inline-flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-[6px]", cls].join(" ")}>
+    <span className={["inline-flex items-center gap-1.5 text-[13px] px-3 py-1.5 rounded-[8px]", cls].join(" ")}>
       {icon && <span className="opacity-90">{icon}</span>}
       {children}
     </span>
   );
 }
 
-function ProgressStep({ icon, done, inProgress, label, mutedIfPending }: {
+function BigProgressStep({ icon, done, inProgress, label, sub, mutedIfPending }: {
   icon: React.ReactNode;
   done?: boolean;
   inProgress?: boolean;
   label: React.ReactNode;
+  sub?: React.ReactNode;
   mutedIfPending?: boolean;
 }) {
-  const bg = done ? "bg-[#178a5c] text-white" : inProgress ? "bg-[#ef9f27] text-white" : "bg-[#e3eeff] text-[#6b93c4]";
-  const textCls = done || inProgress ? "text-[#0f3d2e] font-medium" : (mutedIfPending ? "text-[#5a8a76]" : "text-[#0f3d2e] font-medium");
+  const bg = done
+    ? "bg-[#178a5c] text-white ring-4 ring-[#178a5c]/15"
+    : inProgress
+    ? "bg-[#ef9f27] text-white ring-4 ring-[#ef9f27]/15"
+    : "bg-[#e3eeff] text-[#6b93c4]";
+  const labelCls = done || inProgress
+    ? "text-[#0f3d2e] font-semibold"
+    : (mutedIfPending ? "text-[#5a8a76] font-medium" : "text-[#0f3d2e] font-semibold");
+  const subCls = done || inProgress ? "text-[#5a8a76]" : "text-[#8ab3a1]";
   return (
-    <div className="flex-1 flex items-center gap-1.5 min-w-0">
-      <div className={["w-[22px] h-[22px] rounded-full grid place-items-center shrink-0", bg].join(" ")}>{icon}</div>
-      <span className={["text-[11px] truncate", textCls].join(" ")}>{label}</span>
+    <div className="flex-1 flex flex-col items-center gap-3 min-w-0">
+      <div className={["w-[56px] h-[56px] rounded-full grid place-items-center shrink-0 transition-all", bg].join(" ")} style={{ transform: "scale(1.35)" }}>
+        <span style={{ transform: "scale(1.5)" }}>{icon}</span>
+      </div>
+      <div className="text-center min-w-0">
+        <div className={["text-[15px] leading-tight", labelCls].join(" ")}>{label}</div>
+        {sub && <div className={["text-[12px] mt-1", subCls].join(" ")}>{sub}</div>}
+      </div>
     </div>
+  );
+}
+
+function BigConnector({ active }: { active: boolean }) {
+  return (
+    <div
+      className={["flex-none h-[4px] rounded-full", active ? "bg-[#9dcbe8]" : "bg-[#e3eeff]"].join(" ")}
+      style={{ width: "clamp(40px, 8vw, 120px)" }}
+    />
   );
 }
 
@@ -497,11 +522,11 @@ function SectionCard({
   const bgCls = tint ? "bg-[#f0faf5]" : "bg-white";
   const titleCls = accent === "blue" ? "text-[#185fa5]" : "text-[#178a5c]";
   return (
-    <div className={["rounded-[10px] border p-3", borderCls, bgCls].join(" ")}>
-      <div className={["text-[12px] font-medium mb-2 flex items-center gap-1.5", titleCls].join(" ")}>
-        {icon}
+    <div className={["rounded-[12px] border p-5", borderCls, bgCls].join(" ")}>
+      <div className={["text-[14px] font-semibold mb-3 flex items-center gap-2", titleCls].join(" ")}>
+        <span style={{ transform: "scale(1.2)", transformOrigin: "left center", display: "inline-flex" }}>{icon}</span>
         <span>{title}</span>
-        {adminOnly && <span className="ml-1 text-[10px] text-[#8ab3a1] font-normal">admin</span>}
+        {adminOnly && <span className="ml-1.5 text-[11px] text-[#8ab3a1] font-normal">admin</span>}
       </div>
       <div>{children}</div>
     </div>
@@ -511,25 +536,25 @@ function SectionCard({
 function KV({ k, v, valueClass }: { k: string; v: unknown; valueClass?: string }) {
   const display = v === null || v === undefined || v === "" ? "—" : String(v);
   return (
-    <div className="flex justify-between text-[12px] py-[3px] gap-3">
+    <div className="flex justify-between text-[14px] py-[5px] gap-3">
       <span className="text-[#5a8a76] shrink-0">{k}</span>
-      <span className={["text-right min-w-0 truncate", valueClass ?? "text-[#0f3d2e]"].join(" ")}>{display}</span>
+      <span className={["text-right min-w-0 truncate font-medium", valueClass ?? "text-[#0f3d2e]"].join(" ")}>{display}</span>
     </div>
   );
 }
 
 function LenderStatePill({ state }: { state: "approved" | "docs" | "none" }) {
   if (state === "approved") {
-    return <span className="text-[11px] text-[#178a5c] font-medium inline-flex items-center gap-1">
-      <span className="inline-block w-2 h-2 rounded-full bg-[#178a5c]" /> approved
+    return <span className="text-[13px] text-[#178a5c] font-semibold inline-flex items-center gap-1.5">
+      <span className="inline-block w-2.5 h-2.5 rounded-full bg-[#178a5c]" /> approved
     </span>;
   }
   if (state === "docs") {
-    return <span className="text-[11px] text-[#854f0b] inline-flex items-center gap-1">
-      <span className="inline-block w-2 h-2 rounded-full bg-[#ef9f27]" /> docs sent
+    return <span className="text-[13px] text-[#854f0b] font-medium inline-flex items-center gap-1.5">
+      <span className="inline-block w-2.5 h-2.5 rounded-full bg-[#ef9f27]" /> docs sent
     </span>;
   }
-  return <span className="text-[11px] text-[#8ab3a1]">not sent</span>;
+  return <span className="text-[13px] text-[#8ab3a1]">not sent</span>;
 }
 
 function fmtCapacity(n: number | null | undefined, unit: string | null | undefined): string {

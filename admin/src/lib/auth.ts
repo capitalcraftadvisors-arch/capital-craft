@@ -2,6 +2,12 @@ import { FUNCTIONS_URL } from "./supabase";
 
 // Shape returned by the `auth` Edge Function (plus epc_self_edited which
 // AuthGuard re-fetches on every page mount so we can gate the wizard).
+//
+// loan_app_unlocked is the ONE boolean that decides whether an EPC sees
+// the loan-app dashboard vs the "Under review" status page. It is a
+// stored generated column on epc_business:
+//   loan_app_unlocked = loan_app_grandfathered OR has_lender_approval
+// EPCs never see the internal admin `status` field in any UI.
 export type Business = {
   id: string;
   status: "draft" | "under_review" | "approved" | "on_hold" | "rejected";
@@ -16,15 +22,11 @@ export type Business = {
   contact_name: string | null;
   epc_self_edited?: boolean;
   epc_self_edited_at?: string | null;
+  loan_app_unlocked?: boolean;
 };
 
 const TOKEN_KEY = "cc_token";
 const BUSINESS_KEY = "cc_business";
-// When an admin creates a new EPC via "Add New EPC" and walks through the
-// onboarding wizard on their behalf, this key holds the impersonated EPC's
-// Business context. getBusiness() prefers it over the admin's own business.
-// getToken() always returns the admin's real token — RLS lets an admin
-// write any row, so no token swap is needed.
 const IMPERSONATE_KEY = "cc_admin_impersonating";
 
 export async function login(mobile: string, otp: string): Promise<{ ok: true; business: Business } | { ok: false; error: string }> {
@@ -37,8 +39,6 @@ export async function login(mobile: string, otp: string): Promise<{ ok: true; bu
   if (!data.ok) return { ok: false, error: data.error || "login_failed" };
   localStorage.setItem(TOKEN_KEY, data.token);
   localStorage.setItem(BUSINESS_KEY, JSON.stringify(data.business));
-  // Any lingering impersonation from a prior admin session is cleared on
-  // a fresh login so a new user never inherits it.
   localStorage.removeItem(IMPERSONATE_KEY);
   return { ok: true, business: data.business };
 }
@@ -54,8 +54,6 @@ export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
-// Returns the impersonated business when the admin is walking the wizard
-// on someone's behalf; falls back to the real logged-in business.
 export function getBusiness(): Business | null {
   if (typeof window === "undefined") return null;
   const imp = localStorage.getItem(IMPERSONATE_KEY);
@@ -67,9 +65,6 @@ export function getBusiness(): Business | null {
   try { return JSON.parse(raw) as Business; } catch { return null; }
 }
 
-// setBusiness writes to whichever slot is active — so state changes made
-// by the wizard during impersonation update the impersonated context, not
-// the admin's own business.
 export function setBusiness(b: Business) {
   if (typeof window !== "undefined" && localStorage.getItem(IMPERSONATE_KEY)) {
     localStorage.setItem(IMPERSONATE_KEY, JSON.stringify(b));
@@ -93,7 +88,6 @@ export function isImpersonating(): boolean {
   return !!localStorage.getItem(IMPERSONATE_KEY);
 }
 
-// Snapshot of the impersonated business for banner rendering.
 export function getImpersonatedBusiness(): Business | null {
   if (typeof window === "undefined") return null;
   const raw = localStorage.getItem(IMPERSONATE_KEY);
@@ -102,10 +96,18 @@ export function getImpersonatedBusiness(): Business | null {
 }
 
 // Decides where a user should land after login (or on any page mount).
+//
+// The EPC-facing routing is DECOUPLED from admin's internal `status`:
+//   - draft            → onboarding wizard
+//   - loan_app_unlocked → /dashboard (loan-app view)
+//   - anything else    → /status ("Under review")
+// This means an EPC with admin status='approved' but no lender approval
+// AND no grandfather flag stays on /status. Conversely, an EPC whose
+// admin status stays under_review but who's been ticked "approved" by
+// any lender gets the /dashboard immediately.
 export function routeForBusiness(b: Business): string {
   if (b.business_type === "admin") return "/admin";
   if (b.status === "draft") return `/onboarding/step-${Math.max(1, Math.min(b.current_step || 1, 7))}`;
-  if (b.status === "under_review" || b.status === "on_hold" || b.status === "rejected") return "/status";
-  if (b.status === "approved") return "/dashboard";
-  return "/login";
+  if (b.loan_app_unlocked === true) return "/dashboard";
+  return "/status";
 }
