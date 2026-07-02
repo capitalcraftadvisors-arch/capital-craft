@@ -28,6 +28,11 @@ type Props = {
   // Called whenever the slot's state changes (uploaded/replaced/removed) so
   // the parent can re-fetch the doc list. Optional.
   onChange?: () => void;
+  // When true, the slot renders nothing when no doc exists (no upload
+  // affordance). Used for legacy-only categories like stakeholder_aadhaar
+  // where new uploads should go to the split front/back categories, but
+  // an existing doc still needs to be viewable / replaceable / removable.
+  hideWhenEmpty?: boolean;
 };
 
 type Doc = {
@@ -38,13 +43,14 @@ type Doc = {
 };
 
 export default function AdminDocSlot({
-  businessId, stakeholderId, category, label, onChange,
+  businessId, stakeholderId, category, label, onChange, hideWhenEmpty,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [doc, setDoc] = useState<Doc | null>(null);
   const [thumb, setThumb] = useState<string | null>(null);
   const [busy, setBusy] = useState<"upload" | "replace" | "remove" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState(false);
 
   async function load() {
     let q = supabase()
@@ -63,6 +69,7 @@ export default function AdminDocSlot({
     } else {
       setThumb(null);
     }
+    setLoaded(true);
   }
 
   useEffect(() => { void load(); }, [businessId, stakeholderId, category]);
@@ -104,6 +111,11 @@ export default function AdminDocSlot({
     setThumb(null);
     onChange?.();
   }
+
+  // Legacy-only mode: after the initial load, if no doc exists we render
+  // nothing so the admin isn't offered an upload affordance for a category
+  // that's meant to be phased out.
+  if (hideWhenEmpty && loaded && !doc) return null;
 
   return (
     <div className="bg-white border border-line rounded-input p-3">

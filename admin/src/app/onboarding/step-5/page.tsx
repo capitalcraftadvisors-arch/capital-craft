@@ -13,11 +13,11 @@ type BusinessType = "proprietorship" | "pvt_ltd" | "partnership" | "llp" | null;
 
 function selfieLabel(bt: BusinessType): string {
   switch (bt) {
-    case "proprietorship":         return "Selfie of Proprietor at office";
+    case "proprietorship":         return "Selfie of proprietor at office";
     case "partnership":
-    case "llp":                    return "Selfie of Partner 1 at office";
-    case "pvt_ltd":                return "Selfie of Director at office";
-    default:                       return "Selfie at office";
+    case "llp":                    return "Selfie of at least 1 partner at office";
+    case "pvt_ltd":                return "Selfie of at least 1 director at office";
+    default:                       return "Selfie of at least 1 partner or at least 1 director at office";
   }
 }
 
@@ -86,14 +86,14 @@ export default function Step5Page() {
             <GeoOfficeUpload
               businessId={businessId}
               category="office_exterior"
-              label="Exterior (signboard)"
+              label="Exterior photo (signboard should be visible)"
             />
           </Card>
           <Card className="p-5">
             <GeoOfficeUpload
               businessId={businessId}
               category="office_interior"
-              label="Interior"
+              label="Interior photo"
             />
           </Card>
           <Card className="p-5">

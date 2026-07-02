@@ -207,6 +207,18 @@ function Inner() {
             hint="Auto-filled from the EPC's GST registration document. Optional."
           />
           <EditableField
+            label="GSTIN"
+            value={biz.gstin_number}
+            onSave={async (v) => saveField("gstin_number")(v.toUpperCase())}
+            validate={(v) =>
+              !v ? null
+              : /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/.test(v.toUpperCase())
+                  ? null
+                  : "Invalid GSTIN (15 chars)"
+            }
+            hint="Auto-filled from the EPC's GST registration document."
+          />
+          <EditableField
             label="PAN"
             value={biz.pan_number}
             onSave={async (v) => saveField("pan_number")(v.toUpperCase())}
@@ -357,8 +369,19 @@ function MembersEditor({
               {s.email ? ` · ${s.email}` : ""}
             </p>
             <div className="grid sm:grid-cols-2 gap-3 mt-2">
-              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_pan"     label="Member PAN card" />
-              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_aadhaar" label="Member Aadhaar card" />
+              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_pan"            label="Member PAN card" />
+              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_aadhaar_front"  label="Member Aadhaar card (front)" />
+              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_aadhaar_back"   label="Member Aadhaar card (back)" />
+              {/* Legacy category: shows only if a pre-split Aadhaar doc exists
+                  for this member (40 legacy EPCs). Never renders an upload
+                  affordance — admin can View / Replace / Remove only. */}
+              <AdminDocSlot
+                businessId={businessId}
+                stakeholderId={s.id}
+                category="stakeholder_aadhaar"
+                label="Member Aadhaar card (legacy)"
+                hideWhenEmpty
+              />
             </div>
           </div>
         ))}

@@ -139,7 +139,7 @@ export default function Step6Page() {
         <h1 className="font-display text-[24px] sm:text-[28px] font-bold">References</h1>
         <p className="text-text-mid mt-1">
           {isDraft
-            ? "Add at least 2 customer references and 2 supplier references."
+            ? "Add at least 2 customers and 2 suppliers details."
             : "Update your references as needed."}
         </p>
       </div>

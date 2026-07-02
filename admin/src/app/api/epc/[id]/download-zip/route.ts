@@ -266,12 +266,21 @@ function pathInZip(doc: Doc, memberLabelById: Map<string, string>): string {
     return `gst_r3b/${sanitizeSegment(prefix + fname)}`;
   }
 
-  if (doc.category === "stakeholder_pan" || doc.category === "stakeholder_aadhaar") {
+  if (
+    doc.category === "stakeholder_pan" ||
+    doc.category === "stakeholder_aadhaar" ||
+    doc.category === "stakeholder_aadhaar_front" ||
+    doc.category === "stakeholder_aadhaar_back"
+  ) {
     const label = doc.stakeholder_id
       ? (memberLabelById.get(doc.stakeholder_id) ??
          `Member (${doc.stakeholder_id.slice(0, 8)})`)
       : "Member (unknown)";
-    const kind = doc.category === "stakeholder_pan" ? "pan" : "aadhaar";
+    const kind =
+      doc.category === "stakeholder_pan"            ? "pan" :
+      doc.category === "stakeholder_aadhaar_front"  ? "aadhaar_front" :
+      doc.category === "stakeholder_aadhaar_back"   ? "aadhaar_back" :
+      /* stakeholder_aadhaar (legacy) */              "aadhaar_legacy";
     return `documents/members/${sanitizeSegment(label)}/${kind}/${fname}`;
   }
 
@@ -412,7 +421,8 @@ function renderSummaryHtml(data: {
   <tr><th>Trade name</th><td>${esc(biz.trade_name)}</td></tr>
   <tr><th>Business type</th><td>${esc(btLabel)}</td></tr>
   <tr><th>PAN</th><td class="mono">${esc(biz.pan_number)}</td></tr>
-  <tr><th>PM Surya Ghar Yojana</th><td>${suryaGharDisplay}</td></tr>
+  <tr><th>GSTIN</th><td class="mono">${esc(biz.gstin_number)}</td></tr>
+  <tr><th>PM Surya Ghar</th><td>${suryaGharDisplay}</td></tr>
 </table>
 
 <h2>Bank</h2>

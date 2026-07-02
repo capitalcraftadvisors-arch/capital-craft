@@ -2,24 +2,18 @@
 
 // Step 3 — Directors / Partners / Proprietor / generic Members.
 //
-// All labels and the section heading branch on epc_business.business_type
-// (which was saved in Step 2):
+// Labels branch on epc_business.business_type. Stakeholders JSONB shape:
+// { id, name, designation, mobile, email }. Backward-compat: legacy rows
+// missing mobile/email surface as "".
 //
-//   proprietorship  → "Proprietor details"  + single editable row whose
-//                     name + designation + mobile + email are pre-seeded
-//                     from Step 1's contact_name / contact_designation /
-//                     contact_mobile / contact_email. No add button.
-//                     If the JSONB has multiple rows (e.g. user switched
-//                     here from Pvt Ltd), we DESTRUCTIVELY TRIM to the
-//                     first on save and delete the dropped rows' docs.
-//   pvt_ltd         → "Director details"    + "Director N" rows, "+ Add Director"
-//   partnership/llp → "Partner details"     + "Partner N" rows, "+ Add Partner"
-//   null/unset      → "Member details"      + "Member N" rows, "+ Add Member"
+// Aadhaar layout: TWO SEPARATE slots per member — front + back — using the
+// new epc_doc_category enum values from migration 0015:
+//   stakeholder_aadhaar_front, stakeholder_aadhaar_back
+// Old-shape uploads (stakeholder_aadhaar) are NEVER deleted or migrated;
+// they surface as a "Legacy Aadhaar" slot on the admin detail page. Step 3
+// itself only exposes the two new slots for new onboarding.
 //
-// Stakeholders JSONB shape (v2): { id, name, designation, mobile, email }.
-// Backward-compatible read: legacy rows without mobile/email surface as "".
-// Mobile is REQUIRED (10-digit Indian mobile). Email is OPTIONAL but
-// validated when non-empty (EMAIL_RE).
+// Required-ness on new fields is enforced ONLY when status='draft'.
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -64,8 +58,6 @@ function configFor(bt: BizType): RoleConfig {
   }
 }
 
-// Backward-compat: coerce raw JSONB rows (which may be missing mobile/email
-// on legacy EPCs) into the current Stakeholder shape.
 function normalizeStakeholder(raw: unknown): Stakeholder {
   const r = raw as Record<string, unknown>;
   return {
@@ -86,6 +78,7 @@ export default function Step3Page() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const cfg = configFor(businessType);
+  const isDraft = getBusiness()?.status === "draft";
 
   useEffect(() => {
     const biz = getBusiness();
@@ -108,9 +101,6 @@ export default function Step3Page() {
       const existing = rawExisting.map(normalizeStakeholder);
 
       if (existing.length === 0) {
-        // Seed first row:
-        //   proprietorship → from Step 1 fields (editable)
-        //   others         → empty name+mobile+email + role-default designation
         const seeded: Stakeholder =
           bt === "proprietorship"
             ? {
@@ -147,7 +137,6 @@ export default function Step3Page() {
       void persistJsonb(next);
       return next;
     });
-    // Clear that field's error on edit.
     if (errors[`${id}.${key}`]) {
       setErrors((e) => {
         const c = { ...e };
@@ -197,7 +186,12 @@ export default function Step3Page() {
       if (!s.designation.trim()) errs[`${s.id}.designation`] = "Required";
       if (!s.mobile.trim())      errs[`${s.id}.mobile`]      = "Required";
       else if (!MOBILE_RE.test(s.mobile)) errs[`${s.id}.mobile`] = "Invalid 10-digit mobile";
-      if (s.email.trim() && !EMAIL_RE.test(s.email.trim())) {
+      // Email required only for new onboarding. Legacy/self-edit: only
+      // validate when non-empty.
+      if (isDraft) {
+        if (!s.email.trim()) errs[`${s.id}.email`] = "Required";
+        else if (!EMAIL_RE.test(s.email.trim())) errs[`${s.id}.email`] = "Invalid email";
+      } else if (s.email.trim() && !EMAIL_RE.test(s.email.trim())) {
         errs[`${s.id}.email`] = "Invalid email";
       }
     });
@@ -268,8 +262,8 @@ export default function Step3Page() {
         <h1 className="font-display text-[24px] sm:text-[28px] font-bold">{cfg.heading}</h1>
         <p className="text-text-mid mt-1">
           {businessType === "proprietorship"
-            ? "Confirm or correct the proprietor's details. Document uploads are optional."
-            : `At least one ${cfg.roleLabel.toLowerCase()} is required. Document uploads are optional.`}
+            ? "Confirm or correct the proprietor's details."
+            : `At least one ${cfg.roleLabel.toLowerCase()} is required.`}
         </p>
       </div>
 
@@ -316,7 +310,7 @@ export default function Step3Page() {
                 error={errors[`${s.id}.mobile`]}
               />
               <Input
-                label="Email (optional)"
+                label={isDraft ? "Email" : "Email (optional)"}
                 type="email"
                 placeholder="name@example.com"
                 value={s.email}
@@ -326,27 +320,41 @@ export default function Step3Page() {
             </div>
 
             {businessId && (
-              <div className="grid gap-5 sm:grid-cols-2 mt-5">
-                <div className="p-4 bg-bg-soft rounded-input border border-line">
-                  <FileUpload
-                    businessId={businessId}
-                    stakeholderId={s.id}
-                    table="epc_documents"
-                    category="stakeholder_aadhaar"
-                    maxFiles={4}
-                    label="Aadhaar card (optional)"
-                    hint="One or many."
-                  />
-                </div>
-                <div className="p-4 bg-bg-soft rounded-input border border-line">
-                  <FileUpload
-                    businessId={businessId}
-                    stakeholderId={s.id}
-                    table="epc_documents"
-                    category="stakeholder_pan"
-                    maxFiles={1}
-                    label="PAN card (optional)"
-                  />
+              <div className="mt-5 space-y-3">
+                <p className="text-[12px] font-semibold text-text-mid uppercase tracking-wide">
+                  Documents (optional)
+                </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="p-4 bg-bg-soft rounded-input border border-line">
+                    <FileUpload
+                      businessId={businessId}
+                      stakeholderId={s.id}
+                      table="epc_documents"
+                      category="stakeholder_pan"
+                      maxFiles={1}
+                      label="PAN card"
+                    />
+                  </div>
+                  <div className="p-4 bg-bg-soft rounded-input border border-line">
+                    <FileUpload
+                      businessId={businessId}
+                      stakeholderId={s.id}
+                      table="epc_documents"
+                      category={"stakeholder_aadhaar_front" as any}
+                      maxFiles={1}
+                      label="Aadhaar card (front)"
+                    />
+                  </div>
+                  <div className="p-4 bg-bg-soft rounded-input border border-line sm:col-start-2">
+                    <FileUpload
+                      businessId={businessId}
+                      stakeholderId={s.id}
+                      table="epc_documents"
+                      category={"stakeholder_aadhaar_back" as any}
+                      maxFiles={1}
+                      label="Aadhaar card (back)"
+                    />
+                  </div>
                 </div>
               </div>
             )}

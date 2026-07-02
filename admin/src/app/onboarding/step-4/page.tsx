@@ -17,7 +17,6 @@ type Form = {
   bank_account_number: string;
   confirm_account_number: string; // UI-only; not persisted
   bank_ifsc: string;
-  bank_branch: string;
   bank_name: string;
 };
 
@@ -36,7 +35,6 @@ export default function Step4Page() {
       bank_account_number: "",
       confirm_account_number: "",
       bank_ifsc: "",
-      bank_branch: "",
       bank_name: "",
     },
   });
@@ -56,7 +54,7 @@ export default function Step4Page() {
     (async () => {
       const { data } = await supabase()
         .from("epc_business")
-        .select("bank_account_number, bank_ifsc, bank_branch, bank_name")
+        .select("bank_account_number, bank_ifsc, bank_name")
         .eq("id", biz.id)
         .maybeSingle();
       reset({
@@ -65,7 +63,6 @@ export default function Step4Page() {
         // forced to re-type if they already verified it last session.
         confirm_account_number: data?.bank_account_number ?? "",
         bank_ifsc: data?.bank_ifsc ?? "",
-        bank_branch: data?.bank_branch ?? "",
         bank_name: data?.bank_name ?? "",
       });
     })();
@@ -103,7 +100,9 @@ export default function Step4Page() {
       .update({
         bank_account_number: values.bank_account_number || null,
         bank_ifsc: values.bank_ifsc ? values.bank_ifsc.toUpperCase() : null,
-        bank_branch: values.bank_branch || null,
+        // Branch input removed from the form; clear any stale value on save so
+        // the admin view / summary don't show a value the EPC can no longer edit.
+        bank_branch: null,
         bank_name: values.bank_name || null,
         // Account-holder field was removed from the form; clear any stale value.
         bank_account_holder: null,
@@ -150,7 +149,9 @@ export default function Step4Page() {
       <div className="mb-6">
         <h1 className="font-display text-[24px] sm:text-[28px] font-bold">Bank details</h1>
         <p className="text-text-mid mt-1">
-          Upload a cancelled cheque — we&rsquo;ll try to read it automatically. Optional, you can skip.
+          Upload a clear picture or copy of a cheque for the account where you&rsquo;d
+          like to receive payment. We&rsquo;ll read the account number, IFSC and bank
+          name automatically. This step is optional — you can skip and add these later.
         </p>
       </div>
 
@@ -163,7 +164,7 @@ export default function Step4Page() {
               category="cancelled_cheque"
               maxFiles={1}
               label="Cancelled cheque (optional)"
-              hint="JPG, PNG, WEBP, or PDF. We'll read the IFSC, account number, and bank name."
+              hint="JPG, PNG, WEBP, or PDF. Make sure the account number, IFSC and bank name are legible."
               onUploaded={handleChequeUploaded}
             />
             {ocrToast && (
@@ -178,7 +179,7 @@ export default function Step4Page() {
           <form className="grid gap-5 sm:grid-cols-2">
             <Input
               label="Account number"
-              placeholder="9 to 18 digits"
+              placeholder=""
               inputMode="numeric"
               {...register("bank_account_number", {
                 validate: (v) => !v || ACCOUNT_RE.test(v) || "9-18 digits",
@@ -187,7 +188,7 @@ export default function Step4Page() {
             />
             <Input
               label="Re-confirm account number"
-              placeholder="Type it again"
+              placeholder=""
               inputMode="numeric"
               {...register("confirm_account_number")}
               error={acctMismatch ? "Account numbers don't match." : undefined}
@@ -202,7 +203,7 @@ export default function Step4Page() {
 
             <Input
               label="IFSC code"
-              placeholder="ABCD0123456"
+              placeholder=""
               maxLength={11}
               {...register("bank_ifsc", {
                 validate: (v) => !v || IFSC_RE.test(v.toUpperCase()) || "Invalid IFSC",
@@ -212,14 +213,10 @@ export default function Step4Page() {
             />
             <Input
               label="Bank name"
-              placeholder="e.g. HDFC Bank (auto-filled from cheque)"
+              placeholder="e.g. HDFC Bank"
               {...register("bank_name")}
               hint="Auto-filled when the cheque is read. Edit if it looks wrong."
             />
-
-            <div className="sm:col-span-2">
-              <Input label="Branch" placeholder="Branch name" {...register("bank_branch")} />
-            </div>
           </form>
         </Card>
       </div>
