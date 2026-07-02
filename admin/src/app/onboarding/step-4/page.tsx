@@ -58,6 +58,13 @@ export default function Step4Page() {
     acct.length > 0 && acctConfirm.length > 0 && acct === acctConfirm;
   const acctMismatch =
     acctConfirm.length > 0 && acct !== acctConfirm;
+  // OCR-filled top box shows ••••••XXXX (last 4) while blurred, raw while
+  // focused. Both boxes are editable so the user/admin can correct the
+  // one OCR read wrong.
+  const [acctFocused, setAcctFocused] = useState(false);
+  const acctDisplay = acctFocused || acct.length <= 4
+    ? acct
+    : "•".repeat(acct.length - 4) + acct.slice(-4);
 
   useEffect(() => {
     const biz = getBusiness();
@@ -140,7 +147,7 @@ export default function Step4Page() {
         return alert("Please enter a valid account number (9-18 digits).");
       }
       if (v.bank_account_number !== v.confirm_account_number) {
-        return alert("The re-confirm account number doesn't match.");
+        return alert("OCR may have read the wrong value — please edit the account number so both boxes match.");
       }
       if (!v.bank_ifsc || !IFSC_RE.test(v.bank_ifsc.toUpperCase())) {
         return alert("Please enter a valid IFSC code.");
@@ -198,21 +205,36 @@ export default function Step4Page() {
 
         <Card className="p-6 sm:p-7">
           <form className="grid gap-5 sm:grid-cols-2">
+            {/* Top box: OCR-filled, MASKED (•••••XXXX) while blurred so */}
+            {/* the value from the cheque isn't visible in plain text.   */}
+            {/* Fully editable — click to focus, unmasks. Type or paste  */}
+            {/* to correct OCR errors. Stored raw in bank_account_number. */}
             <Input
               label="Account number"
               placeholder=""
               inputMode="numeric"
-              {...register("bank_account_number", {
-                validate: (v) => !v || ACCOUNT_RE.test(v) || "9-18 digits",
-              })}
+              value={acctDisplay}
+              onFocus={() => setAcctFocused(true)}
+              onBlur={() => setAcctFocused(false)}
+              onChange={(e) => {
+                // Guard against user editing the masked bullets; only accept
+                // digits and let react-hook-form hold the raw value.
+                const digits = e.target.value.replace(/\D/g, "");
+                setValue("bank_account_number", digits);
+              }}
               error={errors.bank_account_number?.message}
             />
+            {/* Bottom box: user re-enters, always visible, always editable. */}
             <Input
-              label="Re-confirm account number"
+              label="Re-enter account number"
               placeholder=""
               inputMode="numeric"
               {...register("confirm_account_number")}
-              error={acctMismatch ? "Account numbers don't match." : undefined}
+              error={
+                acctMismatch
+                  ? "OCR may have read the wrong value — please edit the account number."
+                  : undefined
+              }
               hint={
                 !acctMismatch && acctMatches
                   ? "Matches."

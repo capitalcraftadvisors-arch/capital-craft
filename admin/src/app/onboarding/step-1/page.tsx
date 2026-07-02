@@ -169,7 +169,7 @@ export default function Step1Page() {
 
       <div className="mb-6">
         <h1 className="font-display text-[24px] sm:text-[28px] font-bold">
-          Personal details
+          Identity details
         </h1>
         <p className="text-text-mid mt-1">
           Tell us who we&rsquo;ll be working with.

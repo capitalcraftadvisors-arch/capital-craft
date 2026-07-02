@@ -46,9 +46,15 @@ serve(async (req) => {
     if (!text) return json({ ok: false, error: "ocr_returned_empty" });
 
     const ifsc = (text.match(/\b[A-Z]{4}0[A-Z0-9]{6}\b/) || [])[0] ?? null;
+    // Account number lookup — label-anchored first, length-based only as
+    // a last resort. Real cheques carry multiple 9-18 digit runs (MICR
+    // band, cheque number, IFSC-adjacent numbers); picking the longest
+    // often returns MICR instead of the actual account number.
     const accountNumber =
-      (text.match(/\b\d{9,18}\b/g) || [])
-        .sort((a: string, b: string) => b.length - a.length)[0] ?? null;
+         findAccountByLabel(text)
+      ?? (text.match(/\b\d{9,18}\b/g) || [])
+           .sort((a: string, b: string) => b.length - a.length)[0]
+      ?? null;
     const bankName = bankFromIfsc(ifsc) ?? bankFromText(text);
 
     return json({ ok: true, raw: text, ifsc, accountNumber, bankName });
@@ -103,6 +109,37 @@ async function ocrPdf(base64: string, mimeType: string): Promise<string> {
   const pages: Array<{ fullTextAnnotation?: { text?: string } }> =
     data?.responses?.[0]?.responses ?? [];
   return pages.map((p) => p.fullTextAnnotation?.text ?? "").join("\n\n");
+}
+
+// ── Account number extraction ─────────────────────────────────────────────
+
+// Two tiers of label-anchored lookup:
+//   1. Inline: "A/C NO : 1234567890" / "Account No 1234567890"
+//   2. Label on one line, digits on the next 1-2 lines
+// Returns null if no label was detected — caller falls back to the
+// longest-digit-run heuristic.
+function findAccountByLabel(text: string): string | null {
+  const LABEL_INLINE_RE =
+    /(?:A\s*\/?\s*C(?:\s*No\.?)?|Account\s+(?:No\.?|Number))\s*[:.\-]?\s*(\d{9,18})/i;
+  const LABEL_LINE_RE =
+    /A\s*\/?\s*C\s*(?:No\.?)?|Account\s+(?:No\.?|Number)/i;
+
+  const inline = text.match(LABEL_INLINE_RE);
+  if (inline) return inline[1];
+
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    if (!LABEL_LINE_RE.test(lines[i])) continue;
+    // Same line first (in case a residual comma/space fell between).
+    const same = lines[i].match(/\b(\d{9,18})\b/);
+    if (same) return same[1];
+    // Then walk forward 1-2 lines.
+    for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
+      const next = lines[j].match(/\b(\d{9,18})\b/);
+      if (next) return next[1];
+    }
+  }
+  return null;
 }
 
 // ── Bank name extraction ───────────────────────────────────────────────────

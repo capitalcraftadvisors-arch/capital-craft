@@ -3,9 +3,9 @@
 type Step = { n: number; label: string; href: string };
 
 const STEPS: Step[] = [
-  { n: 1, label: "Personal",      href: "/onboarding/step-1" },
+  { n: 1, label: "Identity",      href: "/onboarding/step-1" },
   { n: 2, label: "Business",      href: "/onboarding/step-2" },
-  { n: 3, label: "Members",       href: "/onboarding/step-3" },
+  { n: 3, label: "Stakeholders",  href: "/onboarding/step-3" },
   { n: 4, label: "Bank",          href: "/onboarding/step-4" },
   { n: 5, label: "Office",        href: "/onboarding/step-5" },
   { n: 6, label: "References",    href: "/onboarding/step-6" },

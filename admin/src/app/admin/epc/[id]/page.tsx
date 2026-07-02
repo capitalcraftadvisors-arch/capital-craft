@@ -158,7 +158,7 @@ function Inner() {
           <StatusBadge status={biz.status} updated={biz.epc_self_edited === true} />
         </div>
 
-        <Section title="Personal">
+        <Section title="Identity">
           <EditableField
             label="Point of contact"
             value={biz.contact_name}
@@ -247,7 +247,7 @@ function Inner() {
           </div>
         </Section>
 
-        <Section title="Members">
+        <Section title="Stakeholders">
           <MembersEditor
             value={((biz.stakeholders ?? []) as unknown[]).map(normStakeholder)}
             onSave={saveStakeholders}

@@ -1,14 +1,15 @@
-// GET /api/epc/[id]/download-zip
+// GET /api/epc/[id]/download-zip?lender=creditfair|aerem|solfin
 //
 // Admin-only. Streams a fresh ZIP for the given EPC containing:
-//   - summary.xlsx            (Excel workbook: all profile data as
-//                              label + value rows on a single sheet.
-//                              Documents are intentionally OMITTED
-//                              from the workbook — the files themselves
-//                              are in the ZIP folders.)
-//   - documents/<category>/…  (pan_business, gstin, extra_doc, cancelled_cheque, office_*)
+//   - summary.xlsx            AEREM-template workbook. Title reads
+//                              "For CreditFair" / "For Aerem" / "For Solfin"
+//                              per the chosen lender; sections are identical
+//                              across all three lenders. See buildAeremXlsx.
+//                              Documents are OMITTED from the workbook —
+//                              the files themselves live in the ZIP folders.
+//   - documents/<category>/…  pan_business, gstin, extra_doc, cancelled_cheque, office_*
 //   - documents/members/<Member N - name>/{pan,aadhaar_front,aadhaar_back,aadhaar_legacy}/…
-//   - gst_r3b/…               (admin-only R3B files, prefixed by period-year)
+//   - gst_r3b/…               admin-only R3B files, prefixed by period-year
 //
 // Response is streamed (archiver → Node Readable → Web ReadableStream) so
 // the ZIP is never fully buffered. Missing GCS files are logged and
@@ -33,6 +34,15 @@ const SUPABASE_URL =
 const SUPABASE_ANON =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
+
+const LENDER_KEYS = ["creditfair", "aerem", "solfin"] as const;
+type LenderKey = typeof LENDER_KEYS[number];
+
+const LENDER_LABEL: Record<LenderKey, string> = {
+  creditfair: "CreditFair",
+  aerem:      "Aerem",
+  solfin:     "Solfin",
+};
 
 type Doc = {
   id: string;
@@ -76,6 +86,13 @@ export async function GET(
     const claims = await verifyJwt(token);
     if (claims.business_type !== "admin") return err("admin_only", 403);
 
+    // ── Lender query param — required ──────────────────────────────────
+    const lenderParam = (new URL(req.url).searchParams.get("lender") ?? "").toLowerCase();
+    if (!LENDER_KEYS.includes(lenderParam as LenderKey)) {
+      return err("missing_or_invalid_lender", 400);
+    }
+    const lender = lenderParam as LenderKey;
+
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
       global: { headers: { Authorization: `Bearer ${token}` } },
       auth: { persistSession: false, autoRefreshToken: false },
@@ -114,7 +131,8 @@ export async function GET(
       adminInfo = null;
     }
 
-    // ── Filename ──────────────────────────────────────────────────────
+    // ── Filename — includes lender so downloads for the same EPC across
+    // multiple lenders don't collide.
     const nameForFile = sanitizeName(
       (biz.trade_name as string) ||
       (biz.legal_name as string) ||
@@ -122,7 +140,7 @@ export async function GET(
       String(biz.id).slice(0, 8),
     );
     const dateStr = new Date().toISOString().slice(0, 10);
-    const filename = `EPC_${nameForFile}_${dateStr}.zip`;
+    const filename = `EPC_${nameForFile}_${LENDER_LABEL[lender]}_${dateStr}.zip`;
 
     // ── Archive ───────────────────────────────────────────────────────
     const archive = archiver("zip", { zlib: { level: 3 } });
@@ -158,12 +176,12 @@ export async function GET(
           }
         }
 
-        // Excel summary — one sheet, label + value rows.
-        // OMITS: documents list, lender status. Bank account is FULL/unmasked
-        // (the value the EPC typed and reconfirmed at Step 4).
-        const xlsx = await buildSummaryXlsx({
+        const xlsx = await buildAeremXlsx({
           biz: biz as Record<string, unknown>,
           adminInfo,
+          docs,
+          stakeholders,
+          lender,
         });
         archive.append(xlsx, { name: "summary.xlsx" });
 
@@ -249,7 +267,7 @@ function pathInZip(doc: Doc, memberLabelById: Map<string, string>): string {
   return `documents/${sanitizeSegment(doc.category)}/${fname}`;
 }
 
-// ── Excel summary ─────────────────────────────────────────────────────
+// ── AEREM Excel template ──────────────────────────────────────────────
 
 const BUSINESS_TYPE_LABEL: Record<string, string> = {
   proprietorship: "Proprietorship",
@@ -258,33 +276,58 @@ const BUSINESS_TYPE_LABEL: Record<string, string> = {
   llp:            "LLP",
 };
 
-function fmtDate(v: unknown): string {
-  if (!v) return "";
-  try {
-    return new Date(String(v)).toLocaleString("en-IN", {
-      dateStyle: "medium", timeStyle: "short",
-    });
-  } catch {
-    return String(v);
-  }
-}
-
 function display(v: unknown): string {
   if (v === null || v === undefined) return "";
   const s = String(v);
   return s.trim();
 }
 
-async function buildSummaryXlsx(data: {
+const COLOR_BRAND_GREEN     = "FF178A5C";
+const COLOR_BRAND_GREEN_BG  = "FFDCEFE4";
+const COLOR_SECTION_BG      = "FFE5E7EB";
+const COLOR_SECTION_TEXT    = "FF0F3D2E";
+const COLOR_LABEL           = "FF374151";
+const COLOR_MUTED           = "FF6B7280";
+
+async function buildAeremXlsx(data: {
   biz: Record<string, unknown>;
   adminInfo: Record<string, unknown> | null;
+  docs: Doc[];
+  stakeholders: Stakeholder[];
+  lender: LenderKey;
 }): Promise<Buffer> {
-  const { biz, adminInfo } = data;
+  const { biz, adminInfo, docs, stakeholders, lender } = data;
 
-  const stakeholders = ((biz.stakeholders ?? []) as unknown[]).map((s) => s as Stakeholder);
+  // GST turnover — sum of total_taxable_value across all uploaded R3B docs.
+  // Matches the total the View page already displays for the admin.
+  const r3bTotal = docs
+    .filter((d) => d.category === "gst_r3b")
+    .reduce((s, d) => {
+      const v = (d.metadata as { total_taxable_value?: number } | null)?.total_taxable_value;
+      return typeof v === "number" && !isNaN(v) ? s + v : s;
+    }, 0);
+
+  // Per-stakeholder doc presence flags.
+  const hasPan = new Map<string, boolean>();
+  const hasAadhaarFront = new Map<string, boolean>();
+  const hasAadhaarBack = new Map<string, boolean>();
+  const hasAadhaarLegacy = new Map<string, boolean>();
+  for (const d of docs) {
+    if (!d.stakeholder_id) continue;
+    const id = d.stakeholder_id;
+    if (d.category === "stakeholder_pan")            hasPan.set(id, true);
+    if (d.category === "stakeholder_aadhaar_front")  hasAadhaarFront.set(id, true);
+    if (d.category === "stakeholder_aadhaar_back")   hasAadhaarBack.set(id, true);
+    if (d.category === "stakeholder_aadhaar")        hasAadhaarLegacy.set(id, true);
+  }
+
   const refs = ((biz.business_references ?? []) as unknown[]).map((r) => r as Reference);
   const customers = refs.filter((r) => r.type === "customer");
   const suppliers = refs.filter((r) => r.type === "supplier");
+  const buyer1 = customers[0] ?? { name: "", mobile: "" };
+  const buyer2 = customers[1] ?? { name: "", mobile: "" };
+  const supplier1 = suppliers[0] ?? { name: "", mobile: "" };
+  const supplier2 = suppliers[1] ?? { name: "", mobile: "" };
 
   const btLabel = BUSINESS_TYPE_LABEL[(biz.business_type as string) ?? ""] ?? String(biz.business_type ?? "");
   const suryaGhar = biz.pm_surya_ghar as string | null;
@@ -298,123 +341,146 @@ async function buildSummaryXlsx(data: {
   wb.creator = "Capital Craft — admin export";
   wb.created = new Date();
 
-  const ws = wb.addWorksheet("Profile");
-  ws.columns = [
-    { header: "", key: "label", width: 34 },
-    { header: "", key: "value", width: 60 },
-  ];
+  const ws = wb.addWorksheet("Summary");
 
-  // Header row.
-  const titleText = String(biz.trade_name || biz.legal_name || biz.contact_name || "EPC");
-  const titleRow = ws.addRow([titleText, ""]);
-  titleRow.getCell(1).font = { bold: true, size: 16, color: { argb: "FF0F3D2E" } };
-  ws.mergeCells(titleRow.number, 1, titleRow.number, 2);
-  const generated = ws.addRow([`Generated ${new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}`, ""]);
-  generated.getCell(1).font = { italic: true, color: { argb: "FF5A8A76" }, size: 10 };
-  ws.mergeCells(generated.number, 1, generated.number, 2);
+  // Column widths tuned for the stakeholder table: label column wide (28),
+  // then one wide column per stakeholder (24 each). Minimum 2 columns so
+  // small EPCs with 1 stakeholder still get some breathing room.
+  const stakeholderCols = Math.max(2, stakeholders.length);
+  const totalCols = 1 + stakeholderCols;
+  ws.getColumn(1).width = 34;
+  for (let c = 2; c <= totalCols; c++) {
+    ws.getColumn(c).width = 26;
+  }
+
+  // ── Title: "For <LENDER>" ───────────────────────────────────────
+  const titleRow = ws.addRow([`For ${LENDER_LABEL[lender]}`]);
+  ws.mergeCells(titleRow.number, 1, titleRow.number, totalCols);
+  const titleCell = titleRow.getCell(1);
+  titleCell.font = { bold: true, size: 18, color: { argb: "FFFFFFFF" } };
+  titleCell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR_BRAND_GREEN } };
+  titleCell.alignment = { horizontal: "center", vertical: "middle" };
+  titleRow.height = 32;
   ws.addRow([]);
 
-  // Utility to add a section heading and a set of key-value rows.
-  const section = (name: string, rows: Array<[string, unknown]>) => {
-    const headingRow = ws.addRow([name.toUpperCase(), ""]);
-    headingRow.getCell(1).font = { bold: true, size: 11, color: { argb: "FF178A5C" } };
-    headingRow.getCell(1).alignment = { vertical: "middle" };
-    ws.mergeCells(headingRow.number, 1, headingRow.number, 2);
-    for (const [label, value] of rows) {
-      const r = ws.addRow([label, display(value) || "—"]);
-      r.getCell(1).font = { bold: true, color: { argb: "FF5A8A76" } };
-      r.getCell(2).alignment = { wrapText: true, vertical: "top" };
-    }
-    ws.addRow([]);
+  // ── Utility: section heading (grey band across all columns) ────
+  const sectionHeader = (label: string) => {
+    const r = ws.addRow([label]);
+    ws.mergeCells(r.number, 1, r.number, totalCols);
+    const c = r.getCell(1);
+    c.font = { bold: true, size: 12, color: { argb: COLOR_SECTION_TEXT } };
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR_SECTION_BG } };
+    c.alignment = { vertical: "middle" };
+    r.height = 22;
   };
 
-  // ── META ─────────────────────────────────────────────────────────
-  section("Meta", [
-    ["EPC Display ID", biz.epc_display_id],
-    ["Internal status", biz.status],
-    ["Loan-app unlocked", biz.loan_app_unlocked === true ? "Yes" : "No"],
-    ["Grandfathered", biz.loan_app_grandfathered === true ? "Yes" : "No"],
-    ["Source", biz.source],
-    ["Current step", biz.current_step],
-    ["EPC self-edited", biz.epc_self_edited === true ? "Yes" : "No"],
-    ["Created", fmtDate(biz.created_at)],
-    ["Submitted", fmtDate(biz.submitted_at)],
-    ["Last updated", fmtDate(biz.updated_at)],
-    ["Row ID (uuid)", biz.id],
+  // Value row for the standard 2-column sections (label | value).
+  const kv = (label: string, value: unknown) => {
+    const r = ws.addRow([label, display(value) || "—", ...Array(totalCols - 2).fill("")]);
+    r.getCell(1).font = { bold: true, color: { argb: COLOR_LABEL } };
+    r.getCell(2).alignment = { wrapText: true, vertical: "top" };
+    if (totalCols > 2) ws.mergeCells(r.number, 2, r.number, totalCols);
+  };
+
+  // ── Business Details ────────────────────────────────────────────
+  sectionHeader("Business Details");
+  kv("Legal name",   biz.legal_name);
+  kv("Trade name",   biz.trade_name);
+  kv("Business type", btLabel);
+  kv("PAN",          biz.pan_number);
+  kv("GSTIN",        biz.gstin_number);
+  kv("PM Surya Ghar", suryaGharDisplay);
+  ws.addRow([]);
+
+  // ── Stakeholder Details (columns per stakeholder) ──────────────
+  sectionHeader("Stakeholder Details");
+  // Header row: "" | Stake Holder 1 | Stake Holder 2 | ...
+  const shHeader = ws.addRow([
+    "",
+    ...Array.from({ length: stakeholderCols }, (_, i) => `Stake Holder ${i + 1}`),
   ]);
+  shHeader.eachCell({ includeEmpty: false }, (c, idx) => {
+    if (idx === 1) return;
+    c.font = { bold: true, color: { argb: COLOR_SECTION_TEXT } };
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: COLOR_BRAND_GREEN_BG } };
+    c.alignment = { horizontal: "center" };
+  });
 
-  // ── PERSONAL ─────────────────────────────────────────────────────
-  section("Personal", [
-    ["Point of contact", biz.contact_name],
-    ["Email", biz.contact_email],
-    ["Mobile (login)", biz.contact_mobile ? `+91 ${display(biz.contact_mobile)}` : ""],
-    ["Designation", biz.contact_designation],
-  ]);
+  // Field labels down column A; one column per stakeholder for the value.
+  const stakeholderField = (label: string, valueFor: (s: Stakeholder | undefined) => string) => {
+    const values = Array.from({ length: stakeholderCols }, (_, i) => valueFor(stakeholders[i]));
+    const r = ws.addRow([label, ...values]);
+    r.getCell(1).font = { bold: true, color: { argb: COLOR_LABEL } };
+    for (let c = 2; c <= totalCols; c++) {
+      const cell = r.getCell(c);
+      cell.alignment = { wrapText: true, vertical: "top" };
+      if (!cell.value) cell.value = "—";
+    }
+  };
 
-  // ── BUSINESS ─────────────────────────────────────────────────────
-  section("Business", [
-    ["Legal name", biz.legal_name],
-    ["Trade name", biz.trade_name],
-    ["Business type", btLabel],
-    ["PAN", biz.pan_number],
-    ["GSTIN", biz.gstin_number],
-    ["PM Surya Ghar", suryaGharDisplay],
-  ]);
+  stakeholderField("Stakeholder Name", (s) => display(s?.name));
+  stakeholderField("Designation",      (s) => display(s?.designation));
+  stakeholderField("Mob No",           (s) => s?.mobile ? `+91 ${s.mobile}` : "");
+  stakeholderField("Email ID",         (s) => display(s?.email));
+  stakeholderField("PAN", (s) => {
+    if (!s) return "";
+    return hasPan.get(s.id) ? "uploaded ✓" : "—";
+  });
+  stakeholderField("Aadhar", (s) => {
+    if (!s) return "";
+    const legacy = hasAadhaarLegacy.get(s.id);
+    const both = hasAadhaarFront.get(s.id) && hasAadhaarBack.get(s.id);
+    if (both || legacy) return "uploaded ✓";
+    const partial = hasAadhaarFront.get(s.id) || hasAadhaarBack.get(s.id);
+    return partial ? "partial" : "—";
+  });
+  ws.addRow([]);
 
-  // ── BANK — account number is FULL/unmasked ───────────────────────
-  // The value stored in epc_business.bank_account_number is what the
-  // EPC re-entered in the "re-confirm account number" field on Step 4
-  // (Step 4 blocks Save & continue until reconfirm matches). The admin
-  // detail edit path also persists the raw digits. Masking is UI-only.
-  section("Bank", [
-    ["Account holder", biz.bank_account_holder],
-    ["Account number", biz.bank_account_number],
-    ["IFSC", biz.bank_ifsc],
-    ["Bank name", biz.bank_name],
-  ]);
+  // ── Bank Details ─────────────────────────────────────────────────
+  sectionHeader("Bank Details");
+  kv("Account Number", biz.bank_account_number);   // full/unmasked
+  kv("IFSC",           biz.bank_ifsc);
+  kv("Bank Name",      biz.bank_name);
+  ws.addRow([]);
 
-  // ── MEMBERS ──────────────────────────────────────────────────────
-  const memberRows: Array<[string, unknown]> = [];
-  if (stakeholders.length === 0) {
-    memberRows.push(["(none)", ""]);
-  } else {
-    stakeholders.forEach((s, i) => {
-      const prefix = `${i + 1}.`;
-      memberRows.push([`${prefix} Name`, s.name]);
-      memberRows.push([`${prefix} Designation`, s.designation]);
-      memberRows.push([`${prefix} Mobile`, s.mobile ? `+91 ${s.mobile}` : ""]);
-      memberRows.push([`${prefix} Email`, s.email]);
-    });
-  }
-  section(`Members (${stakeholders.length})`, memberRows);
+  // ── Other Details ────────────────────────────────────────────────
+  sectionHeader("Other Details");
+  kv("Total Team Size (Technical + Non-Technical)", adminInfo?.team_size);
+  const capResi = adminInfo?.capacity_residential
+    ? `${display(adminInfo.capacity_residential)} ${display(adminInfo?.capacity_residential_unit)}`.trim()
+    : "";
+  const capComm = adminInfo?.capacity_commercial
+    ? `${display(adminInfo.capacity_commercial)} ${display(adminInfo?.capacity_commercial_unit)}`.trim()
+    : "";
+  kv("Installed Capacity (Resi.)",            capResi);
+  kv("Installed Capacity (Comm.)",            capComm);
+  kv("Last FY Turnover",                      adminInfo?.turnover_last_fy);
+  kv("GST Turnover (Latest 12 Months)",
+     `₹${r3bTotal.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`);
+  ws.addRow([]);
 
-  // ── REFERENCES ───────────────────────────────────────────────────
-  const refRows: Array<[string, unknown]> = [];
-  if (refs.length === 0) {
-    refRows.push(["(none)", ""]);
-  } else {
-    customers.forEach((r, i) => {
-      refRows.push([`Customer ${i + 1} name`, r.name]);
-      refRows.push([`Customer ${i + 1} mobile`, r.mobile ? `+91 ${r.mobile}` : ""]);
-    });
-    suppliers.forEach((r, i) => {
-      refRows.push([`Supplier ${i + 1} name`, r.name]);
-      refRows.push([`Supplier ${i + 1} mobile`, r.mobile ? `+91 ${r.mobile}` : ""]);
-    });
-  }
-  section(`References (${refs.length})`, refRows);
+  // ── Reference Details ────────────────────────────────────────────
+  sectionHeader("Reference Details");
+  // Sub-header for the two-column layout inside this section: Name | Phone No
+  const refHeader = ws.addRow(["", "Name", "Phone No", ...Array(totalCols - 3).fill("")]);
+  refHeader.getCell(2).font = { bold: true, color: { argb: COLOR_MUTED } };
+  refHeader.getCell(3).font = { bold: true, color: { argb: COLOR_MUTED } };
+  if (totalCols > 3) ws.mergeCells(refHeader.number, 3, refHeader.number, totalCols);
 
-  // ── ADMIN INFO ───────────────────────────────────────────────────
-  if (adminInfo) {
-    section("Admin business info", [
-      ["Team size", adminInfo.team_size],
-      ["Installed capacity (Residential)", `${display(adminInfo.capacity_residential)} ${display(adminInfo.capacity_residential_unit)}`.trim()],
-      ["Installed capacity (Commercial)",  `${display(adminInfo.capacity_commercial)} ${display(adminInfo.capacity_commercial_unit)}`.trim()],
-      ["Turnover (last FY)", adminInfo.turnover_last_fy],
-    ]);
-  }
+  const refRow = (label: string, r: Reference) => {
+    const row = ws.addRow([label, display(r.name), r.mobile ? `+91 ${r.mobile}` : "", ...Array(totalCols - 3).fill("")]);
+    row.getCell(1).font = { bold: true, color: { argb: COLOR_LABEL } };
+    row.getCell(2).alignment = { wrapText: true, vertical: "top" };
+    row.getCell(3).alignment = { wrapText: true, vertical: "top" };
+    if (!row.getCell(2).value) row.getCell(2).value = "—";
+    if (!row.getCell(3).value) row.getCell(3).value = "—";
+    if (totalCols > 3) ws.mergeCells(row.number, 3, row.number, totalCols);
+  };
 
-  // Lender status is intentionally OMITTED from the Excel per spec.
+  refRow("Buyer 1",    buyer1 as Reference);
+  refRow("Buyer 2",    buyer2 as Reference);
+  refRow("Supplier 1", supplier1 as Reference);
+  refRow("Supplier 2", supplier2 as Reference);
 
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf as ArrayBuffer);

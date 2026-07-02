@@ -23,6 +23,7 @@ import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
 import { getDocumentUrl } from "@/lib/storage";
 import { logAudit } from "@/lib/auditLog";
+import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 
 export default function AdminEpcViewPage() {
   return (
@@ -64,7 +65,7 @@ function peopleHeading(bt: string | null | undefined): string {
     case "pvt_ltd":        return "Director details";
     case "partnership":
     case "llp":            return "Partner details";
-    default:               return "Member details";
+    default:               return "Stakeholder details";
   }
 }
 
@@ -74,7 +75,7 @@ function roleLabel(bt: string | null | undefined): string {
     case "pvt_ltd":        return "Director";
     case "partnership":
     case "llp":            return "Partner";
-    default:               return "Member";
+    default:               return "Stakeholder";
   }
 }
 
@@ -140,6 +141,7 @@ function Inner() {
   const [adminInfo, setAdminInfo] = useState<AdminInfo | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [zipPickerOpen, setZipPickerOpen] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -201,11 +203,11 @@ function Inner() {
     }
   }
 
-  async function downloadZip() {
+  async function downloadZip(lender: LenderKey) {
     if (!biz || downloading) return;
     setDownloading(true);
     try {
-      const res = await fetch(`/api/epc/${biz.id}/download-zip`, {
+      const res = await fetch(`/api/epc/${biz.id}/download-zip?lender=${lender}`, {
         headers: { Authorization: `Bearer ${getToken() ?? ""}` },
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -471,7 +473,7 @@ function Inner() {
           </button>
           <button
             type="button"
-            onClick={downloadZip}
+            onClick={() => setZipPickerOpen(true)}
             disabled={downloading}
             className="flex-1 py-3.5 text-[15px] font-semibold bg-[#185fa5] text-white rounded-[10px] hover:bg-[#144d84] disabled:opacity-70 inline-flex items-center justify-center gap-2"
           >
@@ -480,6 +482,13 @@ function Inner() {
         </div>
 
       </div>
+
+      <LenderPickerModal
+        open={zipPickerOpen}
+        onClose={() => setZipPickerOpen(false)}
+        epcName={trade}
+        onConfirm={(lender) => downloadZip(lender)}
+      />
     </main>
   );
 }

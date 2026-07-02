@@ -65,24 +65,31 @@ serve(async (req) => {
 
     const gstin = matchGstin(text);
 
-    // Step 1: in-place label matchers, specific → generic.
-    // For Legal Name: three chained patterns. Generic 2-word `/Legal\s+Name/i`
-    // is the LAST resort so it doesn't outrun the more descriptive labels
-    // on documents that use them.
-    let legal_name =
-         matchAfterFormLabel(text, /Legal\s+Name\s+of\s+Business/i)
-      ?? matchAfterFormLabel(text, /Legal\s+name\s+of\s+the\s+registered\s+person/i)
-      ?? matchAfterFormLabel(text, /Legal\s+Name/i);
+    // Step 0 (PREFERRED): pair-aware Annexure-block matcher.
+    // Requires "Legal Name" → adjacent value → "Trade Name, if any" →
+    // adjacent value. Guarantees the value goes into the CORRECT field
+    // (never swaps legal ↔ trade) because each value is directly under
+    // its own label. Handles JAYANT SOLAR (legal == trade) and the LALIT
+    // / ANJALI cert cleanly.
+    const block = parseAnnexureBlock(text);
+    let legal_name: string | null = block.legal;
+    let trade_name: string | null = block.trade;
 
-    // For Trade Name: one pattern that consumes ", if any" / "(if any)"
-    // as part of the label. Lines containing "Additional trade" are
-    // skipped by skipLine so REG-06 row 3 ("Additional trade names,
-    // if any") never satisfies this matcher.
-    let trade_name = matchAfterFormLabel(
-      text,
-      /Trade\s+Name(?:\s*[,\(]?\s*if\s+any\s*\)?)?/i,
-      { skipLine: ADDITIONAL_TRADE_RE },
-    );
+    // Step 1 (fallback): per-label matchers. Only fire if the Annexure
+    // block didn't yield a clean pair.
+    if (!legal_name || isLabelOrPrefix(legal_name)) {
+      legal_name =
+           matchAfterFormLabel(text, /Legal\s+Name\s+of\s+Business/i)
+        ?? matchAfterFormLabel(text, /Legal\s+name\s+of\s+the\s+registered\s+person/i)
+        ?? matchAfterFormLabel(text, /Legal\s+Name/i);
+    }
+    if (!trade_name || isLabelOrPrefix(trade_name)) {
+      trade_name = matchAfterFormLabel(
+        text,
+        /Trade\s+Name(?:\s*[,\(]?\s*if\s+any\s*\)?)?/i,
+        { skipLine: ADDITIONAL_TRADE_RE },
+      );
+    }
 
     // Step 2: columnar fallback if either field came back null or as a
     // label/prefix/fragment scrap.
@@ -298,6 +305,94 @@ function matchAfterFormLabel(
     // next occurrence of the same label further down the document.
   }
   return null;
+}
+
+// Pair-aware Annexure-block matcher. Guarantees legal ↔ row-1 and
+// trade ↔ row-2 by requiring each value to be directly adjacent to its
+// own label. The pattern this matches is:
+//
+//   Legal Name              (any form: "Legal Name", "Legal Name of Business",
+//                            or "Legal name of the registered person")
+//   <legal value>           (adjacent — skips empty / fragment lines)
+//   Trade Name, if any      (or "Trade Name" alone)
+//   <trade value>
+//
+// Real REG-06 certs guarantee this shape in Annexure A and Annexure B.
+// Page 1's numbered table, when Vision reads it column-by-column, does
+// NOT have adjacent value-to-label alignment — so this matcher rejects
+// that block and moves on to the Annexure pages further down, giving
+// pair-correct output every time.
+//
+// Duplicate values (legal == trade, e.g. "JAYANT SOLAR" / "JAYANT SOLAR")
+// are fine — the two values come from DIFFERENT lines in the OCR text.
+function parseAnnexureBlock(text: string): { legal: string | null; trade: string | null } {
+  const lines = text.split(/\r?\n/);
+
+  const LEGAL_LABEL_RE =
+    /^(?:Legal\s+Name(?:\s+of\s+Business)?|Legal\s+name\s+of\s+the\s+registered\s+person)$/i;
+  const TRADE_LABEL_RE = /^Trade\s+Name(?:\s*[,\(]?\s*if\s+any\s*\)?)?$/i;
+
+  // Look at a stripped, trimmed line and normalize trailing punctuation
+  // ("Legal Name:" or "Legal Name," -> "Legal Name") so the label regex
+  // matches robustly.
+  const norm = (s: string) => stripTableNumber(s).trim().replace(/[,:.]+\s*$/, "");
+
+  for (let i = 0; i < lines.length; i++) {
+    if (ADDITIONAL_TRADE_RE.test(lines[i])) continue;
+    if (!LEGAL_LABEL_RE.test(norm(lines[i]))) continue;
+
+    // Look up to 3 lines forward for a legal VALUE. Skip empty /
+    // fragment lines; abort if we hit another form label first.
+    let legal: string | null = null;
+    let cursor = i + 1;
+    for (let steps = 0; cursor < lines.length && steps < 4; cursor++, steps++) {
+      if (ADDITIONAL_TRADE_RE.test(lines[cursor])) continue;
+      const raw = stripTableNumber(lines[cursor]).trim();
+      if (!raw) continue;
+      if (isJustSectionPrefix(raw)) continue;
+      if (LEGAL_LABEL_RE.test(norm(lines[cursor]))) continue; // duplicate legal label
+      if (OTHER_FORM_LABEL_RE.test(raw)) break;
+      const candidate = stripLeadingLabelScraps(stripSectionPrefix(raw));
+      if (candidate && !looksLikeLabelFragment(candidate)) {
+        legal = cap(candidate);
+        cursor++;
+        break;
+      }
+    }
+    if (!legal) continue;
+
+    // Look up to 5 lines forward for the Trade Name label. Skip "Additional
+    // trade..." lines. Abort if we hit ANOTHER non-Trade form label first.
+    let foundTradeLabelAt = -1;
+    for (let steps = 0; cursor < lines.length && steps < 6; cursor++, steps++) {
+      if (ADDITIONAL_TRADE_RE.test(lines[cursor])) continue;
+      const n = norm(lines[cursor]);
+      if (!n) continue;
+      if (TRADE_LABEL_RE.test(n)) { foundTradeLabelAt = cursor; break; }
+      // If we hit another sibling label (GSTIN, Constitution, etc.) or a
+      // duplicate Legal label, this block isn't a clean Annexure pair.
+      if (OTHER_FORM_LABEL_RE.test(lines[cursor]) && !TRADE_LABEL_RE.test(n)) break;
+    }
+    if (foundTradeLabelAt === -1) continue;
+
+    // Look up to 3 lines forward for the trade VALUE.
+    let trade: string | null = null;
+    for (let k = foundTradeLabelAt + 1; k < lines.length && k < foundTradeLabelAt + 5; k++) {
+      if (ADDITIONAL_TRADE_RE.test(lines[k])) continue;
+      const raw = stripTableNumber(lines[k]).trim();
+      if (!raw) continue;
+      if (isJustSectionPrefix(raw)) continue;
+      if (TRADE_LABEL_RE.test(norm(lines[k]))) continue;
+      if (OTHER_FORM_LABEL_RE.test(raw)) break;
+      const candidate = stripLeadingLabelScraps(stripSectionPrefix(raw));
+      if (candidate && !looksLikeLabelFragment(candidate)) {
+        trade = cap(candidate);
+        break;
+      }
+    }
+    if (trade) return { legal, trade };
+  }
+  return { legal: null, trade: null };
 }
 
 // Columnar layout fallback (GSTN-portal cert / R3B style). Anchors on the

@@ -143,7 +143,7 @@ export default function ReviewPage() {
       )}
 
       <div className="space-y-5">
-        <Section title="Personal">
+        <Section title="Identity">
           <Row k="Name" v={biz.contact_name} />
           <Row k="Mobile" v={biz.contact_mobile} />
           <Row k="Designation" v={biz.contact_designation} />
@@ -154,7 +154,7 @@ export default function ReviewPage() {
           <Row k="PAN" v={biz.pan_number} />
         </Section>
 
-        <Section title="Members">
+        <Section title="Stakeholders">
           {(biz.stakeholders ?? []).length === 0 ? <Empty /> : (biz.stakeholders ?? []).map((s) => (
             <Row key={s.id} k={s.name} v={s.designation} />
           ))}

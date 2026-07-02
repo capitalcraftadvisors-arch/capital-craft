@@ -54,7 +54,7 @@ function configFor(bt: BizType): RoleConfig {
     case "llp":
       return { heading: "Partner details", roleLabel: "Partner", addButtonLabel: "+ Add Partner", defaultDesignation: "Partner", maxRows: Infinity };
     default:
-      return { heading: "Member details", roleLabel: "Member", addButtonLabel: "+ Add Member", defaultDesignation: "", maxRows: Infinity };
+      return { heading: "Stakeholders details", roleLabel: "Stakeholder", addButtonLabel: "+ Add Stakeholder", defaultDesignation: "", maxRows: Infinity };
   }
 }
 

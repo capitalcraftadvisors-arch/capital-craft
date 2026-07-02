@@ -9,6 +9,7 @@ import Select from "@/components/ui/Select";
 import Button from "@/components/ui/Button";
 import StatusBadge from "@/components/StatusBadge";
 import AddNewEpcModal from "@/components/AddNewEpcModal";
+import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import { supabase } from "@/lib/supabase";
 import { logout, getToken } from "@/lib/auth";
 
@@ -156,6 +157,7 @@ function EpcsTab() {
   const [lenderState, setLenderState] = useState<Record<string, LenderMap>>({});
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
   const [addOpen, setAddOpen] = useState(false);
+  const [zipPickerRow, setZipPickerRow] = useState<Row | null>(null);
 
   async function load() {
     let query = supabase().from("epc_business")
@@ -260,11 +262,11 @@ function EpcsTab() {
     }
   }
 
-  async function downloadZip(row: Row) {
+  async function downloadZip(row: Row, lender: LenderKey) {
     if (downloading[row.id]) return;
     setDownloading((d) => ({ ...d, [row.id]: true }));
     try {
-      const res = await fetch(`/api/epc/${row.id}/download-zip`, {
+      const res = await fetch(`/api/epc/${row.id}/download-zip?lender=${lender}`, {
         headers: { Authorization: `Bearer ${getToken() ?? ""}` },
       });
       if (!res.ok) {
@@ -405,7 +407,7 @@ function EpcsTab() {
                     <button
                       type="button"
                       disabled={!!downloading[r.id]}
-                      onClick={() => downloadZip(r)}
+                      onClick={() => setZipPickerRow(r)}
                       className={[
                         "text-[12px] font-semibold px-3 py-1.5 rounded-input border transition-colors inline-flex items-center justify-center gap-1.5",
                         downloading[r.id]
@@ -430,6 +432,16 @@ function EpcsTab() {
       </Card>
 
       <AddNewEpcModal open={addOpen} onClose={() => setAddOpen(false)} />
+      <LenderPickerModal
+        open={!!zipPickerRow}
+        onClose={() => setZipPickerRow(null)}
+        epcName={zipPickerRow ? (zipPickerRow.trade_name || zipPickerRow.legal_name || zipPickerRow.contact_name) : null}
+        onConfirm={async (lender) => {
+          const row = zipPickerRow;
+          if (!row) return;
+          await downloadZip(row, lender);
+        }}
+      />
     </>
   );
 }
