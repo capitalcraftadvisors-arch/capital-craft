@@ -158,8 +158,15 @@ export async function GET(
           memberLabelById.set(s.id, `Member ${i + 1}${nameBit}`);
         });
 
-        // Download + append each document. Missing files are silently
-        // skipped (logged); the workbook doesn't mention them.
+        // Track every doc as we walk it — feeds the manifest.txt at the
+        // end of the build.
+        type Entry =
+          | { status: "INCLUDED"; category: string; storage_path: string; zip_path: string; size: number; file_name: string | null }
+          | { status: "MISSING";  category: string; storage_path: string; zip_path: string; error: string; file_name: string | null };
+        const manifest: Entry[] = [];
+
+        // Download + append each document. Missing files are logged and
+        // recorded in the manifest but never abort the build.
         for (const doc of docs) {
           const zipPath = pathInZip(doc, memberLabelById);
           try {
@@ -168,14 +175,32 @@ export async function GET(
               name: zipPath,
               date: doc.created_at ? new Date(doc.created_at) : undefined,
             });
+            manifest.push({
+              status: "INCLUDED",
+              category: doc.category,
+              file_name: doc.file_name,
+              storage_path: doc.storage_path,
+              zip_path: zipPath,
+              size: buf.length,
+            });
+            console.log(`[download-zip] included ${doc.category} ${doc.storage_path} (${buf.length}B) -> ${zipPath}`);
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             console.warn(
               `[download-zip] missing/failed: ${doc.storage_path} — ${msg}`,
             );
+            manifest.push({
+              status: "MISSING",
+              category: doc.category,
+              file_name: doc.file_name,
+              storage_path: doc.storage_path,
+              zip_path: zipPath,
+              error: msg,
+            });
           }
         }
 
+        // Excel summary.
         const xlsx = await buildAeremXlsx({
           biz: biz as Record<string, unknown>,
           adminInfo,
@@ -185,7 +210,15 @@ export async function GET(
         });
         archive.append(xlsx, { name: "summary.xlsx" });
 
+        // manifest.txt — cheap diagnostic that documents exactly what
+        // ended up in the ZIP vs what the DB knew about. Open this file
+        // any time a ZIP looks incomplete.
+        archive.append(buildManifest(biz as Record<string, unknown>, lender, manifest), {
+          name: "manifest.txt",
+        });
+
         await archive.finalize();
+        console.log(`[download-zip] finalized: ${manifest.filter((m) => m.status === "INCLUDED").length}/${manifest.length} docs included, lender=${lender}`);
       } catch (e) {
         console.error("[download-zip] build error:", e);
         archive.abort();
@@ -484,4 +517,62 @@ async function buildAeremXlsx(data: {
 
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf as ArrayBuffer);
+}
+
+// ── Manifest ─────────────────────────────────────────────────────────
+
+type ManifestEntry =
+  | { status: "INCLUDED"; category: string; storage_path: string; zip_path: string; size: number; file_name: string | null }
+  | { status: "MISSING";  category: string; storage_path: string; zip_path: string; error: string; file_name: string | null };
+
+// Builds a plain-text manifest listing every doc known to the DB and
+// whether it made it into the ZIP. Format is designed for human eyes
+// (grep-friendly, ~1 KB for a typical EPC).
+function buildManifest(biz: Record<string, unknown>, lender: LenderKey, entries: ManifestEntry[]): Buffer {
+  const generated = new Date().toISOString();
+  const included = entries.filter((e) => e.status === "INCLUDED") as Extract<ManifestEntry, { status: "INCLUDED" }>[];
+  const missing  = entries.filter((e) => e.status === "MISSING")  as Extract<ManifestEntry, { status: "MISSING"  }>[];
+  const bytesTotal = included.reduce((s, e) => s + e.size, 0);
+
+  const header = [
+    `Capital Craft — Download ZIP manifest`,
+    `Generated:      ${generated}`,
+    `EPC:            ${display(biz.trade_name) || display(biz.legal_name) || display(biz.contact_name) || biz.id}`,
+    `EPC UUID:       ${biz.id}`,
+    `EPC Display ID: ${display(biz.epc_display_id) || "—"}`,
+    `Lender:         ${LENDER_LABEL[lender]}`,
+    `Documents:      ${entries.length} total · ${included.length} included · ${missing.length} missing`,
+    `Included size:  ${bytesTotal} bytes`,
+    ``,
+    `Also in the ZIP root:`,
+    `  summary.xlsx  — profile workbook in the AEREM template layout for ${LENDER_LABEL[lender]}`,
+    ``,
+    `─── INCLUDED (${included.length}) ─────────────────────────────────`,
+  ];
+
+  const inclLines = included.length === 0
+    ? ["(none)"]
+    : included.map((e) =>
+        `INCLUDED  ${padRight(e.category, 32)}  ${padRight((e.file_name ?? "(unnamed)"), 40)}  ${e.size}B  ->  ${e.zip_path}`
+      );
+
+  const missLines = missing.length === 0
+    ? ["(none)"]
+    : missing.map((e) =>
+        `MISSING   ${padRight(e.category, 32)}  ${padRight((e.file_name ?? "(unnamed)"), 40)}  storage_path=${e.storage_path}  error=${e.error}`
+      );
+
+  const tail = [
+    ``,
+    `─── MISSING (${missing.length}) ─────────────────────────────────`,
+  ];
+
+  const text =
+    [...header, ...inclLines, ...tail, ...missLines, ""].join("\n");
+  return Buffer.from(text, "utf-8");
+}
+
+function padRight(s: string, n: number): string {
+  if (s.length >= n) return s;
+  return s + " ".repeat(n - s.length);
 }

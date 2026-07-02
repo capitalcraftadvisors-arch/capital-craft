@@ -46,15 +46,13 @@ serve(async (req) => {
     if (!text) return json({ ok: false, error: "ocr_returned_empty" });
 
     const ifsc = (text.match(/\b[A-Z]{4}0[A-Z0-9]{6}\b/) || [])[0] ?? null;
-    // Account number lookup — label-anchored first, length-based only as
-    // a last resort. Real cheques carry multiple 9-18 digit runs (MICR
-    // band, cheque number, IFSC-adjacent numbers); picking the longest
-    // often returns MICR instead of the actual account number.
-    const accountNumber =
-         findAccountByLabel(text)
-      ?? (text.match(/\b\d{9,18}\b/g) || [])
-           .sort((a: string, b: string) => b.length - a.length)[0]
-      ?? null;
+    // Account number lookup — LABEL-ANCHORED ONLY. If we can't find an
+    // "A/c No" / "Account No" / "खा. सं." label, we return null. The
+    // client shows a blank field for manual entry rather than accepting
+    // a wrong number (e.g. the "VALID UP TO ₹100 LACS" reference number
+    // stamped on the right side of some cheques would win a length-based
+    // race otherwise).
+    const accountNumber = findAccountByLabel(text);
     const bankName = bankFromIfsc(ifsc) ?? bankFromText(text);
 
     return json({ ok: true, raw: text, ifsc, accountNumber, bankName });
@@ -113,27 +111,46 @@ async function ocrPdf(base64: string, mimeType: string): Promise<string> {
 
 // ── Account number extraction ─────────────────────────────────────────────
 
-// Two tiers of label-anchored lookup:
-//   1. Inline: "A/C NO : 1234567890" / "Account No 1234567890"
-//   2. Label on one line, digits on the next 1-2 lines
-// Returns null if no label was detected — caller falls back to the
-// longest-digit-run heuristic.
+// LABEL-ANCHORED lookup — English + Hindi variants. Two tiers, in order:
+//   1. Inline: "<LABEL> : <digits>" on the same OCR line.
+//   2. Label on one line, digits on the next 1-2 lines.
+//
+// If neither tier fires, returns null. The caller does NOT fall back to a
+// length-based heuristic — grabbing the "longest 9-18 digit run" on a
+// cheque risks returning the "VALID UP TO ₹XXX LACS" reference stamped on
+// the right side, or the MICR band digits at the bottom.
+//
+// Labels recognized (case-insensitive):
+//   English: "A/c No", "A/C No", "A/c No.", "A c No", "Account No",
+//            "Account No.", "Account Number"
+//   Hindi:   "खा. सं.", "खाता सं", "खाता संख्या"
+//
+// The regex is tolerant of whitespace/dots between letters because
+// Vision OCR sometimes emits e.g. "A / c   No.".
 function findAccountByLabel(text: string): string | null {
-  const LABEL_INLINE_RE =
-    /(?:A\s*\/?\s*C(?:\s*No\.?)?|Account\s+(?:No\.?|Number))\s*[:.\-]?\s*(\d{9,18})/i;
-  const LABEL_LINE_RE =
-    /A\s*\/?\s*C\s*(?:No\.?)?|Account\s+(?:No\.?|Number)/i;
+  // Common label form for BOTH tiers.
+  const LABEL = new RegExp(
+    "(?:"
+    + "A\\s*[\\/\\.]?\\s*[cC]\\s*(?:No\\.?)?"          // A/c No, A/C No, A c No, A.c.No
+    + "|Account\\s+(?:No\\.?|Number)"                  // Account No, Account Number
+    + "|खा\\s*\\.?\\s*सं\\s*\\.?"                       // खा. सं.
+    + "|खाता\\s*(?:सं\\s*\\.?|संख्या)"                    // खाता सं, खाता संख्या
+    + ")",
+    "i",
+  );
 
-  const inline = text.match(LABEL_INLINE_RE);
+  // Tier 1: "<LABEL> [:.-]? <digits>" — same OCR line.
+  const inline = text.match(
+    new RegExp(LABEL.source + "\\s*[:.\\-]?\\s*(\\d{9,18})", "i"),
+  );
   if (inline) return inline[1];
 
+  // Tier 2: label somewhere on line i, digits within lines i..i+2.
   const lines = text.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
-    if (!LABEL_LINE_RE.test(lines[i])) continue;
-    // Same line first (in case a residual comma/space fell between).
+    if (!LABEL.test(lines[i])) continue;
     const same = lines[i].match(/\b(\d{9,18})\b/);
     if (same) return same[1];
-    // Then walk forward 1-2 lines.
     for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
       const next = lines[j].match(/\b(\d{9,18})\b/);
       if (next) return next[1];

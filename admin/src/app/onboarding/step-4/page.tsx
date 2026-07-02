@@ -58,13 +58,25 @@ export default function Step4Page() {
     acct.length > 0 && acctConfirm.length > 0 && acct === acctConfirm;
   const acctMismatch =
     acctConfirm.length > 0 && acct !== acctConfirm;
-  // OCR-filled top box shows ••••••XXXX (last 4) while blurred, raw while
-  // focused. Both boxes are editable so the user/admin can correct the
-  // one OCR read wrong.
-  const [acctFocused, setAcctFocused] = useState(false);
-  const acctDisplay = acctFocused || acct.length <= 4
-    ? acct
-    : "•".repeat(acct.length - 4) + acct.slice(-4);
+
+  // TOP-BOX behavior (the OCR-filled "Account number" field):
+  //
+  //   ┌────────────────────────────┬──────────────┬───────────────────────┐
+  //   │ state                      │ editable?    │ display               │
+  //   ├────────────────────────────┼──────────────┼───────────────────────┤
+  //   │ empty / short (< 9 digits) │ YES (typable)│ raw (as user types)   │
+  //   │ valid (≥ 9) + no mismatch  │ NO           │ ••••••XXXX (last 4)   │
+  //   │ valid (≥ 9) + MISMATCH     │ YES          │ raw (full, for fix)   │
+  //   └────────────────────────────┴──────────────┴───────────────────────┘
+  //
+  // Storage stays raw in bank_account_number regardless — the mask is
+  // purely a display transform. Same digits go to Supabase and Excel.
+  const acctIsValidLen = acct.length >= 9;
+  const acctReadOnly = acctIsValidLen && !acctMismatch;
+  const acctMasked = acct.length > 4
+    ? "•".repeat(acct.length - 4) + acct.slice(-4)
+    : acct;
+  const acctDisplay = acctReadOnly ? acctMasked : acct;
 
   useEffect(() => {
     const biz = getBusiness();
@@ -205,24 +217,31 @@ export default function Step4Page() {
 
         <Card className="p-6 sm:p-7">
           <form className="grid gap-5 sm:grid-cols-2">
-            {/* Top box: OCR-filled, MASKED (•••••XXXX) while blurred so */}
-            {/* the value from the cheque isn't visible in plain text.   */}
-            {/* Fully editable — click to focus, unmasks. Type or paste  */}
-            {/* to correct OCR errors. Stored raw in bank_account_number. */}
+            {/* Top box: display transform driven by acctReadOnly.        */}
+            {/* Masked + locked when valid + matches; unmasked + editable  */}
+            {/* while short/empty or on mismatch. Raw digits are stored   */}
+            {/* in bank_account_number regardless — mask is display-only.  */}
             <Input
               label="Account number"
               placeholder=""
               inputMode="numeric"
               value={acctDisplay}
-              onFocus={() => setAcctFocused(true)}
-              onBlur={() => setAcctFocused(false)}
+              readOnly={acctReadOnly}
               onChange={(e) => {
-                // Guard against user editing the masked bullets; only accept
-                // digits and let react-hook-form hold the raw value.
+                // Belt-and-suspenders: don't accept edits while readOnly.
+                // (The browser also refuses; this guards against a mis-typed
+                //  imperative setValue.)
+                if (acctReadOnly) return;
                 const digits = e.target.value.replace(/\D/g, "");
                 setValue("bank_account_number", digits);
               }}
               error={errors.bank_account_number?.message}
+              hint={
+                acctMismatch
+                  ? "OCR may have read the wrong value — please edit the account number."
+                  : undefined
+              }
+              className={acctReadOnly ? "bg-bg-soft cursor-not-allowed" : undefined}
             />
             {/* Bottom box: user re-enters, always visible, always editable. */}
             <Input
