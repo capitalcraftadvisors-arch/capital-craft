@@ -198,6 +198,35 @@ export default function Step3Page() {
     return errs;
   }
 
+  // Draft-only: every member must have PAN + Aadhaar front + Aadhaar back
+  // uploaded. Returns a list of human-readable missing-doc messages.
+  async function missingMemberDocs(): Promise<string[]> {
+    if (!businessId) return [];
+    const { data: docs } = await supabase()
+      .from("epc_documents")
+      .select("stakeholder_id, category")
+      .eq("business_id", businessId)
+      .in("category", [
+        "stakeholder_pan",
+        "stakeholder_aadhaar_front",
+        "stakeholder_aadhaar_back",
+      ]);
+    const bySh: Record<string, Set<string>> = {};
+    for (const d of (docs ?? []) as { stakeholder_id: string | null; category: string }[]) {
+      if (!d.stakeholder_id) continue;
+      (bySh[d.stakeholder_id] ??= new Set()).add(d.category);
+    }
+    const missing: string[] = [];
+    displayed.forEach((s, i) => {
+      const cats = bySh[s.id] ?? new Set<string>();
+      const who = businessType === "proprietorship" ? "Proprietor" : `${cfg.roleLabel} ${i + 1}`;
+      if (!cats.has("stakeholder_pan"))            missing.push(`${who}: PAN card`);
+      if (!cats.has("stakeholder_aadhaar_front"))  missing.push(`${who}: Aadhaar (front)`);
+      if (!cats.has("stakeholder_aadhaar_back"))   missing.push(`${who}: Aadhaar (back)`);
+    });
+    return missing;
+  }
+
   async function handleContinue() {
     const biz = getBusiness();
     if (!biz || !businessId) return;
@@ -212,6 +241,14 @@ export default function Step3Page() {
     if (Object.keys(errs).length > 0) {
       alert("Please fix the highlighted fields.");
       return;
+    }
+
+    if (isDraft) {
+      const missing = await missingMemberDocs();
+      if (missing.length > 0) {
+        alert("Please upload the following documents:\n\n" + missing.join("\n"));
+        return;
+      }
     }
 
     setSaving(true);
@@ -322,7 +359,7 @@ export default function Step3Page() {
             {businessId && (
               <div className="mt-5 space-y-3">
                 <p className="text-[12px] font-semibold text-text-mid uppercase tracking-wide">
-                  Documents (optional)
+                  Documents
                 </p>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="p-4 bg-bg-soft rounded-input border border-line">

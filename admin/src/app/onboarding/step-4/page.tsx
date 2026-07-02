@@ -13,6 +13,18 @@ import { supabase } from "@/lib/supabase";
 import { extractCheque } from "@/lib/ocr";
 import { ACCOUNT_RE, IFSC_RE } from "@/lib/validators";
 
+// Bank details.
+//
+// New-onboarding (status='draft') rules:
+//   - Cancelled cheque doc is REQUIRED.
+//   - Account number + IFSC + Bank name + confirm-account-number match REQUIRED.
+//   - No Skip button — the EPC must complete before advancing.
+// Legacy / self-edit EPCs remain optional: Skip and empty fields allowed.
+//
+// OCR runs silently — no user-facing "reading…" / "auto-filled…" strings.
+// Fields simply appear populated a moment after the upload; the EPC verifies
+// and can edit anything wrong.
+
 type Form = {
   bank_account_number: string;
   confirm_account_number: string; // UI-only; not persisted
@@ -24,8 +36,9 @@ export default function Step4Page() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [ocrToast, setOcrToast] = useState<string | null>(null);
   const [ocrRaw, setOcrRaw] = useState<unknown>(null);
+
+  const isDraft = getBusiness()?.status === "draft";
 
   const {
     register, handleSubmit, reset, setValue, watch,
@@ -39,7 +52,6 @@ export default function Step4Page() {
     },
   });
 
-  // Watch both account-number fields so the Continue button reacts in real time.
   const acct = watch("bank_account_number");
   const acctConfirm = watch("confirm_account_number");
   const acctMatches =
@@ -59,8 +71,6 @@ export default function Step4Page() {
         .maybeSingle();
       reset({
         bank_account_number: data?.bank_account_number ?? "",
-        // On resume, pre-fill confirm with the stored value so the EPC isn't
-        // forced to re-type if they already verified it last session.
         confirm_account_number: data?.bank_account_number ?? "",
         bank_ifsc: data?.bank_ifsc ?? "",
         bank_name: data?.bank_name ?? "",
@@ -68,27 +78,34 @@ export default function Step4Page() {
     })();
   }, [reset]);
 
+  // OCR runs silently in the background. No user-facing feedback strings.
   async function handleChequeUploaded({ file }: { file: File }) {
-    setOcrToast("Reading cheque…");
-    const r = await extractCheque(file);
-    if (!r.ok) {
-      setOcrToast(
-        "Couldn't read cheque automatically — please type the fields manually.",
-      );
-      return;
+    try {
+      const r = await extractCheque(file);
+      if (!r.ok) return;
+      if (r.ifsc) setValue("bank_ifsc", r.ifsc);
+      if (r.accountNumber) {
+        setValue("bank_account_number", r.accountNumber);
+        // OCR auto-fill should NOT auto-confirm — the point is the EPC
+        // re-types it as a verification step. Clear confirm so they have to.
+        setValue("confirm_account_number", "");
+      }
+      if (r.bankName) setValue("bank_name", r.bankName);
+      setOcrRaw(r);
+    } catch (e) {
+      console.warn("[step-4] cheque OCR silent failure:", e);
     }
-    if (r.ifsc) setValue("bank_ifsc", r.ifsc);
-    if (r.accountNumber) {
-      setValue("bank_account_number", r.accountNumber);
-      // OCR auto-fill should NOT auto-confirm — the whole point is the EPC
-      // re-types it as a verification step. Clear confirm so they have to.
-      setValue("confirm_account_number", "");
-    }
-    if (r.bankName) setValue("bank_name", r.bankName);
-    setOcrRaw(r);
-    setOcrToast(
-      "We pre-filled what we could — verify and re-confirm the account number below.",
-    );
+  }
+
+  async function chequeUploaded(): Promise<boolean> {
+    if (!businessId) return false;
+    const { data } = await supabase()
+      .from("epc_documents")
+      .select("id")
+      .eq("business_id", businessId)
+      .eq("category", "cancelled_cheque")
+      .limit(1);
+    return (data?.length ?? 0) > 0;
   }
 
   async function save(values: Form, nextStep: number) {
@@ -100,11 +117,9 @@ export default function Step4Page() {
       .update({
         bank_account_number: values.bank_account_number || null,
         bank_ifsc: values.bank_ifsc ? values.bank_ifsc.toUpperCase() : null,
-        // Branch input removed from the form; clear any stale value on save so
-        // the admin view / summary don't show a value the EPC can no longer edit.
+        // Branch input removed from the form; clear any stale value on save.
         bank_branch: null,
         bank_name: values.bank_name || null,
-        // Account-holder field was removed from the form; clear any stale value.
         bank_account_holder: null,
         cheque_ocr_raw: ocrRaw,
         current_step: nextStep,
@@ -116,24 +131,36 @@ export default function Step4Page() {
     router.push(`/onboarding/step-${nextStep}` as any);
   }
 
-  // Skip is allowed even if confirm doesn't match — the entire step is optional.
-  const onSkip = handleSubmit((v) => save(v, 5));
-
-  // Continue requires the re-confirm field to match (when there's a value).
-  const onNext = handleSubmit((v) => {
-    if (v.bank_account_number && v.bank_account_number !== v.confirm_account_number) {
-      // Should be blocked by the disabled state, but guard anyway.
-      return;
+  const onNext = handleSubmit(async (v) => {
+    if (isDraft) {
+      if (!(await chequeUploaded())) {
+        return alert("Please upload the cancelled cheque to continue.");
+      }
+      if (!v.bank_account_number || !ACCOUNT_RE.test(v.bank_account_number)) {
+        return alert("Please enter a valid account number (9-18 digits).");
+      }
+      if (v.bank_account_number !== v.confirm_account_number) {
+        return alert("The re-confirm account number doesn't match.");
+      }
+      if (!v.bank_ifsc || !IFSC_RE.test(v.bank_ifsc.toUpperCase())) {
+        return alert("Please enter a valid IFSC code.");
+      }
+      if (!v.bank_name.trim()) {
+        return alert("Please enter the bank name.");
+      }
+    } else {
+      // Non-draft path: if the account number is present it must match confirm.
+      if (v.bank_account_number && v.bank_account_number !== v.confirm_account_number) return;
     }
     save(v, 5);
   });
 
-  // The Continue button is disabled when the EPC has typed an account number
-  // but the confirm field doesn't match (or is empty). If the EPC hasn't
-  // entered any account number, Continue stays enabled (the whole step is
-  // optional — they can leave bank blank).
-  const continueDisabled =
-    acct.length > 0 && !acctMatches;
+  // Non-draft only.
+  const onSkip = handleSubmit((v) => save(v, 5));
+
+  const continueDisabled = isDraft
+    ? saving
+    : (acct.length > 0 && !acctMatches) || saving;
 
   return (
     <>
@@ -150,8 +177,7 @@ export default function Step4Page() {
         <h1 className="font-display text-[24px] sm:text-[28px] font-bold">Bank details</h1>
         <p className="text-text-mid mt-1">
           Upload a clear picture or copy of a cheque for the account where you&rsquo;d
-          like to receive payment. We&rsquo;ll read the account number, IFSC and bank
-          name automatically. This step is optional — you can skip and add these later.
+          like to receive payment, then confirm the details below.
         </p>
       </div>
 
@@ -163,15 +189,10 @@ export default function Step4Page() {
               table="epc_documents"
               category="cancelled_cheque"
               maxFiles={1}
-              label="Cancelled cheque (optional)"
-              hint="JPG, PNG, WEBP, or PDF. Make sure the account number, IFSC and bank name are legible."
+              label="Cancelled cheque"
+              hint="JPG, PNG, WEBP, or PDF. Make sure all details are clearly visible."
               onUploaded={handleChequeUploaded}
             />
-            {ocrToast && (
-              <div className="mt-3 px-3.5 py-2.5 rounded-input bg-blue-50 border border-blue/15 text-[12px] text-text-mid">
-                {ocrToast}
-              </div>
-            )}
           </Card>
         )}
 
@@ -215,22 +236,23 @@ export default function Step4Page() {
               label="Bank name"
               placeholder="e.g. HDFC Bank"
               {...register("bank_name")}
-              hint="Auto-filled when the cheque is read. Edit if it looks wrong."
             />
           </form>
         </Card>
       </div>
 
       <div className="mt-6 flex flex-col sm:flex-row gap-3 sm:justify-end">
-        <Button type="button" variant="outline" onClick={onSkip} loading={saving}>
-          Skip
-        </Button>
+        {!isDraft && (
+          <Button type="button" variant="outline" onClick={onSkip} loading={saving}>
+            Skip
+          </Button>
+        )}
         <Button
           type="button"
           variant="primary"
           onClick={onNext}
           loading={saving}
-          disabled={continueDisabled || saving}
+          disabled={continueDisabled}
         >
           Save &amp; continue
         </Button>

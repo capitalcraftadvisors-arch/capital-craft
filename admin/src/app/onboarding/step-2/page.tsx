@@ -8,7 +8,6 @@ import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
 import Card from "@/components/ui/Card";
 import FieldGroup from "@/components/ui/FieldGroup";
-import OcrStatus from "@/components/ui/OcrStatus";
 import WizardProgress from "@/components/WizardProgress";
 import FileUpload from "@/components/FileUpload";
 import { getBusiness, setBusiness } from "@/lib/auth";
@@ -17,7 +16,6 @@ import { extractPan, extractGstLegalName } from "@/lib/ocr";
 import { PAN_RE } from "@/lib/validators";
 
 type SuryaGhar = "yes" | "no" | "other" | "";
-type OcrState = null | { state: "reading" | "success" | "warn" | "error"; text: string };
 
 const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/;
 
@@ -87,8 +85,6 @@ export default function Step2Page() {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [businessId, setBusinessId] = useState<string | null>(null);
-  const [panOcr, setPanOcr] = useState<OcrState>(null);
-  const [gstOcr, setGstOcr] = useState<OcrState>(null);
 
   const {
     register, handleSubmit, reset, watch, setValue,
@@ -132,63 +128,42 @@ export default function Step2Page() {
     })();
   }, [reset]);
 
+  // OCR runs silently — no user-facing feedback. Fields simply appear
+  // populated a moment after upload. EPCs can edit anything wrong.
   async function handlePanUploaded({ file }: { file: File }) {
-    setPanOcr({ state: "reading", text: "Reading your PAN card…" });
-    const r = await extractPan(file);
-    if (!r.ok) {
-      setPanOcr({ state: "error", text: "Couldn't read the PAN automatically — please type the number below." });
-      return;
-    }
-    if (r.pan) {
-      setValue("pan_number", r.pan, { shouldValidate: true });
-      setPanOcr({ state: "success", text: "PAN number auto-filled from your card. Please verify below." });
-    } else {
-      setPanOcr({ state: "warn", text: "We read the card but couldn't detect a PAN number — please type it below." });
+    try {
+      const r = await extractPan(file);
+      if (r.ok && r.pan) setValue("pan_number", r.pan, { shouldValidate: true });
+    } catch (e) {
+      console.warn("[step-2] PAN OCR silent failure:", e);
     }
   }
 
   async function handleGstUploaded({ docId, file }: { docId: string; storagePath: string; file: File }) {
-    setGstOcr({ state: "reading", text: "Reading your GST registration…" });
-    const r = await extractGstLegalName(file);
-    if (!r.ok) {
-      setGstOcr({ state: "error", text: "Couldn't read the GST document automatically — please fill the fields below." });
-      return;
-    }
-    if (r.legal_name) setValue("legal_name", r.legal_name, { shouldValidate: true });
-    if (r.trade_name) setValue("trade_name", r.trade_name, { shouldValidate: true });
-    if (r.gstin)      setValue("gstin_number", r.gstin,      { shouldValidate: true });
-
-    // Persist OCR audit trail on the gstin doc row for future debugging.
     try {
-      await supabase()
-        .from("epc_documents")
-        .update({
-          metadata: {
-            ocr_raw_text: r.raw_text ?? null,
-            gstin: r.gstin ?? null,
-            legal_name: r.legal_name ?? null,
-            trade_name: r.trade_name ?? null,
-          },
-        })
-        .eq("id", docId);
+      const r = await extractGstLegalName(file);
+      if (!r.ok) return;
+      if (r.legal_name) setValue("legal_name", r.legal_name, { shouldValidate: true });
+      if (r.trade_name) setValue("trade_name", r.trade_name, { shouldValidate: true });
+      if (r.gstin)      setValue("gstin_number", r.gstin,      { shouldValidate: true });
+      // Persist OCR audit trail on the gstin doc row for future debugging.
+      try {
+        await supabase()
+          .from("epc_documents")
+          .update({
+            metadata: {
+              ocr_raw_text: r.raw_text ?? null,
+              gstin: r.gstin ?? null,
+              legal_name: r.legal_name ?? null,
+              trade_name: r.trade_name ?? null,
+            },
+          })
+          .eq("id", docId);
+      } catch (e) {
+        console.warn("[step-2] gstin metadata write failed:", e);
+      }
     } catch (e) {
-      console.warn("[step-2] gstin metadata write failed:", e);
-    }
-
-    const filled: string[] = [];
-    if (r.legal_name) filled.push("legal name");
-    if (r.trade_name) filled.push("trade name");
-    if (r.gstin)      filled.push("GSTIN");
-    if (filled.length > 0) {
-      setGstOcr({
-        state: "success",
-        text: `${cap(filled.join(", "))} auto-filled from your document. Please verify below.`,
-      });
-    } else {
-      setGstOcr({
-        state: "warn",
-        text: "We read the document but couldn't detect the fields — please type them below.",
-      });
+      console.warn("[step-2] GST OCR silent failure:", e);
     }
   }
 
@@ -323,7 +298,7 @@ export default function Step2Page() {
           {businessId && (
             <FieldGroup
               title="PAN card"
-              subtitle="We'll read your PAN number from the card automatically."
+              subtitle="Upload a clear photo or scan of your PAN card."
               leftIcon={IconIdCard}
               required={isDraft}
             >
@@ -332,10 +307,9 @@ export default function Step2Page() {
                 table="epc_documents"
                 category="pan_business"
                 maxFiles={1}
-                label={isDraft ? "Upload PAN card (required)" : "Upload PAN card"}
+                label="Upload PAN card"
                 onUploaded={handlePanUploaded}
               />
-              {panOcr && <OcrStatus state={panOcr.state}>{panOcr.text}</OcrStatus>}
               <Input
                 label="PAN number"
                 placeholder="ABCDE1234F"
@@ -347,7 +321,6 @@ export default function Step2Page() {
                   onChange: (e) => setValue("pan_number", e.target.value.toUpperCase()),
                 })}
                 error={errors.pan_number?.message}
-                hint="Auto-filled from the card. Edit if needed."
               />
             </FieldGroup>
           )}
@@ -356,7 +329,7 @@ export default function Step2Page() {
           {businessId && (
             <FieldGroup
               title="GST registration"
-              subtitle="We'll read the Legal name, Trade name, and GSTIN from your document."
+              subtitle="Upload your GST registration certificate."
               leftIcon={IconReceipt}
               required={isDraft}
             >
@@ -365,12 +338,11 @@ export default function Step2Page() {
                 table="epc_documents"
                 category="gstin"
                 maxFiles={1}
-                label={isDraft ? "Upload GST registration document (required)" : "Upload GST registration document"}
+                label="Upload GST registration document"
                 onUploaded={handleGstUploaded}
               />
-              {gstOcr && <OcrStatus state={gstOcr.state}>{gstOcr.text}</OcrStatus>}
               <Input
-                label={isDraft ? "Legal name of business (required)" : "Legal name of business"}
+                label="Legal name of business"
                 placeholder="e.g. Acme Solar Pvt Ltd"
                 leftIcon={IconTag}
                 {...register("legal_name", {
@@ -380,7 +352,7 @@ export default function Step2Page() {
                 error={errors.legal_name?.message}
               />
               <Input
-                label={isDraft ? "Trade name (required)" : "Trade name (optional)"}
+                label="Trade name"
                 placeholder="e.g. Acme Solar"
                 leftIcon={IconTag}
                 {...register("trade_name", {
@@ -390,7 +362,7 @@ export default function Step2Page() {
                 error={errors.trade_name?.message}
               />
               <Input
-                label={isDraft ? "GSTIN (required)" : "GSTIN"}
+                label="GSTIN"
                 placeholder="08ATMPS8478D1ZY"
                 maxLength={15}
                 leftIcon={IconHash}
@@ -405,7 +377,6 @@ export default function Step2Page() {
                   onChange: (e) => setValue("gstin_number", e.target.value.toUpperCase()),
                 })}
                 error={errors.gstin_number?.message}
-                hint="Auto-filled from the GST document."
               />
             </FieldGroup>
           )}
@@ -418,7 +389,7 @@ export default function Step2Page() {
                 table="epc_documents"
                 category="extra_doc"
                 maxFiles={1}
-                label={`${extraLabel} (optional)`}
+                label={extraLabel}
               />
             </div>
           )}
@@ -432,8 +403,4 @@ export default function Step2Page() {
       </Card>
     </>
   );
-}
-
-function cap(s: string): string {
-  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
