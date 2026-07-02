@@ -171,7 +171,7 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
         <Field label="Total installed capacity (Residential)">
           <div className="flex gap-2">
             <input
-              className={inputCls}
+              className={inputCls + " flex-1 min-w-0"}
               inputMode="decimal"
               placeholder="Number"
               value={draft.capacity_residential}
@@ -192,7 +192,7 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
         <Field label="Total installed capacity (Commercial)">
           <div className="flex gap-2">
             <input
-              className={inputCls}
+              className={inputCls + " flex-1 min-w-0"}
               inputMode="decimal"
               placeholder="Number"
               value={draft.capacity_commercial}

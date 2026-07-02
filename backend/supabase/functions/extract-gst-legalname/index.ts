@@ -160,11 +160,18 @@ function matchGstin(text: string): string | null {
 }
 
 // Strip "1. ", "2. ", "3. " from the head of a line so label matchers
-// can see past REG-06 table numbering.
-const TABLE_NUMBER_PREFIX_RE = /^\s*\d+\s*\.\s+/;
+// can see past REG-06 table numbering. `\s*` (not `\s+`) at the tail so
+// a line that IS JUST a table number (e.g. Vision OCR emits "2." as its
+// own line in columnar layouts) reduces to "" and gets skipped by the
+// forward-walk. Otherwise it would come back as the "value" of the
+// preceding label — which is exactly the "Legal name = 2., Trade name = 3."
+// bug we saw on real REG-06 certs.
+const TABLE_NUMBER_PREFIX_RE = /^\s*\d+\s*\.\s*/;
 function stripTableNumber(s: string): string {
   return s.replace(TABLE_NUMBER_PREFIX_RE, "");
 }
+// True if a raw line is JUST a bare table number ("1.", " 2 . ", etc.).
+const BARE_TABLE_NUMBER_RE = /^\s*\d+\s*\.\s*$/;
 
 // GSTR-3B PDF section prefixes ("2(a).", "3.1(b)", etc.) — different beast
 // from REG-06 table numbering. Retained from the previous parser.
@@ -199,6 +206,9 @@ function looksLikeLabelFragment(s: string): boolean {
   if (!t) return true;
   if (t === "if any" || t.startsWith("if any ")) return true;
   if (t === "additional") return true;
+  // Belt-and-suspenders: even if stripTableNumber missed for some reason,
+  // reject a bare "2." / "3." from being returned as a value.
+  if (BARE_TABLE_NUMBER_RE.test(t)) return true;
   return false;
 }
 
