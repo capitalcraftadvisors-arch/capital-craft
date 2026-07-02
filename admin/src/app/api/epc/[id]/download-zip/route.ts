@@ -61,13 +61,6 @@ type Reference = {
   mobile: string;
 };
 
-type LenderRow = {
-  lender: string;
-  docs_given: boolean;
-  approved: boolean;
-  updated_at: string;
-};
-
 function err(message: string, status: number) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
@@ -107,13 +100,6 @@ export async function GET(
       .order("category", { ascending: true })
       .order("created_at", { ascending: true });
     const docs = (docsData ?? []) as Doc[];
-
-    // ── Lender status (admin-only RLS) ────────────────────────────────
-    const { data: lenderData } = await supabase
-      .from("epc_lender_status")
-      .select("lender, docs_given, approved, updated_at")
-      .eq("business_id", params.id);
-    const lender = (lenderData ?? []) as LenderRow[];
 
     // ── Admin info (may not exist yet) ────────────────────────────────
     let adminInfo: Record<string, unknown> | null = null;
@@ -172,10 +158,11 @@ export async function GET(
           }
         }
 
-        // Excel summary — one sheet, label + value rows, no documents list.
+        // Excel summary — one sheet, label + value rows.
+        // OMITS: documents list, lender status. Bank account is FULL/unmasked
+        // (the value the EPC typed and reconfirmed at Step 4).
         const xlsx = await buildSummaryXlsx({
           biz: biz as Record<string, unknown>,
-          lender,
           adminInfo,
         });
         archive.append(xlsx, { name: "summary.xlsx" });
@@ -282,13 +269,6 @@ function fmtDate(v: unknown): string {
   }
 }
 
-function maskAccount(a: unknown): string {
-  const s = a === null || a === undefined ? "" : String(a);
-  if (!s) return "";
-  if (s.length <= 4) return "•".repeat(6) + s;
-  return "•".repeat(Math.max(6, s.length - 4)) + s.slice(-4);
-}
-
 function display(v: unknown): string {
   if (v === null || v === undefined) return "";
   const s = String(v);
@@ -297,10 +277,9 @@ function display(v: unknown): string {
 
 async function buildSummaryXlsx(data: {
   biz: Record<string, unknown>;
-  lender: LenderRow[];
   adminInfo: Record<string, unknown> | null;
 }): Promise<Buffer> {
-  const { biz, lender, adminInfo } = data;
+  const { biz, adminInfo } = data;
 
   const stakeholders = ((biz.stakeholders ?? []) as unknown[]).map((s) => s as Stakeholder);
   const refs = ((biz.business_references ?? []) as unknown[]).map((r) => r as Reference);
@@ -382,10 +361,14 @@ async function buildSummaryXlsx(data: {
     ["PM Surya Ghar", suryaGharDisplay],
   ]);
 
-  // ── BANK (account masked) ────────────────────────────────────────
+  // ── BANK — account number is FULL/unmasked ───────────────────────
+  // The value stored in epc_business.bank_account_number is what the
+  // EPC re-entered in the "re-confirm account number" field on Step 4
+  // (Step 4 blocks Save & continue until reconfirm matches). The admin
+  // detail edit path also persists the raw digits. Masking is UI-only.
   section("Bank", [
     ["Account holder", biz.bank_account_holder],
-    ["Account number (masked)", maskAccount(biz.bank_account_number)],
+    ["Account number", biz.bank_account_number],
     ["IFSC", biz.bank_ifsc],
     ["Bank name", biz.bank_name],
   ]);
@@ -431,17 +414,7 @@ async function buildSummaryXlsx(data: {
     ]);
   }
 
-  // ── LENDER STATUS ────────────────────────────────────────────────
-  const lenderRows: Array<[string, unknown]> = [];
-  const LENDERS = ["creditfair", "aerem", "solfin"] as const;
-  const label = (k: string) => k === "creditfair" ? "CreditFair" : k === "aerem" ? "Aerem" : "Solfin";
-  for (const k of LENDERS) {
-    const l = lender.find((x) => x.lender === k);
-    lenderRows.push([`${label(k)} — docs given`, l?.docs_given ? "Yes" : "No"]);
-    lenderRows.push([`${label(k)} — approved`,   l?.approved   ? "Yes" : "No"]);
-    lenderRows.push([`${label(k)} — updated`,    l ? fmtDate(l.updated_at) : ""]);
-  }
-  section("Lender status (admin-only)", lenderRows);
+  // Lender status is intentionally OMITTED from the Excel per spec.
 
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf as ArrayBuffer);
