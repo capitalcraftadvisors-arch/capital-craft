@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
+import Button from "@/components/ui/Button";
 import StatusBadge from "@/components/StatusBadge";
+import AddNewEpcModal from "@/components/AddNewEpcModal";
 import { supabase } from "@/lib/supabase";
 import { logout, getToken } from "@/lib/auth";
 
@@ -84,17 +86,56 @@ const LENDERS: { key: Lender; label: string }[] = [
 type LenderState = { docs_given: boolean; approved: boolean };
 type LenderMap = Partial<Record<Lender, LenderState>>;
 
-// Display-only mask for the admin LIST table. Full number still shows on
-// the admin EPC detail page. Non-10-digit numbers pass through unchanged.
+type SortKey = "created_at" | "status";
+type SortDir = "asc" | "desc";
+
 function maskMobile(m: string | null): string {
   if (!m) return "—";
   return m.length === 10 ? "•••••" + m.slice(5) : m;
 }
 
+// ── Icons (inline SVG) ─────────────────────────────────────────────
+const IconBuilding = (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="4" y="3" width="16" height="18" rx="1" /><path d="M9 21V9M15 21V9M4 9h16M9 6h.01M15 6h.01M9 13h.01M15 13h.01M9 17h.01M15 17h.01" />
+  </svg>
+);
+const IconGlobe = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" />
+  </svg>
+);
+const IconUserPlus = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="9" cy="8" r="3.5" /><path d="M3 20a6 6 0 0 1 12 0M18 8v6M15 11h6" />
+  </svg>
+);
+const IconEye = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M1.5 12s3.5-7 10.5-7 10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z" /><circle cx="12" cy="12" r="3" />
+  </svg>
+);
+const IconDownload = (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16" />
+  </svg>
+);
+const IconArrowUp = (
+  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 19V5m-6 6 6-6 6 6" />
+  </svg>
+);
+const IconArrowDown = (
+  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 5v14m-6-6 6 6 6-6" />
+  </svg>
+);
+
 function EpcsTab() {
   const router = useRouter();
   type Row = {
     id: string;
+    epc_display_id: string | null;
     legal_name: string | null;
     trade_name: string | null;
     contact_name: string | null;
@@ -102,27 +143,30 @@ function EpcsTab() {
     contact_email: string | null;
     business_type: string | null;
     status: string;
+    source: string | null;
+    created_at: string;
     submitted_at: string | null;
     epc_self_edited: boolean | null;
   };
   const [rows, setRows] = useState<Row[]>([]);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  // business_id → lender_name → state. Missing key = both false.
+  const [sortKey, setSortKey] = useState<SortKey>("created_at");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [lenderState, setLenderState] = useState<Record<string, LenderMap>>({});
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
+  const [selected, setSelected] = useState<Record<string, boolean>>({});
+  const [addOpen, setAddOpen] = useState(false);
 
   async function load() {
     let query = supabase().from("epc_business")
-      .select("id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, submitted_at, epc_self_edited")
-      .neq("business_type", "admin")
-      .order("submitted_at", { ascending: false, nullsFirst: false });
+      .select("id, epc_display_id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, source, created_at, submitted_at, epc_self_edited")
+      .neq("business_type", "admin");
     if (statusFilter) query = query.eq("status", statusFilter);
     const { data } = await query;
     const rs = (data ?? []) as Row[];
     setRows(rs);
 
-    // Batch-fetch lender state for all EPCs in view.
     if (rs.length > 0) {
       const ids = rs.map((r) => r.id);
       const { data: lenderRows } = await supabase()
@@ -142,23 +186,45 @@ function EpcsTab() {
 
   useEffect(() => { void load(); }, [statusFilter]);
 
-  const filtered = q.trim()
-    ? rows.filter((r) =>
-        (r.legal_name || "").toLowerCase().includes(q.toLowerCase()) ||
-        (r.trade_name || "").toLowerCase().includes(q.toLowerCase()) ||
-        (r.contact_name || "").toLowerCase().includes(q.toLowerCase()) ||
-        (r.contact_mobile || "").includes(q) ||
-        (r.contact_email || "").toLowerCase().includes(q.toLowerCase()))
-    : rows;
+  const filtered = useMemo(() => {
+    const base = q.trim()
+      ? rows.filter((r) => {
+          const ql = q.toLowerCase();
+          return (
+            (r.legal_name || "").toLowerCase().includes(ql) ||
+            (r.trade_name || "").toLowerCase().includes(ql) ||
+            (r.epc_display_id || "").toLowerCase().includes(ql) ||
+            (r.contact_name || "").toLowerCase().includes(ql) ||
+            (r.contact_mobile || "").includes(q) ||
+            (r.contact_email || "").toLowerCase().includes(ql)
+          );
+        })
+      : rows;
+    const sorted = [...base].sort((a, b) => {
+      let av: string | number = "";
+      let bv: string | number = "";
+      if (sortKey === "created_at") {
+        av = new Date(a.created_at).getTime() || 0;
+        bv = new Date(b.created_at).getTime() || 0;
+      } else if (sortKey === "status") {
+        av = a.status || "";
+        bv = b.status || "";
+      }
+      const cmp = av < bv ? -1 : av > bv ? 1 : 0;
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return sorted;
+  }, [rows, q, sortKey, sortDir]);
 
-  // Lazy upsert: if no row exists, insert; otherwise update.
+  function toggleSort(k: SortKey) {
+    if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(k); setSortDir("desc"); }
+  }
+
   async function toggleLender(epcId: string, lender: Lender, field: "docs_given" | "approved", value: boolean) {
-    // Approve-ON requires an admin confirmation. Approve-OFF and any
-    // docs_given toggle proceed silently.
     if (field === "approved" && value === true) {
       if (!window.confirm("Are you sure for this approval?")) return;
     }
-    // Optimistic UI update.
     const prevState = lenderState;
     setLenderState((s) => {
       const next = { ...s };
@@ -167,7 +233,6 @@ function EpcsTab() {
       next[epcId] = { ...cur, [lender]: { ...lenderCur, [field]: value } };
       return next;
     });
-
     try {
       const { data: existing } = await supabase()
         .from("epc_lender_status")
@@ -175,32 +240,24 @@ function EpcsTab() {
         .eq("business_id", epcId)
         .eq("lender", lender)
         .maybeSingle();
-
       if (existing) {
         await supabase()
           .from("epc_lender_status")
           .update({ [field]: value })
           .eq("id", (existing as { id: string }).id);
       } else {
-        // Lazy insert. The other boolean defaults to false.
         const row: Record<string, unknown> = {
-          business_id: epcId,
-          lender,
-          docs_given: false,
-          approved: false,
+          business_id: epcId, lender, docs_given: false, approved: false,
         };
         row[field] = value;
         await supabase().from("epc_lender_status").insert(row);
       }
     } catch (e) {
-      // Revert on failure.
       setLenderState(prevState);
       alert("Couldn't save lender state: " + (e as Error).message);
     }
   }
 
-  // Streams the ZIP from /api/epc/[id]/download-zip and triggers a browser
-  // download. Per-row spinner while fetching; alert on failure.
   async function downloadZip(row: Row) {
     if (downloading[row.id]) return;
     setDownloading((d) => ({ ...d, [row.id]: true }));
@@ -210,10 +267,7 @@ function EpcsTab() {
       });
       if (!res.ok) {
         let msg = `HTTP ${res.status}`;
-        try {
-          const j = await res.json();
-          if (j?.error) msg = j.error;
-        } catch { /* body wasn't JSON — keep HTTP status */ }
+        try { const j = await res.json(); if (j?.error) msg = j.error; } catch { /* keep */ }
         throw new Error(msg);
       }
       const blob = await res.blob();
@@ -231,18 +285,18 @@ function EpcsTab() {
     } catch (e) {
       alert("Download failed: " + ((e as Error)?.message ?? String(e)));
     } finally {
-      setDownloading((d) => {
-        const next = { ...d };
-        delete next[row.id];
-        return next;
-      });
+      setDownloading((d) => { const next = { ...d }; delete next[row.id]; return next; });
     }
   }
 
   return (
     <>
-      <div className="grid sm:grid-cols-[1fr_220px] gap-3 mb-5">
-        <Input placeholder="Search by legal name, POC, mobile, or email…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="grid sm:grid-cols-[1fr_220px_auto] gap-3 mb-5">
+        <Input
+          placeholder="Search by name, ID, POC, mobile, or email…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
         <Select
           placeholder="All statuses"
           options={[
@@ -255,50 +309,118 @@ function EpcsTab() {
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         />
+        <Button
+          type="button"
+          variant="primary"
+          onClick={() => setAddOpen(true)}
+          className="whitespace-nowrap"
+        >
+          + Add New EPC
+        </Button>
       </div>
 
       <Card className="overflow-x-auto">
-        <table className="w-full text-[14px] min-w-[1000px]">
-          <thead className="bg-bg-soft border-b border-line text-left text-text-muted">
+        <table className="w-full text-[14px] min-w-[1100px]">
+          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">
             <tr>
-              <th className="px-4 py-3 font-medium">EPC details</th>
-              <th className="px-4 py-3 font-medium">Email ID</th>
-              <th className="px-4 py-3 font-medium">Type of business</th>
-              <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">Submitted on</th>
-              <th className="px-4 py-3 font-medium">Lenders</th>
-              <th className="px-4 py-3 font-medium">Download</th>
+              <th className="px-4 py-3 font-medium text-[12px] uppercase tracking-wide">EPC details</th>
+              <th className="px-4 py-3 font-medium text-[12px] uppercase tracking-wide">Source</th>
+              <th className="px-4 py-3 font-medium text-[12px] uppercase tracking-wide">
+                <button type="button" onClick={() => toggleSort("created_at")} className="inline-flex items-center gap-1 uppercase tracking-wide">
+                  Profile created
+                  <SortMark active={sortKey === "created_at"} dir={sortDir} />
+                </button>
+              </th>
+              <th className="px-4 py-3 font-medium text-[12px] uppercase tracking-wide">
+                <button type="button" onClick={() => toggleSort("status")} className="inline-flex items-center gap-1 uppercase tracking-wide">
+                  Status
+                  <SortMark active={sortKey === "status"} dir={sortDir} />
+                </button>
+              </th>
+              <th className="px-4 py-3 font-medium text-[12px] uppercase tracking-wide">Action</th>
+              <th className="px-4 py-3 font-medium text-[12px] uppercase tracking-wide">Lenders</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={7} className="px-5 py-10 text-center text-text-muted">No EPCs match.</td></tr>
+              <tr><td colSpan={6} className="px-5 py-10 text-center text-[#5a8a76]">No EPCs match.</td></tr>
             ) : filtered.map((r) => (
               <tr
                 key={r.id}
-                onClick={() => router.push(`/admin/epc/${r.id}` as any)}
-                className="border-b border-line cursor-pointer hover:bg-bg-soft transition-colors align-top"
+                className="border-b border-[#eaf3ee] hover:bg-[#f7fcfa] transition-colors align-top"
               >
                 <td className="px-4 py-3">
-                  <div className="space-y-0.5 min-w-[180px]">
-                    {/* Trade name is the primary identifier. Falls back to
-                        legal_name so the 40 legacy EPCs (onboarded before
-                        trade_name existed) don't all render blank. */}
-                    <p className="text-[13px] font-semibold text-text">
-                      {r.trade_name || r.legal_name ||
-                        <span className="text-text-muted font-normal">—</span>}
-                    </p>
-                    <p className="text-[12px] text-text-mid">{r.contact_name || "—"}</p>
-                    <p className="text-[12px] text-text-muted">+91 {maskMobile(r.contact_mobile)}</p>
+                  <div className="flex items-start gap-3 min-w-[240px]">
+                    <input
+                      type="checkbox"
+                      checked={!!selected[r.id]}
+                      onChange={(e) => setSelected((s) => ({ ...s, [r.id]: e.target.checked }))}
+                      className="mt-1 h-3.5 w-3.5 accent-[#178a5c] shrink-0"
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <div
+                      className="w-9 h-9 rounded-md bg-[#d6efe3] text-[#178a5c] grid place-items-center shrink-0 cursor-pointer"
+                      onClick={() => router.push(`/admin/epc/${r.id}/view` as any)}
+                    >
+                      {IconBuilding}
+                    </div>
+                    <div
+                      className="flex-1 min-w-0 cursor-pointer"
+                      onClick={() => router.push(`/admin/epc/${r.id}/view` as any)}
+                    >
+                      <p className="text-[13px] font-semibold text-[#0f3d2e] truncate">
+                        {r.trade_name || r.legal_name ||
+                          <span className="text-[#5a8a76] font-normal">—</span>}
+                      </p>
+                      {r.epc_display_id && (
+                        <p className="text-[11px] font-mono text-[#185fa5]">{r.epc_display_id}</p>
+                      )}
+                      <p className="text-[12px] text-[#5a8a76]">
+                        +91 {maskMobile(r.contact_mobile)}
+                      </p>
+                      {r.contact_email && (
+                        <p className="text-[11px] text-[#5a8a76] truncate">{r.contact_email}</p>
+                      )}
+                    </div>
                   </div>
                 </td>
-                <td className="px-4 py-3 text-[13px]">{r.contact_email || <span className="text-text-muted">—</span>}</td>
-                <td className="px-4 py-3 text-[13px]">{BUSINESS_TYPE_LABEL[r.business_type ?? ""] ?? "—"}</td>
+                <td className="px-4 py-3">
+                  <SourcePill source={r.source} />
+                </td>
+                <td className="px-4 py-3">
+                  <p className="text-[13px] text-[#0f3d2e]">
+                    {new Date(r.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                  </p>
+                  <p className="text-[11px] text-[#5a8a76]">
+                    {new Date(r.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                </td>
                 <td className="px-4 py-3">
                   <StatusBadge status={r.status} updated={r.epc_self_edited === true} />
                 </td>
-                <td className="px-4 py-3 text-[13px] text-text-muted">
-                  {r.submitted_at ? new Date(r.submitted_at).toLocaleDateString("en-IN") : "—"}
+                <td className="px-4 py-3">
+                  <div className="flex flex-col gap-1.5 min-w-[130px]">
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/admin/epc/${r.id}/view` as any)}
+                      className="text-[12px] font-semibold px-3 py-1.5 rounded-input border border-[#185fa5]/30 bg-white text-[#185fa5] hover:bg-[#dceffb] inline-flex items-center justify-center gap-1.5"
+                    >
+                      {IconEye} View
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!!downloading[r.id]}
+                      onClick={() => downloadZip(r)}
+                      className={[
+                        "text-[12px] font-semibold px-3 py-1.5 rounded-input border transition-colors inline-flex items-center justify-center gap-1.5",
+                        downloading[r.id]
+                          ? "border-line bg-bg-soft text-text-muted cursor-not-allowed"
+                          : "border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5]",
+                      ].join(" ")}
+                    >
+                      {IconDownload} {downloading[r.id] ? "Preparing…" : "Download ZIP"}
+                    </button>
+                  </div>
                 </td>
                 <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                   <LenderCell
@@ -306,28 +428,37 @@ function EpcsTab() {
                     onToggle={(lender, field, v) => toggleLender(r.id, lender, field, v)}
                   />
                 </td>
-                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    disabled={!!downloading[r.id]}
-                    onClick={() => downloadZip(r)}
-                    className={[
-                      "text-[12px] font-semibold px-3 py-1.5 rounded-input border transition-colors",
-                      downloading[r.id]
-                        ? "border-line bg-bg-soft text-text-muted cursor-not-allowed"
-                        : "border-blue/30 bg-white text-blue hover:bg-blue/5",
-                    ].join(" ")}
-                    title={downloading[r.id] ? "Preparing ZIP…" : "Download all documents + profile summary as a ZIP"}
-                  >
-                    {downloading[r.id] ? "Preparing…" : "Download ZIP"}
-                  </button>
-                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </Card>
+
+      <AddNewEpcModal open={addOpen} onClose={() => setAddOpen(false)} />
     </>
+  );
+}
+
+function SortMark({ active, dir }: { active: boolean; dir: SortDir }) {
+  if (!active) return <span className="opacity-30">{IconArrowDown}</span>;
+  return dir === "asc" ? IconArrowUp : IconArrowDown;
+}
+
+function SourcePill({ source }: { source: string | null }) {
+  const s = (source || "website").toLowerCase();
+  const isManual = s === "manual";
+  return (
+    <span
+      className={[
+        "inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full",
+        isManual
+          ? "bg-[#fef0d6] text-[#854f0b]"
+          : "bg-[#dceffb] text-[#185fa5]",
+      ].join(" ")}
+    >
+      {isManual ? IconUserPlus : IconGlobe}
+      {isManual ? "Manual" : "Website"}
+    </span>
   );
 }
 
@@ -343,24 +474,24 @@ function LenderCell({
         const s = state[l.key] ?? { docs_given: false, approved: false };
         return (
           <div key={l.key} className="flex items-center gap-3 text-[11px]">
-            <span className="min-w-[64px] font-medium text-text-mid">{l.label}</span>
+            <span className="min-w-[64px] font-medium text-[#0f3d2e]">{l.label}</span>
             <label className="flex items-center gap-1 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={s.docs_given}
                 onChange={(e) => onToggle(l.key, "docs_given", e.target.checked)}
-                className="h-3.5 w-3.5 accent-blue"
+                className="h-3.5 w-3.5 accent-[#185fa5]"
               />
-              <span className="text-text-mid">Docs</span>
+              <span className="text-[#5a8a76]">Docs</span>
             </label>
             <label className="flex items-center gap-1 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={s.approved}
                 onChange={(e) => onToggle(l.key, "approved", e.target.checked)}
-                className="h-3.5 w-3.5 accent-green"
+                className="h-3.5 w-3.5 accent-[#178a5c]"
               />
-              <span className="text-text-mid">Approved</span>
+              <span className="text-[#5a8a76]">Approved</span>
             </label>
           </div>
         );

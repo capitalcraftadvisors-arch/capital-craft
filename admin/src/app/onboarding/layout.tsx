@@ -2,15 +2,21 @@
 
 import { ReactNode } from "react";
 import AuthGuard from "@/components/AuthGuard";
+import ImpersonationBanner from "@/components/ImpersonationBanner";
 
 // Allow:
 //   draft       — initial onboarding (status='draft').
 //   self_edit   — EPC's one-time post-submit edit pass: status='under_review'
 //                 AND epc_self_edited=false.
+// When admin is impersonating (Add New EPC flow), getBusiness() returns the
+// impersonated EPC's context — which is status='draft' — so AuthGuard admits
+// them through the "draft" clause naturally. ImpersonationBanner renders a
+// visible marker so the admin always knows whose account they're editing.
 export default function OnboardingLayout({ children }: { children: ReactNode }) {
   return (
     <AuthGuard allow={["draft", "self_edit"]}>
       <main className="min-h-screen bg-bg-soft">
+        <ImpersonationBanner />
         <header className="border-b border-line bg-white">
           <div className="max-w-container mx-auto px-7 h-16 flex items-center justify-between">
             <a href="/" className="font-display font-bold text-[20px] grad-text">Capital Craft</a>
