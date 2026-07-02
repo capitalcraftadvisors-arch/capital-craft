@@ -238,7 +238,14 @@ function cap(s: string, n = 200): string {
 //      - STOP at a sibling label (Trade Name if we're searching Legal,
 //        Additional Trade, GSTIN, Period, etc.)
 //      - first surviving line, after prefix strip, is the value
-//   6. If nothing survives, return null (fallback will pick it up).
+//   6. If this occurrence's walk yielded nothing, CONTINUE the outer
+//      loop to look for the NEXT occurrence of the label. Real REG-06
+//      certs repeat the label three times (page 1 table + Annexure A
+//      + Annexure B); on page 1 Vision reads the table column-by-column
+//      so the walk-forward hits sibling labels ("Trade Name") before
+//      the values ("LALIT KUMAR SAINI"). The Annexure pages then have
+//      labels immediately adjacent to their values and give a clean
+//      match on the second/third try.
 function matchAfterFormLabel(
   text: string,
   labelRe: RegExp,
@@ -272,7 +279,8 @@ function matchAfterFormLabel(
         return cap(candidate);
       }
     }
-    return null;
+    // Deliberate: DON'T return null here. Let the outer loop try the
+    // next occurrence of the same label further down the document.
   }
   return null;
 }
