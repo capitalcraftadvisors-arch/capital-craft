@@ -22,6 +22,7 @@ import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
 import { getDocumentUrl } from "@/lib/storage";
+import { logAudit } from "@/lib/auditLog";
 
 export default function AdminEpcViewPage() {
   return (
@@ -138,6 +139,7 @@ function Inner() {
   const [lender, setLender] = useState<LenderRow[]>([]);
   const [adminInfo, setAdminInfo] = useState<AdminInfo | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [statusBusy, setStatusBusy] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -174,6 +176,29 @@ function Inner() {
   async function openDoc(id: string) {
     const u = await getDocumentUrl(id);
     if (u) window.open(u, "_blank");
+  }
+
+  // Internal status transitions — writes to epc_business.status (admin's
+  // internal tracking field) and logs to admin_edit_log. This mirrors the
+  // detail page's changeStatus. IMPORTANT: this DOES NOT unlock the EPC's
+  // loan application — only a lender "Approved" tick does that.
+  async function changeStatus(next: "approved" | "on_hold" | "rejected" | "under_review") {
+    if (!biz || statusBusy) return;
+    setStatusBusy(true);
+    try {
+      const { error } = await supabase()
+        .from("epc_business")
+        .update({ status: next })
+        .eq("id", biz.id);
+      if (error) {
+        alert("Status update failed: " + error.message);
+        return;
+      }
+      await logAudit(biz.id, "field_edit", "status", biz.status, next);
+      setBiz({ ...biz, status: next });
+    } finally {
+      setStatusBusy(false);
+    }
   }
 
   async function downloadZip() {
@@ -259,6 +284,17 @@ function Inner() {
             </div>
           </div>
         </div>
+
+        {/* ── INTERNAL STATUS BAND — admin-only, visually distinct ──── */}
+        {/* Slate palette (not brand green) so it can't be confused with     */}
+        {/* the lender "Approved" tick, which is what actually unlocks the   */}
+        {/* EPC's loan application. This field is purely internal admin      */}
+        {/* tracking; the EPC never sees it and it never gates their access. */}
+        <InternalStatusBand
+          current={biz.status}
+          busy={statusBusy}
+          onChange={changeStatus}
+        />
 
         {/* ── PROGRESS TRACKER — prominent standalone band ─────────── */}
         <div className="rounded-[12px] border border-[#cdeadd] bg-white p-6 sm:p-8 mb-4">
@@ -449,6 +485,90 @@ function Inner() {
 }
 
 // ── Reusable pieces ─────────────────────────────────────────────────
+
+const INTERNAL_STATUS_LABEL: Record<string, string> = {
+  draft:        "Draft",
+  under_review: "Under review",
+  approved:     "Approved",
+  on_hold:      "On hold",
+  rejected:     "Rejected",
+};
+
+function InternalStatusBand({
+  current, busy, onChange,
+}: {
+  current: string;
+  busy: boolean;
+  onChange: (next: "approved" | "on_hold" | "rejected" | "under_review") => void;
+}) {
+  // Draft: nothing to change yet (EPC hasn't submitted).
+  const label = INTERNAL_STATUS_LABEL[current] ?? current;
+  return (
+    <div className="rounded-[12px] border border-slate-300 bg-slate-50 p-4 sm:p-5 mb-4">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
+            Internal status <span className="normal-case font-normal text-slate-400">· admin only</span>
+          </div>
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="text-[18px] font-semibold text-slate-800">{label}</span>
+            <span className="text-[12px] text-slate-500">
+              Private to admin — does not unlock the EPC&rsquo;s loan application.
+              Only a lender &ldquo;Approved&rdquo; tick does.
+            </span>
+          </div>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {current === "draft" && (
+            <span className="text-[12px] text-slate-500 italic self-center">
+              EPC hasn&rsquo;t submitted yet
+            </span>
+          )}
+          {current === "under_review" && (
+            <>
+              <StatusBtn kind="approve" busy={busy} onClick={() => onChange("approved")}>Approve</StatusBtn>
+              <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("on_hold")}>On hold</StatusBtn>
+              <StatusBtn kind="danger" busy={busy} onClick={() => onChange("rejected")}>Reject</StatusBtn>
+            </>
+          )}
+          {current === "on_hold" && (
+            <>
+              <StatusBtn kind="approve" busy={busy} onClick={() => onChange("approved")}>Approve</StatusBtn>
+              <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("under_review")}>Back to review</StatusBtn>
+              <StatusBtn kind="danger" busy={busy} onClick={() => onChange("rejected")}>Reject</StatusBtn>
+            </>
+          )}
+          {current === "rejected" && (
+            <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("under_review")}>Re-open</StatusBtn>
+          )}
+          {current === "approved" && (
+            <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("under_review")}>Move back to review</StatusBtn>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatusBtn({
+  kind, busy, onClick, children,
+}: {
+  kind: "approve" | "neutral" | "danger";
+  busy: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  const base = "text-[13px] font-semibold px-3.5 py-1.5 rounded-md border transition-colors disabled:opacity-60";
+  const cls =
+    kind === "approve" ? "bg-slate-800 text-white border-slate-800 hover:bg-slate-700" :
+    kind === "danger"  ? "bg-white text-red-700 border-red-300 hover:bg-red-50" :
+                         "bg-white text-slate-700 border-slate-300 hover:bg-slate-100";
+  return (
+    <button type="button" disabled={busy} onClick={onClick} className={[base, cls].join(" ")}>
+      {children}
+    </button>
+  );
+}
 
 function Pill({ children, tint, icon }: {
   children: React.ReactNode;
