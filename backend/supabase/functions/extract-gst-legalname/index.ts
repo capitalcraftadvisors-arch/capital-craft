@@ -204,12 +204,27 @@ function isOtherFormLabel(s: string, currentLabelRe: RegExp): boolean {
 function looksLikeLabelFragment(s: string): boolean {
   const t = s.trim().toLowerCase();
   if (!t) return true;
-  if (t === "if any" || t.startsWith("if any ")) return true;
+  if (t === "if any") return true;
+  // Standalone leftover tokens from a split "Trade Name, if any" cell —
+  // e.g. Vision sometimes emits ",", "if", "any" on their own lines.
+  if (t === "if" || t === "any") return true;
+  if (t === "," || t === ";") return true;
   if (t === "additional") return true;
   // Belt-and-suspenders: even if stripTableNumber missed for some reason,
   // reject a bare "2." / "3." from being returned as a value.
   if (BARE_TABLE_NUMBER_RE.test(t)) return true;
   return false;
+}
+
+// Peel off a leading "if any" or "Additional trade" scrap that Vision
+// sometimes glues onto the front of the actual value line
+// (e.g. "if any ANJALI AGENCIES" -> "ANJALI AGENCIES"). Applied after
+// stripSectionPrefix, before looksLikeLabelFragment.
+function stripLeadingLabelScraps(s: string): string {
+  return s
+    .replace(/^\s*(?:Additional\s+trade\s+names?)\s*[,]?\s*(?:if\s+any)?\s*/i, "")
+    .replace(/^\s*if\s+any\s+/i, "")
+    .trim();
 }
 
 function isLabelOrPrefix(s: string | null): boolean {
@@ -260,7 +275,7 @@ function matchAfterFormLabel(
     // Same-line attempt.
     const sameLineRemainder = line.replace(labelRe, "");
     const trimmed = sameLineRemainder.replace(/^[\s:.\-,]+/, "").trim();
-    const sameLineVal = stripSectionPrefix(trimmed);
+    const sameLineVal = stripLeadingLabelScraps(stripSectionPrefix(trimmed));
     if (sameLineVal && !looksLikeLabelFragment(sameLineVal)) {
       return cap(sameLineVal);
     }
@@ -274,7 +289,7 @@ function matchAfterFormLabel(
       if (labelRe.test(raw)) continue;            // duplicate of OUR label
       if (isOtherFormLabel(raw, labelRe)) break;  // stop at a sibling label
 
-      const candidate = stripSectionPrefix(raw);
+      const candidate = stripLeadingLabelScraps(stripSectionPrefix(raw));
       if (candidate && !looksLikeLabelFragment(candidate)) {
         return cap(candidate);
       }
