@@ -61,22 +61,89 @@ export default function ActivityLog({ businessId, refreshKey }: Props) {
 
   return (
     <ol className="space-y-2">
-      {rows.map((r) => (
-        <li
-          key={r.id}
-          className="border-l-4 border-[#cdeadd] pl-4 py-2 bg-[#f7fcfa] rounded-r-[8px]"
-        >
-          <div className="flex items-baseline justify-between gap-3">
-            <p className="text-[14px] text-[#0f3d2e]">{describe(r)}</p>
-            <span className="text-[11px] text-[#5a8a76] shrink-0">{fmtDate(r.created_at)}</span>
-          </div>
-          <p className="text-[12px] text-[#5a8a76] mt-0.5 capitalize">
-            by {actorLabel(r.actor)}
-          </p>
-        </li>
-      ))}
+      {rows.map((r) => {
+        const icon = iconFor(r);
+        return (
+          <li
+            key={r.id}
+            className="border-l-4 border-[#cdeadd] pl-4 py-2 bg-[#f7fcfa] rounded-r-[8px]"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <span className={["shrink-0 mt-0.5", icon.tone].join(" ")}>{icon.svg}</span>
+                <p className="text-[14px] text-[#0f3d2e]">{describe(r)}</p>
+              </div>
+              <span className="text-[11px] text-[#5a8a76] shrink-0">{fmtDate(r.created_at)}</span>
+            </div>
+            <p className="text-[12px] text-[#5a8a76] mt-0.5 pl-[26px] capitalize">
+              by {actorLabel(r.actor)}
+            </p>
+          </li>
+        );
+      })}
     </ol>
   );
+}
+
+// ── Per-action icons ─────────────────────────────────────────────────
+
+type IconChoice = { svg: React.ReactNode; tone: string };
+
+const SVG_PROPS = {
+  width: 16,
+  height: 16,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 1.8,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+};
+
+const I_PENCIL      = (<svg {...SVG_PROPS}><path d="M17 3l4 4-13 13H4v-4z"/></svg>);
+const I_TARGET      = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></svg>);
+const I_UPLOAD      = (<svg {...SVG_PROPS}><path d="M12 4v13m0-13-5 5m5-5 5 5M4 20h16"/></svg>);
+const I_REFRESH     = (<svg {...SVG_PROPS}><path d="M4 12a8 8 0 0 1 14-5l3-3M20 12a8 8 0 0 1-14 5l-3 3M17 4h4v4M7 20H3v-4"/></svg>);
+const I_TRASH       = (<svg {...SVG_PROPS}><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14zM10 11v6M14 11v6"/></svg>);
+const I_USERS       = (<svg {...SVG_PROPS}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>);
+const I_STAR        = (<svg {...SVG_PROPS}><path d="M12 2 15.09 8.26 22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>);
+const I_SEND        = (<svg {...SVG_PROPS}><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>);
+const I_CHECK_CIRC  = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>);
+const I_X_CIRC      = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="10"/><path d="m9 9 6 6M15 9l-6 6"/></svg>);
+const I_FILE_PLUS   = (<svg {...SVG_PROPS}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 12v6M9 15h6"/></svg>);
+const I_FILE_MINUS  = (<svg {...SVG_PROPS}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 15h6"/></svg>);
+const I_CHAT        = (<svg {...SVG_PROPS}><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z"/></svg>);
+const I_CHAT_PLUS   = (<svg {...SVG_PROPS}><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z"/><path d="M12 8v6M9 11h6"/></svg>);
+const I_CHAT_X      = (<svg {...SVG_PROPS}><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z"/><path d="m10 9 4 4M14 9l-4 4"/></svg>);
+const I_DOT         = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>);
+
+function iconFor(r: LogRow): IconChoice {
+  const NEUTRAL = "text-[#5a8a76]";
+  const GREEN   = "text-[#178a5c]";
+  const BLUE    = "text-[#185fa5]";
+  const AMBER   = "text-[#854f0b]";
+  const RED     = "text-red-600";
+
+  switch (r.action) {
+    case "field_edit":
+      return r.field === "status"
+        ? { svg: I_TARGET, tone: BLUE }
+        : { svg: I_PENCIL, tone: BLUE };
+    case "doc_upload":         return { svg: I_UPLOAD, tone: GREEN };
+    case "doc_replace":        return { svg: I_REFRESH, tone: BLUE };
+    case "doc_delete":         return { svg: I_TRASH, tone: RED };
+    case "members_edited":     return { svg: I_USERS, tone: BLUE };
+    case "references_edited":  return { svg: I_STAR, tone: BLUE };
+    case "self_edit_submit":   return { svg: I_SEND, tone: BLUE };
+    case "lender_approve":     return { svg: I_CHECK_CIRC, tone: GREEN };
+    case "lender_unapprove":   return { svg: I_X_CIRC, tone: AMBER };
+    case "lender_docs_given":  return { svg: I_FILE_PLUS, tone: GREEN };
+    case "lender_docs_ungiven":return { svg: I_FILE_MINUS, tone: AMBER };
+    case "comment_add":        return { svg: I_CHAT_PLUS, tone: GREEN };
+    case "comment_edit":       return { svg: I_CHAT, tone: BLUE };
+    case "comment_delete":     return { svg: I_CHAT_X, tone: RED };
+    default:                   return { svg: I_DOT, tone: NEUTRAL };
+  }
 }
 
 function actorLabel(actor: string): string {

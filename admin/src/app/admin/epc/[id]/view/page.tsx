@@ -24,9 +24,8 @@ import { getToken } from "@/lib/auth";
 import { getDocumentUrl } from "@/lib/storage";
 import { logAudit } from "@/lib/auditLog";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
-import CommentsButton from "@/components/CommentsButton";
 import CommentsPanel, { CommentRow } from "@/components/CommentsPanel";
-import ActivityLog from "@/components/ActivityLog";
+import ActivityLogModal from "@/components/ActivityLogModal";
 
 export default function AdminEpcViewPage() {
   return (
@@ -147,6 +146,7 @@ function Inner() {
   const [zipPickerOpen, setZipPickerOpen] = useState(false);
   const [latestComment, setLatestComment] = useState<CommentRow | null>(null);
   const [commentsOpen, setCommentsOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
   // Bumped after any comment write to force ActivityLog to re-fetch.
   const [activityRefresh, setActivityRefresh] = useState(0);
 
@@ -404,19 +404,13 @@ function Inner() {
               {nonR3bDocs.length === 0 ? (
                 <p className="text-[13px] text-[#5a8a76]">No documents uploaded.</p>
               ) : (
-                <div className="grid grid-cols-2 gap-2">
-                  {nonR3bDocs.map((d) => (
-                    <button
-                      key={d.id}
-                      type="button"
-                      onClick={() => openDoc(d.id)}
-                      className="border border-[#e0f0e8] bg-[#f7fcfa] hover:bg-[#f0faf5] rounded-[8px] px-3 py-2.5 text-[13px] flex items-center justify-between gap-2 min-w-0"
-                    >
-                      <span className="text-[#0f3d2e] font-medium truncate">{DOC_LABEL(d.category)}</span>
-                      <span className="text-[#185fa5] shrink-0" style={{ transform: "scale(1.2)" }}>{I.eye}</span>
-                    </button>
-                  ))}
-                </div>
+                <DocumentsBySteps
+                  docs={nonR3bDocs}
+                  stakeholders={stakeholders}
+                  businessType={biz.business_type as string | null}
+                  openDoc={openDoc}
+                  eyeIcon={I.eye}
+                />
               )}
             </SectionCard>
 
@@ -514,30 +508,15 @@ function Inner() {
           </div>
         </div>
 
-        {/* ── Activity log — full-width band under the 3-column grid. */}
-        {/* Feeds from admin_edit_log — combines admin edits, EPC self-  */}
-        {/* edits, doc actions, status changes, lender approvals, and   */}
-        {/* comment events (all via triggers in migration 0018).         */}
-        <div className="rounded-[12px] border border-[#cdeadd] bg-white p-5 sm:p-6 mt-4">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h3 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Activity log</h3>
-              <p className="text-[12px] text-[#5a8a76]">
-                Chronological · admin edits, EPC self-edits, status changes, lender ticks, and comments.
-              </p>
-            </div>
-            <CommentsButton
-              businessId={biz.id}
-              epcName={trade}
-              onChanged={() => void refreshLatestComment()}
-              size="md"
-            />
-          </div>
-          <ActivityLog businessId={biz.id} refreshKey={activityRefresh} />
-        </div>
-
-        {/* ── Actions ────────────────────────────────────────────────── */}
+        {/* ── Actions strip — Activity log · Edit profile · Download ZIP */}
         <div className="flex gap-3 mt-4">
+          <button
+            type="button"
+            onClick={() => setActivityOpen(true)}
+            className="flex-1 py-3.5 text-[15px] font-semibold bg-white border-2 border-[#178a5c] text-[#178a5c] rounded-[10px] hover:bg-[#f0faf5] inline-flex items-center justify-center gap-2"
+          >
+            {I.eye} Activity log
+          </button>
           <button
             type="button"
             onClick={() => router.push(`/admin/epc/${biz.id}` as any)}
@@ -569,6 +548,13 @@ function Inner() {
         businessId={biz.id}
         epcName={trade}
         onChanged={() => void refreshLatestComment()}
+      />
+      <ActivityLogModal
+        open={activityOpen}
+        onClose={() => setActivityOpen(false)}
+        businessId={biz.id}
+        epcName={trade}
+        refreshKey={activityRefresh}
       />
     </main>
   );
@@ -774,4 +760,236 @@ function fmtCapacity(n: number | null | undefined, unit: string | null | undefin
 
 function cap(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
+// ── DocumentsBySteps ─────────────────────────────────────────────────
+//
+// Renders the EPC's documents grouped by the onboarding step that
+// produced them, in step order. Sections with zero docs are hidden so
+// the panel stays compact. Stakeholder docs are further grouped per
+// stakeholder with role-based labels (Proprietor / Director N / Partner
+// N / Stakeholder N) that fall back to "Stakeholder N" when
+// business_type is null.
+//
+// Signed-URL viewing (openDoc) is unchanged.
+
+const BUSINESS_STEP_CATS = ["pan_business", "gstin", "extra_doc"] as const;
+const STAKEHOLDER_CATS = [
+  "stakeholder_pan",
+  "stakeholder_aadhaar_front",
+  "stakeholder_aadhaar_back",
+  "stakeholder_aadhaar",
+] as const;
+const BANK_CATS   = ["cancelled_cheque"] as const;
+const OFFICE_CATS = ["office_exterior", "office_interior", "office_selfie"] as const;
+
+function DocumentsBySteps({
+  docs, stakeholders, businessType, openDoc, eyeIcon,
+}: {
+  docs: Doc[];
+  stakeholders: Array<{ id: string; name?: string; designation?: string; mobile?: string; email?: string }>;
+  businessType: string | null;
+  openDoc: (id: string) => void;
+  eyeIcon: React.ReactNode;
+}) {
+  // Bucket docs by category family.
+  const byCat = (cats: readonly string[]) =>
+    docs.filter((d) => cats.includes(d.category));
+
+  const bizDocs    = byCat(BUSINESS_STEP_CATS);
+  const stkDocs    = byCat(STAKEHOLDER_CATS);
+  const bankDocs   = byCat(BANK_CATS);
+  const officeDocs = byCat(OFFICE_CATS);
+  const knownCats: readonly string[] =
+    [...BUSINESS_STEP_CATS, ...STAKEHOLDER_CATS, ...BANK_CATS, ...OFFICE_CATS];
+  const otherDocs  = docs.filter((d) => !knownCats.includes(d.category));
+
+  const stakeholderIndex = new Map<string, number>();
+  stakeholders.forEach((s, i) => stakeholderIndex.set(s.id, i));
+
+  // Group stakeholder docs by stakeholder_id, preserving stakeholder order.
+  const stakeholderGroups = stakeholders.map((s) => ({
+    stakeholder: s,
+    docs: stkDocs.filter((d) => d.stakeholder_id === s.id),
+  }));
+  // Orphan stakeholder docs (stakeholder_id that doesn't match any current row).
+  const orphanStakeholderDocs = stkDocs.filter(
+    (d) => !d.stakeholder_id || !stakeholderIndex.has(d.stakeholder_id),
+  );
+
+  return (
+    <div className="space-y-4">
+      {bizDocs.length > 0 && (
+        <StepBlock title="Business (Step 2)">
+          <DocGrid docs={bizDocs} label={(d) => businessDocLabel(d.category, businessType)} openDoc={openDoc} eyeIcon={eyeIcon} />
+        </StepBlock>
+      )}
+
+      {(stakeholderGroups.some((g) => g.docs.length > 0) || orphanStakeholderDocs.length > 0) && (
+        <StepBlock title="Stakeholders (Step 3)">
+          <div className="space-y-2.5">
+            {stakeholderGroups.map((g, i) => (
+              g.docs.length === 0 ? null : (
+                <StakeholderDocs
+                  key={g.stakeholder.id ?? i}
+                  header={stakeholderRoleTag(businessType, i, stakeholders.length) +
+                          (g.stakeholder.name ? ` — ${g.stakeholder.name}` : "")}
+                  docs={g.docs}
+                  label={(d) => stakeholderDocLabel(businessType, i, stakeholders.length, d.category)}
+                  openDoc={openDoc}
+                  eyeIcon={eyeIcon}
+                />
+              )
+            ))}
+            {orphanStakeholderDocs.length > 0 && (
+              <StakeholderDocs
+                header="Legacy stakeholder documents"
+                docs={orphanStakeholderDocs}
+                label={(d) => plainStakeholderCatLabel(d.category)}
+                openDoc={openDoc}
+                eyeIcon={eyeIcon}
+              />
+            )}
+          </div>
+        </StepBlock>
+      )}
+
+      {bankDocs.length > 0 && (
+        <StepBlock title="Bank (Step 4)">
+          <DocGrid docs={bankDocs} label={() => "Empty cheque copy / picture"} openDoc={openDoc} eyeIcon={eyeIcon} />
+        </StepBlock>
+      )}
+
+      {officeDocs.length > 0 && (
+        <StepBlock title="Office (Step 5)">
+          <DocGrid docs={officeDocs} label={(d) => officeDocLabel(d.category, businessType)} openDoc={openDoc} eyeIcon={eyeIcon} />
+        </StepBlock>
+      )}
+
+      {otherDocs.length > 0 && (
+        <StepBlock title="Other">
+          <DocGrid docs={otherDocs} label={(d) => DOC_LABEL(d.category)} openDoc={openDoc} eyeIcon={eyeIcon} />
+        </StepBlock>
+      )}
+    </div>
+  );
+}
+
+function StepBlock({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[12px] font-semibold text-[#5a8a76] uppercase tracking-wider mb-2 pb-1.5 border-b border-[#cdeadd]">
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function StakeholderDocs({
+  header, docs, label, openDoc, eyeIcon,
+}: {
+  header: string;
+  docs: Doc[];
+  label: (d: Doc) => string;
+  openDoc: (id: string) => void;
+  eyeIcon: React.ReactNode;
+}) {
+  return (
+    <div>
+      <p className="text-[12px] font-semibold text-[#0f3d2e] mb-1.5">{header}</p>
+      <DocGrid docs={docs} label={label} openDoc={openDoc} eyeIcon={eyeIcon} />
+    </div>
+  );
+}
+
+function DocGrid({
+  docs, label, openDoc, eyeIcon,
+}: {
+  docs: Doc[];
+  label: (d: Doc) => string;
+  openDoc: (id: string) => void;
+  eyeIcon: React.ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {docs.map((d) => (
+        <button
+          key={d.id}
+          type="button"
+          onClick={() => openDoc(d.id)}
+          className="border border-[#e0f0e8] bg-[#f7fcfa] hover:bg-[#f0faf5] rounded-[8px] px-3 py-2.5 text-[13px] flex items-center justify-between gap-2 min-w-0"
+          title={d.file_name ?? undefined}
+        >
+          <span className="text-[#0f3d2e] font-medium truncate">{label(d)}</span>
+          <span className="text-[#185fa5] shrink-0" style={{ transform: "scale(1.2)" }}>{eyeIcon}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Label helpers ────────────────────────────────────────────────────
+
+function businessDocLabel(cat: string, bt: string | null): string {
+  if (cat === "pan_business") return "PAN card";
+  if (cat === "gstin")        return "GST registration";
+  if (cat === "extra_doc") {
+    if (bt === "partnership") return "Partnership Deed";
+    if (bt === "pvt_ltd")     return "Certificate of Incorporation";
+    if (bt === "llp")         return "LLP Agreement";
+    return "Extra document";
+  }
+  return DOC_LABEL(cat);
+}
+
+function officeDocLabel(cat: string, bt: string | null): string {
+  if (cat === "office_exterior") return "Exterior photo";
+  if (cat === "office_interior") return "Interior photo";
+  if (cat === "office_selfie") {
+    switch (bt) {
+      case "proprietorship":         return "Selfie of proprietor at office";
+      case "partnership":
+      case "llp":                    return "Selfie of at least 1 partner at office";
+      case "pvt_ltd":                return "Selfie of at least 1 director at office";
+      default:                       return "Selfie at office";
+    }
+  }
+  return DOC_LABEL(cat);
+}
+
+// Role tag for a stakeholder header row.
+// Proprietorship never carries a number (there's only one row).
+function stakeholderRoleTag(bt: string | null, index: number, total: number): string {
+  if (bt === "proprietorship") return "Proprietor";
+  const role = roleLabel(bt);
+  return `${role} ${index + 1}`;
+}
+
+// Label for a single stakeholder-doc card. Prefixed with the role tag
+// (e.g. "Partner 1 PAN", "Director 2 Aadhaar (back)"). Proprietorship
+// omits the number.
+function stakeholderDocLabel(bt: string | null, index: number, total: number, cat: string): string {
+  const prefix = bt === "proprietorship"
+    ? "Proprietor"
+    : `${roleLabel(bt)} ${index + 1}`;
+  switch (cat) {
+    case "stakeholder_pan":            return `${prefix} PAN`;
+    case "stakeholder_aadhaar_front":  return `${prefix} Aadhaar (front)`;
+    case "stakeholder_aadhaar_back":   return `${prefix} Aadhaar (back)`;
+    case "stakeholder_aadhaar":        return `${prefix} Aadhaar (legacy)`;
+    default:                           return `${prefix} ${DOC_LABEL(cat)}`;
+  }
+}
+
+// Used when a stakeholder-doc row can't be attributed to a live
+// stakeholder (orphaned by a Step-3 destructive-trim, for instance).
+function plainStakeholderCatLabel(cat: string): string {
+  switch (cat) {
+    case "stakeholder_pan":            return "PAN";
+    case "stakeholder_aadhaar_front":  return "Aadhaar (front)";
+    case "stakeholder_aadhaar_back":   return "Aadhaar (back)";
+    case "stakeholder_aadhaar":        return "Aadhaar (legacy)";
+    default:                           return DOC_LABEL(cat);
+  }
 }
