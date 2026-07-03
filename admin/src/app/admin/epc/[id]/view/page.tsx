@@ -557,11 +557,20 @@ function InternalStatusBand({
             </span>
           </div>
         </div>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
+          {/* Draft: admin can still act — internal status is admin's
+              bookkeeping, not gated on EPC submission. Show the same
+              action buttons as under_review, plus a small hint. */}
           {current === "draft" && (
-            <span className="text-[12px] text-slate-500 italic self-center">
-              EPC hasn&rsquo;t submitted yet
-            </span>
+            <>
+              <span className="text-[12px] text-slate-500 italic self-center">
+                EPC hasn&rsquo;t submitted yet
+              </span>
+              <StatusBtn kind="approve" busy={busy} onClick={() => onChange("approved")}>Approve</StatusBtn>
+              <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("on_hold")}>On hold</StatusBtn>
+              <StatusBtn kind="danger" busy={busy} onClick={() => onChange("rejected")}>Reject</StatusBtn>
+              <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("under_review")}>Mark under review</StatusBtn>
+            </>
           )}
           {current === "under_review" && (
             <>

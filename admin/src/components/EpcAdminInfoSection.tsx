@@ -134,10 +134,13 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
 
   if (!loaded) return null;
 
-  const inputCls =
-    "w-full border border-line rounded-input px-3.5 py-2.5 text-[14px] " +
+  // Base classes with NO width class — width is applied per-usage so
+  // capacity rows can use flex-1 (input) + fixed-width (select) without
+  // fighting a w-full on the base class.
+  const inputBase =
+    "border border-line rounded-input px-3.5 py-2.5 text-[14px] " +
     "focus:border-blue outline-none bg-white";
-  const selectCls = inputCls;
+  const fullInputCls = inputBase + " w-full";
 
   // Dropdown labels display full words per spec ("Kilowatt" / "Megawatt").
   // DB values stay "KW" / "MW" so backfills, the ZIP Excel formatter, and
@@ -153,7 +156,8 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
       <div className="grid gap-4 sm:grid-cols-2 mb-4">
         <Field label="Total team size (Technical + Non-Technical)">
           <input
-            className={inputCls}
+            type="text"
+            className={fullInputCls}
             placeholder='e.g. "50" or "50 (30T + 20NT)"'
             value={draft.team_size}
             onChange={(e) => set("team_size", e.target.value)}
@@ -162,7 +166,8 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
 
         <Field label="Total turnover (last FY)">
           <input
-            className={inputCls}
+            type="text"
+            className={fullInputCls}
             placeholder='e.g. "₹5 Cr" or "50000000"'
             value={draft.turnover_last_fy}
             onChange={(e) => set("turnover_last_fy", e.target.value)}
@@ -170,19 +175,21 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
         </Field>
       </div>
 
-      {/* Row 2 — Residential capacity, full width, wide number + Kilowatt/Megawatt select */}
+      {/* Row 2 — Residential capacity: WIDE number input + small unit select. */}
+      {/* Neither element uses `w-full` — that would collide with flex sizing. */}
       <div className="mb-4">
         <Field label="Total installed capacity (Residential)">
-          <div className="flex gap-3">
+          <div className="flex gap-3 items-stretch">
             <input
-              className={inputCls + " flex-1 min-w-0"}
+              type="text"
+              className={inputBase + " flex-1 min-w-0"}
               inputMode="decimal"
-              placeholder="Number"
+              placeholder="e.g. 850"
               value={draft.capacity_residential}
               onChange={(e) => set("capacity_residential", e.target.value)}
             />
             <select
-              className={selectCls + " w-[150px] shrink-0"}
+              className={inputBase + " w-[130px] shrink-0"}
               value={draft.capacity_residential_unit}
               onChange={(e) => set("capacity_residential_unit", e.target.value as Unit)}
             >
@@ -193,19 +200,20 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
         </Field>
       </div>
 
-      {/* Row 3 — Commercial capacity, same layout */}
+      {/* Row 3 — Commercial capacity: same shape. */}
       <div className="mb-4">
         <Field label="Total installed capacity (Commercial)">
-          <div className="flex gap-3">
+          <div className="flex gap-3 items-stretch">
             <input
-              className={inputCls + " flex-1 min-w-0"}
+              type="text"
+              className={inputBase + " flex-1 min-w-0"}
               inputMode="decimal"
-              placeholder="Number"
+              placeholder="e.g. 2"
               value={draft.capacity_commercial}
               onChange={(e) => set("capacity_commercial", e.target.value)}
             />
             <select
-              className={selectCls + " w-[150px] shrink-0"}
+              className={inputBase + " w-[130px] shrink-0"}
               value={draft.capacity_commercial_unit}
               onChange={(e) => set("capacity_commercial_unit", e.target.value as Unit)}
             >
