@@ -493,27 +493,31 @@ async function buildAeremXlsx(data: {
   ws.addRow([]);
 
   // ── Reference Details ────────────────────────────────────────────
-  sectionHeader("Reference Details");
-  // Sub-header for the two-column layout inside this section: Name | Phone No
-  const refHeader = ws.addRow(["", "Name", "Phone No", ...Array(totalCols - 3).fill("")]);
-  refHeader.getCell(2).font = { bold: true, color: { argb: COLOR_MUTED } };
-  refHeader.getCell(3).font = { bold: true, color: { argb: COLOR_MUTED } };
-  if (totalCols > 3) ws.mergeCells(refHeader.number, 3, refHeader.number, totalCols);
+  // CreditFair variant: the entire References section is omitted.
+  // Aerem + Solfin: full AEREM layout (Buyer 1/2 + Supplier 1/2).
+  if (lender !== "creditfair") {
+    sectionHeader("Reference Details");
+    // Sub-header for the two-column layout inside this section: Name | Phone No
+    const refHeader = ws.addRow(["", "Name", "Phone No", ...Array(totalCols - 3).fill("")]);
+    refHeader.getCell(2).font = { bold: true, color: { argb: COLOR_MUTED } };
+    refHeader.getCell(3).font = { bold: true, color: { argb: COLOR_MUTED } };
+    if (totalCols > 3) ws.mergeCells(refHeader.number, 3, refHeader.number, totalCols);
 
-  const refRow = (label: string, r: Reference) => {
-    const row = ws.addRow([label, display(r.name), r.mobile ? `+91 ${r.mobile}` : "", ...Array(totalCols - 3).fill("")]);
-    row.getCell(1).font = { bold: true, color: { argb: COLOR_LABEL } };
-    row.getCell(2).alignment = { wrapText: true, vertical: "top" };
-    row.getCell(3).alignment = { wrapText: true, vertical: "top" };
-    if (!row.getCell(2).value) row.getCell(2).value = "—";
-    if (!row.getCell(3).value) row.getCell(3).value = "—";
-    if (totalCols > 3) ws.mergeCells(row.number, 3, row.number, totalCols);
-  };
+    const refRow = (label: string, r: Reference) => {
+      const row = ws.addRow([label, display(r.name), r.mobile ? `+91 ${r.mobile}` : "", ...Array(totalCols - 3).fill("")]);
+      row.getCell(1).font = { bold: true, color: { argb: COLOR_LABEL } };
+      row.getCell(2).alignment = { wrapText: true, vertical: "top" };
+      row.getCell(3).alignment = { wrapText: true, vertical: "top" };
+      if (!row.getCell(2).value) row.getCell(2).value = "—";
+      if (!row.getCell(3).value) row.getCell(3).value = "—";
+      if (totalCols > 3) ws.mergeCells(row.number, 3, row.number, totalCols);
+    };
 
-  refRow("Buyer 1",    buyer1 as Reference);
-  refRow("Buyer 2",    buyer2 as Reference);
-  refRow("Supplier 1", supplier1 as Reference);
-  refRow("Supplier 2", supplier2 as Reference);
+    refRow("Buyer 1",    buyer1 as Reference);
+    refRow("Buyer 2",    buyer2 as Reference);
+    refRow("Supplier 1", supplier1 as Reference);
+    refRow("Supplier 2", supplier2 as Reference);
+  }
 
   const buf = await wb.xlsx.writeBuffer();
   return Buffer.from(buf as ArrayBuffer);

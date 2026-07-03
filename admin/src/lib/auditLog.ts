@@ -10,14 +10,27 @@
 import { supabase } from "./supabase";
 import { getBusiness } from "./auth";
 
-type Action =
+// Action strings live entirely in the TEXT column admin_edit_log.action —
+// no enum change is needed to add new event types. The union below is for
+// TS ergonomics; the app writes the older values, DB triggers write the
+// newer ones (lender_* and comment_*), and everything shows up in the
+// unified Activity Log on the View page.
+export type Action =
   | "field_edit"
   | "doc_upload"
   | "doc_replace"
   | "doc_delete"
   | "members_edited"
   | "references_edited"
-  | "self_edit_submit";
+  | "self_edit_submit"
+  // Written by triggers in migration 0018:
+  | "lender_approve"
+  | "lender_unapprove"
+  | "lender_docs_given"
+  | "lender_docs_ungiven"
+  | "comment_add"
+  | "comment_edit"
+  | "comment_delete";
 
 export async function logAudit(
   businessId: string,
