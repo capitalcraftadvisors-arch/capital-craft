@@ -135,19 +135,22 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
   if (!loaded) return null;
 
   const inputCls =
-    "w-full border border-line rounded-input px-3 py-2 text-[13px] " +
+    "w-full border border-line rounded-input px-3.5 py-2.5 text-[14px] " +
     "focus:border-blue outline-none bg-white";
   const selectCls = inputCls;
 
+  // Dropdown labels display full words per spec ("Kilowatt" / "Megawatt").
+  // DB values stay "KW" / "MW" so backfills, the ZIP Excel formatter, and
+  // the View page's fmtCapacity all keep working unchanged.
   return (
     <Card className="p-6">
       <h3 className="font-display font-semibold text-[16px] mb-1">EPC business info</h3>
-      <p className="text-[12px] text-text-muted mb-4">
+      <p className="text-[12px] text-text-muted mb-5">
         Admin-only. These fields are never visible to the EPC.
       </p>
 
-      <div className="grid gap-4 sm:grid-cols-2">
-        {/* 1. Team size */}
+      {/* Row 1 — Team size + Turnover side by side (both short freeform) */}
+      <div className="grid gap-4 sm:grid-cols-2 mb-4">
         <Field label="Total team size (Technical + Non-Technical)">
           <input
             className={inputCls}
@@ -157,7 +160,6 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
           />
         </Field>
 
-        {/* 4. Turnover — kept next to team size for tidy 2-col layout */}
         <Field label="Total turnover (last FY)">
           <input
             className={inputCls}
@@ -166,10 +168,12 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
             onChange={(e) => set("turnover_last_fy", e.target.value)}
           />
         </Field>
+      </div>
 
-        {/* 2. Residential capacity */}
+      {/* Row 2 — Residential capacity, full width, wide number + Kilowatt/Megawatt select */}
+      <div className="mb-4">
         <Field label="Total installed capacity (Residential)">
-          <div className="flex gap-2">
+          <div className="flex gap-3">
             <input
               className={inputCls + " flex-1 min-w-0"}
               inputMode="decimal"
@@ -178,19 +182,21 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
               onChange={(e) => set("capacity_residential", e.target.value)}
             />
             <select
-              className={selectCls + " w-[80px] shrink-0"}
+              className={selectCls + " w-[150px] shrink-0"}
               value={draft.capacity_residential_unit}
               onChange={(e) => set("capacity_residential_unit", e.target.value as Unit)}
             >
-              <option value="KW">KW</option>
-              <option value="MW">MW</option>
+              <option value="KW">Kilowatt</option>
+              <option value="MW">Megawatt</option>
             </select>
           </div>
         </Field>
+      </div>
 
-        {/* 3. Commercial capacity */}
+      {/* Row 3 — Commercial capacity, same layout */}
+      <div className="mb-4">
         <Field label="Total installed capacity (Commercial)">
-          <div className="flex gap-2">
+          <div className="flex gap-3">
             <input
               className={inputCls + " flex-1 min-w-0"}
               inputMode="decimal"
@@ -199,18 +205,18 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
               onChange={(e) => set("capacity_commercial", e.target.value)}
             />
             <select
-              className={selectCls + " w-[80px] shrink-0"}
+              className={selectCls + " w-[150px] shrink-0"}
               value={draft.capacity_commercial_unit}
               onChange={(e) => set("capacity_commercial_unit", e.target.value as Unit)}
             >
-              <option value="KW">KW</option>
-              <option value="MW">MW</option>
+              <option value="KW">Kilowatt</option>
+              <option value="MW">Megawatt</option>
             </select>
           </div>
         </Field>
       </div>
 
-      <div className="mt-4 flex items-center gap-3">
+      <div className="mt-5 flex items-center gap-3">
         <button
           type="button"
           onClick={save}

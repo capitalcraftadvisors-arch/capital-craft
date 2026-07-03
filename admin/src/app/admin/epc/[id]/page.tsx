@@ -18,13 +18,14 @@
 //     category unique indexes don't trip.
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import StatusBadge from "@/components/StatusBadge";
 import GstR3bSection from "@/components/GstR3bSection";
 import EpcAdminInfoSection from "@/components/EpcAdminInfoSection";
+import CommentsSection from "@/components/CommentsSection";
 import EditableField from "@/components/EditableField";
 import AdminDocSlot from "@/components/AdminDocSlot";
 import { supabase } from "@/lib/supabase";
@@ -72,9 +73,8 @@ export default function AdminEpcDetailPage() {
 
 function Inner() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const [biz, setBiz] = useState<Biz | null>(null);
-  const [notes, setNotes] = useState("");
-  const [busy, setBusy] = useState(false);
 
   useEffect(() => { void load(); }, [params.id]);
 
@@ -118,15 +118,6 @@ function Inner() {
     if (error) throw error;
     await logAudit(params.id, "references_edited", "business_references");
     setBiz((b) => (b ? { ...b, business_references: next } : b));
-  }
-
-  async function changeStatus(next: "approved" | "on_hold" | "rejected" | "under_review") {
-    if (!biz) return;
-    setBusy(true);
-    await supabase().from("epc_business").update({ status: next }).eq("id", biz.id);
-    await logAudit(biz.id, "field_edit", "status", biz.status, next);
-    setBusy(false);
-    void load();
   }
 
   if (!biz) return null;
@@ -284,31 +275,30 @@ function Inner() {
 
         <GstR3bSection businessId={params.id} />
 
+        {/* Comments replace the old "Review actions" card. The internal
+            status control lives on the View page header. */}
         <Card className="p-6">
-          <h3 className="font-display font-semibold text-[16px] mb-3">Review actions</h3>
-          <textarea
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Internal review notes (optional — not persisted yet)"
-            className="w-full border border-line rounded-input px-3.5 py-3 text-[14px] mb-3 min-h-[80px] focus:border-blue outline-none"
+          <h3 className="font-display font-semibold text-[16px] mb-3">Comments</h3>
+          <CommentsSection
+            businessId={params.id}
+            epcName={biz.contact_name || biz.trade_name || biz.legal_name}
           />
-          <div className="flex flex-wrap gap-3">
-            {biz.status === "under_review" && <>
-              <Button variant="grad" loading={busy} onClick={() => changeStatus("approved")}>Approve</Button>
-              <Button variant="outline" loading={busy} onClick={() => changeStatus("on_hold")}>On hold</Button>
-              <Button variant="outline" loading={busy} onClick={() => changeStatus("rejected")}>Reject</Button>
-            </>}
-            {biz.status === "on_hold" && <>
-              <Button variant="grad" loading={busy} onClick={() => changeStatus("approved")}>Approve</Button>
-              <Button variant="outline" loading={busy} onClick={() => changeStatus("rejected")}>Reject</Button>
-            </>}
-            {biz.status === "rejected" && (
-              <Button variant="outline" loading={busy} onClick={() => changeStatus("under_review")}>Re-open</Button>
-            )}
-            {biz.status === "draft" && <p className="text-[13px] text-text-muted">EPC hasn&rsquo;t submitted yet.</p>}
-            {biz.status === "approved" && <p className="text-[13px] text-text-muted">Approved. EPC has dashboard access.</p>}
-          </div>
         </Card>
+
+        {/* Save Draft — closure gesture. Each field autosaves individually
+            as you type/blur, so this button just navigates back to the View
+            after confirming everything's persisted. */}
+        <div className="flex justify-end">
+          <Button
+            variant="primary"
+            onClick={() => {
+              alert("All changes saved.");
+              router.push(`/admin/epc/${params.id}/view` as any);
+            }}
+          >
+            Save Draft
+          </Button>
+        </div>
       </section>
     </main>
   );

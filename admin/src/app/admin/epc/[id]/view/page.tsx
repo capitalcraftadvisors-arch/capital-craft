@@ -24,7 +24,7 @@ import { getToken } from "@/lib/auth";
 import { getDocumentUrl } from "@/lib/storage";
 import { logAudit } from "@/lib/auditLog";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
-import CommentsPanel, { CommentRow } from "@/components/CommentsPanel";
+import CommentsSection from "@/components/CommentsSection";
 import ActivityLogModal from "@/components/ActivityLogModal";
 
 export default function AdminEpcViewPage() {
@@ -144,42 +144,29 @@ function Inner() {
   const [downloading, setDownloading] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
   const [zipPickerOpen, setZipPickerOpen] = useState(false);
-  const [latestComment, setLatestComment] = useState<CommentRow | null>(null);
-  const [commentsOpen, setCommentsOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   // Bumped after any comment write to force ActivityLog to re-fetch.
   const [activityRefresh, setActivityRefresh] = useState(0);
 
   useEffect(() => {
     void (async () => {
-      const [{ data: b }, { data: d }, { data: l }, { data: ai }, { data: c }] = await Promise.all([
+      const [{ data: b }, { data: d }, { data: l }, { data: ai }] = await Promise.all([
         supabase().from("epc_business").select("*").eq("id", params.id).maybeSingle(),
         supabase().from("epc_documents").select("id, category, file_name, mime_type, stakeholder_id, metadata").eq("business_id", params.id),
         supabase().from("epc_lender_status").select("lender, docs_given, approved").eq("business_id", params.id),
         supabase().from("epc_admin_info").select("*").eq("business_id", params.id).maybeSingle(),
-        supabase()
-          .from("epc_comments")
-          .select("id, business_id, author_id, author_name, comment_text, created_at, updated_at")
-          .eq("business_id", params.id)
-          .order("created_at", { ascending: false })
-          .limit(1),
       ]);
       setBiz(b);
       setDocs((d ?? []) as Doc[]);
       setLender((l ?? []) as LenderRow[]);
       setAdminInfo((ai as AdminInfo | null) ?? null);
-      setLatestComment(((c ?? [])[0] as CommentRow | undefined) ?? null);
     })();
   }, [params.id, activityRefresh]);
 
-  async function refreshLatestComment() {
-    const { data } = await supabase()
-      .from("epc_comments")
-      .select("id, business_id, author_id, author_name, comment_text, created_at, updated_at")
-      .eq("business_id", params.id)
-      .order("created_at", { ascending: false })
-      .limit(1);
-    setLatestComment(((data ?? [])[0] as CommentRow | undefined) ?? null);
+  // Bumped whenever the inline CommentsSection writes something — so the
+  // Activity log modal (which reads from admin_edit_log) reflects the
+  // new comment event next time the admin opens it.
+  function onCommentsChanged() {
     setActivityRefresh((n) => n + 1);
   }
 
@@ -442,31 +429,14 @@ function Inner() {
 
           {/* COL 3 — admin only */}
           <div className="flex flex-col gap-2.5">
-            {/* Latest admin comment — capped preview + Show all link. */}
-            <SectionCard title="Latest comment" tint icon={I.lock} adminOnly>
-              {latestComment ? (
-                <>
-                  <p className="text-[12px] text-[#5a8a76] mb-1">
-                    <span className="font-semibold text-[#0f3d2e]">{latestComment.author_name || "Admin"}</span>
-                    <span className="mx-1">·</span>
-                    <span>{new Date(latestComment.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</span>
-                  </p>
-                  <p className="text-[13px] text-[#0f3d2e] whitespace-pre-wrap">
-                    {latestComment.comment_text.length > 240
-                      ? latestComment.comment_text.slice(0, 240) + "…"
-                      : latestComment.comment_text}
-                  </p>
-                </>
-              ) : (
-                <p className="text-[13px] text-[#5a8a76]">No comments yet.</p>
-              )}
-              <button
-                type="button"
-                onClick={() => setCommentsOpen(true)}
-                className="w-full mt-3 text-[13px] font-medium py-2 px-3 bg-white border border-[#cdeadd] rounded-[8px] text-[#178a5c] hover:bg-[#f0faf5]"
-              >
-                {latestComment ? "Show all comments" : "Add first comment"}
-              </button>
+            {/* Inline chat-box comments — add + scrollable list of all. */}
+            <SectionCard title="Comments" tint icon={I.lock} adminOnly>
+              <CommentsSection
+                businessId={biz.id}
+                epcName={trade}
+                onChanged={onCommentsChanged}
+                maxListHeight={360}
+              />
             </SectionCard>
 
             <SectionCard title="Business info" tint icon={I.lock} adminOnly>
@@ -541,13 +511,6 @@ function Inner() {
         onClose={() => setZipPickerOpen(false)}
         epcName={trade}
         onConfirm={(lender) => downloadZip(lender)}
-      />
-      <CommentsPanel
-        open={commentsOpen}
-        onClose={() => setCommentsOpen(false)}
-        businessId={biz.id}
-        epcName={trade}
-        onChanged={() => void refreshLatestComment()}
       />
       <ActivityLogModal
         open={activityOpen}

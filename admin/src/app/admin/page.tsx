@@ -10,7 +10,6 @@ import Button from "@/components/ui/Button";
 import StatusBadge from "@/components/StatusBadge";
 import AddNewEpcModal from "@/components/AddNewEpcModal";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
-import CommentsButton from "@/components/CommentsButton";
 import { supabase } from "@/lib/supabase";
 import { logout, getToken } from "@/lib/auth";
 
@@ -418,10 +417,6 @@ function EpcsTab() {
                     >
                       {IconDownload} {downloading[r.id] ? "Preparing…" : "Download ZIP"}
                     </button>
-                    <CommentsButton
-                      businessId={r.id}
-                      epcName={r.trade_name || r.legal_name || r.contact_name}
-                    />
                   </div>
                 </td>
                 <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
