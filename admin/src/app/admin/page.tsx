@@ -358,16 +358,17 @@ function EpcsTab() {
 
       <Card className="overflow-x-auto">
         <table className="w-full text-[14px] table-fixed">
-          {/* Column widths tuned to fit ~1366-1920px viewports without */}
-          {/* horizontal scroll. EPC details grows (flexes), the other  */}
-          {/* columns are content-appropriate widths.                    */}
+          {/* Column widths tuned so every column shows fully at ~1366px+.
+              Internal Status needs room for the status pill AND the
+              UPDATED pill side-by-side without clipping. Lenders is
+              tightened to give that space back. EPC details flexes. */}
           <colgroup>
             <col style={{ width: "auto" }} />
-            <col style={{ width: "110px" }} />
-            <col style={{ width: "130px" }} />
-            <col style={{ width: "120px" }} />
-            <col style={{ width: "150px" }} />
-            <col style={{ width: "245px" }} />
+            <col style={{ width: "95px" }} />
+            <col style={{ width: "115px" }} />
+            <col style={{ width: "175px" }} />
+            <col style={{ width: "155px" }} />
+            <col style={{ width: "220px" }} />
           </colgroup>
           <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">
             <tr>
