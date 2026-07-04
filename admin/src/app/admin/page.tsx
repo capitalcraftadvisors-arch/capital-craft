@@ -29,7 +29,7 @@ function Inner() {
   return (
     <main className="min-h-screen bg-bg-soft">
       <header className="border-b border-line bg-white">
-        <div className="max-w-container mx-auto px-7 h-16 flex items-center justify-between">
+        <div className="w-full px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <span className="font-display font-bold text-[20px] grad-text">Capital Craft</span>
             <span className="text-[12px] px-2 py-0.5 rounded-full bg-bg-tint text-blue-dark font-semibold uppercase tracking-wide">Admin</span>
@@ -40,8 +40,8 @@ function Inner() {
         </div>
       </header>
 
-      <section className="max-w-container mx-auto px-5 sm:px-7 py-10">
-        <h1 className="font-display text-[26px] sm:text-[30px] font-bold mb-6">Ops console</h1>
+      <section className="w-full px-4 sm:px-6 py-8">
+        <h1 className="font-display text-[26px] sm:text-[30px] font-bold mb-6">Pryank Console</h1>
 
         <div className="flex gap-2 mb-6 border-b border-line">
           <TabBtn active={tab === "epcs"} onClick={() => setTab("epcs")}>EPCs</TabBtn>
@@ -158,6 +158,39 @@ function EpcsTab() {
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
   const [addOpen, setAddOpen] = useState(false);
   const [zipPickerRow, setZipPickerRow] = useState<Row | null>(null);
+  // Row highlighted after returning from View. sessionStorage-backed so
+  // it survives navigation but not full reload.
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+
+  // On mount (and after rows load) restore scroll position and mark the
+  // last-viewed row for a brief highlight, then clear the sessionStorage
+  // so a fresh session doesn't inherit stale state.
+  useEffect(() => {
+    if (rows.length === 0) return;
+    const savedScroll = sessionStorage.getItem("adminList.scroll");
+    const savedRow    = sessionStorage.getItem("adminList.lastRowId");
+    if (savedScroll) {
+      const y = parseInt(savedScroll, 10);
+      if (!isNaN(y)) window.scrollTo(0, y);
+    }
+    if (savedRow) {
+      setHighlightId(savedRow);
+      const t = window.setTimeout(() => setHighlightId(null), 2100);
+      // Clear immediately — we've consumed it.
+      sessionStorage.removeItem("adminList.lastRowId");
+      sessionStorage.removeItem("adminList.scroll");
+      return () => window.clearTimeout(t);
+    }
+    sessionStorage.removeItem("adminList.lastRowId");
+    sessionStorage.removeItem("adminList.scroll");
+  }, [rows.length]);
+
+  // Save scroll + row id, then navigate to View.
+  function navigateToView(row: Row) {
+    sessionStorage.setItem("adminList.scroll", String(window.scrollY));
+    sessionStorage.setItem("adminList.lastRowId", row.id);
+    router.push(`/admin/epc/${row.id}/view` as any);
+  }
 
   async function load() {
     let query = supabase().from("epc_business")
@@ -302,7 +335,7 @@ function EpcsTab() {
           onChange={(e) => setQ(e.target.value)}
         />
         <Select
-          placeholder="All statuses"
+          placeholder="Status filter"
           options={[
             { value: "draft", label: "Draft" },
             { value: "under_review", label: "Under review" },
@@ -324,46 +357,64 @@ function EpcsTab() {
       </div>
 
       <Card className="overflow-x-auto">
-        <table className="w-full text-[14px] min-w-[1100px]">
+        <table className="w-full text-[14px] table-fixed">
+          {/* Column widths tuned to fit ~1366-1920px viewports without */}
+          {/* horizontal scroll. EPC details grows (flexes), the other  */}
+          {/* columns are content-appropriate widths.                    */}
+          <colgroup>
+            <col style={{ width: "auto" }} />
+            <col style={{ width: "110px" }} />
+            <col style={{ width: "130px" }} />
+            <col style={{ width: "120px" }} />
+            <col style={{ width: "150px" }} />
+            <col style={{ width: "245px" }} />
+          </colgroup>
           <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">
             <tr>
-              <th className="px-4 py-3 font-medium text-[12px] uppercase tracking-wide">EPC details</th>
-              <th className="px-4 py-3 font-medium text-[12px] uppercase tracking-wide">Source</th>
-              <th className="px-4 py-3 font-medium text-[12px] uppercase tracking-wide">
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">EPC details</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Source</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">
                 <button type="button" onClick={() => toggleSort("created_at")} className="inline-flex items-center gap-1 uppercase tracking-wide">
                   Profile created
                   <SortMark active={sortKey === "created_at"} dir={sortDir} />
                 </button>
               </th>
-              <th className="px-4 py-3 font-medium text-[12px] uppercase tracking-wide">
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">
                 <button type="button" onClick={() => toggleSort("status")} className="inline-flex items-center gap-1 uppercase tracking-wide">
                   Internal status
                   <SortMark active={sortKey === "status"} dir={sortDir} />
                 </button>
               </th>
-              <th className="px-4 py-3 font-medium text-[12px] uppercase tracking-wide">Action</th>
-              <th className="px-4 py-3 font-medium text-[12px] uppercase tracking-wide">Lenders</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Action</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Lenders</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
               <tr><td colSpan={6} className="px-5 py-10 text-center text-[#5a8a76]">No EPCs match.</td></tr>
-            ) : filtered.map((r) => (
+            ) : filtered.map((r) => {
+              const isHighlighted = highlightId === r.id;
+              return (
               <tr
                 key={r.id}
-                className="border-b border-[#eaf3ee] hover:bg-[#f7fcfa] transition-colors align-top"
+                data-highlighted={isHighlighted ? "yes" : undefined}
+                style={{
+                  transition: "background-color 2s ease-out",
+                  backgroundColor: isHighlighted ? "#dceffb" : undefined,
+                }}
+                className="border-b border-[#eaf3ee] hover:bg-[#f7fcfa] align-top"
               >
-                <td className="px-4 py-3">
-                  <div className="flex items-start gap-3 min-w-[240px]">
+                <td className="px-3 py-3">
+                  <div className="flex items-start gap-3">
                     <div
                       className="w-9 h-9 rounded-md bg-[#d6efe3] text-[#178a5c] grid place-items-center shrink-0 cursor-pointer"
-                      onClick={() => router.push(`/admin/epc/${r.id}/view` as any)}
+                      onClick={() => navigateToView(r)}
                     >
                       {IconBuilding}
                     </div>
                     <div
                       className="flex-1 min-w-0 cursor-pointer"
-                      onClick={() => router.push(`/admin/epc/${r.id}/view` as any)}
+                      onClick={() => navigateToView(r)}
                     >
                       <p className="text-[13px] font-semibold text-[#0f3d2e] truncate">
                         {r.trade_name || r.legal_name ||
@@ -381,10 +432,10 @@ function EpcsTab() {
                     </div>
                   </div>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-3 py-3">
                   <SourcePill source={r.source} />
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-3 py-3">
                   <p className="text-[13px] text-[#0f3d2e]">
                     {new Date(r.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
                   </p>
@@ -392,15 +443,15 @@ function EpcsTab() {
                     {new Date(r.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
                   </p>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-3 py-3">
                   <StatusBadge status={r.status} updated={r.epc_self_edited === true} />
                 </td>
-                <td className="px-4 py-3">
-                  <div className="flex flex-col gap-1.5 min-w-[130px]">
+                <td className="px-3 py-3">
+                  <div className="flex flex-col gap-1.5">
                     <button
                       type="button"
-                      onClick={() => router.push(`/admin/epc/${r.id}/view` as any)}
-                      className="text-[12px] font-semibold px-3 py-1.5 rounded-input border border-[#185fa5]/30 bg-white text-[#185fa5] hover:bg-[#dceffb] inline-flex items-center justify-center gap-1.5"
+                      onClick={() => navigateToView(r)}
+                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#185fa5]/30 bg-white text-[#185fa5] hover:bg-[#dceffb] inline-flex items-center justify-center gap-1.5"
                     >
                       {IconEye} View
                     </button>
@@ -409,7 +460,7 @@ function EpcsTab() {
                       disabled={!!downloading[r.id]}
                       onClick={() => setZipPickerRow(r)}
                       className={[
-                        "text-[12px] font-semibold px-3 py-1.5 rounded-input border transition-colors inline-flex items-center justify-center gap-1.5",
+                        "text-[12px] font-semibold px-2.5 py-1.5 rounded-input border transition-colors inline-flex items-center justify-center gap-1.5",
                         downloading[r.id]
                           ? "border-line bg-bg-soft text-text-muted cursor-not-allowed"
                           : "border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5]",
@@ -419,14 +470,15 @@ function EpcsTab() {
                     </button>
                   </div>
                 </td>
-                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                   <LenderCell
                     state={lenderState[r.id] ?? {}}
                     onToggle={(lender, field, v) => toggleLender(r.id, lender, field, v)}
                   />
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </Card>
@@ -543,7 +595,7 @@ function AppsTab() {
       <div className="grid sm:grid-cols-[1fr_220px] gap-3 mb-5">
         <Input placeholder="Search by borrower or EPC…" value={q} onChange={(e) => setQ(e.target.value)} />
         <Select
-          placeholder="All statuses"
+          placeholder="Status filter"
           options={[
             { value: "draft", label: "Draft" },
             { value: "submitted", label: "Submitted" },

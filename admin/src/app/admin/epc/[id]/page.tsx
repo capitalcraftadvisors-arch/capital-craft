@@ -55,6 +55,12 @@ const BUSINESS_TYPE_OPTIONS = [
   { value: "llp",            label: "LLP" },
 ];
 
+const PM_SURYA_GHAR_OPTIONS = [
+  { value: "yes",   label: "Yes" },
+  { value: "no",    label: "No" },
+  { value: "other", label: "Other" },
+];
+
 const DESIGNATION_OPTIONS = [
   { value: "Partner",    label: "Partner" },
   { value: "Director",   label: "Director" },
@@ -215,6 +221,29 @@ function Inner() {
             onSave={async (v) => saveField("pan_number")(v.toUpperCase())}
             validate={(v) => (!v ? null : PAN_RE.test(v.toUpperCase()) ? null : "Invalid PAN (AAAAA9999A)")}
           />
+
+          {/* PM Surya Ghar — always renders, even for legacy EPCs where the */}
+          {/* value is null (onboarded before the field existed).             */}
+          <EditableField
+            label="PM Surya Ghar"
+            value={biz.pm_surya_ghar}
+            display={(v) =>
+              v === "yes"   ? "Yes"
+              : v === "no"    ? "No"
+              : v === "other" ? "Other"
+              : ""
+            }
+            options={PM_SURYA_GHAR_OPTIONS}
+            onSave={saveField("pm_surya_ghar")}
+          />
+          {biz.pm_surya_ghar === "other" && (
+            <EditableField
+              label="Which entity are you registered with?"
+              value={biz.pm_surya_ghar_other}
+              onSave={saveField("pm_surya_ghar_other")}
+              hint="Entity / scheme name — free text."
+            />
+          )}
         </Section>
 
         <Section title="Bank">

@@ -429,15 +429,7 @@ function Inner() {
 
           {/* COL 3 — admin only */}
           <div className="flex flex-col gap-2.5">
-            {/* Inline chat-box comments — add + scrollable list of all. */}
-            <SectionCard title="Comments" tint icon={I.lock} adminOnly>
-              <CommentsSection
-                businessId={biz.id}
-                epcName={trade}
-                onChanged={onCommentsChanged}
-                maxListHeight={360}
-              />
-            </SectionCard>
+            {/* Col 3 order: Business info → Lenders → GST R3B → Comments. */}
 
             <SectionCard title="Business info" tint icon={I.lock} adminOnly>
               <KV k="Team size" v={adminInfo?.team_size} />
@@ -474,6 +466,16 @@ function Inner() {
               >
                 {I.eye} View R3B
               </button>
+            </SectionCard>
+
+            {/* Inline chat-box comments — LAST in Col 3 per spec. */}
+            <SectionCard title="Comments" tint icon={I.lock} adminOnly>
+              <CommentsSection
+                businessId={biz.id}
+                epcName={trade}
+                onChanged={onCommentsChanged}
+                maxListHeight={360}
+              />
             </SectionCard>
           </div>
         </div>
