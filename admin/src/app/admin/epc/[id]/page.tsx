@@ -184,13 +184,27 @@ function Inner() {
         </Section>
 
         <Section title="Business">
-          <EditableField
-            label="Business type"
-            value={biz.business_type}
-            display={(v) => v ? (BUSINESS_TYPE_OPTIONS.find((o) => o.value === v)?.label ?? v) : ""}
-            options={BUSINESS_TYPE_OPTIONS}
-            onSave={saveField("business_type")}
-          />
+          {/* Admin rows: business_type is locked. A DB trigger
+              (prevent_admin_demotion_trg) blocks the write anyway, but
+              hiding the dropdown keeps the UI honest and avoids a
+              confusing DB-error toast on accidental save. */}
+          {biz.business_type === "admin" ? (
+            <EditableField
+              label="Business type"
+              value="admin"
+              display={() => "Admin"}
+              readOnly
+              onSave={async () => {}}
+            />
+          ) : (
+            <EditableField
+              label="Business type"
+              value={biz.business_type}
+              display={(v) => v ? (BUSINESS_TYPE_OPTIONS.find((o) => o.value === v)?.label ?? v) : ""}
+              options={BUSINESS_TYPE_OPTIONS}
+              onSave={saveField("business_type")}
+            />
+          )}
           <EditableField
             label="Legal name"
             value={biz.legal_name}
