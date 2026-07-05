@@ -46,6 +46,11 @@ function Inner() {
         <div className="flex gap-2 mb-6 border-b border-line">
           <TabBtn active={tab === "epcs"} onClick={() => setTab("epcs")}>EPCs</TabBtn>
           <TabBtn active={tab === "apps"} onClick={() => setTab("apps")}>Loan applications</TabBtn>
+          {/* Analytics is a dedicated full page — the tab acts as a
+              navigation link, not an inline tab body. */}
+          <TabBtn active={false} onClick={() => router.push("/admin/analytics" as any)}>
+            Analytics
+          </TabBtn>
         </div>
 
         {tab === "epcs" ? <EpcsTab /> : <AppsTab />}

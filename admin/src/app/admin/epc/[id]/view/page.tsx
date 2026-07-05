@@ -200,16 +200,24 @@ function Inner() {
     if (!biz || statusBusy) return;
     setStatusBusy(true);
     try {
+      // reviewed_at = the first time an admin acted on this EPC after
+      // it was submitted. First-write wins — subsequent status flips
+      // keep the original timestamp so the analytics "time to review"
+      // metric measures initial admin response, not the latest change.
+      const patch: Record<string, unknown> = { status: next };
+      const firstReview = !biz.reviewed_at ? new Date().toISOString() : null;
+      if (firstReview) patch.reviewed_at = firstReview;
+
       const { error } = await supabase()
         .from("epc_business")
-        .update({ status: next })
+        .update(patch)
         .eq("id", biz.id);
       if (error) {
         alert("Status update failed: " + error.message);
         return;
       }
       await logAudit(biz.id, "field_edit", "status", biz.status, next);
-      setBiz({ ...biz, status: next });
+      setBiz({ ...biz, status: next, ...(firstReview ? { reviewed_at: firstReview } : {}) });
     } finally {
       setStatusBusy(false);
     }
