@@ -1,20 +1,40 @@
 // POST /api/admin/delete-epc  { businessId }
 //
-// Admin-only. Irreversibly destroys an EPC:
+// Admin-only. Irreversibly destroys an EPC.
+//
+// Explicit child-first deletion order (rather than relying on cascade)
+// to avoid the trigger-during-cascade FK race in 0018's
+// log_epc_comment_change trigger. Even though the FKs are all CASCADE,
+// the epc_comments AFTER-DELETE trigger tries to INSERT a
+// comment_delete audit row referencing the parent's business_id — if
+// the parent is being deleted in the same statement, the FK check on
+// admin_edit_log.business_id fails. Migration 0021 makes the trigger
+// swallow that violation (belt); this route also deletes children
+// explicitly first so the trigger writes are harmless (suspenders).
+//
+// Deletion order:
 //   1. All GCS files under `${businessId}/**` (business + stakeholder docs)
 //   2. All GCS files under `applications/${appId}/**` for each loan app
-//   3. epc_applications rows (RESTRICT FK → must delete before parent)
-//   4. epc_business row (CASCADE cleans everything else)
-//   5. Forensic audit_log entry attached to the actor admin's own row
-//      (the deleted EPC's log rows cascaded away with the row itself)
+//   3. epc_comments   — fires log trigger → inserts comment_delete audit
+//                       rows (parent still exists, FK ok); those get
+//                       cleaned in step 4.
+//   4. admin_edit_log rows for this business_id — clears history.
+//   5. epc_lender_status — no audit trigger on DELETE.
+//   6. epc_documents  — no trigger writes to admin_edit_log.
+//   7. epc_admin_info — no trigger.
+//   8. epc_applications — RESTRICT FK on epc_business; must go before parent.
+//                         Cascades user_application_docs.
+//   9. epc_business   — WHERE-clause anti-admin belt. No children left.
+//  10. Forensic audit_log entry attached to the ACTOR admin's own row so
+//      it survives (the target's business_id is gone).
 //
-// Admin-account protection (defense in depth):
-//   Layer 1 — UI: View page hides the button when biz.business_type='admin'.
-//   Layer 2 — this route: loads the target row and 403s if it's admin.
-//   Layer 3 — SQL WHERE clause: the DELETE carries "and business_type != 'admin'"
-//             so even if layer 2 races against a demotion, the query is inert.
-//   Layer 4 — DB trigger prevent_admin_delete (migration 0020) raises regardless
-//             of caller. Last line of defense for Studio / psql / service-role.
+// Admin-account protection (four layers):
+//   1. UI: View page hides the button when biz.business_type='admin'.
+//   2. This route: loads the target row and 403s if it's admin.
+//   3. SQL WHERE clause: the DELETE carries "and business_type != 'admin'"
+//      so a race with demotion still results in 0 rows affected.
+//   4. DB trigger prevent_admin_delete (migration 0020) raises regardless
+//      of caller. Last line of defense for Studio / psql / service-role.
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
@@ -86,17 +106,59 @@ export async function POST(req: NextRequest) {
       console.warn("[delete-epc] GCS purge partial failure:", e);
     }
 
-    // ── DB delete (children before parent for RESTRICT FK) ─
-    if (appIds.length > 0) {
-      const { error: delAppsErr } = await supabase
-        .from("epc_applications")
-        .delete()
-        .eq("epc_business_id", businessId);
-      if (delAppsErr) return err(`Loan-app delete failed: ${delAppsErr.message}`, 500);
+    // ── Explicit child-first delete order ──────────────────
+    // See file header for why we don't rely on cascade. Each step
+    // is a hard failure — if any child delete errors out we stop
+    // and return, leaving state partially cleaned but consistent
+    // (the target epc_business row still exists so admin can retry).
+
+    // Step 3 — epc_comments. Fires the log trigger which inserts
+    // comment_delete audit rows referencing this business_id. Parent
+    // still exists at this point, so the FK check passes. Those log
+    // rows are cleaned up in step 4.
+    {
+      const { error } = await supabase.from("epc_comments").delete().eq("business_id", businessId);
+      if (error) return err(`Comments delete failed: ${error.message}`, 500);
     }
 
-    // Layer 3: the WHERE clause carries an anti-admin belt.
+    // Step 4 — admin_edit_log. Removes all audit history for this
+    // business, including any comment_delete rows the previous step
+    // just wrote via the 0018 trigger.
+    {
+      const { error } = await supabase.from("admin_edit_log").delete().eq("business_id", businessId);
+      if (error) return err(`Audit-log delete failed: ${error.message}`, 500);
+    }
+
+    // Step 5 — epc_lender_status. The 0017 has_lender_approval sync
+    // trigger will UPDATE epc_business.has_lender_approval to false;
+    // that's a normal update and does not trip the demotion trigger.
+    {
+      const { error } = await supabase.from("epc_lender_status").delete().eq("business_id", businessId);
+      if (error) return err(`Lender-status delete failed: ${error.message}`, 500);
+    }
+
+    // Step 6 — epc_documents.
+    {
+      const { error } = await supabase.from("epc_documents").delete().eq("business_id", businessId);
+      if (error) return err(`Documents delete failed: ${error.message}`, 500);
+    }
+
+    // Step 7 — epc_admin_info (single row keyed by business_id).
+    {
+      const { error } = await supabase.from("epc_admin_info").delete().eq("business_id", businessId);
+      if (error) return err(`Admin-info delete failed: ${error.message}`, 500);
+    }
+
+    // Step 8 — epc_applications (RESTRICT FK; must go before parent).
+    // Cascades user_application_docs.
+    if (appIds.length > 0) {
+      const { error } = await supabase.from("epc_applications").delete().eq("epc_business_id", businessId);
+      if (error) return err(`Loan-app delete failed: ${error.message}`, 500);
+    }
+
+    // Step 9 — epc_business. WHERE-clause anti-admin belt (layer 3).
     // .select() returns the deleted rows so we can confirm we hit one.
+    // No cascades to worry about — children are already gone.
     const { data: deleted, error: delBizErr } = await supabase
       .from("epc_business")
       .delete()
