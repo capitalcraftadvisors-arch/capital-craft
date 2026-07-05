@@ -9,6 +9,7 @@ import Select from "@/components/ui/Select";
 import Button from "@/components/ui/Button";
 import StatusBadge from "@/components/StatusBadge";
 import AddNewEpcModal from "@/components/AddNewEpcModal";
+import AddNewLoanAppModal from "@/components/AddNewLoanAppModal";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import { supabase } from "@/lib/supabase";
 import { logout, getToken } from "@/lib/auth";
@@ -577,6 +578,7 @@ function AppsTab() {
   const [rows, setRows] = useState<Row[]>([]);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -598,6 +600,11 @@ function AppsTab() {
 
   return (
     <>
+      <div className="flex justify-end mb-3">
+        <Button variant="primary" onClick={() => setAddOpen(true)}>
+          + Add New Loan Application
+        </Button>
+      </div>
       <div className="grid sm:grid-cols-[1fr_220px] gap-3 mb-5">
         <Input placeholder="Search by borrower or EPC…" value={q} onChange={(e) => setQ(e.target.value)} />
         <Select
@@ -646,6 +653,8 @@ function AppsTab() {
           </tbody>
         </table>
       </Card>
+
+      <AddNewLoanAppModal open={addOpen} onClose={() => setAddOpen(false)} />
     </>
   );
 }
