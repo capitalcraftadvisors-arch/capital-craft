@@ -41,7 +41,7 @@ function Inner() {
       </header>
 
       <section className="w-full px-4 sm:px-6 py-8">
-        <h1 className="font-display text-[26px] sm:text-[30px] font-bold mb-6">Pryank Console</h1>
+        <h1 className="font-display text-[26px] sm:text-[30px] font-bold mb-6">Priyank Console</h1>
 
         <div className="flex gap-2 mb-6 border-b border-line">
           <TabBtn active={tab === "epcs"} onClick={() => setTab("epcs")}>EPCs</TabBtn>

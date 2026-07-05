@@ -30,7 +30,11 @@ export type Action =
   | "lender_docs_ungiven"
   | "comment_add"
   | "comment_edit"
-  | "comment_delete";
+  | "comment_delete"
+  // Written by /api/admin/delete-epc after a successful destroy.
+  // Note: the row it references is gone; the log entry survives
+  // as an append-only record of who deleted whom.
+  | "epc_deleted";
 
 export async function logAudit(
   businessId: string,

@@ -26,6 +26,7 @@ import { logAudit } from "@/lib/auditLog";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import CommentsSection from "@/components/CommentsSection";
 import ActivityLogModal from "@/components/ActivityLogModal";
+import DeleteEpcModal from "@/components/DeleteEpcModal";
 
 export default function AdminEpcViewPage() {
   return (
@@ -145,6 +146,7 @@ function Inner() {
   const [statusBusy, setStatusBusy] = useState(false);
   const [zipPickerOpen, setZipPickerOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   // Bumped after any comment write to force ActivityLog to re-fetch.
   const [activityRefresh, setActivityRefresh] = useState(0);
 
@@ -514,6 +516,21 @@ function Inner() {
           </button>
         </div>
 
+        {/* Danger zone — Delete profile. Hidden entirely for admin
+            rows (defense layer 1: the button never renders). Backend
+            still enforces the ban even if this check is bypassed. */}
+        {biz.business_type !== "admin" && (
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={() => setDeleteOpen(true)}
+              className="px-4 py-2 text-[13px] font-semibold border border-red-300 text-red-700 rounded-[8px] hover:bg-red-50 hover:border-red-500 transition-colors"
+            >
+              Delete profile
+            </button>
+          </div>
+        )}
+
       </div>
 
       <LenderPickerModal
@@ -528,6 +545,19 @@ function Inner() {
         businessId={biz.id}
         epcName={trade}
         refreshKey={activityRefresh}
+      />
+      <DeleteEpcModal
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        onDeleted={(payload) => {
+          setDeleteOpen(false);
+          alert(`Deleted ${payload.display_id ?? "EPC"}${payload.contact_name ? ` — ${payload.contact_name}` : ""}.`);
+          router.push("/admin");
+        }}
+        businessId={biz.id}
+        displayId={biz.epc_display_id ?? null}
+        contactName={biz.contact_name ?? null}
+        contactMobile={biz.contact_mobile ?? null}
       />
     </main>
   );

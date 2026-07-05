@@ -48,6 +48,18 @@ export async function deleteObject(path: string): Promise<void> {
   }
 }
 
+// Batch-delete every object under a prefix. Used by /api/admin/delete-epc
+// to purge an EPC's entire storage folder ({businessId}/**) and each
+// loan-app's folder (applications/{appId}/**) in one call per prefix.
+// `force: true` = keep going past a missing file. Empty prefix would be
+// catastrophic — callers must always pass a scoped prefix ending in '/'.
+export async function deleteFolder(prefix: string): Promise<void> {
+  if (!prefix || !prefix.endsWith("/")) {
+    throw new Error(`deleteFolder: refusing to delete without trailing slash: '${prefix}'`);
+  }
+  await bucket.deleteFiles({ prefix, force: true });
+}
+
 // Downloads the object at `path` to an in-memory Buffer. Throws if the object
 // is missing or unreadable — callers (e.g. /api/epc/[id]/download-zip) catch
 // and skip so a single missing file doesn't fail the whole ZIP.

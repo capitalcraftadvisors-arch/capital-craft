@@ -18,19 +18,15 @@ type Biz = {
   epc_self_edited?: boolean;
 };
 
-const MESSAGES: Record<string, { title: string; body: string }> = {
-  under_review: {
-    title: "Application under review",
-    body: "Thanks — we&rsquo;ve received your profile. Our team will get back to you shortly.",
-  },
-  on_hold: {
-    title: "We need more information",
-    body: "Your application is on hold. Our team will contact you about what&rsquo;s missing.",
-  },
-  rejected: {
-    title: "Not approved this time",
-    body: "Unfortunately we couldn&rsquo;t approve your application. Reach out if you&rsquo;d like to know more.",
-  },
+// EPC-facing copy is DELIBERATELY uniform across every internal status.
+// Whether the internal team has marked this row as under_review, on_hold,
+// rejected, or (internal) approved, the EPC always sees "Under review".
+// The only thing that changes the EPC's view is a lender "Approved" tick,
+// which unlocks loan_app and routes them to /dashboard (see AuthGuard +
+// routeForBusiness). No status leak from admin's internal tracking.
+const EPC_MESSAGE = {
+  title: "Application under review",
+  body: "Thanks — we&rsquo;ve received your profile. Our team will get back to you shortly.",
 };
 
 const SELF_EDIT_SNAPSHOT_KEY = "cc_self_edit_snapshot";
@@ -54,7 +50,8 @@ function StatusInner() {
   }, []);
 
   if (!biz) return null;
-  const msg = MESSAGES[biz.status] ?? { title: "Application status", body: "" };
+  // Uniform copy regardless of biz.status — see EPC_MESSAGE.
+  const msg = EPC_MESSAGE;
   const showEditButton =
     biz.status === "under_review" && biz.epc_self_edited !== true;
 
@@ -93,7 +90,10 @@ function StatusInner() {
 
       <section className="max-w-[560px] mx-auto px-5 sm:px-7 py-12 sm:py-20">
         <Card className="p-7 sm:p-9 text-center">
-          <StatusBadge status={biz.status} updated={biz.epc_self_edited === true} />
+          {/* Hardcoded to "under_review" so the pill never leaks the real
+              internal status. Admin views of StatusBadge still show the
+              real value — that component is unchanged. */}
+          <StatusBadge status="under_review" updated={biz.epc_self_edited === true} />
           <h1 className="font-display text-[24px] sm:text-[28px] font-bold mt-4">{msg.title}</h1>
           <p className="text-text-mid mt-2" dangerouslySetInnerHTML={{ __html: msg.body }} />
 
