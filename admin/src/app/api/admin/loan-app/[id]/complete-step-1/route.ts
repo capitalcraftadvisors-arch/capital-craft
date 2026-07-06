@@ -45,6 +45,7 @@ const UUID_RE   = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 const PIN_RE    = /^[1-9]\d{5}$/;
 const MOBILE_RE = /^[6-9]\d{9}$/;
 const EMAIL_RE  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PAN_RE    = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const SYSTEM_TYPES = new Set(["off_grid", "on_grid", "hybrid"]);
 
 // The full canonical policy list. We accept anything from this set;
@@ -94,6 +95,7 @@ export async function PATCH(
     const install_city     = String(b.install_city     ?? "").trim() || null;
     const borrower_mobile  = String(b.borrower_mobile  ?? "").replace(/\D/g, "");
     const borrower_email   = String(b.borrower_email   ?? "").trim();
+    const borrower_pan     = String(b.borrower_pan     ?? "").trim().toUpperCase();
     const system_type      = String(b.system_type      ?? "").trim();
     const consent_policies_raw = Array.isArray(b.consent_policies) ? b.consent_policies : [];
 
@@ -101,6 +103,7 @@ export async function PATCH(
     if (!install_state)                    return err("Installation state is required.", 400);
     if (!MOBILE_RE.test(borrower_mobile)) return err("Enter a valid 10-digit mobile.", 400);
     if (!EMAIL_RE.test(borrower_email))    return err("Enter a valid email.", 400);
+    if (!PAN_RE.test(borrower_pan))        return err("Enter a valid PAN (AAAAA9999A).", 400);
     if (!SYSTEM_TYPES.has(system_type))    return err("Choose a valid system type.", 400);
 
     // Filter policies to the known set — anything else is discarded.
@@ -145,6 +148,7 @@ export async function PATCH(
       install_city,
       borrower_mobile,
       borrower_email,
+      borrower_pan,
       system_type,
       consent_at,
       consent_policies,

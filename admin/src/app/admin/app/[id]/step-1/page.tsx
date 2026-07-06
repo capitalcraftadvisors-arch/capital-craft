@@ -106,8 +106,8 @@ function Inner() {
   const [email, setEmail]             = useState("");
   const [systemType, setSystemType]   = useState<"off_grid" | "on_grid" | "hybrid" | "">("");
   const [panUploaded, setPanUploaded] = useState(false);
-  const [panOcrText, setPanOcrText]   = useState<string | null>(null);
-  const panExtracted                  = useRef<string | null>(null);
+  // PAN number is a proper editable field — OCR prefills, admin can correct.
+  const [panNumber, setPanNumber]     = useState("");
 
   const [consented, setConsented]     = useState(false);
   const [sending, setSending]         = useState(false);
@@ -168,18 +168,17 @@ function Inner() {
     }
   }
 
-  // PAN OCR runs client-side after upload. Non-fatal: if it fails we
-  // still keep the uploaded doc; the PAN number can be filled later.
+  // PAN OCR runs client-side after upload. Prefills the editable PAN
+  // Number input — admin can always correct or type manually.
   async function onPanUploaded(info: { file: File }) {
     setPanUploaded(true);
     try {
       const r = await extractPan(info.file);
-      if (r.ok && r.pan) {
-        panExtracted.current = r.pan;
-        setPanOcrText(r.pan);
+      if (r.ok && r.pan && !panNumber) {
+        setPanNumber(r.pan);
       }
     } catch {
-      // OCR silent-fail is fine at Step 1.
+      // OCR silent-fail is fine — admin fills the PAN box manually.
     }
   }
 
@@ -188,6 +187,9 @@ function Inner() {
     return epc.trade_name || epc.legal_name || epc.contact_name || "(unnamed EPC)";
   }, [epc]);
 
+  const PAN_FMT_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+  const panValid = PAN_FMT_RE.test(panNumber.trim().toUpperCase());
+
   const canSend =
     PIN_RE.test(pin) &&
     state.trim().length > 0 &&
@@ -195,6 +197,7 @@ function Inner() {
     EMAIL_RE.test(email) &&
     !!systemType &&
     panUploaded &&
+    panValid &&
     consented &&
     !sending;
 
@@ -216,6 +219,7 @@ function Inner() {
           install_city:     city || null,
           borrower_mobile:  phone,
           borrower_email:   email,
+          borrower_pan:     panNumber.trim().toUpperCase(),
           system_type:      systemType,
           consent_policies: CONSENT_KEYS,
         }),
@@ -225,13 +229,6 @@ function Inner() {
         setSendError(data?.error || `HTTP ${res.status}`);
         setSending(false);
         return;
-      }
-      // Best-effort: if OCR grabbed a PAN, persist it on the row too.
-      if (panExtracted.current) {
-        await supabase()
-          .from("epc_applications")
-          .update({ borrower_pan: panExtracted.current })
-          .eq("id", loan.id);
       }
       router.push(`/admin/app/${loan.id}/step-2` as any);
     } catch (e) {
@@ -271,10 +268,13 @@ function Inner() {
 
       <section className="max-w-[880px] mx-auto px-5 sm:px-7 py-10 space-y-5">
         <div>
-          <h1 className="font-display text-[26px] sm:text-[30px] font-bold">Registration</h1>
-          <p className="text-text-mid mt-1 text-[14px]">
-            Capture the borrower&rsquo;s basic details and record consent. The customer will
-            receive a WhatsApp confirmation once you click Send confirmation.
+          <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
+            Registration
+          </h1>
+          <p className="text-text-mid mt-2 text-[15px]">
+            Capture the customer&rsquo;s basic details, upload their PAN card, and record
+            consent. All fields on this page are editable — OCR-detected values are
+            prefilled but you can correct anything before saving.
           </p>
         </div>
 
@@ -362,9 +362,14 @@ function Inner() {
           </div>
         </Card>
 
-        {/* Section: PAN card — its own Card now, separate from solar. */}
-        <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px]">PAN card</h2>
+        {/* Section: PAN card — upload + editable PAN number in a proper box. */}
+        <Card className="p-6 space-y-5">
+          <div>
+            <h2 className="font-display font-semibold text-[18px] text-[#0f3d2e]">PAN card</h2>
+            <p className="text-[13px] text-text-mid mt-1">
+              Upload the PAN card, then confirm the number OCR pulled out. Correct it if wrong.
+            </p>
+          </div>
 
           <div>
             <p className="block mb-1.5 text-[13px] font-medium text-text-mid">
@@ -376,14 +381,41 @@ function Inner() {
               table="user_application_docs"
               uploadedBy="admin"
               onUploaded={(info) => void onPanUploaded(info)}
-              hint="Image or PDF. Large images are auto-compressed to ~1 MB."
+              hint="Photo, scan, or PDF."
             />
-            {panOcrText && (
-              <p className="mt-2 text-[13px] text-[#5a8a76]">
-                PAN detected:{" "}
-                <span className="font-mono font-semibold text-[#0f3d2e]">{panOcrText}</span>
-              </p>
-            )}
+          </div>
+
+          {/* Proper editable PAN Number field — prefilled from OCR when detected. */}
+          <div className="rounded-input border-2 border-line bg-[#f8fafc] p-4">
+            <div className="flex items-baseline justify-between mb-2">
+              <label className="text-[13px] font-semibold text-text">
+                PAN Number
+              </label>
+              {panUploaded && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#f0faf5] text-[#0f3d2e] font-semibold uppercase tracking-wide border border-[#cdeadd]">
+                  {panNumber ? "Extracted" : "Enter manually"}
+                </span>
+              )}
+            </div>
+            <input
+              type="text"
+              value={panNumber}
+              onChange={(e) => setPanNumber(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10))}
+              placeholder="AAAAA9999A"
+              maxLength={10}
+              className={[
+                "w-full rounded-input border-2 px-4 py-3 text-[16px] font-mono tracking-wider outline-none transition-colors bg-white",
+                panNumber && !panValid
+                  ? "border-red-400 focus:border-red-500"
+                  : panValid
+                  ? "border-[#178a5c] focus:border-[#178a5c]"
+                  : "border-line focus:border-[#185fa5]",
+              ].join(" ")}
+            />
+            <p className="mt-2 text-[11px] text-text-muted">
+              Format: 5 letters + 4 digits + 1 letter (e.g. ABCDE1234F).
+              {panNumber && !panValid && " Invalid format."}
+            </p>
           </div>
         </Card>
 

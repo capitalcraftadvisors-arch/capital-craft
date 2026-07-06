@@ -314,10 +314,13 @@ function Inner() {
         />
 
         <div>
-          <h1 className="font-display text-[26px] sm:text-[30px] font-bold">Personal details</h1>
-          <p className="text-text-mid mt-1 text-[14px]">
-            Capture the customer&rsquo;s employment info and verify bank details
-            from a recent statement.
+          <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
+            Personal Details
+          </h1>
+          <p className="text-text-mid mt-2 text-[15px]">
+            Capture the customer&rsquo;s employment info and verify bank details from
+            a recent statement. All bank fields are prefilled from OCR — every one
+            is editable, so correct anything before confirming.
           </p>
         </div>
 
@@ -636,14 +639,20 @@ function BankDocSlot({
               Uploaded on {uploaded.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
             </p>
           )}
-          <div className="flex gap-2 pt-1">
+          <div className="flex items-center gap-2 pt-1">
             {doc!.signed_url && (
               <a
                 href={doc!.signed_url}
                 target="_blank"
                 rel="noopener"
-                className="text-[12px] font-semibold text-[#185fa5] hover:underline"
+                title="View uploaded document"
+                aria-label="View uploaded document"
+                className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#185fa5] hover:underline"
               >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
                 View
               </a>
             )}

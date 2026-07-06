@@ -427,11 +427,13 @@ function Inner() {
         />
 
         <div>
-          <h1 className="font-display text-[26px] sm:text-[30px] font-bold">Loan requirements</h1>
-          <p className="text-text-mid mt-1 text-[14px]">
-            Upload the proforma invoice and the latest electricity bill. We&rsquo;ll
-            prefill project, loan, and connection details from OCR — you review
-            and correct before saving.
+          <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
+            Loan Requirements
+          </h1>
+          <p className="text-text-mid mt-2 text-[15px]">
+            Upload the proforma invoice and the latest electricity bill. Project,
+            loan, and connection details are prefilled from OCR — every field below
+            is editable so you can correct anything before saving.
           </p>
         </div>
 
@@ -771,14 +773,20 @@ function DocSlot({
               Uploaded on {uploaded.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
             </p>
           )}
-          <div className="flex gap-2 pt-1">
+          <div className="flex items-center gap-2 pt-1">
             {doc!.signed_url && (
               <a
                 href={doc!.signed_url}
                 target="_blank"
                 rel="noopener"
-                className="text-[12px] font-semibold text-[#185fa5] hover:underline"
+                title="View uploaded document"
+                aria-label="View uploaded document"
+                className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#185fa5] hover:underline"
               >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
                 View
               </a>
             )}
