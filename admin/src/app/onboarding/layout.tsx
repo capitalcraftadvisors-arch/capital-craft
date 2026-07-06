@@ -6,8 +6,10 @@ import ImpersonationBanner from "@/components/ImpersonationBanner";
 
 // Allow:
 //   draft       — initial onboarding (status='draft').
-//   self_edit   — EPC's one-time post-submit edit pass: status='under_review'
-//                 AND epc_self_edited=false.
+//   self_edit   — EPC's one-time post-submit edit pass: epc_self_edited=false
+//                 (status can be under_review / on_hold / approved / rejected;
+//                 the pass is available to any submitted EPC who hasn't used
+//                 it. The DB trigger from 0010 locks further writes after use).
 // When admin is impersonating (Add New EPC flow), getBusiness() returns the
 // impersonated EPC's context — which is status='draft' — so AuthGuard admits
 // them through the "draft" clause naturally. ImpersonationBanner renders a

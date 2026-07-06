@@ -20,8 +20,10 @@ type Props = {
   //                is NOT true and status is one of under_review/on_hold/
   //                rejected/approved (admin still tracks the last two
   //                internally; the EPC just sees "Under review").
-  //   self_edit  — status='under_review' AND epc_self_edited=false, for the
-  //                wizard re-entry pass.
+  //   self_edit  — epc_self_edited=false, for the one-time wizard re-entry.
+  //                Available across submitted statuses (under_review /
+  //                on_hold / approved / rejected). Once the EPC uses the
+  //                pass, the DB trigger locks further non-admin writes.
   allow: Allow[];
 };
 
@@ -82,9 +84,13 @@ function matches(b: Business, allow: Allow[]): boolean {
   if (b.status === "under_review" || b.status === "on_hold" || b.status === "rejected" || b.status === "approved") {
     if (b.loan_app_unlocked === true) return false;
     if (allow.includes("status")) return true;
+    // self_edit is a one-time pass available to any submitted EPC (status of
+    // under_review / on_hold / approved / rejected — the outer branch above
+    // already scoped us to those) that has NOT used their one edit yet. The
+    // DB trigger + /api/epc/submit-self-edit enforce the lock via
+    // epc_self_edited alone; no status guard needed here.
     if (
       allow.includes("self_edit") &&
-      b.status === "under_review" &&
       b.epc_self_edited !== true
     ) {
       return true;

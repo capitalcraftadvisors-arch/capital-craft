@@ -52,8 +52,13 @@ function StatusInner() {
   if (!biz) return null;
   // Uniform copy regardless of biz.status — see EPC_MESSAGE.
   const msg = EPC_MESSAGE;
-  const showEditButton =
-    biz.status === "under_review" && biz.epc_self_edited !== true;
+  // The one-time edit is offered to any submitted EPC who hasn't used it yet,
+  // regardless of internal status (under_review / on_hold / approved /
+  // rejected). Draft EPCs never land on /status — they stay in the onboarding
+  // wizard. The DB trigger (0010) and /api/epc/submit-self-edit both still
+  // enforce the one-time lock via epc_self_edited alone, so relaxing this UI
+  // gate does not weaken the guarantee.
+  const showEditButton = biz.epc_self_edited !== true;
 
   async function startSelfEdit() {
     // Capture a snapshot of the fields the audit endpoint expects in `before`.
