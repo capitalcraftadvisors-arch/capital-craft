@@ -1,8 +1,13 @@
 // PATCH /api/admin/loan-app/[id]/complete-step-1
 //
 // Admin-only. Persists Step 1 fields on the draft row, records the
-// consent breadcrumb, fires the WhatsApp confirmation stub, and
-// advances current_step from 1 to 2.
+// consent legal breadcrumb, and advances current_step from 1 to 2.
+//
+// WhatsApp confirmation is intentionally NOT called from this route
+// (dropped from the current build). The sendWhatsAppConfirmation stub
+// in admin/src/lib/whatsapp.ts is kept in the codebase for future
+// re-enablement; the whatsapp_* columns on epc_applications (added by
+// migration 0022) stay in the schema unwritten.
 //
 // Idempotence: refuses to run twice on the same row (returns 409 if
 // current_step is already > 1). The frontend also disables the button
@@ -23,7 +28,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
-import { sendWhatsAppConfirmation } from "@/lib/whatsapp";
+// Note: sendWhatsAppConfirmation is intentionally NOT imported here —
+// the WhatsApp step is dropped from the current build. See header
+// comment. The stub in @/lib/whatsapp stays for later re-enablement.
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -145,55 +152,17 @@ export async function PATCH(
       consent_user_agent,
     };
 
-    const { error: upd1Err } = await supabase
+    // Fold current_step advance into the same UPDATE — one round-trip,
+    // one atomic commit for the field writes + consent + step transition.
+    patch.current_step = 2;
+
+    const { error: updErr } = await supabase
       .from("epc_applications")
       .update(patch)
       .eq("id", appId);
-    if (upd1Err) return err(`Save failed: ${upd1Err.message}`, 500);
+    if (updErr) return err(`Save failed: ${updErr.message}`, 500);
 
-    // Load the EPC row for the WhatsApp payload's display name.
-    const { data: epc } = await supabase
-      .from("epc_business")
-      .select("contact_name, trade_name, legal_name")
-      .eq("id", app.epc_business_id)
-      .maybeSingle();
-    const epcName = epc?.trade_name || epc?.legal_name || epc?.contact_name || null;
-
-    const wa = await sendWhatsAppConfirmation({
-      applicationId: appId,
-      borrowerName: null,   // not collected yet (later step)
-      borrowerMobile: borrower_mobile,
-      epcName,
-    });
-
-    // Persist WhatsApp result + advance current_step.
-    // If the send call reported failure, we still record the attempt
-    // (status='failed', sent_at=now) but do NOT advance the step —
-    // the admin can retry from the Step 1 page.
-    const now = new Date().toISOString();
-    if (wa.ok) {
-      const { error: upd2Err } = await supabase
-        .from("epc_applications")
-        .update({
-          whatsapp_confirmation_status: "sent",
-          whatsapp_sent_at: now,
-          whatsapp_provider_msg_id: wa.provider_message_id,
-          current_step: 2,
-        })
-        .eq("id", appId);
-      if (upd2Err) return err(`Confirmation recorded but step advance failed: ${upd2Err.message}`, 500);
-
-      return NextResponse.json({ ok: true, next_step: 2, whatsapp: wa });
-    } else {
-      await supabase
-        .from("epc_applications")
-        .update({
-          whatsapp_confirmation_status: "failed",
-          whatsapp_sent_at: now,
-        })
-        .eq("id", appId);
-      return err(`WhatsApp send failed: ${wa.error ?? "unknown"}`, 502);
-    }
+    return NextResponse.json({ ok: true, next_step: 2 });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[complete-step-1] error:", msg);

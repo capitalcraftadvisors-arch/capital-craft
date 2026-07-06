@@ -1,5 +1,6 @@
 import { FUNCTIONS_URL } from "./supabase";
 import { getToken } from "./auth";
+import { parsePanFields } from "./pan-parser";
 
 export type ChequeOcrResult =
   | {
@@ -58,12 +59,22 @@ export async function extractGstR3b(file: File): Promise<GstR3bOcrResult> {
   return res.json();
 }
 
+// Extended PAN OCR result. The Deno extract-pan Edge Function still
+// returns only { ok, pan, raw_text } — we enrich the success payload
+// client-side by running parsePanFields on the raw_text to pull the
+// name / father's name / DOB off the card. Existing Page 1 callers
+// that only read `pan` are unaffected.
 export type PanOcrResult =
-  | { ok: true; raw_text: string; pan: string | null }
+  | {
+      ok: true;
+      raw_text: string;
+      pan: string | null;
+      name: string | null;
+      father_name: string | null;
+      dob: string | null;
+    }
   | { ok: false; error: string };
 
-// Mirrors extractCheque / extractGstR3b. Forwards mimeType so PDFs route
-// to Vision's files:annotate endpoint and images go to images:annotate.
 export async function extractPan(file: File): Promise<PanOcrResult> {
   const base64 = await fileToBase64(file);
   const res = await fetch(`${FUNCTIONS_URL}/extract-pan`, {
@@ -74,7 +85,19 @@ export async function extractPan(file: File): Promise<PanOcrResult> {
     },
     body: JSON.stringify({ imageBase64: base64, mimeType: file.type }),
   });
-  return res.json();
+  const raw = (await res.json()) as
+    | { ok: true; pan: string | null; raw_text: string }
+    | { ok: false; error: string };
+  if (!raw.ok) return raw;
+  const parsed = parsePanFields(raw.raw_text || "");
+  return {
+    ok: true,
+    raw_text:    raw.raw_text,
+    pan:         raw.pan ?? parsed.pan,
+    name:        parsed.name,
+    father_name: parsed.father_name,
+    dob:         parsed.dob,
+  };
 }
 
 export type GstLegalNameOcrResult =

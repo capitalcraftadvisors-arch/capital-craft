@@ -26,21 +26,38 @@ import { getToken } from "@/lib/auth";
 import { extractPan } from "@/lib/ocr";
 import { EMAIL_RE, MOBILE_RE } from "@/lib/validators";
 
-// The five policies bundled behind the single consent checkbox.
-// The server ACCEPTS values from this list only.
-const POLICIES: { key: string; label: string; blurb: string }[] = [
-  { key: "terms_conditions",   label: "Terms & Conditions",  blurb: "The rules governing use of Capital Craft and this loan application." },
-  { key: "privacy_policy",     label: "Privacy Policy",      blurb: "How we handle personal data collected during this application." },
-  { key: "cookie_policy",      label: "Cookie Policy",       blurb: "Cookies and tracking used across Capital Craft properties." },
-  { key: "credit_information", label: "Credit Information",  blurb: "Consent to share application data with credit bureaux and NBFCs." },
-  { key: "loan_application",   label: "Loan Application",    blurb: "Consent to the loan application itself and any resulting agreement." },
+// The five policy keys recorded in the consent legal breadcrumb. The
+// visible consent line mentions three by name (Terms / Privacy / Cookie)
+// plus body text covering credit-information sharing and the loan
+// application itself — so ticking the box implies all five. We record
+// all five server-side to keep the legal record stronger.
+const CONSENT_KEYS = [
+  "terms_conditions",
+  "privacy_policy",
+  "cookie_policy",
+  "credit_information",
+  "loan_application",
 ];
-const CONSENT_KEYS = POLICIES.map((p) => p.key);
 
-const SYSTEM_OPTIONS = [
-  { value: "off_grid", label: "Off-grid" },
-  { value: "on_grid",  label: "On-grid"  },
-  { value: "hybrid",   label: "Hybrid"   },
+// Solar system options rendered as three side-by-side clickable cards.
+// Each has a heading + short description. Order matches the design spec
+// (On-Grid first, then Off-Grid, then Hybrid).
+const SYSTEM_CARDS = [
+  {
+    value: "on_grid",
+    title: "On-Grid Solar System",
+    desc:  "Connected to electricity grid, can sell excess power",
+  },
+  {
+    value: "off_grid",
+    title: "Off-Grid Solar System",
+    desc:  "Independent system with battery storage",
+  },
+  {
+    value: "hybrid",
+    title: "Hybrid Solar System",
+    desc:  "Connected to the grid with battery storage",
+  },
 ] as const;
 
 const PIN_RE = /^[1-9]\d{5}$/;
@@ -345,13 +362,13 @@ function Inner() {
           </div>
         </Card>
 
-        {/* Section: PAN + system type */}
+        {/* Section: PAN card — its own Card now, separate from solar. */}
         <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px]">Identity &amp; preference</h2>
+          <h2 className="font-display font-semibold text-[16px]">PAN card</h2>
 
           <div>
             <p className="block mb-1.5 text-[13px] font-medium text-text-mid">
-              PAN card upload
+              Upload the customer&rsquo;s PAN card
             </p>
             <FileUpload
               applicationId={loan.id}
@@ -362,65 +379,93 @@ function Inner() {
               hint="Image or PDF. Large images are auto-compressed to ~1 MB."
             />
             {panOcrText && (
-              <p className="mt-2 text-[12px] text-[#5a8a76]">
-                Detected PAN: <span className="font-mono font-semibold text-[#0f3d2e]">{panOcrText}</span>
+              <p className="mt-2 text-[13px] text-[#5a8a76]">
+                PAN detected:{" "}
+                <span className="font-mono font-semibold text-[#0f3d2e]">{panOcrText}</span>
               </p>
             )}
           </div>
+        </Card>
 
-          <div>
-            <p className="block mb-1.5 text-[13px] font-medium text-text-mid">
-              Solar system preference
-            </p>
-            <div className="grid sm:grid-cols-3 gap-3">
-              {SYSTEM_OPTIONS.map((opt) => (
-                <label
+        {/* Section: Solar system preference — three side-by-side clickable
+            cards. Whole card is the click target; radio indicator in the
+            top-right corner. Selected state uses the brand green palette. */}
+        <Card className="p-6 space-y-4">
+          <h2 className="font-display font-semibold text-[16px]">Solar system preference</h2>
+
+          <div className="grid sm:grid-cols-3 gap-3">
+            {SYSTEM_CARDS.map((opt) => {
+              const active = systemType === opt.value;
+              return (
+                <button
                   key={opt.value}
+                  type="button"
+                  onClick={() => setSystemType(opt.value)}
                   className={[
-                    "border rounded-input px-4 py-3 text-[14px] cursor-pointer transition-colors",
-                    systemType === opt.value
-                      ? "border-[#178a5c] bg-[#f0faf5] font-semibold text-[#0f3d2e]"
-                      : "border-line hover:border-blue",
+                    "text-left rounded-input border-2 p-4 transition-colors relative",
+                    "focus:outline-none focus-visible:ring-2 focus-visible:ring-[#185fa5]",
+                    active
+                      ? "border-[#178a5c] bg-[#f0faf5]"
+                      : "border-line bg-white hover:border-[#185fa5]",
                   ].join(" ")}
                 >
-                  <input
-                    type="radio"
-                    name="system_type"
-                    value={opt.value}
-                    checked={systemType === opt.value}
-                    onChange={() => setSystemType(opt.value)}
-                    className="mr-2 accent-[#178a5c]"
-                  />
-                  {opt.label}
-                </label>
-              ))}
-            </div>
+                  {/* Radio indicator — top-right corner */}
+                  <span
+                    className={[
+                      "absolute top-3 right-3 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors",
+                      active ? "border-[#178a5c]" : "border-line",
+                    ].join(" ")}
+                    aria-hidden
+                  >
+                    {active && (
+                      <span className="w-2 h-2 rounded-full bg-[#178a5c]" />
+                    )}
+                  </span>
+
+                  <p
+                    className={[
+                      "font-display font-semibold text-[14px] pr-6",
+                      active ? "text-[#0f3d2e]" : "text-text",
+                    ].join(" ")}
+                  >
+                    {opt.title}
+                  </p>
+                  <p className="text-[12px] text-text-muted mt-1">
+                    {opt.desc}
+                  </p>
+                </button>
+              );
+            })}
           </div>
         </Card>
 
-        {/* Section: consent + send */}
+        {/* Section: consent line + Next */}
         <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px]">Consent &amp; confirmation</h2>
+          <h2 className="font-display font-semibold text-[16px]">Consent &amp; authorization</h2>
 
-          <ul className="text-[13px] text-text-mid space-y-1.5 list-disc pl-5">
-            {POLICIES.map((p) => (
-              <li key={p.key}>
-                <span className="font-semibold text-text">{p.label}</span> —{" "}
-                <span className="text-text-muted">{p.blurb}</span>
-              </li>
-            ))}
-          </ul>
-
-          <label className="flex items-start gap-2 text-[14px] cursor-pointer">
+          <label className="flex items-start gap-3 text-[14px] leading-relaxed cursor-pointer">
             <input
               type="checkbox"
               checked={consented}
               onChange={(e) => setConsented(e.target.checked)}
-              className="mt-1 h-4 w-4 accent-[#178a5c]"
+              className="mt-1 h-4 w-4 shrink-0 accent-[#178a5c]"
             />
-            <span>
-              I have read all the documents and policies above and confirm the
-              customer&rsquo;s consent to all of them.
+            <span className="text-text">
+              By clicking here, I state that I have read and understood the{" "}
+              <a href="#" target="_blank" rel="noopener" className="text-[#185fa5] hover:underline font-medium">
+                Terms and Conditions
+              </a>
+              ,{" "}
+              <a href="#" target="_blank" rel="noopener" className="text-[#185fa5] hover:underline font-medium">
+                Privacy Policy
+              </a>{" "}
+              and{" "}
+              <a href="#" target="_blank" rel="noopener" className="text-[#185fa5] hover:underline font-medium">
+                Cookie Policy
+              </a>{" "}
+              and Allow{" "}
+              <span className="font-semibold">Capital Craft Financial Advisors</span>{" "}
+              and its lending partners to access my credit information.
             </span>
           </label>
 
@@ -438,7 +483,7 @@ function Inner() {
               loading={sending}
               disabled={!canSend}
             >
-              Send confirmation
+              Next
             </Button>
           </div>
         </Card>
