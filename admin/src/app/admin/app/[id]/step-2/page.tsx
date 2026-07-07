@@ -22,6 +22,7 @@ import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
+import DatePicker from "@/components/ui/DatePicker";
 import LoanAppStepTracker from "@/components/LoanAppStepTracker";
 import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
@@ -361,11 +362,11 @@ function Inner() {
                   onChange={(e) => setName(e.target.value)}
                   placeholder="As on Aadhaar"
                 />
-                <Input
+                <DatePicker
                   label="Date of birth"
                   value={dob}
-                  onChange={(e) => setDob(e.target.value)}
-                  placeholder="DD/MM/YYYY or YYYY"
+                  onChange={setDob}
+                  hint="Click the field to open a calendar."
                 />
                 <div>
                   <label className="block mb-1.5 text-[13px] font-medium text-text-mid">

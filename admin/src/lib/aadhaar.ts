@@ -45,17 +45,23 @@ export type FaceCropResult = {
 // ── Public API ────────────────────────────────────────────────────────
 
 // Runs DOCUMENT_TEXT_DETECTION against the file and returns parsed
-// Aadhaar fields with the number MASKED. Never returns raw OCR text or
-// the full number. Callers use the masked field for persistence.
+// Aadhaar fields (with the number MASKED) alongside the raw OCR text.
+// The raw text is stored server-side under ocr_raw_text so parser
+// misses on real documents can be debugged without re-uploading.
+//
+// PRIVACY: the raw text may contain the unmasked 12-digit Aadhaar
+// number. Route callers persist this under an admin-only-RLS column
+// on epc_applications. The client-side masked field remains the only
+// value the borrower's account ever exposes.
 export async function extractAadhaar(
   buffer: Buffer,
   mimeType: string,
-): Promise<AadhaarFields> {
+): Promise<{ fields: AadhaarFields; raw_text: string }> {
   if (buffer.length > AADHAAR_FILE_MAX) {
     throw new Error(`aadhaar_file_too_large_${buffer.length}`);
   }
   const text = await visionDocumentText(buffer, mimeType);
-  return parseAadhaar(text);
+  return { fields: parseAadhaar(text), raw_text: text };
 }
 
 // Attempts to detect a face on the FRONT-side buffer and, if one is

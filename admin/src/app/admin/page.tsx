@@ -571,9 +571,16 @@ function LenderCell({
 function AppsTab() {
   const router = useRouter();
   type Row = {
-    id: string; borrower_name: string | null; loan_amount: number | null;
+    id: string;
+    // Borrower fallback chain: borrower_name → aadhaar_name (Step 2 KYC) → "—".
+    borrower_name: string | null;
+    aadhaar_name:  string | null;
+    // Loan amount lives in loan_amount_required (Step 3). loan_amount is
+    // the legacy 0001 column — read both, prefer the newer one.
+    loan_amount: number | null;
+    loan_amount_required: number | null;
     status: string; created_at: string; created_by: string;
-    epc_business: { contact_name: string | null } | null;
+    epc_business: { contact_name: string | null; trade_name: string | null; legal_name: string | null; epc_display_id: string | null } | null;
   };
   const [rows, setRows] = useState<Row[]>([]);
   const [q, setQ] = useState("");
@@ -584,7 +591,11 @@ function AppsTab() {
     (async () => {
       let query = supabase()
         .from("epc_applications")
-        .select("id, borrower_name, loan_amount, status, created_at, created_by, epc_business:epc_business_id(contact_name)")
+        .select(
+          "id, borrower_name, aadhaar_name, loan_amount, loan_amount_required, " +
+          "status, created_at, created_by, " +
+          "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
+        )
         .order("created_at", { ascending: false });
       if (statusFilter) query = query.eq("status", statusFilter);
       const { data } = await query;
@@ -592,10 +603,25 @@ function AppsTab() {
     })();
   }, [statusFilter]);
 
+  // Display helpers — encapsulated so the render below stays clean.
+  function displayBorrower(r: Row): string {
+    return r.borrower_name || r.aadhaar_name || "—";
+  }
+  function displayEpc(r: Row): string {
+    return r.epc_business?.trade_name
+        || r.epc_business?.legal_name
+        || r.epc_business?.contact_name
+        || "—";
+  }
+  function displayAmount(r: Row): string {
+    const n = r.loan_amount_required ?? r.loan_amount;
+    return n ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
+  }
+
   const filtered = q.trim()
     ? rows.filter((r) =>
-        (r.borrower_name || "").toLowerCase().includes(q.toLowerCase()) ||
-        (r.epc_business?.contact_name || "").toLowerCase().includes(q.toLowerCase()))
+        displayBorrower(r).toLowerCase().includes(q.toLowerCase()) ||
+        displayEpc(r).toLowerCase().includes(q.toLowerCase()))
     : rows;
 
   return (
@@ -625,11 +651,19 @@ function AppsTab() {
       </div>
 
       <Card className="overflow-hidden">
-        <table className="w-full text-[14px]">
+        <table className="w-full text-[14px] table-fixed">
+          <colgroup>
+            <col />
+            <col />
+            <col style={{ width: "140px" }} />
+            <col style={{ width: "150px" }} />
+            <col style={{ width: "120px" }} />
+            <col style={{ width: "100px" }} />
+          </colgroup>
           <thead className="bg-bg-soft border-b border-line text-left text-text-muted">
             <tr>
               <th className="px-5 py-3 font-medium">Borrower</th>
-              <th className="px-5 py-3 font-medium">EPC</th>
+              <th className="px-5 py-3 font-medium">EPC Partner</th>
               <th className="px-5 py-3 font-medium">Amount</th>
               <th className="px-5 py-3 font-medium">Status</th>
               <th className="px-5 py-3 font-medium">Created</th>
@@ -640,13 +674,18 @@ function AppsTab() {
             {filtered.length === 0 ? (
               <tr><td colSpan={6} className="px-5 py-10 text-center text-text-muted">No applications match.</td></tr>
             ) : filtered.map((r) => (
-              <tr key={r.id} onClick={() => router.push(`/admin/app/${r.id}` as any)}
-                  className="border-b border-line cursor-pointer hover:bg-bg-soft transition-colors">
-                <td className="px-5 py-4">{r.borrower_name || "—"}</td>
-                <td className="px-5 py-4">{r.epc_business?.contact_name || "—"}</td>
-                <td className="px-5 py-4">{r.loan_amount ? `₹${Number(r.loan_amount).toLocaleString("en-IN")}` : "—"}</td>
+              <tr key={r.id} onClick={() => router.push(`/admin/app/${r.id}/view` as any)}
+                  className="border-b border-line cursor-pointer hover:bg-[#f0faf5] transition-colors">
+                <td className="px-5 py-4 font-semibold text-text truncate">{displayBorrower(r)}</td>
+                <td className="px-5 py-4 truncate">
+                  <div className="text-text">{displayEpc(r)}</div>
+                  {r.epc_business?.epc_display_id && (
+                    <div className="text-[11px] font-mono text-text-muted mt-0.5">{r.epc_business.epc_display_id}</div>
+                  )}
+                </td>
+                <td className="px-5 py-4 font-semibold text-[#0f3d2e]">{displayAmount(r)}</td>
                 <td className="px-5 py-4"><StatusBadge status={r.status} /></td>
-                <td className="px-5 py-4 text-text-muted">{new Date(r.created_at).toLocaleDateString("en-IN")}</td>
+                <td className="px-5 py-4 text-text-muted whitespace-nowrap">{new Date(r.created_at).toLocaleDateString("en-IN")}</td>
                 <td className="px-5 py-4 text-text-muted capitalize">{r.created_by}</td>
               </tr>
             ))}

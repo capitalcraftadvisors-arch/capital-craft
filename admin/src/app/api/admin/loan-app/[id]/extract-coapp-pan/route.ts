@@ -86,19 +86,27 @@ export async function POST(
     const path = `applications/${appId}/coapp_pan/${Date.now()}_${safeName(file.name, "coapp_pan")}`;
     await uploadBuffer(path, output, mime);
 
-    // OCR + parse.
+    // OCR + parse. Vision-error message flows through to the client.
     let fields: { pan: string | null; name: string | null; father_name: string | null; dob: string | null } = {
       pan: null, name: null, father_name: null, dob: null,
     };
+    let rawText: string | null = null;
+    let visionError: string | null = null;
     try {
-      const text = await visionDocumentText(output, mime);
-      fields = parsePanFields(text);
+      rawText = await visionDocumentText(output, mime);
+      fields = parsePanFields(rawText);
     } catch (e) {
-      console.warn("[extract-coapp-pan] OCR failed:", e);
+      visionError = e instanceof Error ? e.message : String(e);
+      console.error("[extract-coapp-pan] vision error:", visionError);
     }
 
     let signed: string | null = null;
     try { signed = await getSignedReadUrl(path, 3600); } catch { /* non-fatal */ }
+
+    if (rawText) {
+      supabase.rpc("append_ocr_raw", { app_id: appId, key_name: "coapp_pan", raw_text: rawText })
+        .then((r) => r.error && console.warn("[extract-coapp-pan] raw-text save:", r.error.message));
+    }
 
     return NextResponse.json({
       ok: true,
@@ -106,6 +114,8 @@ export async function POST(
       storage_path: path,
       signed_url:   signed,
       uploaded_at:  new Date().toISOString(),
+      debug_vision_error: visionError,
+      debug_raw_text:     rawText,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

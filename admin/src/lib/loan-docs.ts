@@ -34,17 +34,17 @@ export type EbillFields = {
 export async function extractProforma(
   buffer: Buffer,
   mimeType: string,
-): Promise<ProformaFields> {
+): Promise<{ fields: ProformaFields; raw_text: string }> {
   const text = await visionDocumentText(buffer, mimeType);
-  return parseProforma(text);
+  return { fields: parseProforma(text), raw_text: text };
 }
 
 export async function extractEbill(
   buffer: Buffer,
   mimeType: string,
-): Promise<EbillFields> {
+): Promise<{ fields: EbillFields; raw_text: string }> {
   const text = await visionDocumentText(buffer, mimeType);
-  return parseEbill(text);
+  return { fields: parseEbill(text), raw_text: text };
 }
 
 // ── Proforma / quotation parser ──────────────────────────────────────

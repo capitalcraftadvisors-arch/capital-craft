@@ -24,6 +24,8 @@ import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
 import Button from "@/components/ui/Button";
+import DatePicker from "@/components/ui/DatePicker";
+import FileUpload from "@/components/FileUpload";
 import LoanAppStepTracker from "@/components/LoanAppStepTracker";
 import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
@@ -56,6 +58,9 @@ type Loan = {
   install_pincode: string | null;
   install_state:   string | null;
   install_city:    string | null;
+  borrower_mobile: string | null;
+  borrower_email:  string | null;
+  rooftop_photo_path: string | null;
   epc_business: {
     contact_name: string | null;
     trade_name: string | null;
@@ -82,12 +87,28 @@ type Coapp = {
   pan_path: string | null;
   pan_uploaded_at: string | null;
   pan_signed_url: string | null;
+  // Co-applicant Aadhaar OCR (mirrors applicant KYC — Step 2 shape).
+  aadhaar_name:   string;
+  aadhaar_dob:    string;
+  aadhaar_gender: string;
+  aadhaar_last4:  string;              // last 4 digits only
+  aadhaar_care_of: string;
+  aadhaar_address: string;
+  aadhaar_front_path: string | null;
+  aadhaar_back_path:  string | null;
+  aadhaar_face_path:  string | null;
+  aadhaar_uploading:  boolean;
+  aadhaar_error:      string | null;
 };
 
 const EMPTY_COAPP: Coapp = {
   pan: "", name: "", father_name: "", dob: "",
   relation: "", mobile: "", email: "",
   pan_path: null, pan_uploaded_at: null, pan_signed_url: null,
+  aadhaar_name: "", aadhaar_dob: "", aadhaar_gender: "",
+  aadhaar_last4: "", aadhaar_care_of: "", aadhaar_address: "",
+  aadhaar_front_path: null, aadhaar_back_path: null, aadhaar_face_path: null,
+  aadhaar_uploading: false, aadhaar_error: null,
 };
 
 // ── Page ─────────────────────────────────────────────────────────────
@@ -126,12 +147,21 @@ function Inner() {
 
   // Installation address
   const [addressLine,    setAddressLine]    = useState<string>("");
+  // OCR-fetched address from the e-bill — kept separate so we can flag
+  // a mismatch if the admin edits the installation address away from
+  // what the bill said (spec: "should match the electricity bill").
+  const [ocrEbillAddressLine, setOcrEbillAddressLine] = useState<string | null>(null);
   const [pincode,        setPincode]        = useState<string>("");
   const [city,           setCity]           = useState<string>("");
   const [state,          setState]          = useState<string>("");
   const [pincodeBusy,    setPincodeBusy]    = useState(false);
   const [pincodeError,   setPincodeError]   = useState<string | null>(null);
   const [ebillName,      setEbillName]      = useState<string>("");
+
+  // Rooftop photo — geo-tagged. Reuses the GeoOfficeUpload pipeline that
+  // the EPC office photos use (exifr + camera GPS).
+  const [rooftopDoc,       setRooftopDoc]       = useState<{ id: string; storage_path: string; file_name: string | null } | null>(null);
+  const [rooftopGps,       setRooftopGps]       = useState<{ lat: number; lng: number; captured_at: string } | null>(null);
 
   // Bill ownership + co-applicant
   const [ownership, setOwnership] = useState<"yes" | "no" | null>(null);
@@ -151,6 +181,7 @@ function Inner() {
         .select(
           "id, current_step, created_at, " +
           "install_pincode, install_state, install_city, " +
+          "borrower_mobile, borrower_email, rooftop_photo_path, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .eq("id", params.id)
@@ -221,6 +252,7 @@ function Inner() {
         }
         if (!discomName && e.fields.discom_name) setDiscomName(e.fields.discom_name);
         if (!caNumber   && e.fields.ca_number)   setCaNumber(e.fields.ca_number);
+        if (e.fields.ebill_address_line) setOcrEbillAddressLine(e.fields.ebill_address_line);
         if (!addressLine && e.fields.ebill_address_line) setAddressLine(e.fields.ebill_address_line);
         if (!pincode     && e.fields.pincode)            {
           setPincode(e.fields.pincode);
@@ -290,6 +322,44 @@ function Inner() {
     }
   }
 
+  // Co-applicant Aadhaar OCR — reuses the same server route the applicant
+  // KYC on Step 2 uses. Uploads FRONT + BACK together, prefills fields.
+  async function uploadCoappAadhaar(front: File, back: File) {
+    setCoapp((c) => ({ ...c, aadhaar_uploading: true, aadhaar_error: null }));
+    try {
+      const fd = new FormData();
+      fd.append("front", front);
+      fd.append("back",  back);
+      const res = await fetch(`/api/admin/loan-app/${loan!.id}/extract-aadhaar`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        body: fd,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) {
+        setCoapp((c) => ({ ...c, aadhaar_uploading: false, aadhaar_error: data?.error || `Upload failed (HTTP ${res.status}).` }));
+        return;
+      }
+      const f = data.fields ?? {};
+      setCoapp((c) => ({
+        ...c,
+        aadhaar_uploading: false,
+        aadhaar_error: null,
+        aadhaar_name:    c.aadhaar_name    || (f.name    ?? ""),
+        aadhaar_dob:     c.aadhaar_dob     || (f.dob     ?? ""),
+        aadhaar_gender:  c.aadhaar_gender  || (f.gender  ?? ""),
+        aadhaar_care_of: c.aadhaar_care_of || (f.care_of ?? ""),
+        aadhaar_address: c.aadhaar_address || (f.address ?? ""),
+        aadhaar_last4:   c.aadhaar_last4   || (f.aadhaar_masked ? String(f.aadhaar_masked).slice(-4) : ""),
+        aadhaar_front_path: data.storage_paths?.front ?? null,
+        aadhaar_back_path:  data.storage_paths?.back  ?? null,
+        aadhaar_face_path:  data.storage_paths?.face  ?? null,
+      }));
+    } catch (e) {
+      setCoapp((c) => ({ ...c, aadhaar_uploading: false, aadhaar_error: (e as Error)?.message || "Network error." }));
+    }
+  }
+
   // ── Derived ────────────────────────────────────────────────────────
 
   const costN = Number(totalCost);
@@ -312,6 +382,20 @@ function Inner() {
     city.trim().length > 0 &&
     state.trim().length > 0;
 
+  // Applicant contact from Step 1 (for cross-check)
+  const applicantMobile = (loan?.borrower_mobile ?? "").trim();
+  const applicantEmail  = (loan?.borrower_email  ?? "").trim().toLowerCase();
+
+  // Co-applicant vs applicant mismatch checks (spec: must NOT be same)
+  const coappMobileConflict = ownership === "no" &&
+    coapp.mobile.trim().length > 0 &&
+    applicantMobile.length > 0 &&
+    coapp.mobile.trim() === applicantMobile;
+  const coappEmailConflict  = ownership === "no" &&
+    coapp.email.trim().length > 0 &&
+    applicantEmail.length > 0 &&
+    coapp.email.trim().toLowerCase() === applicantEmail;
+
   const coappComplete =
     ownership === "no" &&
     !!coapp.pan_path &&
@@ -321,7 +405,9 @@ function Inner() {
     coapp.dob.trim().length > 0 &&
     !!coapp.relation &&
     MOBILE_RE.test(coapp.mobile) &&
-    EMAIL_RE.test(coapp.email);
+    EMAIL_RE.test(coapp.email) &&
+    !coappMobileConflict &&
+    !coappEmailConflict;
 
   const canNext =
     !!proforma && !!ebill &&
@@ -366,6 +452,25 @@ function Inner() {
         body.coapp_mobile      = coapp.mobile;
         body.coapp_email       = coapp.email.trim();
         body.coapp_pan_path    = coapp.pan_path;
+        // Co-applicant Aadhaar KYC (optional — only if any of the fields
+        // are populated). Server accepts nulls for missing pieces.
+        if (coapp.aadhaar_name)        body.coapp_aadhaar_name        = coapp.aadhaar_name.trim();
+        if (coapp.aadhaar_dob)         body.coapp_aadhaar_dob         = coapp.aadhaar_dob.trim();
+        if (coapp.aadhaar_gender)      body.coapp_aadhaar_gender      = coapp.aadhaar_gender.trim();
+        if (coapp.aadhaar_care_of)     body.coapp_aadhaar_care_of     = coapp.aadhaar_care_of.trim();
+        if (coapp.aadhaar_address)     body.coapp_aadhaar_address     = coapp.aadhaar_address.trim();
+        if (coapp.aadhaar_last4 && /^\d{4}$/.test(coapp.aadhaar_last4)) {
+          body.coapp_aadhaar_number_masked = "xxxxxxxx" + coapp.aadhaar_last4;
+        }
+        if (coapp.aadhaar_front_path)  body.coapp_aadhaar_front_path  = coapp.aadhaar_front_path;
+        if (coapp.aadhaar_back_path)   body.coapp_aadhaar_back_path   = coapp.aadhaar_back_path;
+        if (coapp.aadhaar_face_path)   body.coapp_aadhaar_face_path   = coapp.aadhaar_face_path;
+      }
+      // Rooftop photo — optional (spec adds it under installation address).
+      if (rooftopDoc) {
+        body.rooftop_photo_path = rooftopDoc.storage_path;
+        body.rooftop_photo_uploaded_at = new Date().toISOString();
+        if (rooftopGps) body.rooftop_photo_gps = rooftopGps;
       }
       const res = await fetch(`/api/admin/loan-app/${loan.id}/complete-step-3`, {
         method: "POST",
@@ -557,11 +662,20 @@ function Inner() {
         {/* f. Installation Address */}
         <Card className="p-6 space-y-4">
           <h2 className="font-display font-semibold text-[16px]">Installation address</h2>
+          <p className="text-[12px] text-text-mid -mt-2">
+            Should match the address on the electricity bill. Edit if the site
+            differs from what OCR pulled.
+          </p>
           <Input
             label="Address line"
             value={addressLine}
             onChange={(e) => setAddressLine(e.target.value)}
             placeholder="Flat / building / street"
+            hint={
+              ocrEbillAddressLine && addressLine.trim() && addressLine.trim() !== ocrEbillAddressLine.trim()
+                ? `⚠ Doesn't match the e-bill address OCR read (${ocrEbillAddressLine}). Confirm before saving.`
+                : undefined
+            }
           />
           <div className="grid sm:grid-cols-3 gap-4">
             <Input
@@ -586,6 +700,47 @@ function Inner() {
               options={INDIA_STATES.map((s) => ({ value: s, label: s }))}
               value={state}
               onChange={(e) => setState(e.target.value)}
+            />
+          </div>
+
+          {/* Rooftop photo — geo-tagged, reuses EPC office-photo pipeline */}
+          <div className="pt-2 border-t border-line">
+            <p className="text-[13px] font-medium text-text-mid mb-1.5">
+              Rooftop photo (geo-tagged)
+            </p>
+            <p className="text-[12px] text-text-muted mb-3">
+              Take a photo of the installation rooftop so the site can be verified.
+              Location is captured with the photo.
+            </p>
+            <FileUpload
+              applicationId={loan.id}
+              category="borrower_photo"
+              table="user_application_docs"
+              uploadedBy="admin"
+              captureGps
+              hint="Photo, scan, or PDF. Location is captured with the upload."
+              onUploaded={(info) => {
+                setRooftopDoc({
+                  id: info.docId,
+                  storage_path: info.storagePath,
+                  file_name: info.file?.name ?? null,
+                });
+                // Capture live GPS in parallel (best-effort) so we can save it
+                // to rooftop_photo_gps. FileUpload also stores gps in doc.metadata
+                // server-side via /api/upload; this local copy is what
+                // complete-step-3 persists into the epc_applications column.
+                if ("geolocation" in navigator) {
+                  navigator.geolocation.getCurrentPosition(
+                    (p) => setRooftopGps({
+                      lat: p.coords.latitude,
+                      lng: p.coords.longitude,
+                      captured_at: new Date().toISOString(),
+                    }),
+                    () => { /* silent — GPS optional */ },
+                    { timeout: 6000 },
+                  );
+                }
+              }}
             />
           </div>
         </Card>
@@ -685,11 +840,10 @@ function Inner() {
                 value={coapp.father_name}
                 onChange={(e) => setCoapp({ ...coapp, father_name: e.target.value })}
               />
-              <Input
+              <DatePicker
                 label="Date of birth"
                 value={coapp.dob}
-                onChange={(e) => setCoapp({ ...coapp, dob: e.target.value })}
-                placeholder="DD/MM/YYYY"
+                onChange={(v) => setCoapp({ ...coapp, dob: v })}
               />
               <Select
                 label="Relation with applicant"
@@ -705,13 +859,91 @@ function Inner() {
                 value={coapp.mobile}
                 onChange={(e) => setCoapp({ ...coapp, mobile: e.target.value.replace(/\D/g, "") })}
                 placeholder="10-digit"
+                error={coappMobileConflict ? "Cannot be the same as the applicant's mobile." : undefined}
               />
               <Input
                 label="Email"
                 type="email"
                 value={coapp.email}
                 onChange={(e) => setCoapp({ ...coapp, email: e.target.value })}
+                error={coappEmailConflict ? "Cannot be the same as the applicant's email." : undefined}
               />
+            </div>
+
+            {/* Co-applicant Aadhaar KYC — mirrors the applicant's Step 2. */}
+            <div className="pt-4 border-t border-line space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-[13px] font-semibold text-text">Co-applicant Aadhaar (KYC)</p>
+                {(coapp.aadhaar_front_path || coapp.aadhaar_back_path) && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#f0faf5] text-[#0f3d2e] font-semibold uppercase tracking-wide border border-[#cdeadd]">
+                    Uploaded
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-text-muted">
+                Upload the co-applicant&rsquo;s Aadhaar front and back. Details are extracted automatically.
+              </p>
+              <CoappAadhaarPicker
+                onFiles={(front, back) => void uploadCoappAadhaar(front, back)}
+                uploading={coapp.aadhaar_uploading}
+                error={coapp.aadhaar_error}
+                hasFront={!!coapp.aadhaar_front_path}
+                hasBack={!!coapp.aadhaar_back_path}
+              />
+
+              {(coapp.aadhaar_name || coapp.aadhaar_dob || coapp.aadhaar_last4) && (
+                <div className="grid sm:grid-cols-2 gap-4 pt-2">
+                  <Input
+                    label="Aadhaar name"
+                    value={coapp.aadhaar_name}
+                    onChange={(e) => setCoapp({ ...coapp, aadhaar_name: e.target.value })}
+                  />
+                  <DatePicker
+                    label="Aadhaar DOB"
+                    value={coapp.aadhaar_dob}
+                    onChange={(v) => setCoapp({ ...coapp, aadhaar_dob: v })}
+                  />
+                  <Input
+                    label="Gender"
+                    value={coapp.aadhaar_gender}
+                    onChange={(e) => setCoapp({ ...coapp, aadhaar_gender: e.target.value })}
+                  />
+                  <div>
+                    <label className="block mb-1.5 text-[13px] font-medium text-text-mid">
+                      Aadhaar (last 4 digits only)
+                    </label>
+                    <div className="flex items-center">
+                      <span className="px-3 py-2.5 rounded-l-input border-2 border-r-0 border-line bg-bg-tint text-text-muted font-mono text-[14px] select-none">
+                        xxxx xxxx
+                      </span>
+                      <input
+                        value={coapp.aadhaar_last4}
+                        onChange={(e) => setCoapp({ ...coapp, aadhaar_last4: e.target.value.replace(/\D/g, "").slice(0, 4) })}
+                        maxLength={4}
+                        inputMode="numeric"
+                        placeholder="1234"
+                        className="w-[120px] px-3 py-2.5 rounded-r-input border-2 border-line font-mono text-[14px] outline-none focus:border-[#178a5c] bg-white"
+                      />
+                    </div>
+                  </div>
+                  <Input
+                    label="Care of"
+                    value={coapp.aadhaar_care_of}
+                    onChange={(e) => setCoapp({ ...coapp, aadhaar_care_of: e.target.value })}
+                  />
+                  <div className="sm:col-span-2">
+                    <label className="block mb-1.5 text-[13px] font-medium text-text-mid">
+                      Aadhaar address
+                    </label>
+                    <textarea
+                      value={coapp.aadhaar_address}
+                      onChange={(e) => setCoapp({ ...coapp, aadhaar_address: e.target.value })}
+                      rows={3}
+                      className="w-full rounded-input border border-line bg-white px-3.5 py-2.5 text-[14px] outline-none focus:border-blue resize-y"
+                    />
+                  </div>
+                </div>
+              )}
             </div>
           </Card>
         )}
@@ -856,6 +1088,75 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
     <div className="flex gap-3">
       <dt className="min-w-[130px] text-text-muted">{label}</dt>
       <dd className="font-semibold text-[#0f3d2e]">{value}</dd>
+    </div>
+  );
+}
+
+// Two-file picker for co-applicant Aadhaar (front + back). Fires the
+// callback only once BOTH files are selected so the server route can
+// process them together (same shape the applicant Step 2 uses).
+function CoappAadhaarPicker({
+  onFiles, uploading, error, hasFront, hasBack,
+}: {
+  onFiles: (front: File, back: File) => void;
+  uploading: boolean;
+  error: string | null;
+  hasFront: boolean;
+  hasBack: boolean;
+}) {
+  const frontRef = useRef<HTMLInputElement>(null);
+  const backRef  = useRef<HTMLInputElement>(null);
+  const [front, setFront] = useState<File | null>(null);
+  const [back,  setBack]  = useState<File | null>(null);
+
+  useEffect(() => {
+    if (front && back) onFiles(front, back);
+  }, [front, back, onFiles]);
+
+  return (
+    <div className="space-y-2">
+      <div className="grid sm:grid-cols-2 gap-3">
+        <button
+          type="button"
+          onClick={() => frontRef.current?.click()}
+          disabled={uploading}
+          className={[
+            "h-[100px] rounded-input border-2 border-dashed text-center flex items-center justify-center px-3 transition-colors",
+            hasFront || front
+              ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
+              : "border-line bg-white text-text-muted hover:border-[#185fa5]",
+            uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
+          ].join(" ")}
+        >
+          <div>
+            <p className="text-[12px] font-semibold">Aadhaar Front</p>
+            <p className="text-[10px] mt-0.5">{front ? front.name : "Click to select"}</p>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => backRef.current?.click()}
+          disabled={uploading}
+          className={[
+            "h-[100px] rounded-input border-2 border-dashed text-center flex items-center justify-center px-3 transition-colors",
+            hasBack || back
+              ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
+              : "border-line bg-white text-text-muted hover:border-[#185fa5]",
+            uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
+          ].join(" ")}
+        >
+          <div>
+            <p className="text-[12px] font-semibold">Aadhaar Back</p>
+            <p className="text-[10px] mt-0.5">{back ? back.name : "Click to select"}</p>
+          </div>
+        </button>
+      </div>
+      <input ref={frontRef} type="file" accept="image/*,application/pdf" className="hidden"
+             onChange={(e) => { const f = e.target.files?.[0]; if (f) setFront(f); e.target.value = ""; }} />
+      <input ref={backRef} type="file" accept="image/*,application/pdf" className="hidden"
+             onChange={(e) => { const f = e.target.files?.[0]; if (f) setBack(f); e.target.value = ""; }} />
+      {uploading && <p className="text-[12px] text-text-muted">Extracting Aadhaar details…</p>}
+      {error && <p className="text-[12px] text-red-700">{error}</p>}
     </div>
   );
 }

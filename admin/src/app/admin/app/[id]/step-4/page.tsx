@@ -119,6 +119,10 @@ function Inner() {
   const [accountHolder, setAccountHolder] = useState("");
   const [bankName,      setBankName]      = useState("");
   const [accountNo,     setAccountNo]     = useState("");
+  // OCR-fetched account number, kept separate from the editable input
+  // so we can flag a mismatch if admin edits away from the OCR value
+  // (cheque-flow style — Step 4 of the EPC onboarding does the same).
+  const [ocrAccountNo, setOcrAccountNo]   = useState<string | null>(null);
   const [ifsc,          setIfsc]          = useState("");
   const [accountType,   setAccountType]   = useState("");
   const [bankMobile,    setBankMobile]    = useState("");
@@ -196,6 +200,7 @@ function Inner() {
       const f = data.fields as BankFields;
       if (!accountHolder && f.account_holder) setAccountHolder(f.account_holder);
       if (!bankName      && f.bank_name)      setBankName(f.bank_name);
+      if (f.account_no) setOcrAccountNo(f.account_no);
       if (!accountNo     && f.account_no)     setAccountNo(f.account_no);
       if (!ifsc          && f.ifsc)           setIfsc(f.ifsc);
       if (!accountType   && f.account_type)   setAccountType(f.account_type);
@@ -490,6 +495,13 @@ function Inner() {
                 label="Account number"
                 value={accountNo}
                 onChange={(e) => setAccountNo(e.target.value.replace(/\s+/g, ""))}
+                hint={
+                  ocrAccountNo && accountNo && ocrAccountNo !== accountNo
+                    ? `⚠ Doesn't match the account number OCR read from the statement (${ocrAccountNo}). Please double-check before saving.`
+                    : ocrAccountNo && !accountNo
+                    ? "Cleared. The statement OCR read " + ocrAccountNo + "."
+                    : undefined
+                }
               />
               <Input
                 label="IFSC code"
@@ -511,12 +523,9 @@ function Inner() {
                 value={bankMobile}
                 onChange={(e) => setBankMobile(e.target.value.replace(/\D/g, ""))}
               />
-              <Input
-                label="Bank-registered email"
-                type="email"
-                value={bankEmail}
-                onChange={(e) => setBankEmail(e.target.value)}
-              />
+              {/* Bank-registered email intentionally removed per spec —
+                  DB column bank_email in migration 0025 is kept for
+                  compatibility but no longer collected from the UI. */}
             </div>
 
             <label className="flex items-start gap-2 text-[14px] cursor-pointer pt-1">

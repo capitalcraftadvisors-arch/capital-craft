@@ -97,19 +97,30 @@ export async function POST(
     const path = `applications/${appId}/bank_statement/${Date.now()}_${safeName(file.name, "bank_statement")}`;
     await uploadBuffer(path, output, mime);
 
-    // OCR — best-effort; null out the whole fields object if Vision errors.
+    // OCR — best-effort. Vision-error message flows through so we can
+    // diagnose from the client Network tab / Cloud Run logs.
     let fields: BankStatementFields = {
       account_holder: null, bank_name: null, account_no: null,
       ifsc: null, account_type: null, mobile: null, email: null,
     };
+    let rawText: string | null = null;
+    let visionError: string | null = null;
     try {
-      fields = await extractBankStatement(output, mime);
+      const r = await extractBankStatement(output, mime);
+      fields = r.fields;
+      rawText = r.raw_text;
     } catch (e) {
-      console.warn("[extract-bank-statement] OCR failed:", e);
+      visionError = e instanceof Error ? e.message : String(e);
+      console.error("[extract-bank-statement] vision error:", visionError);
     }
 
     let signed: string | null = null;
     try { signed = await getSignedReadUrl(path, 3600); } catch { /* non-fatal */ }
+
+    if (rawText) {
+      supabase.rpc("append_ocr_raw", { app_id: appId, key_name: "bank_statement", raw_text: rawText })
+        .then((r) => r.error && console.warn("[extract-bank-statement] raw-text save:", r.error.message));
+    }
 
     return NextResponse.json({
       ok: true,
@@ -118,6 +129,8 @@ export async function POST(
       storage_path: path,
       signed_url:   signed,
       uploaded_at:  new Date().toISOString(),
+      debug_vision_error: visionError,
+      debug_raw_text:     rawText,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

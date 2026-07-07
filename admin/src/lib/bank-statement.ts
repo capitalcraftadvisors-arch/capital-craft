@@ -20,14 +20,15 @@ export type BankStatementFields = {
 };
 
 // Public entry point — runs Vision on the file then hands off to the
-// text parser. Never throws (except on Vision-config problems); a
-// missed field just comes back as null.
+// text parser. Returns the raw OCR text alongside parsed fields so the
+// extract-bank-statement route can persist it under ocr_raw_text for
+// debugging misreads on real statements.
 export async function extractBankStatement(
   buffer: Buffer,
   mimeType: string,
-): Promise<BankStatementFields> {
+): Promise<{ fields: BankStatementFields; raw_text: string }> {
   const text = await visionDocumentText(buffer, mimeType);
-  return parseBankStatement(text);
+  return { fields: parseBankStatement(text), raw_text: text };
 }
 
 // ── Parser ───────────────────────────────────────────────────────────

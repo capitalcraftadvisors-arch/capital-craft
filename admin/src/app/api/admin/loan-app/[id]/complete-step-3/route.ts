@@ -127,6 +127,17 @@ export async function POST(
     let coapp_email:       string | null = null;
     let coapp_pan_path:    string | null = null;
 
+    // Co-applicant Aadhaar KYC (optional even when co-app is required)
+    let coapp_aadhaar_name:          string | null = null;
+    let coapp_aadhaar_dob:           string | null = null;
+    let coapp_aadhaar_gender:        string | null = null;
+    let coapp_aadhaar_number_masked: string | null = null;
+    let coapp_aadhaar_care_of:       string | null = null;
+    let coapp_aadhaar_address:       string | null = null;
+    let coapp_aadhaar_front_path:    string | null = null;
+    let coapp_aadhaar_back_path:     string | null = null;
+    let coapp_aadhaar_face_path:     string | null = null;
+
     if (bill_on_applicant_name === false) {
       coapp_pan         = strOrNull(b.coapp_pan)?.toUpperCase() ?? null;
       coapp_name        = strOrNull(b.coapp_name);
@@ -137,6 +148,16 @@ export async function POST(
       coapp_email       = strOrNull(b.coapp_email);
       coapp_pan_path    = strOrNull(b.coapp_pan_path);
 
+      coapp_aadhaar_name          = strOrNull(b.coapp_aadhaar_name);
+      coapp_aadhaar_dob           = strOrNull(b.coapp_aadhaar_dob);
+      coapp_aadhaar_gender        = strOrNull(b.coapp_aadhaar_gender);
+      coapp_aadhaar_number_masked = strOrNull(b.coapp_aadhaar_number_masked);
+      coapp_aadhaar_care_of       = strOrNull(b.coapp_aadhaar_care_of);
+      coapp_aadhaar_address       = strOrNull(b.coapp_aadhaar_address);
+      coapp_aadhaar_front_path    = strOrNull(b.coapp_aadhaar_front_path);
+      coapp_aadhaar_back_path     = strOrNull(b.coapp_aadhaar_back_path);
+      coapp_aadhaar_face_path     = strOrNull(b.coapp_aadhaar_face_path);
+
       if (!coapp_pan)         return err("Co-applicant PAN is required.", 400);
       if (!PAN_RE.test(coapp_pan)) return err("Co-applicant PAN is invalid.", 400);
       if (!coapp_name)        return err("Co-applicant name is required.", 400);
@@ -146,7 +167,19 @@ export async function POST(
       if (!coapp_mobile || !MOBILE_RE.test(coapp_mobile)) return err("Co-applicant mobile is invalid.", 400);
       if (!coapp_email  || !EMAIL_RE.test(coapp_email))   return err("Co-applicant email is invalid.", 400);
       if (!coapp_pan_path)    return err("Co-applicant PAN upload is required.", 400);
+
+      if (coapp_aadhaar_number_masked && !/^x{8}\d{4}$/.test(coapp_aadhaar_number_masked)) {
+        return err("Co-applicant Aadhaar must be masked as xxxxxxxx####.", 400);
+      }
     }
+
+    // Cross-check: co-applicant contact must NOT match applicant contact.
+    // Load Step-1 borrower_mobile/email for the comparison.
+    let rooftop_photo_path        = strOrNull(b.rooftop_photo_path);
+    let rooftop_photo_uploaded_at = strOrNull(b.rooftop_photo_uploaded_at);
+    const rooftop_photo_gps       = (b.rooftop_photo_gps && typeof b.rooftop_photo_gps === "object")
+      ? b.rooftop_photo_gps as Record<string, unknown>
+      : null;
 
     // ── Persist + advance ─────────────────────────────────
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
@@ -156,12 +189,23 @@ export async function POST(
 
     const { data: app, error: loadErr } = await supabase
       .from("epc_applications")
-      .select("id, current_step")
+      .select("id, current_step, borrower_mobile, borrower_email")
       .eq("id", appId)
       .maybeSingle();
     if (loadErr) return err(loadErr.message, 500);
     if (!app)    return err("Loan application not found.", 404);
     if ((app.current_step ?? 1) < 3) return err("Complete Step 2 before Step 3.", 409);
+
+    // Applicant vs co-applicant collision check (spec).
+    if (bill_on_applicant_name === false) {
+      if (coapp_mobile && app.borrower_mobile && coapp_mobile === app.borrower_mobile) {
+        return err("Co-applicant mobile must differ from the applicant's mobile.", 400);
+      }
+      if (coapp_email && app.borrower_email &&
+          coapp_email.toLowerCase() === app.borrower_email.toLowerCase()) {
+        return err("Co-applicant email must differ from the applicant's email.", 400);
+      }
+    }
 
     const nextStep = Math.max(app.current_step ?? 3, 4);
 
@@ -193,6 +237,18 @@ export async function POST(
         coapp_mobile,
         coapp_email,
         coapp_pan_path,
+        coapp_aadhaar_name,
+        coapp_aadhaar_dob,
+        coapp_aadhaar_gender,
+        coapp_aadhaar_number_masked,
+        coapp_aadhaar_care_of,
+        coapp_aadhaar_address,
+        coapp_aadhaar_front_path,
+        coapp_aadhaar_back_path,
+        coapp_aadhaar_face_path,
+        rooftop_photo_path,
+        rooftop_photo_uploaded_at,
+        rooftop_photo_gps,
         step3_completed_at: new Date().toISOString(),
         current_step: nextStep,
       })

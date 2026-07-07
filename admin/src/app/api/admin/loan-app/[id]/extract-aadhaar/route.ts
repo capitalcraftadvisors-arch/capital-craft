@@ -133,20 +133,51 @@ export async function POST(
     // ── OCR both sides ───────────────────────────────────────
     // Front carries most identity fields; back carries care_of/address.
     // Merge with front-wins for the identity fields and back-fills for
-    // the address block.
-    const [frontFields, backFields]: [AadhaarFields, AadhaarFields] = await Promise.all([
-      extractAadhaar(frontComp.output, frontComp.outputMime),
-      extractAadhaar(backComp.output,  backComp.outputMime),
-    ]);
+    // the address block. If Vision throws (bad key, API-not-enabled,
+    // quota) the error message flows straight through to the client
+    // response and to Cloud Run logs — no silent-swallow.
+    let frontOut: { fields: AadhaarFields; raw_text: string } | null = null;
+    let backOut:  { fields: AadhaarFields; raw_text: string } | null = null;
+    let visionError: string | null = null;
+    try {
+      [frontOut, backOut] = await Promise.all([
+        extractAadhaar(frontComp.output, frontComp.outputMime),
+        extractAadhaar(backComp.output,  backComp.outputMime),
+      ]);
+    } catch (e) {
+      visionError = e instanceof Error ? e.message : String(e);
+      console.error("[extract-aadhaar] vision error:", visionError);
+    }
+
+    const frontFields = frontOut?.fields ?? null;
+    const backFields  = backOut?.fields  ?? null;
 
     const merged: AadhaarFields = {
-      name:           frontFields.name           ?? backFields.name,
-      dob:            frontFields.dob            ?? backFields.dob,
-      gender:         frontFields.gender         ?? backFields.gender,
-      aadhaar_masked: frontFields.aadhaar_masked ?? backFields.aadhaar_masked,
-      care_of:        backFields.care_of         ?? frontFields.care_of,
-      address:        backFields.address         ?? frontFields.address,
+      name:           frontFields?.name           ?? backFields?.name           ?? null,
+      dob:            frontFields?.dob            ?? backFields?.dob            ?? null,
+      gender:         frontFields?.gender         ?? backFields?.gender         ?? null,
+      aadhaar_masked: frontFields?.aadhaar_masked ?? backFields?.aadhaar_masked ?? null,
+      care_of:        backFields?.care_of         ?? frontFields?.care_of       ?? null,
+      address:        backFields?.address         ?? frontFields?.address       ?? null,
     };
+
+    // Persist raw OCR text (both sides) so parser misses on real docs
+    // can be debugged without re-uploading. Two fire-and-forget RPCs
+    // for atomic jsonb || merge — see 0027_ocr_raw_text.sql.
+    if (frontOut) {
+      supabase.rpc("append_ocr_raw", {
+        app_id: appId,
+        key_name: "aadhaar_front",
+        raw_text: frontOut.raw_text,
+      }).then((r) => r.error && console.warn("[extract-aadhaar] raw-text save (front):", r.error.message));
+    }
+    if (backOut) {
+      supabase.rpc("append_ocr_raw", {
+        app_id: appId,
+        key_name: "aadhaar_back",
+        raw_text: backOut.raw_text,
+      }).then((r) => r.error && console.warn("[extract-aadhaar] raw-text save (back):", r.error.message));
+    }
 
     // ── face crop on front (image only) ──────────────────────
     let facePath: string | null = null;
@@ -180,6 +211,13 @@ export async function POST(
         face:  facePath,
       },
       face_signed_url: faceSignedUrl,
+      // Diagnostics surfaced for the client + Network tab. Non-null
+      // `debug_vision_error` means Vision itself broke — fields will
+      // all be null; admin fills in manually. Raw text is included
+      // for immediate parser tuning against real docs.
+      debug_vision_error: visionError,
+      debug_raw_text_front: frontOut?.raw_text ?? null,
+      debug_raw_text_back:  backOut?.raw_text  ?? null,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

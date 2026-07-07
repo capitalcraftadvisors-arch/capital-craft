@@ -279,6 +279,23 @@ function Inner() {
           </p>
         </div>
 
+        {/* Amber disclaimer strip — regulatory-friendly wording */}
+        <div className="rounded-input border-l-4 border-l-amber-400 border border-amber-200 bg-amber-50 p-4 flex gap-3">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#854f0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5">
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <p className="text-[12px] text-[#854f0b] leading-relaxed">
+            <span className="font-semibold">Disclaimer:</span> The interest rate (ROI) and EMI figures
+            displayed above are <span className="font-semibold">indicative</span> and are provided solely
+            for reference. All rates and repayment amounts are subject to the sole discretion of the
+            lending bank / NBFC and will be finalized only after complete document verification and
+            formal approval by the lender. Capital Craft Financial Advisors makes no guarantee that the
+            indicative terms shown will be offered by the eventual lender.
+          </p>
+        </div>
+
         {/* d. RM inputs */}
         <Card className="p-6 space-y-4">
           <h2 className="font-display font-semibold text-[18px] text-[#0f3d2e]">

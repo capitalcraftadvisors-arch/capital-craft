@@ -107,19 +107,33 @@ export async function POST(
       uploaded_at: string;
     } | null = null;
 
+    // Vision-error surfaces the actual API error message (bad key,
+    // API-not-enabled, quota) to the client + Cloud Run logs.
+    let visionError: string | null = null;
+    let proformaRaw: string | null = null;
+    let ebillRaw:    string | null = null;
+
     if (proformaFile) {
       const { buffer, mime } = await compress(proformaFile);
       const path = `applications/${appId}/loan_docs/proforma/${Date.now()}_${safeName(proformaFile.name, "proforma")}`;
       await uploadBuffer(path, buffer, mime);
       let fields: ProformaFields = { total_project_cost: null, project_size: null, project_size_unit: null };
       try {
-        fields = await extractProforma(buffer, mime);
+        const r = await extractProforma(buffer, mime);
+        fields = r.fields;
+        proformaRaw = r.raw_text;
       } catch (e) {
-        console.warn("[extract-loan-docs] proforma OCR failed:", e);
+        visionError = e instanceof Error ? e.message : String(e);
+        console.error("[extract-loan-docs] proforma vision error:", visionError);
       }
       let signed: string | null = null;
       try { signed = await getSignedReadUrl(path, 3600); } catch { /* non-fatal */ }
       proformaOut = { fields, storage_path: path, signed_url: signed, uploaded_at: new Date().toISOString() };
+
+      if (proformaRaw) {
+        supabase.rpc("append_ocr_raw", { app_id: appId, key_name: "proforma", raw_text: proformaRaw })
+          .then((r) => r.error && console.warn("[extract-loan-docs] raw-text save (proforma):", r.error.message));
+      }
     }
 
     if (ebillFile) {
@@ -131,19 +145,30 @@ export async function POST(
         pincode: null, ebill_address_line: null, ebill_name: null,
       };
       try {
-        fields = await extractEbill(buffer, mime);
+        const r = await extractEbill(buffer, mime);
+        fields = r.fields;
+        ebillRaw = r.raw_text;
       } catch (e) {
-        console.warn("[extract-loan-docs] ebill OCR failed:", e);
+        visionError = e instanceof Error ? e.message : String(e);
+        console.error("[extract-loan-docs] ebill vision error:", visionError);
       }
       let signed: string | null = null;
       try { signed = await getSignedReadUrl(path, 3600); } catch { /* non-fatal */ }
       ebillOut = { fields, storage_path: path, signed_url: signed, uploaded_at: new Date().toISOString() };
+
+      if (ebillRaw) {
+        supabase.rpc("append_ocr_raw", { app_id: appId, key_name: "ebill", raw_text: ebillRaw })
+          .then((r) => r.error && console.warn("[extract-loan-docs] raw-text save (ebill):", r.error.message));
+      }
     }
 
     return NextResponse.json({
       ok: true,
       proforma: proformaOut,
       ebill:    ebillOut,
+      debug_vision_error:    visionError,
+      debug_raw_text_proforma: proformaRaw,
+      debug_raw_text_ebill:    ebillRaw,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

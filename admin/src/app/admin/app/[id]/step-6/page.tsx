@@ -363,36 +363,63 @@ function Inner() {
 
 function ThankYou({ loan, onBack }: { loan: Loan; onBack: () => void }) {
   return (
-    <main className="min-h-screen bg-bg-soft grid place-items-center px-5 py-10">
-      <div className="max-w-[560px] w-full text-center space-y-6">
-        <div className="w-20 h-20 mx-auto rounded-full bg-[#f0faf5] flex items-center justify-center border-2 border-[#cdeadd]">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#178a5c" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
+    <main className="min-h-screen bg-gradient-to-b from-[#f0faf5] via-white to-[#dceffb] grid place-items-center px-5 py-10 relative overflow-hidden">
+      {/* Soft radial decorations — no external asset needed */}
+      <div aria-hidden className="absolute top-0 left-0 w-[420px] h-[420px] rounded-full bg-[#178a5c] opacity-[0.05] blur-3xl -translate-x-1/3 -translate-y-1/3" />
+      <div aria-hidden className="absolute bottom-0 right-0 w-[520px] h-[520px] rounded-full bg-[#185fa5] opacity-[0.05] blur-3xl translate-x-1/4 translate-y-1/4" />
+
+      <div className="max-w-[620px] w-full text-center space-y-7 relative">
+        {/* Big animated success mark */}
+        <div className="relative w-24 h-24 mx-auto">
+          <div className="absolute inset-0 rounded-full bg-[#178a5c] opacity-20 animate-ping" />
+          <div className="relative w-24 h-24 rounded-full bg-gradient-to-br from-[#178a5c] to-[#12734c] flex items-center justify-center shadow-[0_10px_30px_-8px_rgba(23,138,92,0.6)]">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          </div>
         </div>
 
         <div>
-          <p className="text-[12px] uppercase tracking-wide text-[#5a8a76] font-semibold">
-            Capital Craft
+          <p className="text-[12px] uppercase tracking-widest text-[#5a8a76] font-bold">
+            Capital Craft Financial Advisors
           </p>
-          <h1 className="mt-1 font-display text-[30px] sm:text-[34px] font-bold text-[#0f3d2e]">
-            Thank you!
+          <h1 className="mt-2 font-display text-[36px] sm:text-[44px] font-bold bg-gradient-to-r from-[#0f3d2e] via-[#178a5c] to-[#185fa5] bg-clip-text text-transparent leading-tight">
+            Congratulations!
           </h1>
+          <p className="mt-3 font-display text-[18px] sm:text-[20px] font-semibold text-[#0f3d2e]">
+            You&rsquo;ve successfully submitted your application.
+          </p>
         </div>
 
-        <p className="text-text-mid text-[15px] leading-relaxed">
-          We&rsquo;ve received your application and will reach out to you soon.
+        <p className="text-text-mid text-[15px] leading-relaxed max-w-md mx-auto">
+          Thank you for submitting your details — our team will review your
+          application and reach out to you as soon as possible with next steps.
         </p>
 
-        <div className="rounded-input border-2 border-[#cdeadd] bg-white p-5 mx-auto max-w-[400px]">
-          <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold">
-            Application ID
+        {/* Application ID card — bigger, more prominent */}
+        <div className="rounded-card border-2 border-[#cdeadd] bg-white p-6 mx-auto max-w-[440px] shadow-lg">
+          <p className="text-[11px] uppercase tracking-widest text-text-muted font-bold">
+            Your Application Reference
           </p>
-          <p className="mt-1 font-mono font-bold text-[20px] text-[#0f3d2e]">
+          <p className="mt-2 font-mono font-bold text-[26px] text-[#0f3d2e] tracking-wider">
             {solResId(loan.id)}
           </p>
-          <p className="mt-2 text-[11px] text-text-muted">
+          <div className="mt-3 pt-3 border-t border-[#cdeadd] text-[12px] text-text-muted">
             Submitted on {fmtDate(loan.submitted_at)}
+          </div>
+        </div>
+
+        {/* Quick info strip */}
+        <div className="rounded-input border border-[#d3e9f7] bg-[#dceffb] p-4 flex gap-3 items-start text-left">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="16" x2="12" y2="12" />
+            <line x1="12" y1="8" x2="12.01" y2="8" />
+          </svg>
+          <p className="text-[13px] text-[#0f2447] leading-relaxed">
+            Save this reference number — you&rsquo;ll be able to check on the status
+            of your application using it. Our team will contact you on the phone
+            number and email you provided.
           </p>
         </div>
 
