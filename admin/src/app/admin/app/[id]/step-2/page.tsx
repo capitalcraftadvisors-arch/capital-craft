@@ -112,20 +112,43 @@ function Inner() {
         .from("epc_applications")
         .select(
           "id, status, current_step, created_at, " +
+          "aadhaar_name, aadhaar_dob, aadhaar_gender, aadhaar_number, " +
+          "aadhaar_care_of, aadhaar_address, " +
+          "aadhaar_front_path, aadhaar_back_path, aadhaar_face_path, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .eq("id", params.id)
         .maybeSingle();
-      setLoan(data as unknown as Loan | null);
+      const row = data as unknown as (Loan & Record<string, any>) | null;
+      setLoan(row);
+      // Prefill from a previous Step 2 save (edit / resume pass). The
+      // uploaded state is reconstructed from the stored paths so the
+      // extracted panel renders and Next re-saves without forcing a
+      // re-upload. No forward-redirect — the whole flow is editable.
+      if (row && row.aadhaar_front_path && row.aadhaar_back_path) {
+        setUploaded({
+          fields: {
+            name: row.aadhaar_name, dob: row.aadhaar_dob, gender: row.aadhaar_gender,
+            aadhaar_number: row.aadhaar_number, aadhaar_masked: null,
+            care_of: row.aadhaar_care_of, address: row.aadhaar_address,
+          },
+          storage_paths: {
+            front: row.aadhaar_front_path,
+            back:  row.aadhaar_back_path,
+            face:  row.aadhaar_face_path ?? null,
+          },
+          face_signed_url: null,
+        });
+        setName(row.aadhaar_name ?? "");
+        setDob(row.aadhaar_dob ?? "");
+        setGender(row.aadhaar_gender ?? "");
+        setAadhaarNumber(row.aadhaar_number ?? "");
+        setCareOf(row.aadhaar_care_of ?? "");
+        setAddress(row.aadhaar_address ?? "");
+      }
       setLoading(false);
     })();
   }, [params.id]);
-
-  useEffect(() => {
-    if (loan && loan.current_step > 2) {
-      router.replace(`/admin/app/${loan.id}/step-3` as any);
-    }
-  }, [loan, router]);
 
   async function runExtraction() {
     if (!loan || !frontFile || !backFile) return;
@@ -216,7 +239,9 @@ function Inner() {
         setSaving(false);
         return;
       }
-      router.push(`/admin/app/${loan.id}/step-3` as any);
+      // Came here via a Step-6 "Edit" link? Go back to the review.
+      const fromReview = new URLSearchParams(window.location.search).get("from") === "review";
+      router.push(`/admin/app/${loan.id}/${fromReview ? "step-6" : "step-3"}` as any);
     } catch (e) {
       setSaveError((e as Error)?.message || "Network error.");
       setSaving(false);

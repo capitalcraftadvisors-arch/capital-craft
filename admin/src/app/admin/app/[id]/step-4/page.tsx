@@ -143,21 +143,44 @@ function Inner() {
         .select(
           "id, current_step, created_at, " +
           "aadhaar_name, aadhaar_dob, aadhaar_address, aadhaar_number_masked, " +
+          "employment_type, profession, profession_other, organization_name, annual_income, " +
+          "bank_statement_method, bank_statement_path, bank_statement_uploaded_at, step4_completed_at, " +
+          "bank_account_holder, bank_name, bank_account_no, bank_ifsc, bank_account_type, bank_mobile, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .eq("id", params.id)
         .maybeSingle();
-      setLoan(data as unknown as Loan | null);
+      const row = data as unknown as (Loan & Record<string, any>) | null;
+      setLoan(row);
+      // Prefill from a previous Step 4 save (edit / resume pass). No
+      // forward-redirect — the flow stays editable from the Step-6 review.
+      if (row && row.step4_completed_at) {
+        if (row.employment_type)   setEmployment(row.employment_type);
+        if (row.profession)        setProfession(row.profession);
+        if (row.profession_other)  setProfessionOther(row.profession_other);
+        if (row.organization_name) setOrganization(row.organization_name);
+        if (row.annual_income != null) setAnnualIncome(String(row.annual_income));
+        if (row.bank_statement_method) setMethod(row.bank_statement_method);
+        if (row.bank_statement_path) {
+          setBankDoc({
+            path: row.bank_statement_path,
+            uploaded_at: row.bank_statement_uploaded_at ?? row.step4_completed_at,
+            signed_url: null,
+            file_name: String(row.bank_statement_path).split("/").pop() ?? "Bank statement",
+            method: row.bank_statement_method ?? "manual_epdf",
+          });
+        }
+        if (row.bank_account_holder) setAccountHolder(row.bank_account_holder);
+        if (row.bank_name)           setBankName(row.bank_name);
+        if (row.bank_account_no)     setAccountNo(row.bank_account_no);
+        if (row.bank_ifsc)           setIfsc(row.bank_ifsc);
+        if (row.bank_account_type)   setAccountType(row.bank_account_type);
+        if (row.bank_mobile)         setBankMobile(row.bank_mobile);
+        setBankConfirmed(true);   // was confirmed at the previous save
+      }
       setLoading(false);
     })();
   }, [params.id]);
-
-  // Guard: past-Step-4 apps go straight to Step 5.
-  useEffect(() => {
-    if (loan && loan.current_step > 4) {
-      router.replace(`/admin/app/${loan.id}/step-5` as any);
-    }
-  }, [loan, router]);
 
   const professionOptions = useMemo(() => {
     if (employment === "salaried")      return SALARIED_PROFESSIONS;
@@ -275,7 +298,8 @@ function Inner() {
         setSaving(false);
         return;
       }
-      router.push(`/admin/app/${loan.id}/step-5` as any);
+      const fromReview = new URLSearchParams(window.location.search).get("from") === "review";
+      router.push(`/admin/app/${loan.id}/${fromReview ? "step-6" : "step-5"}` as any);
     } catch (e) {
       setSaveError((e as Error)?.message || "Network error.");
       setSaving(false);

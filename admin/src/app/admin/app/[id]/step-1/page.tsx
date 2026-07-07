@@ -113,35 +113,44 @@ function Inner() {
   const [sending, setSending]         = useState(false);
   const [sendError, setSendError]     = useState<string | null>(null);
 
-  // Initial load
+  // Initial load. Prefills saved values so revisiting/editing this
+  // step (via the Step-6 review's Edit links) shows the existing data
+  // instead of blanks. No forward-redirect — every step is freely
+  // editable from anywhere in the flow.
   useEffect(() => {
     void (async () => {
       const { data: la } = await supabase()
         .from("epc_applications")
-        .select("id, epc_business_id, status, current_step")
+        .select(
+          "id, epc_business_id, status, current_step, " +
+          "install_pincode, install_state, install_district, install_city, " +
+          "borrower_mobile, borrower_email, borrower_pan, system_type, consent_at",
+        )
         .eq("id", params.id)
         .maybeSingle();
       if (!la) { setLoading(false); return; }
-      setLoan(la as Loan);
+      const row = la as unknown as Loan & Record<string, any>;
+      setLoan(row);
+      // Prefill from prior save (edit / resume pass).
+      if (row.install_pincode)  setPin(row.install_pincode);
+      if (row.install_state)    setState(row.install_state);
+      if (row.install_district) setDistrict(row.install_district);
+      if (row.install_city)     setCity(row.install_city);
+      if (row.borrower_mobile)  setPhone(row.borrower_mobile);
+      if (row.borrower_email)   setEmail(row.borrower_email);
+      if (row.borrower_pan)     { setPanNumber(row.borrower_pan); setPanUploaded(true); }
+      if (row.system_type)      setSystemType(row.system_type);
+      if (row.consent_at)       setConsented(true);
 
       const { data: e } = await supabase()
         .from("epc_business")
         .select("id, epc_display_id, contact_name, trade_name, legal_name")
-        .eq("id", (la as Loan).epc_business_id)
+        .eq("id", row.epc_business_id)
         .maybeSingle();
       setEpc(e as Epc | null);
       setLoading(false);
     })();
   }, [params.id]);
-
-  // If the step has already been completed, kick the admin to Step 2
-  // (which currently is the placeholder). Prevents re-submission and
-  // matches the server-side idempotence guard.
-  useEffect(() => {
-    if (loan && loan.current_step > 1) {
-      router.replace(`/admin/app/${loan.id}/step-2` as any);
-    }
-  }, [loan, router]);
 
   async function lookupPincode(next: string) {
     setPinError(null);
@@ -230,7 +239,9 @@ function Inner() {
         setSending(false);
         return;
       }
-      router.push(`/admin/app/${loan.id}/step-2` as any);
+      // Came here via a Step-6 "Edit" link? Go back to the review.
+      const fromReview = new URLSearchParams(window.location.search).get("from") === "review";
+      router.push(`/admin/app/${loan.id}/${fromReview ? "step-6" : "step-2"}` as any);
     } catch (e) {
       setSendError((e as Error)?.message || "Network error.");
       setSending(false);

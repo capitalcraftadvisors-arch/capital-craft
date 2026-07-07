@@ -62,3 +62,50 @@ h1, h2, h3, h4 {
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
+
+/* ── Premium interaction polish (loan-app batch) ───────────────────────────
+   Site-wide focus glow + smooth transitions so filling a field feels
+   deliberate and "active". Brand colors: green #178a5c, sky #185fa5.
+   Applies to every input/select/textarea including the loan-app flow;
+   component-level border classes still win where they set their own
+   focus color — this layer adds the glow + easing. */
+
+input, select, textarea, button {
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  box-shadow:
+    0 0 0 3px rgba(23, 138, 92, 0.14),
+    0 1px 2px rgba(10, 31, 46, 0.05);
+}
+
+/* Sky-blue glow for elements the flow styles blue on focus. */
+input.focus\:border-blue:focus,
+select.focus\:border-blue:focus,
+textarea.focus\:border-blue:focus {
+  box-shadow:
+    0 0 0 3px rgba(24, 95, 165, 0.14),
+    0 1px 2px rgba(10, 31, 46, 0.05);
+}
+
+/* Brand text-selection color. */
+::selection {
+  background: rgba(23, 138, 92, 0.18);
+  color: #0f3d2e;
+}
+
+/* Softer, brand-tinted scrollbar (WebKit). */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #cdeadd;
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover { background: #9fd6bd; }

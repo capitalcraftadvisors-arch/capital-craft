@@ -182,32 +182,85 @@ function Inner() {
           "id, current_step, created_at, " +
           "install_pincode, install_state, install_city, step3_completed_at, " +
           "borrower_mobile, borrower_email, rooftop_photo_path, " +
+          "proforma_invoice_path, proforma_uploaded_at, ebill_path, ebill_uploaded_at, " +
+          "project_size, project_size_unit, total_project_cost, loan_amount_required, " +
+          "monthly_bill_amount, discom_name, ca_number, ebill_address_line, ebill_name, " +
+          "bill_on_applicant_name, " +
+          "coapp_pan, coapp_name, coapp_father_name, coapp_dob, coapp_relation, " +
+          "coapp_mobile, coapp_email, coapp_pan_path, " +
+          "coapp_aadhaar_name, coapp_aadhaar_dob, coapp_aadhaar_gender, coapp_aadhaar_number, " +
+          "coapp_aadhaar_care_of, coapp_aadhaar_address, coapp_aadhaar_front_path, coapp_aadhaar_back_path, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .eq("id", params.id)
         .maybeSingle();
-      const l = data as unknown as (Loan & { step3_completed_at: string | null }) | null;
+      const l = data as unknown as (Loan & Record<string, any>) | null;
       setLoan(l);
-      // Only prefill the installation address from the row when it was
-      // saved by a PREVIOUS Step 3 pass (resume case). On first visit the
-      // row's install_* values come from the registration page, and the
-      // installation site may be a different place — so admin enters the
-      // pincode fresh from the bill / customer.
+      // Full prefill from a PREVIOUS Step 3 save (edit / resume pass).
+      // On first visit everything starts blank — including the pincode,
+      // which is intentionally NOT copied from the registration page
+      // because the installation site may be at a different place.
       if (l && l.step3_completed_at) {
         setPincode(l.install_pincode ?? "");
         setState(l.install_state ?? "");
         setCity(l.install_city ?? "");
+        if (l.proforma_invoice_path) {
+          setProforma({
+            path: l.proforma_invoice_path,
+            uploaded_at: l.proforma_uploaded_at ?? l.step3_completed_at,
+            signed_url: null,
+            file_name: String(l.proforma_invoice_path).split("/").pop() ?? "Proforma",
+          });
+        }
+        if (l.ebill_path) {
+          setEbill({
+            path: l.ebill_path,
+            uploaded_at: l.ebill_uploaded_at ?? l.step3_completed_at,
+            signed_url: null,
+            file_name: String(l.ebill_path).split("/").pop() ?? "E-bill",
+          });
+        }
+        if (l.project_size != null)         setProjectSize(String(l.project_size));
+        if (l.project_size_unit === "mw")   setProjectUnit("mw");
+        if (l.total_project_cost != null)   setTotalCost(String(l.total_project_cost));
+        if (l.loan_amount_required != null) setLoanAmount(String(l.loan_amount_required));
+        if (l.monthly_bill_amount != null)  setMonthlyBill(String(l.monthly_bill_amount));
+        if (l.discom_name)                  setDiscomName(l.discom_name);
+        if (l.ca_number)                    setCaNumber(l.ca_number);
+        if (l.ebill_address_line)           setAddressLine(l.ebill_address_line);
+        if (l.ebill_name)                   setEbillName(l.ebill_name);
+        if (typeof l.bill_on_applicant_name === "boolean") {
+          setOwnership(l.bill_on_applicant_name ? "yes" : "no");
+        }
+        if (l.bill_on_applicant_name === false) {
+          setCoapp({
+            ...EMPTY_COAPP,
+            pan:         l.coapp_pan ?? "",
+            name:        l.coapp_name ?? "",
+            father_name: l.coapp_father_name ?? "",
+            dob:         l.coapp_dob ?? "",
+            relation:    l.coapp_relation ?? "",
+            mobile:      l.coapp_mobile ?? "",
+            email:       l.coapp_email ?? "",
+            pan_path:        l.coapp_pan_path ?? null,
+            pan_uploaded_at: l.step3_completed_at,
+            aadhaar_name:    l.coapp_aadhaar_name ?? "",
+            aadhaar_dob:     l.coapp_aadhaar_dob ?? "",
+            aadhaar_gender:  l.coapp_aadhaar_gender ?? "",
+            aadhaar_number:  l.coapp_aadhaar_number ?? "",
+            aadhaar_care_of: l.coapp_aadhaar_care_of ?? "",
+            aadhaar_address: l.coapp_aadhaar_address ?? "",
+            aadhaar_front_path: l.coapp_aadhaar_front_path ?? null,
+            aadhaar_back_path:  l.coapp_aadhaar_back_path ?? null,
+          });
+        }
       }
       setLoading(false);
     })();
   }, [params.id]);
 
-  // Redirect past-Step-3 apps to Step 4
-  useEffect(() => {
-    if (loan && loan.current_step > 3) {
-      router.replace(`/admin/app/${loan.id}/step-4` as any);
-    }
-  }, [loan, router]);
+  // No forward-redirect — every step stays editable (Step-6 review's
+  // Edit links land here even when the application is further along).
 
   // ── Uploads ────────────────────────────────────────────────────────
 
@@ -359,6 +412,12 @@ function Inner() {
         aadhaar_front_path: data.storage_paths?.front ?? null,
         aadhaar_back_path:  data.storage_paths?.back  ?? null,
         aadhaar_face_path:  data.storage_paths?.face  ?? null,
+        // Cross-fill the co-applicant's MAIN fields from the Aadhaar
+        // when they're still empty — same "fetch details properly"
+        // behavior the applicant gets. PAN OCR may already have filled
+        // name/dob; empty-only guard means neither source clobbers.
+        name: c.name || (f.name ?? ""),
+        dob:  c.dob  || (f.dob  ?? ""),
       }));
     } catch (e) {
       setCoapp((c) => ({ ...c, aadhaar_uploading: false, aadhaar_error: (e as Error)?.message || "Network error." }));
@@ -491,7 +550,8 @@ function Inner() {
         setSaving(false);
         return;
       }
-      router.push(`/admin/app/${loan.id}/step-4` as any);
+      const fromReview = new URLSearchParams(window.location.search).get("from") === "review";
+      router.push(`/admin/app/${loan.id}/${fromReview ? "step-6" : "step-4"}` as any);
     } catch (e) {
       setSaveError((e as Error)?.message || "Network error.");
       setSaving(false);
@@ -589,7 +649,10 @@ function Inner() {
                 <select
                   value={projectUnit}
                   onChange={(e) => setProjectUnit(e.target.value as "kw" | "mw")}
-                  className="w-[100px] border border-line rounded-input px-3 py-2.5 text-[14px] outline-none focus:border-blue bg-white"
+                  className={
+                    "w-[100px] border border-line rounded-input pl-3 pr-8 py-2.5 text-[14px] outline-none focus:border-blue bg-white " +
+                    "appearance-none bg-[url('data:image/svg+xml;utf8,<svg fill=%22%236B8294%22 viewBox=%220 0 20 20%22 xmlns=%22http://www.w3.org/2000/svg%22><path d=%22M5 8l5 5 5-5z%22/></svg>')] bg-no-repeat bg-[length:18px] bg-[right_8px_center]"
+                  }
                 >
                   <option value="kw">KW</option>
                   <option value="mw">MW</option>

@@ -130,12 +130,7 @@ function Inner() {
     })();
   }, [params.id]);
 
-  // Kick past-Step-5 apps to Step 6.
-  useEffect(() => {
-    if (loan && loan.current_step > 5) {
-      router.replace(`/admin/app/${loan.id}/step-6` as any);
-    }
-  }, [loan, router]);
+  // No forward-redirect — the flow stays editable from the Step-6 review.
 
   // Convert project_size to kW for subsidy math.
   const sizeKw = useMemo(() => {

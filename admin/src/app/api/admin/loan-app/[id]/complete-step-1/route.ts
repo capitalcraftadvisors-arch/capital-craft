@@ -131,9 +131,10 @@ export async function PATCH(
       .maybeSingle();
     if (loadErr) return err(loadErr.message, 500);
     if (!app)    return err("Loan application not found.", 404);
-    if ((app.current_step ?? 1) > 1) {
-      return err("Step 1 has already been completed for this application.", 409);
-    }
+    // Re-saves are allowed — the flow is editable end-to-end (the
+    // Step-6 review's Edit links come back here). current_step never
+    // rewinds; a re-save from an application already at step 6 keeps
+    // it at 6.
 
     // Persist fields + consent + WhatsApp bookkeeping. current_step
     // stays at 1 for now; we bump it after the send call succeeds.

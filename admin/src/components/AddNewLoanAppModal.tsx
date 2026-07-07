@@ -155,7 +155,10 @@ export default function AddNewLoanAppModal({ open, onClose }: Props) {
                 value={selected}
                 onChange={(e) => setSelected(e.target.value)}
                 disabled={busy}
-                className="w-full rounded-input border border-line bg-white px-3.5 py-3 text-[15px] outline-none focus:border-blue"
+                className={
+                  "w-full rounded-input border border-line bg-white pl-3.5 pr-9 py-3 text-[15px] outline-none focus:border-blue " +
+                  "appearance-none bg-[url('data:image/svg+xml;utf8,<svg fill=%22%236B8294%22 viewBox=%220 0 20 20%22 xmlns=%22http://www.w3.org/2000/svg%22><path d=%22M5 8l5 5 5-5z%22/></svg>')] bg-no-repeat bg-[length:20px] bg-[right_12px_center]"
+                }
               >
                 <option value="">Select…</option>
                 {sortedEpcs.map((e) => (

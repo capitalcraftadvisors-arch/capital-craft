@@ -43,12 +43,13 @@ const METHOD_LABEL: Record<string, string> = {
   scanned_pdf: "Scanned PDF Upload",
 };
 
-// Derive a customer-facing application id.
-// The row's uuid is unfriendly for CX; we surface the first 8 hex
-// characters uppercased as "SOL-RES-XXXXXXXX".
-function solResId(uuid: string): string {
-  const clean = uuid.replace(/-/g, "");
-  return "SOL-RES-" + clean.slice(0, 8).toUpperCase();
+// Customer-facing application id. Prefers the stored loan_display_id
+// (LA-<last5 mobile>-<seq>, assigned by the 0030 trigger when Step 1
+// lands the mobile). Falls back to a uuid-derived reference for rows
+// created before the migration ran.
+function displayId(loan: Loan): string {
+  if (loan.loan_display_id) return loan.loan_display_id;
+  return "LA-" + String(loan.id).replace(/-/g, "").slice(0, 8).toUpperCase();
 }
 
 function fmtRupees(n: number | null | undefined): string {
@@ -187,7 +188,7 @@ function Inner() {
         <ReviewSection
           title="Registration"
           badge="Step 1"
-          onEdit={() => router.push(`/admin/app/${loan.id}/step-1` as any)}
+          onEdit={() => router.push(`/admin/app/${loan.id}/step-1?from=review` as any)}
         >
           <ReviewRow label="EPC partner" value={epcName} />
           <ReviewRow label="EPC ID" value={loan.epc_business?.epc_display_id ?? "—"} mono />
@@ -205,7 +206,7 @@ function Inner() {
         <ReviewSection
           title="KYC Verification"
           badge="Step 2"
-          onEdit={() => router.push(`/admin/app/${loan.id}/step-2` as any)}
+          onEdit={() => router.push(`/admin/app/${loan.id}/step-2?from=review` as any)}
         >
           <div className="grid sm:grid-cols-[1fr_140px] gap-5">
             <div>
@@ -226,7 +227,7 @@ function Inner() {
         <ReviewSection
           title="Loan Requirements"
           badge="Step 3"
-          onEdit={() => router.push(`/admin/app/${loan.id}/step-3` as any)}
+          onEdit={() => router.push(`/admin/app/${loan.id}/step-3?from=review` as any)}
         >
           <ReviewRow label="Project size" value={
             loan.project_size ? `${loan.project_size} ${(loan.project_size_unit ?? "kw").toUpperCase()}` : "—"
@@ -265,7 +266,7 @@ function Inner() {
         <ReviewSection
           title="Personal Details"
           badge="Step 4"
-          onEdit={() => router.push(`/admin/app/${loan.id}/step-4` as any)}
+          onEdit={() => router.push(`/admin/app/${loan.id}/step-4?from=review` as any)}
         >
           <ReviewRow label="Employment type" value={
             loan.employment_type ? EMPLOYMENT_LABEL[loan.employment_type] ?? loan.employment_type : "—"
@@ -298,7 +299,7 @@ function Inner() {
         <ReviewSection
           title="Loan Offers"
           badge="Step 5"
-          onEdit={() => router.push(`/admin/app/${loan.id}/step-5` as any)}
+          onEdit={() => router.push(`/admin/app/${loan.id}/step-5?from=review` as any)}
         >
           <ReviewRow label="ROI" value={loan.roi_percent != null ? `${loan.roi_percent}%` : "—"} />
           <ReviewRow label="Central subsidy" value={fmtRupees(loan.central_subsidy)} />
@@ -402,7 +403,7 @@ function ThankYou({ loan, onBack }: { loan: Loan; onBack: () => void }) {
             Your Application Reference
           </p>
           <p className="mt-2 font-mono font-bold text-[26px] text-[#0f3d2e] tracking-wider">
-            {solResId(loan.id)}
+            {displayId(loan)}
           </p>
           <div className="mt-3 pt-3 border-t border-[#cdeadd] text-[12px] text-text-muted">
             Submitted on {fmtDate(loan.submitted_at)}

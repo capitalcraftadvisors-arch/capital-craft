@@ -38,8 +38,11 @@ const METHOD_LABEL: Record<string, string> = {
   manual_epdf: "Manual E-PDF Upload", scanned_pdf: "Scanned PDF Upload",
 };
 
-function solResId(uuid: string): string {
-  return "SOL-RES-" + uuid.replace(/-/g, "").slice(0, 8).toUpperCase();
+// Prefers the stored loan_display_id (LA-<last5>-<seq>, migration 0030);
+// uuid-derived fallback for rows created before the mobile landed.
+function displayId(loan: Loan): string {
+  if (loan.loan_display_id) return loan.loan_display_id;
+  return "LA-" + String(loan.id).replace(/-/g, "").slice(0, 8).toUpperCase();
 }
 function fmtRupees(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(Number(n))) return "—";
@@ -138,7 +141,7 @@ function Inner() {
             <p className="font-display font-bold text-[22px] text-[#0f3d2e]">
               {fmtRupees(loan.loan_amount_required)}
             </p>
-            <p className="text-[10px] font-mono text-text-muted">{solResId(loan.id)}</p>
+            <p className="text-[10px] font-mono text-text-muted">{displayId(loan)}</p>
           </div>
         </div>
 

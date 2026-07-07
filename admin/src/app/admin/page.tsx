@@ -575,6 +575,8 @@ function AppsTab() {
     // Borrower fallback chain: borrower_name → aadhaar_name (Step 2 KYC) → "—".
     borrower_name: string | null;
     aadhaar_name:  string | null;
+    aadhaar_number_masked: string | null;
+    loan_display_id: string | null;
     // Loan amount lives in loan_amount_required (Step 3). loan_amount is
     // the legacy 0001 column — read both, prefer the newer one.
     loan_amount: number | null;
@@ -586,13 +588,15 @@ function AppsTab() {
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [zipBusy, setZipBusy] = useState<string | null>(null);
 
   useEffect(() => {
     (async () => {
       let query = supabase()
         .from("epc_applications")
         .select(
-          "id, borrower_name, aadhaar_name, loan_amount, loan_amount_required, " +
+          "id, borrower_name, aadhaar_name, aadhaar_number_masked, loan_display_id, " +
+          "loan_amount, loan_amount_required, " +
           "status, created_at, created_by, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
@@ -617,10 +621,46 @@ function AppsTab() {
     const n = r.loan_amount_required ?? r.loan_amount;
     return n ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
   }
+  // Masked Aadhaar display: "xxxxxxxx1234" (stored) → "XXXX XXXX 1234".
+  function displayMaskedAadhaar(r: Row): string | null {
+    const m = r.aadhaar_number_masked;
+    if (!m) return null;
+    const last4 = m.slice(-4);
+    return `XXXX XXXX ${last4}`;
+  }
+
+  // Streams the loan-app ZIP through the admin's bearer token and
+  // triggers a browser download. Mirrors the EPC list's ZIP flow.
+  async function downloadLoanZip(r: Row) {
+    if (zipBusy) return;
+    setZipBusy(r.id);
+    try {
+      const res = await fetch(`/api/admin/loan-app/${r.id}/download-zip`, {
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        alert("ZIP failed: " + (data?.error || `HTTP ${res.status}`));
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${r.loan_display_id || r.id.slice(0, 8)}_${(displayBorrower(r) || "loan").replace(/[^\w-]+/g, "_")}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setZipBusy(null);
+    }
+  }
 
   const filtered = q.trim()
     ? rows.filter((r) =>
         displayBorrower(r).toLowerCase().includes(q.toLowerCase()) ||
+        (r.loan_display_id ?? "").toLowerCase().includes(q.toLowerCase()) ||
         displayEpc(r).toLowerCase().includes(q.toLowerCase()))
     : rows;
 
@@ -655,19 +695,19 @@ function AppsTab() {
           <colgroup>
             <col />
             <col />
+            <col style={{ width: "130px" }} />
             <col style={{ width: "140px" }} />
+            <col style={{ width: "105px" }} />
             <col style={{ width: "150px" }} />
-            <col style={{ width: "120px" }} />
-            <col style={{ width: "100px" }} />
           </colgroup>
           <thead className="bg-bg-soft border-b border-line text-left text-text-muted">
             <tr>
-              <th className="px-5 py-3 font-medium">Borrower</th>
+              <th className="px-5 py-3 font-medium">Borrower Details</th>
               <th className="px-5 py-3 font-medium">EPC Partner</th>
               <th className="px-5 py-3 font-medium">Amount</th>
               <th className="px-5 py-3 font-medium">Status</th>
-              <th className="px-5 py-3 font-medium">Created</th>
               <th className="px-5 py-3 font-medium">By</th>
+              <th className="px-5 py-3 font-medium">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -676,7 +716,16 @@ function AppsTab() {
             ) : filtered.map((r) => (
               <tr key={r.id} onClick={() => router.push(`/admin/app/${r.id}/view` as any)}
                   className="border-b border-line cursor-pointer hover:bg-[#f0faf5] transition-colors">
-                <td className="px-5 py-4 font-semibold text-text truncate">{displayBorrower(r)}</td>
+                {/* Borrower detail box: name + LA id + masked Aadhaar */}
+                <td className="px-5 py-4">
+                  <div className="font-semibold text-text truncate">{displayBorrower(r)}</div>
+                  {r.loan_display_id && (
+                    <div className="text-[11px] font-mono text-[#185fa5] mt-0.5">{r.loan_display_id}</div>
+                  )}
+                  {displayMaskedAadhaar(r) && (
+                    <div className="text-[11px] font-mono text-text-muted mt-0.5">{displayMaskedAadhaar(r)}</div>
+                  )}
+                </td>
                 <td className="px-5 py-4 truncate">
                   <div className="text-text">{displayEpc(r)}</div>
                   {r.epc_business?.epc_display_id && (
@@ -685,8 +734,31 @@ function AppsTab() {
                 </td>
                 <td className="px-5 py-4 font-semibold text-[#0f3d2e]">{displayAmount(r)}</td>
                 <td className="px-5 py-4"><StatusBadge status={r.status} /></td>
-                <td className="px-5 py-4 text-text-muted whitespace-nowrap">{new Date(r.created_at).toLocaleDateString("en-IN")}</td>
-                <td className="px-5 py-4 text-text-muted capitalize">{r.created_by}</td>
+                <td className="px-5 py-4 text-text-muted">
+                  {r.created_by === "admin" ? "Admin" : "Customer"}
+                </td>
+                {/* Action: View + Download ZIP. stopPropagation so the
+                    buttons don't also trigger the row's navigate. */}
+                <td className="px-5 py-4" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/admin/app/${r.id}/view` as any)}
+                      className="px-2.5 py-1.5 text-[12px] font-semibold text-[#185fa5] border border-[#d3e9f7] rounded hover:bg-[#dceffb] transition-colors"
+                    >
+                      View
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void downloadLoanZip(r)}
+                      disabled={zipBusy === r.id}
+                      title="Download all documents + summary as ZIP"
+                      className="px-2.5 py-1.5 text-[12px] font-semibold text-[#178a5c] border border-[#cdeadd] rounded hover:bg-[#f0faf5] disabled:opacity-60 transition-colors"
+                    >
+                      {zipBusy === r.id ? "…" : "ZIP"}
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
