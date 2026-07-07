@@ -140,59 +140,147 @@ const DISCOMS = [
   "APDCL",
 ];
 
+// Hindi DISCOM headers → canonical short names. Rajasthan's three
+// state boards print only the Hindi long-form in the bill header.
+const HINDI_DISCOMS: Array<[RegExp, string]> = [
+  [/जयपुर\s*विद्युत\s*वितरण/,  "JVVNL"],
+  [/अजमेर\s*विद्युत\s*वितरण/,  "AVVNL"],
+  [/जोधपुर\s*विद्युत\s*वितरण/, "JDVVNL"],
+];
+
 export function parseEbill(text: string): EbillFields {
   const t = text || "";
+  const lines = t.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 
-  // Bill amount: labelled hits win. Take the highest labelled amount
-  // (bills sometimes print "amount before due date" AND "amount after");
-  // both are legitimate — highest is the safe one to prefill.
-  const labelled = findAllAmounts(t, [
-    /amount\s*payable[^\d\n]{0,20}([\d,]+(?:\.\d+)?)/i,
-    /net\s*payable[^\d\n]{0,20}([\d,]+(?:\.\d+)?)/i,
-    /net\s*amount[^\d\n]{0,20}([\d,]+(?:\.\d+)?)/i,
-    /total\s*amount(?:\s*due)?[^\d\n]{0,20}([\d,]+(?:\.\d+)?)/i,
-    /bill\s*amount[^\d\n]{0,20}([\d,]+(?:\.\d+)?)/i,
-    /amount\s*due[^\d\n]{0,20}([\d,]+(?:\.\d+)?)/i,
-  ]);
-  const monthly_bill_amount = labelled.length > 0 ? Math.max(...labelled) : null;
-
-  // DISCOM: first case-insensitive match against the known list.
-  let discom_name: string | null = null;
-  for (const name of DISCOMS) {
-    const re = new RegExp(`\\b${escapeRegex(name)}\\b`, "i");
-    if (re.test(t)) { discom_name = name; break; }
+  // ── Bill amount ─────────────────────────────────────────
+  // Layer 1 — Hindi total-consumption label (JVVNL-family bills):
+  // "कुल उपभोग राशि (क्रम 11 से 17 तक का योग)". Vision reads these
+  // table PDFs in block order, so the value may be a few lines AFTER
+  // the label mixed with other rows' zeros — scan the next standalone
+  // numeric lines and take the max positive (validated against a real
+  // JVVNL bill: picks 3646.89 out of [0.00, 0.00, 0.00, 3646.89]).
+  let monthly_bill_amount: number | null = null;
+  const hindiAmountIdx = lines.findIndex((l) => /कुल\s*उपभोग\s*राशि/.test(l));
+  if (hindiAmountIdx >= 0) {
+    const inline = lines[hindiAmountIdx].match(/([\d,]+\.\d{1,4})\s*$/);
+    if (inline) {
+      const n = Number(inline[1].replace(/,/g, ""));
+      if (Number.isFinite(n) && n > 0) monthly_bill_amount = n;
+    }
+    if (monthly_bill_amount === null) {
+      const cands: number[] = [];
+      for (let i = hindiAmountIdx + 1; i < Math.min(lines.length, hindiAmountIdx + 10) && cands.length < 6; i++) {
+        const m = lines[i].match(/^([\d,]+\.\d{1,4})$/);
+        if (m) {
+          const n = Number(m[1].replace(/,/g, ""));
+          if (Number.isFinite(n)) cands.push(n);
+        }
+      }
+      const positive = cands.filter((n) => n > 0);
+      if (positive.length > 0) monthly_bill_amount = Math.max(...positive);
+    }
+  }
+  // Layer 2 — English labelled totals (other boards' bills).
+  if (monthly_bill_amount === null) {
+    const labelled = findAllAmounts(t, [
+      /amount\s*payable[^\d\n]{0,20}([\d,]+(?:\.\d+)?)/i,
+      /net\s*payable[^\d\n]{0,20}([\d,]+(?:\.\d+)?)/i,
+      /net\s*amount[^\d\n]{0,20}([\d,]+(?:\.\d+)?)/i,
+      /total\s*amount(?:\s*due)?[^\d\n]{0,20}([\d,]+(?:\.\d+)?)/i,
+      /bill\s*amount[^\d\n]{0,20}([\d,]+(?:\.\d+)?)/i,
+      /amount\s*due[^\d\n]{0,20}([\d,]+(?:\.\d+)?)/i,
+    ]);
+    monthly_bill_amount = labelled.length > 0 ? Math.max(...labelled) : null;
   }
 
-  // CA / Consumer number. Bills use different labels across regions.
-  const caMatch =
-    t.match(/(?:consumer\s*(?:no|number|id|account)|k\.?\s*no|ca\s*no|account\s*(?:no|number)|service\s*(?:no|number)|bp\s*no)\s*[:\-.]?\s*([A-Z0-9][A-Z0-9\-\/]{4,20})/i);
-  const ca_number = caMatch ? caMatch[1].trim() : null;
+  // ── DISCOM ──────────────────────────────────────────────
+  // Hindi header mappings first (Rajasthan boards), then the English list.
+  let discom_name: string | null = null;
+  for (const [re, name] of HINDI_DISCOMS) {
+    if (re.test(t)) { discom_name = name; break; }
+  }
+  if (!discom_name) {
+    for (const name of DISCOMS) {
+      const re = new RegExp(`\\b${escapeRegex(name)}\\b`, "i");
+      if (re.test(t)) { discom_name = name; break; }
+    }
+  }
 
-  // PIN code — first 6-digit standalone number that starts 1-9. Bills
-  // often have a couple; the customer's PIN is usually the first one
-  // shown near the service address.
+  // ── CA / Consumer / K number ────────────────────────────
+  // Layer 1 — Hindi के.नं with the value on the same line.
+  // Layer 2 — standalone 11-14 digit line near the top of the doc
+  //   (block-ordered JVVNL PDFs print the K.no value lines away from
+  //   its label; 11-14 digits excludes 10-digit mobiles, 9-digit bill
+  //   numbers, and 7-digit subdivision codes).
+  // Layer 3 — English labels (existing behavior).
+  let ca_number: string | null = null;
+  const kInline = t.match(/के\.?\s*नं?\.?\s*[:\-]?\s*(\d{6,15})/);
+  if (kInline) ca_number = kInline[1];
+  if (!ca_number) {
+    for (let i = 0; i < Math.min(lines.length, 40); i++) {
+      if (/^\d{11,14}$/.test(lines[i])) { ca_number = lines[i]; break; }
+    }
+  }
+  if (!ca_number) {
+    const caMatch =
+      t.match(/(?:consumer\s*(?:no|number|id|account)|k\.?\s*no|ca\s*no|account\s*(?:no|number)|service\s*(?:no|number)|bp\s*no)\s*[:\-.]?\s*([A-Z0-9][A-Z0-9\-\/]{4,20})/i);
+    if (caMatch) ca_number = caMatch[1].trim();
+  }
+
+  // ── PIN code ────────────────────────────────────────────
+  // Still parsed (harmless) but the Step 3 UI intentionally does NOT
+  // prefill from it — the installation pincode is entered manually
+  // because the bill's address may differ from the install site.
   const pinMatch = t.match(/\b([1-9]\d{5})\b/);
   const pincode = pinMatch ? pinMatch[1] : null;
 
-  // Address line: text after "Address:", trimmed at ~200 chars or at
-  // the next labelled block (Consumer, Meter, Bill).
+  // ── Address line ────────────────────────────────────────
+  // Layer 1 — Hindi पता with the value inline.
+  // Layer 2 — Latin-uppercase line immediately preceding the मोबाइल
+  //   line (block-ordered JVVNL PDFs place the address value there).
+  // Layer 3 — English Address label (existing behavior).
   let ebill_address_line: string | null = null;
-  const addrIdx = t.search(/(?:service\s*address|billing\s*address|address)\s*[:\-]/i);
-  if (addrIdx >= 0) {
-    const tail = t.slice(addrIdx).replace(/^[^:\-]+[:\-]\s*/, "");
-    const cutAt = Math.min(
-      indexOrEnd(tail, /\n\s*(?:consumer|meter|k\.?\s*no|ca\s*no|bill\s*no|month|reading|discount|rebate)/i),
-      indexOrEnd(tail, /\b\d{6}\b/),   // PIN often ends the address block
-      200,
-    );
-    ebill_address_line = clean(tail.slice(0, cutAt).replace(/\s+/g, " "));
-    if (ebill_address_line.length < 8) ebill_address_line = null;
+  const pataInline = t.match(/पता\s*[.:\-]?\s*([A-Z0-9][A-Z0-9\s,.\/\-]{5,150})/);
+  if (pataInline) ebill_address_line = clean(pataInline[1]);
+  if (!ebill_address_line) {
+    const mobileIdx = lines.findIndex((l) => /^मोबाइल/.test(l));
+    if (mobileIdx > 0 && /^[A-Z0-9][A-Z0-9\s,.\/\-]{5,}$/.test(lines[mobileIdx - 1])) {
+      ebill_address_line = clean(lines[mobileIdx - 1]);
+    }
+  }
+  if (!ebill_address_line) {
+    const addrIdx = t.search(/(?:service\s*address|billing\s*address|address)\s*[:\-]/i);
+    if (addrIdx >= 0) {
+      const tail = t.slice(addrIdx).replace(/^[^:\-]+[:\-]\s*/, "");
+      const cutAt = Math.min(
+        indexOrEnd(tail, /\n\s*(?:consumer|meter|k\.?\s*no|ca\s*no|bill\s*no|month|reading|discount|rebate)/i),
+        indexOrEnd(tail, /\b\d{6}\b/),   // PIN often ends the address block
+        200,
+      );
+      ebill_address_line = clean(tail.slice(0, cutAt).replace(/\s+/g, " "));
+      if (ebill_address_line.length < 8) ebill_address_line = null;
+    }
   }
 
-  // Name on bill: prefer a "Name:" or "Consumer Name:" label.
+  // ── Name on bill ────────────────────────────────────────
+  // Layer 1 — Latin-uppercase line between the नाम and पता labels
+  //   (block-ordered JVVNL layout).
+  // Layer 2 — English name labels (existing behavior).
   let ebill_name: string | null = null;
-  const nameMatch = t.match(/(?:consumer\s*name|customer\s*name|name\s*of\s*consumer|name)\s*[:\-]\s*([A-Z][A-Za-z .'-]{2,60})/i);
-  if (nameMatch) ebill_name = clean(nameMatch[1]);
+  const naamIdx = lines.findIndex((l) => /^नाम/.test(l));
+  if (naamIdx >= 0) {
+    // Value may be inline or on the following line.
+    const inline = lines[naamIdx].match(/^नाम\s*[.:\-]?\s*([A-Z][A-Z\s.'-]{2,80})$/);
+    if (inline) {
+      ebill_name = clean(inline[1]);
+    } else if (naamIdx + 1 < lines.length && /^[A-Z][A-Z\s.'-]{2,80}$/.test(lines[naamIdx + 1])) {
+      ebill_name = clean(lines[naamIdx + 1]);
+    }
+  }
+  if (!ebill_name) {
+    const nameMatch = t.match(/(?:consumer\s*name|customer\s*name|name\s*of\s*consumer|name)\s*[:\-]\s*([A-Z][A-Za-z .'-]{2,60})/i);
+    if (nameMatch) ebill_name = clean(nameMatch[1]);
+  }
 
   return {
     monthly_bill_amount,

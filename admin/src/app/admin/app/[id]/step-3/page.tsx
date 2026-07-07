@@ -180,15 +180,20 @@ function Inner() {
         .from("epc_applications")
         .select(
           "id, current_step, created_at, " +
-          "install_pincode, install_state, install_city, " +
+          "install_pincode, install_state, install_city, step3_completed_at, " +
           "borrower_mobile, borrower_email, rooftop_photo_path, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .eq("id", params.id)
         .maybeSingle();
-      const l = data as unknown as Loan | null;
+      const l = data as unknown as (Loan & { step3_completed_at: string | null }) | null;
       setLoan(l);
-      if (l) {
+      // Only prefill the installation address from the row when it was
+      // saved by a PREVIOUS Step 3 pass (resume case). On first visit the
+      // row's install_* values come from the registration page, and the
+      // installation site may be a different place — so admin enters the
+      // pincode fresh from the bill / customer.
+      if (l && l.step3_completed_at) {
         setPincode(l.install_pincode ?? "");
         setState(l.install_state ?? "");
         setCity(l.install_city ?? "");
@@ -254,10 +259,10 @@ function Inner() {
         if (!caNumber   && e.fields.ca_number)   setCaNumber(e.fields.ca_number);
         if (e.fields.ebill_address_line) setOcrEbillAddressLine(e.fields.ebill_address_line);
         if (!addressLine && e.fields.ebill_address_line) setAddressLine(e.fields.ebill_address_line);
-        if (!pincode     && e.fields.pincode)            {
-          setPincode(e.fields.pincode);
-          void lookupPincode(e.fields.pincode);
-        }
+        // Deliberately NOT prefilling pincode from the bill — the
+        // installation site may be at a different place than the bill
+        // address. Admin enters the pincode manually; India Post lookup
+        // fills city/state.
         if (!ebillName   && e.fields.ebill_name)         setEbillName(e.fields.ebill_name);
       }
     } catch (e) {
