@@ -161,7 +161,7 @@ function Inner() {
               <FieldRow label="Name"        value={loan.aadhaar_name || loan.borrower_name} />
               <FieldRow label="DOB"         value={loan.aadhaar_dob} />
               <FieldRow label="Gender"      value={loan.aadhaar_gender} />
-              <FieldRow label="Aadhaar"     value={loan.aadhaar_number_masked} mono />
+              <FieldRow label="Aadhaar"     value={loan.aadhaar_number ?? loan.aadhaar_number_masked} mono />
               <FieldRow label="Care of"     value={loan.aadhaar_care_of} />
               <FieldRow label="Address"     value={loan.aadhaar_address} multiline />
               <FieldRow label="PAN"         value={loan.borrower_pan} mono />
@@ -186,7 +186,7 @@ function Inner() {
                     </div>
                     <FieldRow label="Aadhaar name" value={loan.coapp_aadhaar_name} />
                     <FieldRow label="Aadhaar DOB"  value={loan.coapp_aadhaar_dob} />
-                    <FieldRow label="Number"       value={loan.coapp_aadhaar_number_masked} mono />
+                    <FieldRow label="Number"       value={loan.coapp_aadhaar_number ?? loan.coapp_aadhaar_number_masked} mono />
                     <FieldRow label="Care of"      value={loan.coapp_aadhaar_care_of} />
                     <FieldRow label="Address"      value={loan.coapp_aadhaar_address} multiline />
                   </>

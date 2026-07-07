@@ -9,12 +9,12 @@
 //   GOOGLE_VISION_API_KEY — required. Same key that powers the Edge
 //   Function OCRs; needs to be set on Cloud Run as a plain env var.
 //
-// PRIVACY: the full 12-digit Aadhaar number is treated as a transient
-// secret. It exists only:
-//   1. Inside Vision's OCR text response, in-memory.
-//   2. Inside `parseAadhaar()`'s local variables while it extracts fields.
-// The public `extractAadhaar()` function returns ONLY the masked form
-// (xxxxxxxx1234). We never log, return, or persist the raw number.
+// AADHAAR NUMBER HANDLING (product decision, 2026-07): the parser
+// returns BOTH the full 12-digit number (`aadhaar_number`) and the
+// masked form (`aadhaar_masked`, xxxxxxxx####). KYC requires the full
+// number; the masked form stays populated for display-facing surfaces.
+// epc_applications is admin-only via RLS — the full number is never
+// exposed to EPC or borrower accounts. Never log the full number.
 //
 // Do NOT import this file from client code — it's server-only. Next.js
 // will refuse a client build if @/lib/aadhaar is imported into a
@@ -33,7 +33,8 @@ export type AadhaarFields = {
   name:           string | null;
   dob:            string | null;
   gender:         string | null;
-  aadhaar_masked: string | null;
+  aadhaar_number: string | null;   // full 12 digits — see header note
+  aadhaar_masked: string | null;   // xxxxxxxx#### — derived from the full number
   care_of:        string | null;
   address:        string | null;
 };
@@ -127,6 +128,7 @@ export function parseAadhaar(text: string): AadhaarFields {
   // 12-digit Aadhaar number (usually printed as 3 groups of 4).
   const numberMatch = text.match(/\b(\d{4})\s?(\d{4})\s?(\d{4})\b/);
   const rawDigits   = numberMatch ? (numberMatch[1] + numberMatch[2] + numberMatch[3]) : null;
+  const aadhaar_number = rawDigits && rawDigits.length === 12 ? rawDigits : null;
   const aadhaar_masked = maskAadhaar(rawDigits);
 
   // DOB: prefer explicit "DOB" label. Fall back to "Year of Birth".
@@ -181,6 +183,7 @@ export function parseAadhaar(text: string): AadhaarFields {
     name,
     dob,
     gender,
+    aadhaar_number,
     aadhaar_masked,
     care_of,
     address,

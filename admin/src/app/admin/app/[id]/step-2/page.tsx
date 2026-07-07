@@ -44,6 +44,7 @@ type ExtractedFields = {
   name:           string | null;
   dob:            string | null;
   gender:         string | null;
+  aadhaar_number: string | null;   // full 12 digits from OCR
   aadhaar_masked: string | null;
   care_of:        string | null;
   address:        string | null;
@@ -84,7 +85,10 @@ function Inner() {
   const [name,     setName]     = useState("");
   const [dob,      setDob]      = useState("");
   const [gender,   setGender]   = useState("");
-  const [last4,    setLast4]    = useState("");  // last-4 digits — client constructs "xxxxxxxx####"
+  // Full 12-digit Aadhaar number (product decision: KYC needs the full
+  // number). Prefilled from OCR; admin can correct. Masked form is
+  // derived from it at save time.
+  const [aadhaarNumber, setAadhaarNumber] = useState("");
   const [careOf,   setCareOf]   = useState("");
   const [address,  setAddress]  = useState("");
 
@@ -154,9 +158,8 @@ function Inner() {
       if (!gender  && result.fields.gender)  setGender(result.fields.gender);
       if (!careOf  && result.fields.care_of) setCareOf(result.fields.care_of);
       if (!address && result.fields.address) setAddress(result.fields.address);
-      if (!last4   && result.fields.aadhaar_masked) {
-        // Masked string is "xxxxxxxx####" — pull the last 4.
-        setLast4(result.fields.aadhaar_masked.slice(-4));
+      if (!aadhaarNumber && result.fields.aadhaar_number) {
+        setAadhaarNumber(result.fields.aadhaar_number);
       }
     } catch (e) {
       setExtractError((e as Error)?.message || "Network error.");
@@ -173,12 +176,12 @@ function Inner() {
     // Editable fields stay so admin doesn't lose typed edits when swapping the doc.
   }
 
-  const validLast4  = /^\d{4}$/.test(last4);
+  const validAadhaar = /^\d{12}$/.test(aadhaarNumber);
   const validForm   =
     name.trim().length > 0 &&
     dob.trim().length > 0 &&
     gender.trim().length > 0 &&
-    validLast4 &&
+    validAadhaar &&
     address.trim().length > 0;
   const canNext = !!uploaded && validForm && !saving;
 
@@ -191,7 +194,8 @@ function Inner() {
         aadhaar_name:          name.trim(),
         aadhaar_dob:           dob.trim(),
         aadhaar_gender:        gender.trim(),
-        aadhaar_number_masked: "xxxxxxxx" + last4,
+        aadhaar_number:        aadhaarNumber,
+        aadhaar_number_masked: "xxxxxxxx" + aadhaarNumber.slice(-4),
         aadhaar_care_of:       careOf.trim() || null,
         aadhaar_address:       address.trim(),
         aadhaar_front_path:    uploaded!.storage_paths.front,
@@ -392,23 +396,26 @@ function Inner() {
                 </div>
                 <div>
                   <label className="block mb-1.5 text-[13px] font-medium text-text-mid">
-                    Aadhaar number (last 4 digits only)
+                    Aadhaar number
                   </label>
-                  <div className="flex items-center">
-                    <span className="px-3 py-2.5 rounded-l-input border-2 border-r-0 border-line bg-bg-tint text-text-muted font-mono text-[14px] select-none">
-                      xxxx xxxx
-                    </span>
-                    <input
-                      value={last4}
-                      onChange={(e) => setLast4(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                      maxLength={4}
-                      inputMode="numeric"
-                      placeholder="1234"
-                      className="w-[120px] px-3 py-2.5 rounded-r-input border-2 border-line font-mono text-[14px] outline-none focus:border-[#178a5c] bg-white"
-                    />
-                  </div>
+                  <input
+                    value={aadhaarNumber.replace(/(\d{4})(?=\d)/g, "$1 ")}
+                    onChange={(e) => setAadhaarNumber(e.target.value.replace(/\D/g, "").slice(0, 12))}
+                    maxLength={14}
+                    inputMode="numeric"
+                    placeholder="0000 0000 0000"
+                    className={[
+                      "w-full px-4 py-3 rounded-input border-2 font-mono text-[16px] tracking-wider outline-none transition-colors bg-white",
+                      aadhaarNumber && !validAadhaar
+                        ? "border-red-400 focus:border-red-500"
+                        : validAadhaar
+                        ? "border-[#178a5c] focus:border-[#178a5c]"
+                        : "border-line focus:border-[#185fa5]",
+                    ].join(" ")}
+                  />
                   <p className="mt-1.5 text-[11px] text-text-muted">
-                    We store only the last 4 digits — never the full 12.
+                    12 digits, as printed on the card.
+                    {aadhaarNumber && !validAadhaar && " Must be exactly 12 digits."}
                   </p>
                 </div>
                 <Input

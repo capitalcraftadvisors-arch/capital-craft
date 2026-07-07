@@ -131,6 +131,7 @@ export async function POST(
     let coapp_aadhaar_name:          string | null = null;
     let coapp_aadhaar_dob:           string | null = null;
     let coapp_aadhaar_gender:        string | null = null;
+    let coapp_aadhaar_number:        string | null = null;
     let coapp_aadhaar_number_masked: string | null = null;
     let coapp_aadhaar_care_of:       string | null = null;
     let coapp_aadhaar_address:       string | null = null;
@@ -151,7 +152,8 @@ export async function POST(
       coapp_aadhaar_name          = strOrNull(b.coapp_aadhaar_name);
       coapp_aadhaar_dob           = strOrNull(b.coapp_aadhaar_dob);
       coapp_aadhaar_gender        = strOrNull(b.coapp_aadhaar_gender);
-      coapp_aadhaar_number_masked = strOrNull(b.coapp_aadhaar_number_masked);
+      // Full 12-digit number; masked form derived server-side.
+      coapp_aadhaar_number        = strOrNull(b.coapp_aadhaar_number)?.replace(/\D/g, "") ?? null;
       coapp_aadhaar_care_of       = strOrNull(b.coapp_aadhaar_care_of);
       coapp_aadhaar_address       = strOrNull(b.coapp_aadhaar_address);
       coapp_aadhaar_front_path    = strOrNull(b.coapp_aadhaar_front_path);
@@ -168,8 +170,11 @@ export async function POST(
       if (!coapp_email  || !EMAIL_RE.test(coapp_email))   return err("Co-applicant email is invalid.", 400);
       if (!coapp_pan_path)    return err("Co-applicant PAN upload is required.", 400);
 
-      if (coapp_aadhaar_number_masked && !/^x{8}\d{4}$/.test(coapp_aadhaar_number_masked)) {
-        return err("Co-applicant Aadhaar must be masked as xxxxxxxx####.", 400);
+      if (coapp_aadhaar_number) {
+        if (!/^\d{12}$/.test(coapp_aadhaar_number)) {
+          return err("Co-applicant Aadhaar number must be exactly 12 digits.", 400);
+        }
+        coapp_aadhaar_number_masked = "xxxxxxxx" + coapp_aadhaar_number.slice(-4);
       }
     }
 
@@ -240,6 +245,7 @@ export async function POST(
         coapp_aadhaar_name,
         coapp_aadhaar_dob,
         coapp_aadhaar_gender,
+        coapp_aadhaar_number,
         coapp_aadhaar_number_masked,
         coapp_aadhaar_care_of,
         coapp_aadhaar_address,

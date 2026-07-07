@@ -212,7 +212,7 @@ function Inner() {
               <ReviewRow label="Name"    value={loan.aadhaar_name ?? "—"} />
               <ReviewRow label="DOB"     value={loan.aadhaar_dob ?? "—"} />
               <ReviewRow label="Gender"  value={loan.aadhaar_gender ?? "—"} />
-              <ReviewRow label="Aadhaar" value={loan.aadhaar_number_masked ?? "—"} mono />
+              <ReviewRow label="Aadhaar" value={loan.aadhaar_number ?? loan.aadhaar_number_masked ?? "—"} mono />
               <ReviewRow label="Care of" value={loan.aadhaar_care_of ?? "—"} />
               <ReviewRow label="Address" value={loan.aadhaar_address ?? "—"} multiline />
             </div>

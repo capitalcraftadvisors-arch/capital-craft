@@ -55,7 +55,9 @@ export async function POST(
     const aadhaar_name          = strOrNull(b.aadhaar_name);
     const aadhaar_dob           = strOrNull(b.aadhaar_dob);
     const aadhaar_gender        = strOrNull(b.aadhaar_gender);
-    const aadhaar_number_masked = strOrNull(b.aadhaar_number_masked);
+    // Full 12-digit number (product decision — KYC needs the full value).
+    // The masked form is derived server-side, never trusted from the client.
+    const aadhaar_number_raw    = strOrNull(b.aadhaar_number)?.replace(/\D/g, "") ?? null;
     const aadhaar_care_of       = strOrNull(b.aadhaar_care_of);
     const aadhaar_address       = strOrNull(b.aadhaar_address);
     const aadhaar_front_path    = strOrNull(b.aadhaar_front_path);
@@ -65,9 +67,11 @@ export async function POST(
     if (!aadhaar_front_path || !aadhaar_back_path) {
       return err("Front and back Aadhaar uploads are required.", 400);
     }
-    if (aadhaar_number_masked && !MASKED_RE.test(aadhaar_number_masked)) {
-      return err("aadhaar_number_masked must be masked as xxxxxxxx####.", 400);
+    if (!aadhaar_number_raw || !/^\d{12}$/.test(aadhaar_number_raw)) {
+      return err("Aadhaar number must be exactly 12 digits.", 400);
     }
+    const aadhaar_number        = aadhaar_number_raw;
+    const aadhaar_number_masked = "xxxxxxxx" + aadhaar_number_raw.slice(-4);
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
       global: { headers: { Authorization: `Bearer ${token}` } },
@@ -95,6 +99,7 @@ export async function POST(
         aadhaar_name,
         aadhaar_dob,
         aadhaar_gender,
+        aadhaar_number,
         aadhaar_number_masked,
         aadhaar_care_of,
         aadhaar_address,

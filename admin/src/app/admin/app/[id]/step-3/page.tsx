@@ -91,7 +91,7 @@ type Coapp = {
   aadhaar_name:   string;
   aadhaar_dob:    string;
   aadhaar_gender: string;
-  aadhaar_last4:  string;              // last 4 digits only
+  aadhaar_number: string;              // full 12 digits
   aadhaar_care_of: string;
   aadhaar_address: string;
   aadhaar_front_path: string | null;
@@ -106,7 +106,7 @@ const EMPTY_COAPP: Coapp = {
   relation: "", mobile: "", email: "",
   pan_path: null, pan_uploaded_at: null, pan_signed_url: null,
   aadhaar_name: "", aadhaar_dob: "", aadhaar_gender: "",
-  aadhaar_last4: "", aadhaar_care_of: "", aadhaar_address: "",
+  aadhaar_number: "", aadhaar_care_of: "", aadhaar_address: "",
   aadhaar_front_path: null, aadhaar_back_path: null, aadhaar_face_path: null,
   aadhaar_uploading: false, aadhaar_error: null,
 };
@@ -350,7 +350,7 @@ function Inner() {
         aadhaar_gender:  c.aadhaar_gender  || (f.gender  ?? ""),
         aadhaar_care_of: c.aadhaar_care_of || (f.care_of ?? ""),
         aadhaar_address: c.aadhaar_address || (f.address ?? ""),
-        aadhaar_last4:   c.aadhaar_last4   || (f.aadhaar_masked ? String(f.aadhaar_masked).slice(-4) : ""),
+        aadhaar_number:  c.aadhaar_number  || (f.aadhaar_number ?? ""),
         aadhaar_front_path: data.storage_paths?.front ?? null,
         aadhaar_back_path:  data.storage_paths?.back  ?? null,
         aadhaar_face_path:  data.storage_paths?.face  ?? null,
@@ -459,8 +459,8 @@ function Inner() {
         if (coapp.aadhaar_gender)      body.coapp_aadhaar_gender      = coapp.aadhaar_gender.trim();
         if (coapp.aadhaar_care_of)     body.coapp_aadhaar_care_of     = coapp.aadhaar_care_of.trim();
         if (coapp.aadhaar_address)     body.coapp_aadhaar_address     = coapp.aadhaar_address.trim();
-        if (coapp.aadhaar_last4 && /^\d{4}$/.test(coapp.aadhaar_last4)) {
-          body.coapp_aadhaar_number_masked = "xxxxxxxx" + coapp.aadhaar_last4;
+        if (coapp.aadhaar_number && /^\d{12}$/.test(coapp.aadhaar_number)) {
+          body.coapp_aadhaar_number = coapp.aadhaar_number;
         }
         if (coapp.aadhaar_front_path)  body.coapp_aadhaar_front_path  = coapp.aadhaar_front_path;
         if (coapp.aadhaar_back_path)   body.coapp_aadhaar_back_path   = coapp.aadhaar_back_path;
@@ -891,7 +891,7 @@ function Inner() {
                 hasBack={!!coapp.aadhaar_back_path}
               />
 
-              {(coapp.aadhaar_name || coapp.aadhaar_dob || coapp.aadhaar_last4) && (
+              {(coapp.aadhaar_name || coapp.aadhaar_dob || coapp.aadhaar_number) && (
                 <div className="grid sm:grid-cols-2 gap-4 pt-2">
                   <Input
                     label="Aadhaar name"
@@ -910,21 +910,17 @@ function Inner() {
                   />
                   <div>
                     <label className="block mb-1.5 text-[13px] font-medium text-text-mid">
-                      Aadhaar (last 4 digits only)
+                      Aadhaar number
                     </label>
-                    <div className="flex items-center">
-                      <span className="px-3 py-2.5 rounded-l-input border-2 border-r-0 border-line bg-bg-tint text-text-muted font-mono text-[14px] select-none">
-                        xxxx xxxx
-                      </span>
-                      <input
-                        value={coapp.aadhaar_last4}
-                        onChange={(e) => setCoapp({ ...coapp, aadhaar_last4: e.target.value.replace(/\D/g, "").slice(0, 4) })}
-                        maxLength={4}
-                        inputMode="numeric"
-                        placeholder="1234"
-                        className="w-[120px] px-3 py-2.5 rounded-r-input border-2 border-line font-mono text-[14px] outline-none focus:border-[#178a5c] bg-white"
-                      />
-                    </div>
+                    <input
+                      value={coapp.aadhaar_number.replace(/(\d{4})(?=\d)/g, "$1 ")}
+                      onChange={(e) => setCoapp({ ...coapp, aadhaar_number: e.target.value.replace(/\D/g, "").slice(0, 12) })}
+                      maxLength={14}
+                      inputMode="numeric"
+                      placeholder="0000 0000 0000"
+                      className="w-full px-4 py-3 rounded-input border-2 border-line font-mono text-[15px] tracking-wider outline-none focus:border-[#178a5c] bg-white"
+                    />
+                    <p className="mt-1 text-[11px] text-text-muted">12 digits, as printed on the card.</p>
                   </div>
                   <Input
                     label="Care of"

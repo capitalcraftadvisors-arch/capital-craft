@@ -156,6 +156,7 @@ export async function POST(
       name:           frontFields?.name           ?? backFields?.name           ?? null,
       dob:            frontFields?.dob            ?? backFields?.dob            ?? null,
       gender:         frontFields?.gender         ?? backFields?.gender         ?? null,
+      aadhaar_number: frontFields?.aadhaar_number ?? backFields?.aadhaar_number ?? null,
       aadhaar_masked: frontFields?.aadhaar_masked ?? backFields?.aadhaar_masked ?? null,
       care_of:        backFields?.care_of         ?? frontFields?.care_of       ?? null,
       address:        backFields?.address         ?? frontFields?.address       ?? null,
