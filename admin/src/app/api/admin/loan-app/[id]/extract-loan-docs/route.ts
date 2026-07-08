@@ -58,10 +58,11 @@ export async function POST(
   { params }: { params: { id: string } },
 ) {
   try {
+    // Admin, or the EPC that owns this application (ownership checked
+    // against the loaded row below).
     const token = getBearerToken(req);
     if (!token) return err("unauthorized", 401);
     const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
 
     const appId = params.id;
     if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);
@@ -84,12 +85,17 @@ export async function POST(
     });
     const { data: app, error: loadErr } = await supabase
       .from("epc_applications")
-      .select("id, current_step")
+      .select("id, current_step, epc_business_id")
       .eq("id", appId)
       .maybeSingle();
     if (loadErr) return err(loadErr.message, 500);
     if (!app)    return err("Loan application not found.", 404);
-    if ((app.current_step ?? 1) < 3) return err("Complete Step 2 before Step 3 uploads.", 409);
+    if (claims.business_type !== "admin" && app.epc_business_id !== claims.business_id) {
+      return err("forbidden", 403);
+    }
+    // Gate relaxed to step 2 — the EPC apply flow uploads the e-bill on
+    // its Page 2 (application is at current_step=2 then).
+    if ((app.current_step ?? 1) < 2) return err("Complete registration before uploads.", 409);
 
     // Handle each side independently. If either OCR fails we still keep
     // the upload — admin can fill fields in by hand.

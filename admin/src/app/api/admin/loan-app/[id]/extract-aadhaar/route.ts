@@ -84,10 +84,12 @@ export async function POST(
 ) {
   try {
     // ── auth ─────────────────────────────────────────────────
+    // Admin, or the EPC that owns this application (EPC-facing apply
+    // flow). Ownership is verified against the loaded row below; the
+    // caller-token supabase client's RLS also scopes the SELECT.
     const token = getBearerToken(req);
     if (!token) return err("unauthorized", 401);
     const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
 
     const appId = params.id;
     if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);
@@ -110,11 +112,14 @@ export async function POST(
     });
     const { data: app, error: loadErr } = await supabase
       .from("epc_applications")
-      .select("id, current_step, status")
+      .select("id, current_step, status, epc_business_id")
       .eq("id", appId)
       .maybeSingle();
     if (loadErr) return err(loadErr.message, 500);
     if (!app)    return err("Loan application not found.", 404);
+    if (claims.business_type !== "admin" && app.epc_business_id !== claims.business_id) {
+      return err("forbidden", 403);
+    }
     if ((app.current_step ?? 1) < 2) {
       return err("Complete Step 1 before uploading Aadhaar.", 409);
     }

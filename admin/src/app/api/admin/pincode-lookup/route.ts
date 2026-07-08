@@ -35,10 +35,12 @@ function err(message: string, status = 400) {
 
 export async function GET(req: NextRequest) {
   try {
+    // Any authenticated user may look up a pincode — it's public India
+    // Post data. Both the admin loan flow and the EPC-facing apply flow
+    // call this.
     const token = getBearerToken(req);
     if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
+    await verifyJwt(token);
 
     const pin = (req.nextUrl.searchParams.get("pin") ?? "").trim();
     if (!PIN_RE.test(pin)) return err("Enter a valid 6-digit Indian pincode.", 400);

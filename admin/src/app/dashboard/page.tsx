@@ -58,7 +58,7 @@ function DashboardInner() {
             <h1 className="font-display text-[26px] sm:text-[30px] font-bold">Loan applications</h1>
             <p className="text-text-mid mt-1">All applications you&rsquo;ve created.</p>
           </div>
-          <Button variant="primary" onClick={() => router.push("/dashboard/new")}>+ New application</Button>
+          <Button variant="primary" onClick={() => router.push("/dashboard/apply" as any)}>Apply for Loan</Button>
         </div>
 
         <Card className="overflow-hidden">

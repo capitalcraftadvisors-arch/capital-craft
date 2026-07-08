@@ -47,40 +47,11 @@ type Loan = {
   } | null;
 };
 
-const ROI_MIN = 7.5;
-const ROI_MAX = 10.8;
-const CENTRAL_CAP = 78000;
-const TENURES = [1, 2, 3, 4, 5] as const;
-
-// PM Surya Ghar central subsidy tiers, computed on the project's
-// installed capacity in kW:
-//   1 kW  → ₹30,000
-//   2 kW  → ₹60,000  (30,000 × 2)
-//   ≥3 kW → ₹78,000  (60,000 + 18,000 cap)
-function computeCentralSubsidy(kw: number | null): number {
-  if (kw == null || !Number.isFinite(kw) || kw <= 0) return 0;
-  const whole = Math.floor(kw);
-  if (whole <= 0) return 0;
-  if (whole === 1) return 30000;
-  if (whole === 2) return 60000;
-  return CENTRAL_CAP;
-}
-
-// Reducing-balance EMI, rounded to nearest rupee.
-// principal in rupees, roi in percent per annum, years in whole years.
-function computeEmi(principal: number, roiPct: number, years: number): number {
-  if (principal <= 0 || roiPct <= 0 || years <= 0) return 0;
-  const r = (roiPct / 100) / 12;
-  const n = years * 12;
-  const pow = Math.pow(1 + r, n);
-  const emi = principal * r * pow / (pow - 1);
-  return Math.round(emi);
-}
-
-function formatRupees(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n)) return "—";
-  return "₹" + Math.round(n).toLocaleString("en-IN");
-}
+// EMI + subsidy math shared with the EPC apply flow — see lib/emi.ts.
+import {
+  ROI_MIN, ROI_MAX, TENURES,
+  computeCentralSubsidy, computeEmi, formatRupees,
+} from "@/lib/emi";
 
 export default function LoanAppStep5Page() {
   return (
