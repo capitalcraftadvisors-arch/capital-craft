@@ -164,6 +164,11 @@ function Inner() {
               value={phone}
               onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
               placeholder="10-digit mobile"
+              error={
+                phone && !MOBILE_RE.test(phone)
+                  ? `Needs 10 digits starting 6-9 (currently ${phone.length}).`
+                  : undefined
+              }
             />
             <Input
               label="Email ID"
@@ -171,6 +176,7 @@ function Inner() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="customer@example.com"
+              error={email && !EMAIL_RE.test(email) ? "Enter a valid email address." : undefined}
             />
           </div>
           <div className="grid sm:grid-cols-2 gap-4">
