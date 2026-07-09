@@ -19,9 +19,9 @@ import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import StatusBadge from "@/components/StatusBadge";
 import { supabase } from "@/lib/supabase";
 import { getDocumentUrl } from "@/lib/storage";
+import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
 
 type Loan = Record<string, any>;
 type Doc  = { id: string; category: string; storage_path: string; file_name: string | null; mime_type: string | null };
@@ -136,7 +136,10 @@ function Inner() {
             </div>
           </div>
           <div className="flex flex-col items-end gap-2">
-            <StatusBadge status={loan.status} />
+            {/* Lender outcome — loan apps have no internal admin status. */}
+            <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${OUTCOME_PILL[lenderOutcome(loan.status)]}`}>
+              {OUTCOME_LABEL[lenderOutcome(loan.status)]}
+            </span>
             <p className="text-[11px] uppercase tracking-widest text-text-muted font-bold">Loan Amount</p>
             <p className="font-display font-bold text-[22px] text-[#0f3d2e]">
               {fmtRupees(loan.loan_amount_required)}

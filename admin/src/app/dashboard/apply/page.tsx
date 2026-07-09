@@ -53,6 +53,7 @@ function Inner() {
   const [pinBusy, setPinBusy]   = useState(false);
   const [pinError, setPinError] = useState<string | null>(null);
   const [systemType, setSystemType] = useState<"off_grid" | "on_grid" | "hybrid" | "">("");
+  const [plantUse, setPlantUse]     = useState<"residential" | "commercial" | "">("");
   const [consented, setConsented]   = useState(false);
   const [sending, setSending]       = useState(false);
   const [sendError, setSendError]   = useState<string | null>(null);
@@ -87,6 +88,7 @@ function Inner() {
     PIN_RE.test(pin) &&
     state.trim().length > 0 &&
     !!systemType &&
+    !!plantUse &&
     consented &&
     !sending;
 
@@ -111,6 +113,7 @@ function Inner() {
           install_district: district || null,
           install_city:     city || null,
           system_type:      systemType,
+          plant_use_type:   plantUse,
           consented:        true,
         }),
       });
@@ -224,6 +227,43 @@ function Inner() {
                     </span>
                     <p className={"font-display font-semibold text-[13px] pr-6 " + (active ? "text-[#0f3d2e]" : "text-text")}>
                       {opt.title}
+                    </p>
+                    <p className="text-[11px] text-text-muted mt-1">{opt.desc}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Residential / Commercial — required */}
+          <div>
+            <p className="block mb-2 text-[13px] font-medium text-text-mid">
+              Is the solar plant for Residential or Commercial use?
+            </p>
+            <div className="grid grid-cols-2 gap-3 max-w-[420px]">
+              {([
+                { value: "residential", label: "Residential", desc: "Home / housing society rooftop" },
+                { value: "commercial",  label: "Commercial",  desc: "Shop, office, factory, or institution" },
+              ] as const).map((opt) => {
+                const active = plantUse === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setPlantUse(opt.value)}
+                    className={[
+                      "text-left rounded-input border-2 p-4 transition-colors relative",
+                      active ? "border-[#178a5c] bg-[#f0faf5]" : "border-line bg-white hover:border-[#185fa5]",
+                    ].join(" ")}
+                  >
+                    <span className={[
+                      "absolute top-3 right-3 w-4 h-4 rounded-full border-2 flex items-center justify-center",
+                      active ? "border-[#178a5c]" : "border-line",
+                    ].join(" ")} aria-hidden>
+                      {active && <span className="w-2 h-2 rounded-full bg-[#178a5c]" />}
+                    </span>
+                    <p className={"font-display font-semibold text-[13px] pr-6 " + (active ? "text-[#0f3d2e]" : "text-text")}>
+                      {opt.label}
                     </p>
                     <p className="text-[11px] text-text-muted mt-1">{opt.desc}</p>
                   </button>

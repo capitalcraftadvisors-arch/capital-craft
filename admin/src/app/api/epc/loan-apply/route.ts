@@ -96,6 +96,7 @@ export async function POST(req: NextRequest) {
       const install_district = strOrNull(b.install_district);
       const install_city     = strOrNull(b.install_city);
       const system_type      = strOrNull(b.system_type);
+      const plant_use_type   = strOrNull(b.plant_use_type);
 
       if (!borrower_name)                   return err("Applicant name is required.", 400);
       if (!MOBILE_RE.test(borrower_mobile)) return err("Enter a valid 10-digit mobile.", 400);
@@ -103,6 +104,9 @@ export async function POST(req: NextRequest) {
       if (!install_pincode || !PIN_RE.test(install_pincode)) return err("Enter a valid 6-digit pincode.", 400);
       if (!install_state)                   return err("Installation state is required.", 400);
       if (!system_type || !SYSTEM_TYPES.has(system_type)) return err("Choose a system type.", 400);
+      if (plant_use_type !== "residential" && plant_use_type !== "commercial") {
+        return err("Choose Residential or Commercial.", 400);
+      }
       if (b.consented !== true)             return err("Consent is required to continue.", 400);
 
       // INSERT + field save in one statement. The 0017 gate trigger
@@ -122,6 +126,7 @@ export async function POST(req: NextRequest) {
           install_district,
           install_city,
           system_type,
+          plant_use_type,
           consent_at: new Date().toISOString(),
           consent_policies: CONSENT_POLICIES,
           consent_ip: firstIp(req),

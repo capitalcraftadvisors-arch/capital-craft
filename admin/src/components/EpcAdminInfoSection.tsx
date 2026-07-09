@@ -50,9 +50,22 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
   const [loaded, setLoaded] = useState(false);
   const [state, setState] = useState<SaveState>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Business Expectation lives on epc_business (not epc_admin_info) per
+  // spec — loaded/saved separately but presented in this same card and
+  // committed by the same Save button.
+  const [expectation, setExpectation] = useState<"" | "crores" | "lakhs">("");
 
   useEffect(() => {
     (async () => {
+      const { data: bizRow } = await supabase()
+        .from("epc_business")
+        .select("business_expectation")
+        .eq("id", businessId)
+        .maybeSingle();
+      if (bizRow?.business_expectation === "crores" || bizRow?.business_expectation === "lakhs") {
+        setExpectation(bizRow.business_expectation);
+      }
+
       const { data, error } = await supabase()
         .from("epc_admin_info")
         .select("*")
@@ -129,6 +142,18 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
       setState("error");
       return;
     }
+
+    // Business Expectation → epc_business (admin RLS permits the write).
+    const { error: bizErr } = await supabase()
+      .from("epc_business")
+      .update({ business_expectation: expectation || null })
+      .eq("id", businessId);
+    if (bizErr) {
+      setErrorMsg(bizErr.message);
+      setState("error");
+      return;
+    }
+
     setState("saved");
   }
 
@@ -221,6 +246,28 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
               <option value="MW">Megawatt</option>
             </select>
           </div>
+        </Field>
+      </div>
+
+      {/* Row 4 — Business Expectation (scale only: Crores / Lakhs).
+          Stored on epc_business.business_expectation. */}
+      <div className="mb-4 max-w-[300px]">
+        <Field label="Business Expectation">
+          <select
+            value={expectation}
+            onChange={(e) => {
+              setExpectation(e.target.value as "" | "crores" | "lakhs");
+              if (state !== "idle") setState("idle");
+            }}
+            className={
+              fullInputCls +
+              " pr-9 appearance-none bg-[url('data:image/svg+xml;utf8,<svg fill=%22%236B8294%22 viewBox=%220 0 20 20%22 xmlns=%22http://www.w3.org/2000/svg%22><path d=%22M5 8l5 5 5-5z%22/></svg>')] bg-no-repeat bg-[length:20px] bg-[right_10px_center]"
+            }
+          >
+            <option value="">Select…</option>
+            <option value="crores">Crores</option>
+            <option value="lakhs">Lakhs</option>
+          </select>
         </Field>
       </div>
 

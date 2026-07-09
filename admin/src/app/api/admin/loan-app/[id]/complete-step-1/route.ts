@@ -97,6 +97,7 @@ export async function PATCH(
     const borrower_email   = String(b.borrower_email   ?? "").trim();
     const borrower_pan     = String(b.borrower_pan     ?? "").trim().toUpperCase();
     const system_type      = String(b.system_type      ?? "").trim();
+    const plant_use_type   = String(b.plant_use_type   ?? "").trim();
     const consent_policies_raw = Array.isArray(b.consent_policies) ? b.consent_policies : [];
 
     if (!PIN_RE.test(install_pincode))    return err("Enter a valid 6-digit pincode.", 400);
@@ -105,6 +106,9 @@ export async function PATCH(
     if (!EMAIL_RE.test(borrower_email))    return err("Enter a valid email.", 400);
     if (!PAN_RE.test(borrower_pan))        return err("Enter a valid PAN (AAAAA9999A).", 400);
     if (!SYSTEM_TYPES.has(system_type))    return err("Choose a valid system type.", 400);
+    if (plant_use_type !== "residential" && plant_use_type !== "commercial") {
+      return err("Choose Residential or Commercial.", 400);
+    }
 
     // Filter policies to the known set — anything else is discarded.
     // If the caller didn't tick anything (impossible via the UI but
@@ -151,6 +155,7 @@ export async function PATCH(
       borrower_email,
       borrower_pan,
       system_type,
+      plant_use_type,
       consent_at,
       consent_policies,
       consent_ip,

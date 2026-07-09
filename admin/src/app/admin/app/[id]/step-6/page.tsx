@@ -199,6 +199,10 @@ function Inner() {
           <ReviewRow label="Email"           value={loan.borrower_email ?? "—"} />
           <ReviewRow label="PAN"             value={loan.borrower_pan ?? "—"} mono />
           <ReviewRow label="System type"     value={loan.system_type ? SYSTEM_LABEL[loan.system_type] ?? loan.system_type : "—"} />
+          <ReviewRow label="Plant use"       value={
+            loan.plant_use_type === "residential" ? "Residential" :
+            loan.plant_use_type === "commercial"  ? "Commercial"  : "—"
+          } />
           <ReviewRow label="Consent recorded" value={loan.consent_at ? fmtDate(loan.consent_at) : "—"} />
         </ReviewSection>
 

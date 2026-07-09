@@ -13,6 +13,7 @@ import AddNewLoanAppModal from "@/components/AddNewLoanAppModal";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import { supabase } from "@/lib/supabase";
 import { logout, getToken } from "@/lib/auth";
+import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL, OUTCOME_STATUSES, type LenderOutcome } from "@/lib/loan-status";
 
 type Tab = "epcs" | "apps";
 
@@ -601,7 +602,10 @@ function AppsTab() {
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .order("created_at", { ascending: false });
-      if (statusFilter) query = query.eq("status", statusFilter);
+      // Filter maps a lender-outcome bucket to its underlying statuses.
+      if (statusFilter && statusFilter in OUTCOME_STATUSES) {
+        query = query.in("status", OUTCOME_STATUSES[statusFilter as LenderOutcome]);
+      }
       const { data } = await query;
       setRows((data ?? []) as unknown as Row[]);
     })();
@@ -676,14 +680,9 @@ function AppsTab() {
         <Select
           placeholder="Status filter"
           options={[
-            { value: "draft", label: "Draft" },
-            { value: "submitted", label: "Submitted" },
-            { value: "under_review", label: "Under review" },
-            { value: "approved", label: "Approved" },
-            { value: "on_hold", label: "On hold" },
-            { value: "rejected", label: "Rejected" },
-            { value: "sent_to_nbfc", label: "Sent to NBFC" },
-            { value: "disbursed", label: "Disbursed" },
+            { value: "review",   label: "Under Review" },
+            { value: "approved", label: "Approved by lender" },
+            { value: "rejected", label: "Rejected by lender" },
           ]}
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
@@ -733,7 +732,13 @@ function AppsTab() {
                   )}
                 </td>
                 <td className="px-5 py-4 font-semibold text-[#0f3d2e]">{displayAmount(r)}</td>
-                <td className="px-5 py-4"><StatusBadge status={r.status} /></td>
+                {/* Loan apps have no internal admin status — show the
+                    lender outcome (same 3 buckets as the EPC's own view). */}
+                <td className="px-5 py-4">
+                  <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${OUTCOME_PILL[lenderOutcome(r.status)]}`}>
+                    {OUTCOME_LABEL[lenderOutcome(r.status)]}
+                  </span>
+                </td>
                 <td className="px-5 py-4 text-text-muted">
                   {r.created_by === "admin" ? "Admin" : "Customer"}
                 </td>

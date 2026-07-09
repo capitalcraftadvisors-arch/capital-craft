@@ -105,6 +105,7 @@ function Inner() {
   const [phone, setPhone]             = useState("");
   const [email, setEmail]             = useState("");
   const [systemType, setSystemType]   = useState<"off_grid" | "on_grid" | "hybrid" | "">("");
+  const [plantUse, setPlantUse]       = useState<"residential" | "commercial" | "">("");
   const [panUploaded, setPanUploaded] = useState(false);
   // PAN number is a proper editable field — OCR prefills, admin can correct.
   const [panNumber, setPanNumber]     = useState("");
@@ -124,7 +125,7 @@ function Inner() {
         .select(
           "id, epc_business_id, status, current_step, " +
           "install_pincode, install_state, install_district, install_city, " +
-          "borrower_mobile, borrower_email, borrower_pan, system_type, consent_at",
+          "borrower_mobile, borrower_email, borrower_pan, system_type, plant_use_type, consent_at",
         )
         .eq("id", params.id)
         .maybeSingle();
@@ -140,6 +141,7 @@ function Inner() {
       if (row.borrower_email)   setEmail(row.borrower_email);
       if (row.borrower_pan)     { setPanNumber(row.borrower_pan); setPanUploaded(true); }
       if (row.system_type)      setSystemType(row.system_type);
+      if (row.plant_use_type)   setPlantUse(row.plant_use_type);
       if (row.consent_at)       setConsented(true);
 
       const { data: e } = await supabase()
@@ -205,6 +207,7 @@ function Inner() {
     MOBILE_RE.test(phone) &&
     EMAIL_RE.test(email) &&
     !!systemType &&
+    !!plantUse &&
     panUploaded &&
     panValid &&
     consented &&
@@ -230,6 +233,7 @@ function Inner() {
           borrower_email:   email,
           borrower_pan:     panNumber.trim().toUpperCase(),
           system_type:      systemType,
+          plant_use_type:   plantUse,
           consent_policies: CONSENT_KEYS,
         }),
       });
@@ -479,6 +483,44 @@ function Inner() {
                 </button>
               );
             })}
+          </div>
+
+          {/* Residential / Commercial — required */}
+          <div className="pt-4 border-t border-line">
+            <p className="block mb-2 text-[13px] font-medium text-text-mid">
+              Is the solar plant for Residential or Commercial use?
+            </p>
+            <div className="grid grid-cols-2 gap-3 max-w-[420px]">
+              {([
+                { value: "residential", label: "Residential", desc: "Home / housing society rooftop" },
+                { value: "commercial",  label: "Commercial",  desc: "Shop, office, factory, or institution" },
+              ] as const).map((opt) => {
+                const active = plantUse === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setPlantUse(opt.value)}
+                    className={[
+                      "text-left rounded-input border-2 p-4 transition-colors relative",
+                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-[#185fa5]",
+                      active ? "border-[#178a5c] bg-[#f0faf5]" : "border-line bg-white hover:border-[#185fa5]",
+                    ].join(" ")}
+                  >
+                    <span className={[
+                      "absolute top-3 right-3 w-4 h-4 rounded-full border-2 flex items-center justify-center",
+                      active ? "border-[#178a5c]" : "border-line",
+                    ].join(" ")} aria-hidden>
+                      {active && <span className="w-2 h-2 rounded-full bg-[#178a5c]" />}
+                    </span>
+                    <p className={"font-display font-semibold text-[14px] pr-6 " + (active ? "text-[#0f3d2e]" : "text-text")}>
+                      {opt.label}
+                    </p>
+                    <p className="text-[12px] text-text-muted mt-1">{opt.desc}</p>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </Card>
 
