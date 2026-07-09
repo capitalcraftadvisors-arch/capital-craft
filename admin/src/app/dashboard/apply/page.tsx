@@ -20,6 +20,9 @@ import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import { getToken } from "@/lib/auth";
+import { uploadDocument } from "@/lib/storage";
+import { supabase } from "@/lib/supabase";
+import { isAcceptedFileType } from "@/lib/validators";
 import EpcApplyTracker from "@/components/EpcApplyTracker";
 
 const PIN_RE    = /^[1-9]\d{5}$/;
@@ -58,6 +61,27 @@ function Inner() {
   const [sending, setSending]       = useState(false);
   const [sendError, setSendError]   = useState<string | null>(null);
 
+  // Applicant passport-size photo. The application row doesn't exist yet
+  // on this page (it's created on "Save & continue"), so we hold the File
+  // and upload it right after the row is created. createdId lets a retry
+  // reuse the same row instead of registering a duplicate.
+  const [photoFile, setPhotoFile]       = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoError, setPhotoError]     = useState<string | null>(null);
+  const [createdId, setCreatedId]       = useState<string | null>(null);
+
+  function onPhotoPick(files: FileList | null) {
+    setPhotoError(null);
+    const f = files?.[0];
+    if (!f) return;
+    if (!isAcceptedFileType(f.type)) {
+      setPhotoError("Only JPG, PNG, or WEBP images are allowed.");
+      return;
+    }
+    setPhotoFile(f);
+    setPhotoPreview((prev) => { if (prev) URL.revokeObjectURL(prev); return URL.createObjectURL(f); });
+  }
+
   async function lookupPincode(next: string) {
     setPinError(null);
     if (!PIN_RE.test(next)) return;
@@ -89,6 +113,7 @@ function Inner() {
     state.trim().length > 0 &&
     !!systemType &&
     !!plantUse &&
+    !!photoFile &&
     consented &&
     !sending;
 
@@ -97,33 +122,63 @@ function Inner() {
     setSendError(null);
     setSending(true);
     try {
-      const res = await fetch("/api/epc/loan-apply", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken() ?? ""}`,
-        },
-        body: JSON.stringify({
-          phase: "register",
-          borrower_name:    name.trim(),
-          borrower_mobile:  phone,
-          borrower_email:   email.trim(),
-          install_pincode:  pin,
-          install_state:    state,
-          install_district: district || null,
-          install_city:     city || null,
-          system_type:      systemType,
-          plant_use_type:   plantUse,
-          consented:        true,
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        setSendError(data?.error || `HTTP ${res.status}`);
-        setSending(false);
-        return;
+      // Register the row once. If a previous attempt already created it
+      // (e.g. the photo upload failed and the user retried), reuse that
+      // id instead of inserting a duplicate.
+      let appId = createdId;
+      if (!appId) {
+        const res = await fetch("/api/epc/loan-apply", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${getToken() ?? ""}`,
+          },
+          body: JSON.stringify({
+            phase: "register",
+            borrower_name:    name.trim(),
+            borrower_mobile:  phone,
+            borrower_email:   email.trim(),
+            install_pincode:  pin,
+            install_state:    state,
+            install_district: district || null,
+            install_city:     city || null,
+            system_type:      systemType,
+            plant_use_type:   plantUse,
+            consented:        true,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data?.ok) {
+          setSendError(data?.error || `HTTP ${res.status}`);
+          setSending(false);
+          return;
+        }
+        appId = data.id as string;
+        setCreatedId(appId);
       }
-      router.push(`/dashboard/apply/${data.id}/docs` as any);
+
+      // Upload the applicant photo now that we have an application id.
+      // The doc lands in user_application_docs (category customer_photo)
+      // and we mirror the path onto the row for the View page.
+      if (photoFile) {
+        const up = await uploadDocument(photoFile, {
+          table: "user_application_docs",
+          category: "customer_photo",
+          application_id: appId,
+          uploaded_by: "epc",
+        });
+        if (up.ok) {
+          // RLS "own_applications" lets the EPC update its own row.
+          await supabase()
+            .from("epc_applications")
+            .update({ customer_photo_path: up.storage_path })
+            .eq("id", appId);
+        }
+        // A failed photo upload is non-fatal — the row exists and we still
+        // proceed; the applicant can be re-uploaded from the admin side.
+      }
+
+      router.push(`/dashboard/apply/${appId}/docs` as any);
     } catch (e) {
       setSendError((e as Error)?.message || "Network error.");
       setSending(false);
@@ -269,6 +324,40 @@ function Inner() {
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Applicant passport-size photo */}
+          <div className="pt-1">
+            <p className="block mb-2 text-[13px] font-medium text-text-mid">
+              Applicant photo (passport-size)
+            </p>
+            <div className="flex items-center gap-4">
+              <div className="w-20 h-24 rounded-input border-2 border-dashed border-line bg-white grid place-items-center overflow-hidden shrink-0">
+                {photoPreview ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={photoPreview} alt="Applicant" className="w-full h-full object-cover" />
+                ) : (
+                  <span className="text-[11px] text-text-muted text-center px-1">No photo</span>
+                )}
+              </div>
+              <div>
+                <label className="inline-block cursor-pointer">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => onPhotoPick(e.target.files)}
+                  />
+                  <span className="inline-block rounded-input border border-[#185fa5] text-[#185fa5] text-[13px] font-semibold px-4 py-2 hover:bg-[#dceffb] transition-colors">
+                    {photoFile ? "Change photo" : "Upload photo"}
+                  </span>
+                </label>
+                <p className="text-[11px] text-text-muted mt-1.5">
+                  Clear, front-facing photograph. JPG, PNG, or WEBP.
+                </p>
+                {photoError && <p className="text-[11px] text-red-600 mt-1">{photoError}</p>}
+              </div>
             </div>
           </div>
 

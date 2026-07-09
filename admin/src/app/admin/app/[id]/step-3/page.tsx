@@ -816,7 +816,7 @@ function Inner() {
         {/* g. Bill Ownership Confirmation */}
         <Card className="p-6 bg-[#f0faf5] border-[#cdeadd] space-y-4">
           <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">
-            Bill ownership confirmation
+            Please confirm the electricity bill is in the name of the applicant.
           </h2>
           {ebillName ? (
             <p className="text-[13px]">
@@ -840,7 +840,7 @@ function Inner() {
               ].join(" ")}
             >
               <p className="font-semibold text-[14px] text-[#0f3d2e]">
-                Yes, bill is on applicant&rsquo;s name
+                Yes, the bill is in the applicant&rsquo;s name
               </p>
               <p className="text-[12px] text-text-muted mt-1">
                 No co-applicant needed.
@@ -857,7 +857,7 @@ function Inner() {
               ].join(" ")}
             >
               <p className="font-semibold text-[14px] text-[#0f3d2e]">
-                No, add co-applicant
+                No, the bill is not in the applicant&rsquo;s name (add a co-applicant)
               </p>
               <p className="text-[12px] text-text-muted mt-1">
                 Bill is on someone else&rsquo;s name.

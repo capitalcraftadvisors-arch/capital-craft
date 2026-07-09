@@ -13,6 +13,7 @@ type EpcCategory =
 
 type LoanCategory =
   | "borrower_pan" | "borrower_aadhaar" | "borrower_photo"
+  | "customer_photo"
   | "bank_statement" | "income_proof" | "electricity_bill"
   | "property_doc" | "quotation" | "other";
 

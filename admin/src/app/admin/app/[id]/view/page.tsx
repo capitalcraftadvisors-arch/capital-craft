@@ -21,7 +21,16 @@ import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import { supabase } from "@/lib/supabase";
 import { getDocumentUrl } from "@/lib/storage";
-import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
+import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL, type LenderOutcome } from "@/lib/loan-status";
+
+// The three loan-status values an admin can set from the View page, and
+// the epc_applications.status each maps to. Loan applications have NO
+// internal admin status — this IS the status.
+const LOAN_STATUS_ACTIONS: Array<{ outcome: LenderOutcome; status: string; label: string; kind: "review" | "approve" | "reject" }> = [
+  { outcome: "review",   status: "under_review", label: "Under Review",       kind: "review" },
+  { outcome: "approved", status: "approved",     label: "Approved by lender",  kind: "approve" },
+  { outcome: "rejected", status: "rejected",     label: "Rejected by lender",  kind: "reject" },
+];
 
 type Loan = Record<string, any>;
 type Doc  = { id: string; category: string; storage_path: string; file_name: string | null; mime_type: string | null };
@@ -36,6 +45,19 @@ const EMPLOYMENT_LABEL: Record<string, string> = {
 };
 const METHOD_LABEL: Record<string, string> = {
   manual_epdf: "Manual E-PDF Upload", scanned_pdf: "Scanned PDF Upload",
+};
+// Friendly labels for the user_application_docs categories surfaced in
+// the Documents card. Falls back to the underscored category name.
+const DOC_LABEL: Record<string, string> = {
+  customer_photo:   "Applicant photo",
+  borrower_photo:   "Rooftop photo",
+  borrower_pan:     "PAN card",
+  borrower_aadhaar: "Aadhaar",
+  quotation:        "Quotation / Proforma",
+  electricity_bill: "Electricity bill",
+  bank_statement:   "Bank statement",
+  income_proof:     "Income proof",
+  property_doc:     "Property document",
 };
 
 // Prefers the stored loan_display_id (LA-<last5>-<seq>, migration 0030);
@@ -67,6 +89,9 @@ function Inner() {
   const [loan, setLoan] = useState<Loan | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [loading, setLoading] = useState(true);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -80,8 +105,16 @@ function Inner() {
           .eq("application_id", params.id),
       ]);
       setLoan(la);
-      setDocs((dd ?? []) as Doc[]);
+      const docRows = (dd ?? []) as Doc[];
+      setDocs(docRows);
       setLoading(false);
+
+      // Sign the applicant's passport photo for the header avatar.
+      const photoDoc = docRows.find((d) => d.category === "customer_photo");
+      if (photoDoc) {
+        const url = await getDocumentUrl(photoDoc.id);
+        if (url) setPhotoUrl(url);
+      }
     })();
   }, [params.id]);
 
@@ -96,6 +129,28 @@ function Inner() {
   async function openDoc(id: string) {
     const url = await getDocumentUrl(id);
     if (url) window.open(url, "_blank", "noopener");
+  }
+
+  // Admin sets the loan's status directly on epc_applications.status.
+  // The three buttons map to the same pipeline values the lender-outcome
+  // display reads back (under_review / approved / rejected). This is the
+  // ONLY status a loan application has — there is no separate internal
+  // admin status the way EPC profiles have.
+  async function changeStatus(nextStatus: string) {
+    if (!loan || statusBusy || loan.status === nextStatus) return;
+    setStatusBusy(true);
+    setStatusMsg(null);
+    const { error } = await supabase()
+      .from("epc_applications")
+      .update({ status: nextStatus, reviewed_at: loan.reviewed_at ?? new Date().toISOString() })
+      .eq("id", loan.id);
+    if (error) {
+      setStatusMsg("Couldn't update status — " + error.message);
+    } else {
+      setLoan({ ...loan, status: nextStatus });
+      setStatusMsg("Status updated.");
+    }
+    setStatusBusy(false);
   }
 
   if (loading) {
@@ -122,17 +177,30 @@ function Inner() {
       <section className="w-full px-4 sm:px-6 py-6 max-w-[1400px] mx-auto space-y-5">
         {/* Header banner — applicant + EPC + amount + status + actions */}
         <div className="rounded-card border border-[#cdeadd] bg-gradient-to-r from-[#f0faf5] via-white to-[#dceffb] p-5 sm:p-6 flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0 flex-1">
-            <p className="text-[11px] uppercase tracking-widest text-[#5a8a76] font-bold">Applicant</p>
-            <h1 className="mt-1 font-display text-[26px] sm:text-[30px] font-bold text-[#0f3d2e] truncate">
-              {applicantName}
-            </h1>
-            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[13px]">
-              <span className="text-text-muted">via</span>
-              <span className="font-semibold text-[#185fa5]">{epcName}</span>
-              {loan.epc_business?.epc_display_id && (
-                <span className="text-[11px] font-mono text-text-muted">{loan.epc_business.epc_display_id}</span>
+          <div className="min-w-0 flex-1 flex items-start gap-4">
+            {/* Applicant passport photo (falls back to a monogram avatar) */}
+            <div className="w-16 h-20 shrink-0 rounded-lg overflow-hidden border border-[#cdeadd] bg-white grid place-items-center">
+              {photoUrl ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={photoUrl} alt={applicantName} className="w-full h-full object-cover" />
+              ) : (
+                <span className="font-display font-bold text-[22px] text-[#178a5c]">
+                  {applicantName.trim().charAt(0).toUpperCase() || "?"}
+                </span>
               )}
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] uppercase tracking-widest text-[#5a8a76] font-bold">Applicant</p>
+              <h1 className="mt-1 font-display text-[26px] sm:text-[30px] font-bold text-[#0f3d2e] truncate">
+                {applicantName}
+              </h1>
+              <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[13px]">
+                <span className="text-text-muted">via</span>
+                <span className="font-semibold text-[#185fa5]">{epcName}</span>
+                {loan.epc_business?.epc_display_id && (
+                  <span className="text-[11px] font-mono text-text-muted">{loan.epc_business.epc_display_id}</span>
+                )}
+              </div>
             </div>
           </div>
           <div className="flex flex-col items-end gap-2">
@@ -156,6 +224,37 @@ function Inner() {
           <Button variant="outline" onClick={() => router.push(`/admin/app/${loan.id}/step-6` as any)}>
             Review page
           </Button>
+        </div>
+
+        {/* Loan status band — admin sets the application's status here.
+            The active choice is derived from the current pipeline status. */}
+        <div className="rounded-card border border-line bg-white p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-display font-semibold text-[15px] text-[#0f3d2e]">Loan status</h2>
+              <p className="text-[12px] text-text-muted mt-0.5">
+                Set where this application stands with the lender. Visible to the EPC partner on their dashboard.
+              </p>
+            </div>
+            {statusMsg && (
+              <span className="text-[12px] text-text-muted">{statusMsg}</span>
+            )}
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2.5">
+            {LOAN_STATUS_ACTIONS.map((a) => {
+              const active = lenderOutcome(loan.status) === a.outcome;
+              return (
+                <StatusBtn
+                  key={a.status}
+                  label={a.label}
+                  kind={a.kind}
+                  active={active}
+                  disabled={statusBusy}
+                  onClick={() => void changeStatus(a.status)}
+                />
+              );
+            })}
+          </div>
         </div>
 
         {/* 2-column dense layout */}
@@ -287,7 +386,7 @@ function Inner() {
                     <li key={d.id} className="flex items-center justify-between gap-3 px-3 py-2 bg-white border border-line rounded-input">
                       <div className="min-w-0">
                         <p className="text-[12px] text-text-muted uppercase tracking-wide font-semibold">
-                          {d.category.replace(/_/g, " ")}
+                          {DOC_LABEL[d.category] ?? d.category.replace(/_/g, " ")}
                         </p>
                         <p className="text-[13px] text-text truncate">{d.file_name || "Document"}</p>
                       </div>
@@ -326,6 +425,41 @@ function Inner() {
 }
 
 // ── Small helpers ────────────────────────────────────────────────────
+
+function StatusBtn({
+  label, kind, active, disabled, onClick,
+}: {
+  label: string;
+  kind: "review" | "approve" | "reject";
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  // Active = current status, shown filled; inactive = outline the admin
+  // can click to switch to.
+  const filled =
+    kind === "approve" ? "bg-green-dark text-white border-green-dark" :
+    kind === "reject"  ? "bg-red-700 text-white border-red-700" :
+                         "bg-[#185fa5] text-white border-[#185fa5]";
+  const outline =
+    kind === "approve" ? "text-green-dark border-[#cdeadd] hover:bg-[#f0faf5]" :
+    kind === "reject"  ? "text-red-700 border-red-200 hover:bg-red-50" :
+                         "text-[#185fa5] border-[#d3e9f7] hover:bg-[#dceffb]";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={[
+        "px-4 py-2 rounded-input text-[13px] font-semibold border transition-colors",
+        "disabled:opacity-50 disabled:cursor-not-allowed",
+        active ? filled : `bg-white ${outline}`,
+      ].join(" ")}
+    >
+      {active && "✓ "}{label}
+    </button>
+  );
+}
 
 function SectionCard({
   title, tint = "neutral", children,

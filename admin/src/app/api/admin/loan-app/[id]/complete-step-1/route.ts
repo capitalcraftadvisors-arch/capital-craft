@@ -96,6 +96,12 @@ export async function PATCH(
     const borrower_mobile  = String(b.borrower_mobile  ?? "").replace(/\D/g, "");
     const borrower_email   = String(b.borrower_email   ?? "").trim();
     const borrower_pan     = String(b.borrower_pan     ?? "").trim().toUpperCase();
+    // Applicant passport-size photo — the FileUpload already persisted the
+    // file to user_application_docs (category customer_photo); this is just
+    // the storage path so the View page can surface it directly. Optional
+    // on re-save (an edit pass that doesn't re-upload leaves the existing
+    // value untouched).
+    const customer_photo_path = String(b.customer_photo_path ?? "").trim() || null;
     const system_type      = String(b.system_type      ?? "").trim();
     const plant_use_type   = String(b.plant_use_type   ?? "").trim();
     const consent_policies_raw = Array.isArray(b.consent_policies) ? b.consent_policies : [];
@@ -157,6 +163,9 @@ export async function PATCH(
       system_type,
       plant_use_type,
       consent_at,
+      // Only overwrite the photo path when the client sent one — preserves
+      // an existing photo on an edit-pass re-save.
+      ...(customer_photo_path ? { customer_photo_path } : {}),
       consent_policies,
       consent_ip,
       consent_user_agent,

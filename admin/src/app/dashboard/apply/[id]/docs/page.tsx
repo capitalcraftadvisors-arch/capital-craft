@@ -23,7 +23,9 @@ import DatePicker from "@/components/ui/DatePicker";
 import FileUpload from "@/components/FileUpload";
 import EpcApplyTracker from "@/components/EpcApplyTracker";
 import { getToken } from "@/lib/auth";
+import { supabase } from "@/lib/supabase";
 import { extractPan } from "@/lib/ocr";
+import { MOBILE_RE, EMAIL_RE } from "@/lib/validators";
 
 export type EpcApplyDocsPayload = {
   borrower_pan: string | null;
@@ -46,6 +48,8 @@ export type EpcApplyDocsPayload = {
   coapp_pan: string | null;
   coapp_name: string | null;
   coapp_dob: string | null;
+  coapp_mobile: string | null;
+  coapp_email: string | null;
   coapp_pan_path: string | null;
   coapp_aadhaar_name: string | null;
   coapp_aadhaar_dob: string | null;
@@ -55,6 +59,12 @@ export type EpcApplyDocsPayload = {
   coapp_aadhaar_address: string | null;
   coapp_aadhaar_front_path: string | null;
   coapp_aadhaar_back_path: string | null;
+  // Bill-ownership flag mirrors admin Step 3 (bill_on_applicant_name).
+  bill_on_applicant_name: boolean;
+  // Quotation / proforma invoice + geo-tagged rooftop photo.
+  proforma_invoice_path: string | null;
+  rooftop_photo_path: string | null;
+  rooftop_photo_gps: { lat: number; lng: number; captured_at: string } | null;
 };
 
 export default function EpcApplyDocsPage() {
@@ -96,6 +106,18 @@ function Inner() {
     file_name: string;
   } | null>(null);
 
+  // Applicant contact (from Page 1) — loaded so we can block a co-applicant
+  // that reuses the applicant's own email or phone.
+  const [applicantMobile, setApplicantMobile] = useState("");
+  const [applicantEmail,  setApplicantEmail]  = useState("");
+
+  // Quotation / proforma invoice
+  const [quotePath, setQuotePath] = useState<string | null>(null);
+
+  // Rooftop photo (geo-tagged)
+  const [rooftopPath, setRooftopPath] = useState<string | null>(null);
+  const [rooftopGps,  setRooftopGps]  = useState<{ lat: number; lng: number; captured_at: string } | null>(null);
+
   // Co-applicant
   const [hasCoapp, setHasCoapp] = useState<boolean | null>(null);
   const [cFront, setCFront] = useState<File | null>(null);
@@ -109,10 +131,27 @@ function Inner() {
   const [cNumber, setCNumber] = useState("");
   const [cCareOf, setCCareOf] = useState("");
   const [cAddress, setCAddress] = useState("");
+  const [cMobile, setCMobile] = useState("");
+  const [cEmail,  setCEmail]  = useState("");
   const [cPanBusy, setCPanBusy] = useState(false);
   const [cPanErr,  setCPanErr]  = useState<string | null>(null);
   const [cPan, setCPan]         = useState("");
   const [cPanPath, setCPanPath] = useState<string | null>(null);
+
+  // Load applicant contact for the co-applicant conflict check.
+  useEffect(() => {
+    void (async () => {
+      const { data } = await supabase()
+        .from("epc_applications")
+        .select("borrower_mobile, borrower_email")
+        .eq("id", appId)
+        .maybeSingle();
+      if (data) {
+        setApplicantMobile(String((data as any).borrower_mobile ?? "").trim());
+        setApplicantEmail(String((data as any).borrower_email ?? "").trim());
+      }
+    })();
+  }, [appId]);
 
   // Run applicant-Aadhaar extraction once both sides are picked.
   useEffect(() => {
@@ -233,14 +272,35 @@ function Inner() {
   }
 
   const PAN_FMT = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+
+  // Co-applicant email / phone must NOT match the applicant's.
+  const coappMobileConflict =
+    hasCoapp === true &&
+    cMobile.trim().length > 0 &&
+    applicantMobile.length > 0 &&
+    cMobile.trim() === applicantMobile;
+  const coappEmailConflict =
+    hasCoapp === true &&
+    cEmail.trim().length > 0 &&
+    applicantEmail.length > 0 &&
+    cEmail.trim().toLowerCase() === applicantEmail.toLowerCase();
+
   const coappOk =
     hasCoapp === false ||
-    (hasCoapp === true && !!cPaths && !!cPanPath && PAN_FMT.test(cPan.trim().toUpperCase()));
+    (hasCoapp === true &&
+      !!cPaths && !!cPanPath &&
+      PAN_FMT.test(cPan.trim().toUpperCase()) &&
+      MOBILE_RE.test(cMobile) &&
+      EMAIL_RE.test(cEmail) &&
+      !coappMobileConflict &&
+      !coappEmailConflict);
 
   const canContinue =
     panUploaded && PAN_FMT.test(panNumber.trim().toUpperCase()) &&
     !!aPaths && /^\d{12}$/.test(aNumber) &&
     !!ebill &&
+    !!quotePath &&
+    !!rooftopPath &&
     hasCoapp !== null && coappOk;
 
   function continueToLoan() {
@@ -265,6 +325,8 @@ function Inner() {
       coapp_pan: hasCoapp ? cPan.trim().toUpperCase() || null : null,
       coapp_name: hasCoapp ? cName || null : null,
       coapp_dob: hasCoapp ? cDob || null : null,
+      coapp_mobile: hasCoapp ? cMobile || null : null,
+      coapp_email: hasCoapp ? cEmail.trim() || null : null,
       coapp_pan_path: hasCoapp ? cPanPath : null,
       coapp_aadhaar_name: hasCoapp ? cName || null : null,
       coapp_aadhaar_dob: hasCoapp ? cDob || null : null,
@@ -274,6 +336,11 @@ function Inner() {
       coapp_aadhaar_address: hasCoapp ? cAddress || null : null,
       coapp_aadhaar_front_path: hasCoapp ? cPaths?.front ?? null : null,
       coapp_aadhaar_back_path: hasCoapp ? cPaths?.back ?? null : null,
+      // Bill is on the applicant's name when there is NO co-applicant.
+      bill_on_applicant_name: hasCoapp === false,
+      proforma_invoice_path: quotePath,
+      rooftop_photo_path: rooftopPath,
+      rooftop_photo_gps: rooftopGps,
     };
     sessionStorage.setItem(`epcApply:${appId}`, JSON.stringify(payload));
     router.push(`/dashboard/apply/${appId}/loan` as any);
@@ -364,15 +431,71 @@ function Inner() {
           {ebillErr && <p className="text-[12px] text-red-700">{ebillErr}</p>}
         </Card>
 
+        {/* Quotation / Proforma invoice */}
+        <Card className="p-6 space-y-4">
+          <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Quotation / Proforma invoice</h2>
+          <p className="text-[13px] text-text-mid -mt-2">
+            Upload the project quotation or proforma invoice for the solar system.
+          </p>
+          <FileUpload
+            applicationId={appId}
+            category="quotation"
+            table="user_application_docs"
+            uploadedBy="epc"
+            onUploaded={(info) => setQuotePath(info.storagePath)}
+            hint="Photo, scan, or PDF."
+          />
+        </Card>
+
+        {/* Rooftop photo — geo-tagged */}
+        <Card className="p-6 space-y-4">
+          <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Rooftop photo (geo-tagged)</h2>
+          <p className="text-[13px] text-text-mid -mt-2">
+            Take a photo of the installation rooftop so the site can be verified.
+            Location is captured with the photo.
+          </p>
+          <FileUpload
+            applicationId={appId}
+            category="borrower_photo"
+            table="user_application_docs"
+            uploadedBy="epc"
+            captureGps
+            hint="Location is captured with the upload."
+            onUploaded={(info) => {
+              setRooftopPath(info.storagePath);
+              if ("geolocation" in navigator) {
+                navigator.geolocation.getCurrentPosition(
+                  (p) => setRooftopGps({
+                    lat: p.coords.latitude,
+                    lng: p.coords.longitude,
+                    captured_at: new Date().toISOString(),
+                  }),
+                  () => { /* silent — GPS optional */ },
+                  { timeout: 6000 },
+                );
+              }
+            }}
+          />
+        </Card>
+
         {/* Co-applicant toggle */}
         <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Co-applicant</h2>
-          <p className="text-[13px] text-text-mid -mt-2">
-            Add a co-applicant if the electricity bill is not in the customer&rsquo;s name.
-          </p>
+          <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">
+            Please confirm the electricity bill is in the name of the applicant.
+          </h2>
           <div className="grid sm:grid-cols-2 gap-3">
-            <ToggleTile active={hasCoapp === false} onClick={() => setHasCoapp(false)} title="No co-applicant" desc="The customer applies alone." />
-            <ToggleTile active={hasCoapp === true}  onClick={() => setHasCoapp(true)}  title="Yes, add co-applicant" desc="Capture their Aadhaar + PAN." />
+            <ToggleTile
+              active={hasCoapp === false}
+              onClick={() => setHasCoapp(false)}
+              title="Yes, the bill is in the applicant's name"
+              desc="No co-applicant needed."
+            />
+            <ToggleTile
+              active={hasCoapp === true}
+              onClick={() => setHasCoapp(true)}
+              title="No, the bill is not in the applicant's name (add a co-applicant)"
+              desc="Capture the co-applicant's Aadhaar + PAN."
+            />
           </div>
 
           {hasCoapp && (
@@ -406,6 +529,35 @@ function Inner() {
                     onChange={(e) => setCNumber(e.target.value.replace(/\D/g, "").slice(0, 12))}
                     placeholder="0000 0000 0000"
                     maxLength={14}
+                  />
+                  <Input
+                    label="Mobile number"
+                    inputMode="numeric"
+                    maxLength={10}
+                    value={cMobile}
+                    onChange={(e) => setCMobile(e.target.value.replace(/\D/g, ""))}
+                    placeholder="10-digit"
+                    error={
+                      coappMobileConflict
+                        ? "Cannot be the same as the applicant's mobile."
+                        : cMobile && !MOBILE_RE.test(cMobile)
+                        ? "Enter a valid 10-digit mobile."
+                        : undefined
+                    }
+                  />
+                  <Input
+                    label="Email"
+                    type="email"
+                    value={cEmail}
+                    onChange={(e) => setCEmail(e.target.value)}
+                    placeholder="coapplicant@example.com"
+                    error={
+                      coappEmailConflict
+                        ? "Cannot be the same as the applicant's email."
+                        : cEmail && !EMAIL_RE.test(cEmail)
+                        ? "Enter a valid email address."
+                        : undefined
+                    }
                   />
                   <div className="sm:col-span-2">
                     <label className="block mb-1.5 text-[13px] font-medium text-text-mid">Address</label>

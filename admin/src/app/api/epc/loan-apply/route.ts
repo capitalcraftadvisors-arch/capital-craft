@@ -149,10 +149,11 @@ export async function POST(req: NextRequest) {
       if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);
 
       // Ownership check (RLS also enforces, but explicit 403 beats a
-      // silent 0-row update).
+      // silent 0-row update). Also pull the applicant's own contact so we
+      // can reject a co-applicant that reuses it.
       const { data: app, error: loadErr } = await supabase
         .from("epc_applications")
-        .select("id, epc_business_id, current_step")
+        .select("id, epc_business_id, current_step, borrower_mobile, borrower_email")
         .eq("id", appId)
         .maybeSingle();
       if (loadErr) return err(loadErr.message, 500);
@@ -173,6 +174,30 @@ export async function POST(req: NextRequest) {
       }
       const coapp_pan = strOrNull(b.coapp_pan)?.toUpperCase() ?? null;
       if (coapp_pan && !PAN_RE.test(coapp_pan)) return err("Co-applicant PAN format is invalid.", 400);
+
+      // Co-applicant contact. Must NOT duplicate the applicant's own
+      // email / phone (same rule the admin flow enforces client-side).
+      const has_coapp = b.has_coapp === true;
+      const coapp_mobile = String(b.coapp_mobile ?? "").replace(/\D/g, "") || null;
+      const coapp_email  = strOrNull(b.coapp_email);
+      if (has_coapp) {
+        const applicantMobile = String((app as any).borrower_mobile ?? "").trim();
+        const applicantEmail  = String((app as any).borrower_email ?? "").trim().toLowerCase();
+        if (coapp_mobile && applicantMobile && coapp_mobile === applicantMobile) {
+          return err("Co-applicant mobile cannot be the same as the applicant's.", 400);
+        }
+        if (coapp_email && applicantEmail && coapp_email.toLowerCase() === applicantEmail) {
+          return err("Co-applicant email cannot be the same as the applicant's.", 400);
+        }
+      }
+
+      // Quotation / proforma + geo-tagged rooftop photo.
+      const proforma_invoice_path = strOrNull(b.proforma_invoice_path);
+      const rooftop_photo_path    = strOrNull(b.rooftop_photo_path);
+      const rooftop_photo_gps =
+        b.rooftop_photo_gps && typeof b.rooftop_photo_gps === "object"
+          ? b.rooftop_photo_gps
+          : null;
 
       // Page 3 — project + loan + tenure.
       const project_size         = numOrNull(b.project_size);
@@ -217,10 +242,18 @@ export async function POST(req: NextRequest) {
           ebill_address_line:     strOrNull(b.ebill_address_line),
           ebill_name:             strOrNull(b.ebill_name),
           bill_on_applicant_name: typeof b.has_coapp === "boolean" ? !b.has_coapp : null,
+          // Page 2 — quotation / proforma + geo-tagged rooftop photo
+          proforma_invoice_path,
+          proforma_uploaded_at:   proforma_invoice_path ? now : null,
+          rooftop_photo_path,
+          rooftop_photo_uploaded_at: rooftop_photo_path ? now : null,
+          rooftop_photo_gps,
           // Page 2 — co-applicant (only when toggled on)
           coapp_pan,
           coapp_name:                  strOrNull(b.coapp_name),
           coapp_dob:                   strOrNull(b.coapp_dob),
+          coapp_mobile,
+          coapp_email,
           coapp_pan_path:              strOrNull(b.coapp_pan_path),
           coapp_aadhaar_name:          strOrNull(b.coapp_aadhaar_name),
           coapp_aadhaar_dob:           strOrNull(b.coapp_aadhaar_dob),

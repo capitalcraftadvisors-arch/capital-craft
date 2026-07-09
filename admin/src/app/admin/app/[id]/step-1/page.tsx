@@ -109,6 +109,9 @@ function Inner() {
   const [panUploaded, setPanUploaded] = useState(false);
   // PAN number is a proper editable field — OCR prefills, admin can correct.
   const [panNumber, setPanNumber]     = useState("");
+  // Applicant passport-size photo (registration step only).
+  const [photoUploaded, setPhotoUploaded] = useState(false);
+  const [photoPath, setPhotoPath]         = useState<string | null>(null);
 
   const [consented, setConsented]     = useState(false);
   const [sending, setSending]         = useState(false);
@@ -125,7 +128,7 @@ function Inner() {
         .select(
           "id, epc_business_id, status, current_step, " +
           "install_pincode, install_state, install_district, install_city, " +
-          "borrower_mobile, borrower_email, borrower_pan, system_type, plant_use_type, consent_at",
+          "borrower_mobile, borrower_email, borrower_pan, system_type, plant_use_type, consent_at, customer_photo_path",
         )
         .eq("id", params.id)
         .maybeSingle();
@@ -140,6 +143,7 @@ function Inner() {
       if (row.borrower_mobile)  setPhone(row.borrower_mobile);
       if (row.borrower_email)   setEmail(row.borrower_email);
       if (row.borrower_pan)     { setPanNumber(row.borrower_pan); setPanUploaded(true); }
+      if (row.customer_photo_path) { setPhotoPath(row.customer_photo_path); setPhotoUploaded(true); }
       if (row.system_type)      setSystemType(row.system_type);
       if (row.plant_use_type)   setPlantUse(row.plant_use_type);
       if (row.consent_at)       setConsented(true);
@@ -210,6 +214,7 @@ function Inner() {
     !!plantUse &&
     panUploaded &&
     panValid &&
+    photoUploaded &&
     consented &&
     !sending;
 
@@ -232,6 +237,7 @@ function Inner() {
           borrower_mobile:  phone,
           borrower_email:   email,
           borrower_pan:     panNumber.trim().toUpperCase(),
+          customer_photo_path: photoPath,
           system_type:      systemType,
           plant_use_type:   plantUse,
           consent_policies: CONSENT_KEYS,
@@ -432,6 +438,24 @@ function Inner() {
               {panNumber && !panValid && " Invalid format."}
             </p>
           </div>
+        </Card>
+
+        {/* Section: Applicant photo — passport-size, captured at registration. */}
+        <Card className="p-6 space-y-4">
+          <div>
+            <h2 className="font-display font-semibold text-[18px] text-[#0f3d2e]">Applicant photo</h2>
+            <p className="text-[13px] text-text-mid mt-1">
+              Upload a recent passport-size photograph of the applicant.
+            </p>
+          </div>
+          <FileUpload
+            applicationId={loan.id}
+            category="customer_photo"
+            table="user_application_docs"
+            uploadedBy="admin"
+            onUploaded={(info) => { setPhotoUploaded(true); setPhotoPath(info.storagePath); }}
+            hint="Clear, front-facing photo — JPG or PNG."
+          />
         </Card>
 
         {/* Section: Solar system preference — three side-by-side clickable
