@@ -87,6 +87,7 @@ function DOC_LABEL(cat: string): string {
     pan_business: "PAN card",
     gstin: "GST reg.",
     extra_doc: "Extra doc",
+    admin_extra: "Extra document",
     cancelled_cheque: "Cheque",
     stakeholder_pan: "Member PAN",
     stakeholder_aadhaar: "Aadhaar (legacy)",
@@ -363,6 +364,9 @@ function Inner() {
                   ? `Other · ${biz.pm_surya_ghar_other || "—"}`
                   : biz.pm_surya_ghar ? cap(biz.pm_surya_ghar) : "—"
               } />
+              {biz.pm_surya_ghar === "yes" && (
+                <KV k="Surya Ghar capacity" v={biz.pm_surya_ghar_capacity} />
+              )}
             </SectionCard>
 
             <SectionCard title={peopleHeading(biz.business_type)} accent="green" icon={I.users}>
@@ -446,6 +450,11 @@ function Inner() {
               <KV k="Resi cap." v={fmtCapacity(adminInfo?.capacity_residential, adminInfo?.capacity_residential_unit)} />
               <KV k="Comm cap." v={fmtCapacity(adminInfo?.capacity_commercial, adminInfo?.capacity_commercial_unit)} />
               <KV k="Turnover" v={adminInfo?.turnover_last_fy} />
+              <KV k="Expectation" v={
+                biz.business_expectation_value != null
+                  ? `${biz.business_expectation_value}${biz.business_expectation ? " " + cap(biz.business_expectation) : ""}`
+                  : (biz.business_expectation ? cap(biz.business_expectation) : "—")
+              } />
             </SectionCard>
 
             <SectionCard title="Lenders" tint icon={I.money} adminOnly>

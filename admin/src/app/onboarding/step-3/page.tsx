@@ -41,20 +41,23 @@ type RoleConfig = {
   roleLabel: string;
   addButtonLabel: string | null;
   defaultDesignation: string;
+  minRows: number;
   maxRows: number;
 };
 
 function configFor(bt: BizType): RoleConfig {
   switch (bt) {
     case "proprietorship":
-      return { heading: "Proprietor details", roleLabel: "Proprietor", addButtonLabel: null, defaultDesignation: "Proprietor", maxRows: 1 };
+      return { heading: "Proprietor details", roleLabel: "Proprietor", addButtonLabel: null, defaultDesignation: "Proprietor", minRows: 1, maxRows: 1 };
     case "pvt_ltd":
-      return { heading: "Director details", roleLabel: "Director", addButtonLabel: "+ Add Director", defaultDesignation: "Director", maxRows: Infinity };
+      // Private Limited requires at least 2 directors.
+      return { heading: "Director details", roleLabel: "Director", addButtonLabel: "+ Add Director", defaultDesignation: "Director", minRows: 2, maxRows: Infinity };
     case "partnership":
     case "llp":
-      return { heading: "Partner details", roleLabel: "Partner", addButtonLabel: "+ Add Partner", defaultDesignation: "Partner", maxRows: Infinity };
+      // Partnership / LLP require at least 2 partners.
+      return { heading: "Partner details", roleLabel: "Partner", addButtonLabel: "+ Add Partner", defaultDesignation: "Partner", minRows: 2, maxRows: Infinity };
     default:
-      return { heading: "Stakeholders details", roleLabel: "Stakeholder", addButtonLabel: "+ Add Stakeholder", defaultDesignation: "", maxRows: Infinity };
+      return { heading: "Stakeholders details", roleLabel: "Stakeholder", addButtonLabel: "+ Add Stakeholder", defaultDesignation: "", minRows: 1, maxRows: Infinity };
   }
 }
 
@@ -231,8 +234,12 @@ export default function Step3Page() {
     const biz = getBusiness();
     if (!biz || !businessId) return;
 
-    if (displayed.length === 0) {
-      alert(`Please add ${businessType === "proprietorship" ? "the proprietor's" : "at least one " + cfg.roleLabel.toLowerCase() + "'s"} details.`);
+    if (displayed.length < cfg.minRows) {
+      alert(
+        businessType === "proprietorship"
+          ? "Please add the proprietor's details."
+          : `Please add at least ${cfg.minRows} ${cfg.roleLabel.toLowerCase()}s' details.`,
+      );
       return;
     }
 

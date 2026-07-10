@@ -19,6 +19,7 @@ import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
+import DeleteLoanAppModal from "@/components/DeleteLoanAppModal";
 import { supabase } from "@/lib/supabase";
 import { getDocumentUrl } from "@/lib/storage";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL, type LenderOutcome } from "@/lib/loan-status";
@@ -92,6 +93,7 @@ function Inner() {
   const [statusBusy, setStatusBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  const [delOpen, setDelOpen] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -217,14 +219,31 @@ function Inner() {
         </div>
 
         {/* Action strip */}
-        <div className="flex gap-3">
+        <div className="flex flex-wrap gap-3">
           <Button variant="primary" onClick={() => router.push(`/admin/app/${loan.id}/step-1` as any)}>
             Edit application
           </Button>
           <Button variant="outline" onClick={() => router.push(`/admin/app/${loan.id}/step-6` as any)}>
             Review page
           </Button>
+          <button
+            type="button"
+            onClick={() => setDelOpen(true)}
+            className="ml-auto px-4 py-2 rounded-input text-[13px] font-semibold border border-red-200 text-red-700 hover:bg-red-50 transition-colors"
+          >
+            Delete application
+          </button>
         </div>
+
+        <DeleteLoanAppModal
+          open={delOpen}
+          onClose={() => setDelOpen(false)}
+          onDeleted={() => router.replace("/admin" as any)}
+          applicationId={loan.id}
+          displayId={displayId(loan)}
+          applicant={applicantName}
+          mobile={loan.borrower_mobile ?? null}
+        />
 
         {/* Loan status band — admin sets the application's status here.
             The active choice is derived from the current pipeline status. */}

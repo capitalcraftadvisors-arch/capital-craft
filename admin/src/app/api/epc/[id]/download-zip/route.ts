@@ -243,6 +243,11 @@ function fallbackFileName(doc: Doc): string {
 function pathInZip(doc: Doc, memberLabelById: Map<string, string>): string {
   const fname = sanitizeSegment(doc.file_name || fallbackFileName(doc));
 
+  // Admin-added extra docs go into their own top-level folder.
+  if (doc.category === "admin_extra") {
+    return `Extra Docs/${fname}`;
+  }
+
   if (doc.category === "gst_r3b") {
     const m = (doc.metadata ?? {}) as Record<string, unknown>;
     const pt = m.period_type as string | undefined;

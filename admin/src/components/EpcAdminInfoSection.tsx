@@ -54,16 +54,21 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
   // spec — loaded/saved separately but presented in this same card and
   // committed by the same Save button.
   const [expectation, setExpectation] = useState<"" | "crores" | "lakhs">("");
+  // Numeric value paired with the unit above (e.g. 5 + "crores" = "5 Crores").
+  const [expectationValue, setExpectationValue] = useState<string>("");
 
   useEffect(() => {
     (async () => {
       const { data: bizRow } = await supabase()
         .from("epc_business")
-        .select("business_expectation")
+        .select("business_expectation, business_expectation_value")
         .eq("id", businessId)
         .maybeSingle();
       if (bizRow?.business_expectation === "crores" || bizRow?.business_expectation === "lakhs") {
         setExpectation(bizRow.business_expectation);
+      }
+      if (bizRow?.business_expectation_value != null) {
+        setExpectationValue(String(bizRow.business_expectation_value));
       }
 
       const { data, error } = await supabase()
@@ -122,6 +127,11 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
         return;
       }
     }
+    if (expectationValue.trim() && parseNum(expectationValue) === null) {
+      setErrorMsg("Business Expectation must be a number.");
+      setState("error");
+      return;
+    }
 
     setState("saving");
     // upsert onto business_id (the PK). Lazy row creation on first save.
@@ -143,10 +153,13 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
       return;
     }
 
-    // Business Expectation → epc_business (admin RLS permits the write).
+    // Business Expectation (value + unit) → epc_business (admin RLS write).
     const { error: bizErr } = await supabase()
       .from("epc_business")
-      .update({ business_expectation: expectation || null })
+      .update({
+        business_expectation: expectation || null,
+        business_expectation_value: parseNum(expectationValue),
+      })
       .eq("id", businessId);
     if (bizErr) {
       setErrorMsg(bizErr.message);
@@ -249,25 +262,39 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
         </Field>
       </div>
 
-      {/* Row 4 — Business Expectation (scale only: Crores / Lakhs).
-          Stored on epc_business.business_expectation. */}
-      <div className="mb-4 max-w-[300px]">
+      {/* Row 4 — Business Expectation: number + scale (Crores / Lakhs).
+          e.g. "5 Crores". Number → business_expectation_value, unit →
+          business_expectation. Both on epc_business. */}
+      <div className="mb-4 max-w-[360px]">
         <Field label="Business Expectation">
-          <select
-            value={expectation}
-            onChange={(e) => {
-              setExpectation(e.target.value as "" | "crores" | "lakhs");
-              if (state !== "idle") setState("idle");
-            }}
-            className={
-              fullInputCls +
-              " pr-9 appearance-none bg-[url('data:image/svg+xml;utf8,<svg fill=%22%236B8294%22 viewBox=%220 0 20 20%22 xmlns=%22http://www.w3.org/2000/svg%22><path d=%22M5 8l5 5 5-5z%22/></svg>')] bg-no-repeat bg-[length:20px] bg-[right_10px_center]"
-            }
-          >
-            <option value="">Select…</option>
-            <option value="crores">Crores</option>
-            <option value="lakhs">Lakhs</option>
-          </select>
+          <div className="flex gap-3 items-stretch">
+            <input
+              type="text"
+              inputMode="decimal"
+              className={inputBase + " flex-1 min-w-0"}
+              placeholder="e.g. 5"
+              value={expectationValue}
+              onChange={(e) => {
+                setExpectationValue(e.target.value);
+                if (state !== "idle") setState("idle");
+              }}
+            />
+            <select
+              value={expectation}
+              onChange={(e) => {
+                setExpectation(e.target.value as "" | "crores" | "lakhs");
+                if (state !== "idle") setState("idle");
+              }}
+              className={
+                inputBase +
+                " w-[130px] shrink-0 pr-9 appearance-none bg-[url('data:image/svg+xml;utf8,<svg fill=%22%236B8294%22 viewBox=%220 0 20 20%22 xmlns=%22http://www.w3.org/2000/svg%22><path d=%22M5 8l5 5 5-5z%22/></svg>')] bg-no-repeat bg-[length:20px] bg-[right_10px_center]"
+              }
+            >
+              <option value="">Unit…</option>
+              <option value="crores">Crores</option>
+              <option value="lakhs">Lakhs</option>
+            </select>
+          </div>
         </Field>
       </div>
 

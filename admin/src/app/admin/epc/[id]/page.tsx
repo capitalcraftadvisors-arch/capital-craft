@@ -28,6 +28,7 @@ import EpcAdminInfoSection from "@/components/EpcAdminInfoSection";
 import CommentsSection from "@/components/CommentsSection";
 import EditableField from "@/components/EditableField";
 import AdminDocSlot from "@/components/AdminDocSlot";
+import FileUpload from "@/components/FileUpload";
 import { supabase } from "@/lib/supabase";
 import { logAudit } from "@/lib/auditLog";
 import { EMAIL_RE, PAN_RE, MOBILE_RE, IFSC_RE, ACCOUNT_RE } from "@/lib/validators";
@@ -258,6 +259,14 @@ function Inner() {
               hint="Entity / scheme name — free text."
             />
           )}
+          {biz.pm_surya_ghar === "yes" && (
+            <EditableField
+              label="Total installed capacity under PM Surya Ghar Yojana"
+              value={biz.pm_surya_ghar_capacity}
+              onSave={saveField("pm_surya_ghar_capacity")}
+              hint='Free text — e.g. "500 KW".'
+            />
+          )}
         </Section>
 
         <Section title="Bank">
@@ -286,6 +295,7 @@ function Inner() {
             value={((biz.stakeholders ?? []) as unknown[]).map(normStakeholder)}
             onSave={saveStakeholders}
             businessId={params.id}
+            businessType={biz.business_type ?? null}
           />
         </Section>
 
@@ -311,6 +321,25 @@ function Inner() {
             {extraDocLabel && (
               <AdminDocSlot businessId={params.id} category="extra_doc" label={extraDocLabel} />
             )}
+          </div>
+
+          {/* Admin-only extra documents — any file type, as many as needed.
+              Distinct from the onboarding doc set (category 'admin_extra');
+              downloaded into a separate "Extra Docs" folder in the ZIP. */}
+          <div className="mt-5 pt-4 border-t border-line">
+            <p className="text-[13px] font-semibold text-text mb-1">Additional documents</p>
+            <p className="text-[12px] text-text-muted mb-3">
+              Admin-only. Attach any extra documents not covered above (agreements,
+              approvals, correspondence). Add as many as you need.
+            </p>
+            <FileUpload
+              businessId={params.id}
+              category="admin_extra"
+              table="epc_documents"
+              uploadedBy="admin"
+              maxFiles={20}
+              hint="Any file — image, scan, or PDF."
+            />
           </div>
         </Section>
 
@@ -358,12 +387,26 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 // ── Members editor (edit-only per spec; no add/delete) ────────────────────
+// Minimum stakeholders per business type (LLP/Partnership = 2 partners,
+// Pvt Ltd = 2 directors). Enforced on save — existing submitted EPCs are
+// only affected when an admin actively re-saves this section.
+const MEMBER_RULES: Record<string, { min: number; max: number; role: string; defaultDesignation: string }> = {
+  proprietorship: { min: 1, max: 1,        role: "proprietor", defaultDesignation: "Proprietor" },
+  pvt_ltd:        { min: 2, max: Infinity, role: "director",   defaultDesignation: "Director" },
+  partnership:    { min: 2, max: Infinity, role: "partner",    defaultDesignation: "Partner" },
+  llp:            { min: 2, max: Infinity, role: "partner",    defaultDesignation: "Partner" },
+};
+function memberRule(bt: string | null) {
+  return MEMBER_RULES[bt ?? ""] ?? { min: 1, max: Infinity, role: "member", defaultDesignation: "" };
+}
+
 function MembersEditor({
-  value, onSave, businessId,
+  value, onSave, businessId, businessType,
 }: {
   value: Stakeholder[];
   onSave: (next: Stakeholder[]) => Promise<void>;
   businessId: string;
+  businessType: string | null;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Stakeholder[]>(value);
@@ -372,7 +415,14 @@ function MembersEditor({
 
   useEffect(() => { setDraft(value); }, [value]);
 
+  const rule = memberRule(businessType);
+
   async function save() {
+    // Minimum-count rule (LLP/Partnership = 2 partners, Pvt Ltd = 2 directors).
+    if (draft.length < rule.min) {
+      setError(`Please add at least ${rule.min} ${rule.role}${rule.min > 1 ? "s" : ""}.`);
+      return;
+    }
     setSaving(true);
     try {
       await onSave(draft);
@@ -385,8 +435,22 @@ function MembersEditor({
     }
   }
 
-  if (value.length === 0) {
-    return <p className="text-[13px] text-text-muted">No members.</p>;
+  if (value.length === 0 && !editing) {
+    return (
+      <div>
+        <p className="text-[13px] text-text-muted mb-2">No members.</p>
+        <button
+          type="button"
+          onClick={() => {
+            setDraft([{ id: crypto.randomUUID(), name: "", designation: rule.defaultDesignation, mobile: "", email: "" }]);
+            setEditing(true);
+          }}
+          className="text-[12px] text-blue hover:underline"
+        >
+          + Add members
+        </button>
+      </div>
+    );
   }
 
   if (!editing) {
@@ -435,7 +499,16 @@ function MembersEditor({
     <div className="space-y-3">
       {draft.map((s, i) => (
         <div key={s.id} className="border border-line rounded-input p-3 bg-bg-soft">
-          <p className="text-[11px] text-text-muted mb-2">Member {i + 1}</p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[11px] text-text-muted">{rule.role.charAt(0).toUpperCase() + rule.role.slice(1)} {i + 1}</p>
+            <button
+              type="button"
+              onClick={() => setDraft(draft.filter((_, idx) => idx !== i))}
+              className="text-[11px] text-red-500 hover:underline"
+            >
+              Remove
+            </button>
+          </div>
           <div className="grid gap-2 sm:grid-cols-2">
             <input
               className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
@@ -480,6 +553,20 @@ function MembersEditor({
           </div>
         </div>
       ))}
+      {draft.length < rule.max && (
+        <button
+          type="button"
+          onClick={() =>
+            setDraft([...draft, { id: crypto.randomUUID(), name: "", designation: rule.defaultDesignation, mobile: "", email: "" }])
+          }
+          className="text-[12px] text-blue hover:underline"
+        >
+          + Add {rule.role}
+        </button>
+      )}
+      {rule.min > 1 && (
+        <p className="text-[11px] text-text-muted">Minimum {rule.min} {rule.role}s required.</p>
+      )}
       {error && <p className="text-[12px] text-red-500">{error}</p>}
       <div className="flex gap-2">
         <button

@@ -27,6 +27,7 @@ type Form = {
   gstin_number: string;
   pm_surya_ghar: SuryaGhar;
   pm_surya_ghar_other: string;
+  pm_surya_ghar_capacity: string;
 };
 
 const BUSINESS_OPTIONS = [
@@ -98,6 +99,7 @@ export default function Step2Page() {
       gstin_number: "",
       pm_surya_ghar: "",
       pm_surya_ghar_other: "",
+      pm_surya_ghar_capacity: "",
     },
   });
 
@@ -112,7 +114,7 @@ export default function Step2Page() {
       const { data } = await supabase()
         .from("epc_business")
         .select(
-          "business_type, pan_number, legal_name, trade_name, gstin_number, pm_surya_ghar, pm_surya_ghar_other",
+          "business_type, pan_number, legal_name, trade_name, gstin_number, pm_surya_ghar, pm_surya_ghar_other, pm_surya_ghar_capacity",
         )
         .eq("id", biz.id)
         .maybeSingle();
@@ -124,6 +126,7 @@ export default function Step2Page() {
         gstin_number: data?.gstin_number ?? "",
         pm_surya_ghar: ((data?.pm_surya_ghar as SuryaGhar) ?? "") as SuryaGhar,
         pm_surya_ghar_other: data?.pm_surya_ghar_other ?? "",
+        pm_surya_ghar_capacity: data?.pm_surya_ghar_capacity ?? "",
       });
     })();
   }, [reset]);
@@ -224,6 +227,10 @@ export default function Step2Page() {
           values.pm_surya_ghar === "other"
             ? values.pm_surya_ghar_other.trim() || null
             : null,
+        pm_surya_ghar_capacity:
+          values.pm_surya_ghar === "yes"
+            ? values.pm_surya_ghar_capacity.trim() || null
+            : null,
         current_step: 3,
       })
       .eq("id", biz.id);
@@ -291,6 +298,15 @@ export default function Step2Page() {
                 },
               })}
               error={errors.pm_surya_ghar_other?.message}
+            />
+          )}
+          {suryaGhar === "yes" && (
+            <Input
+              label="What is the total installed capacity under PM Surya Ghar Yojana?"
+              placeholder="e.g. 500 KW"
+              leftIcon={IconSun}
+              {...register("pm_surya_ghar_capacity")}
+              error={errors.pm_surya_ghar_capacity?.message}
             />
           )}
 

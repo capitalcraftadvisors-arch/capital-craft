@@ -6,7 +6,7 @@ import { uploadDocument, getDocumentUrl, deleteDocument } from "@/lib/storage";
 import { isAcceptedFileType } from "@/lib/validators";
 
 type EpcCategory =
-  | "pan_business" | "gstin" | "extra_doc"
+  | "pan_business" | "gstin" | "extra_doc" | "admin_extra"
   | "stakeholder_pan" | "stakeholder_aadhaar"
   | "cancelled_cheque"
   | "office_exterior" | "office_interior" | "office_selfie";
