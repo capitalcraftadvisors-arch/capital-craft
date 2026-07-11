@@ -104,16 +104,20 @@ export default function Step3Page() {
       const existing = rawExisting.map(normalizeStakeholder);
 
       if (existing.length === 0) {
+        // Only pre-fill the proprietor from the POC when the POC IS the
+        // proprietor. A "Manager" (or any other) POC leaves the proprietor
+        // row blank. The designation always comes from the entity type
+        // (Proprietor), never inherited from the POC's designation.
+        const pocIsProprietor =
+          ((data?.contact_designation as string | null) ?? "").trim().toLowerCase() === "proprietor";
         const seeded: Stakeholder =
           bt === "proprietorship"
             ? {
                 id: crypto.randomUUID(),
-                name: (data?.contact_name as string | null) ?? "",
-                designation:
-                  ((data?.contact_designation as string | null) ?? "") ||
-                  c.defaultDesignation,
-                mobile: (data?.contact_mobile as string | null) ?? "",
-                email:  (data?.contact_email as string | null) ?? "",
+                name:   pocIsProprietor ? ((data?.contact_name   as string | null) ?? "") : "",
+                designation: c.defaultDesignation,
+                mobile: pocIsProprietor ? ((data?.contact_mobile as string | null) ?? "") : "",
+                email:  pocIsProprietor ? ((data?.contact_email  as string | null) ?? "") : "",
               }
             : {
                 id: crypto.randomUUID(),

@@ -19,8 +19,7 @@ type BizFull = {
   business_references: { type: string; name: string; mobile: string }[] | null;
   bank_account_number: string | null;
   bank_ifsc: string | null;
-  bank_branch: string | null;
-  bank_account_holder: string | null;
+  bank_name: string | null;
 };
 
 export default function ReviewPage() {
@@ -35,7 +34,7 @@ export default function ReviewPage() {
       const { data } = await supabase()
         .from("epc_business")
         .select(
-          "contact_name, contact_mobile, contact_designation, business_type, pan_number, stakeholders, business_references, bank_account_number, bank_ifsc, bank_branch, bank_account_holder",
+          "contact_name, contact_mobile, contact_designation, business_type, pan_number, stakeholders, business_references, bank_account_number, bank_ifsc, bank_name",
         )
         .eq("id", b.id)
         .maybeSingle();
@@ -163,8 +162,7 @@ export default function ReviewPage() {
         <Section title="Bank">
           <Row k="Account" v={biz.bank_account_number} />
           <Row k="IFSC" v={biz.bank_ifsc} />
-          <Row k="Branch" v={biz.bank_branch} />
-          <Row k="Holder" v={biz.bank_account_holder} />
+          <Row k="Bank Name" v={biz.bank_name} />
         </Section>
 
         <Section title="References">
