@@ -8,9 +8,8 @@ import Input from "@/components/ui/Input";
 import Card from "@/components/ui/Card";
 import WizardProgress from "@/components/WizardProgress";
 import FileUpload from "@/components/FileUpload";
-import { getBusiness, setBusiness } from "@/lib/auth";
+import { getBusiness, setBusiness, getToken } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
-import { extractCheque } from "@/lib/ocr";
 import { ACCOUNT_RE, IFSC_RE } from "@/lib/validators";
 
 // Bank details.
@@ -57,37 +56,16 @@ export default function Step4Page() {
   const acctMatches =
     acct.length > 0 && acctConfirm.length > 0 && acct === acctConfirm;
 
-  // Mismatch signal only fires when the user has "committed" the re-enter
-  // value — either by blurring the box or by typing enough characters to
-  // reach/exceed the fetched value's length. Typing "43" or "8" or "85"
-  // partway through should NOT show a red error / unmask the top box.
-  // Save & continue does its own strict compare regardless, so this is
-  // purely a UI-timing signal.
+  // Mismatch is shown only after the user "commits" the re-entry — either
+  // by blurring the box or by typing to/past the account length — not on
+  // every keystroke. It clears the INSTANT the two boxes match, so a
+  // corrected value lets the EPC continue immediately with no page refresh.
   const [acctConfirmBlurred, setAcctConfirmBlurred] = useState(false);
   const acctConfirmComplete =
     acctConfirmBlurred ||
     (acct.length > 0 && acctConfirm.length >= acct.length);
   const acctMismatch =
     acctConfirmComplete && acctConfirm.length > 0 && acct !== acctConfirm;
-
-  // TOP-BOX behavior (the OCR-filled "Account number" field):
-  //
-  //   ┌────────────────────────────┬──────────────┬───────────────────────┐
-  //   │ state                      │ editable?    │ display               │
-  //   ├────────────────────────────┼──────────────┼───────────────────────┤
-  //   │ empty / short (< 9 digits) │ YES (typable)│ raw (as user types)   │
-  //   │ valid (≥ 9) + no mismatch  │ NO           │ ••••••XXXX (last 4)   │
-  //   │ valid (≥ 9) + MISMATCH     │ YES          │ raw (full, for fix)   │
-  //   └────────────────────────────┴──────────────┴───────────────────────┘
-  //
-  // Storage stays raw in bank_account_number regardless — the mask is
-  // purely a display transform. Same digits go to Supabase and Excel.
-  const acctIsValidLen = acct.length >= 9;
-  const acctReadOnly = acctIsValidLen && !acctMismatch;
-  const acctMasked = acct.length > 4
-    ? "•".repeat(acct.length - 4) + acct.slice(-4)
-    : acct;
-  const acctDisplay = acctReadOnly ? acctMasked : acct;
 
   useEffect(() => {
     const biz = getBusiness();
@@ -117,26 +95,35 @@ export default function Step4Page() {
   // same debug pattern used for gstin uploads.
   async function handleChequeUploaded({ docId, file }: { docId: string; storagePath: string; file: File }) {
     try {
-      const r = await extractCheque(file);
-      if (!r.ok) return;
+      // OCR on the SAME Cloud Run Google Vision setup the loan-applicant
+      // PAN/Aadhaar OCR uses (working GOOGLE_VISION_API_KEY), not the
+      // Supabase Edge Function.
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/epc/extract-cheque", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        body: fd,
+      });
+      const r = await res.json().catch(() => ({}));
+      if (!res.ok || !r?.ok) return; // silent — the EPC fills the fields manually
       if (r.ifsc) setValue("bank_ifsc", r.ifsc);
       if (r.accountNumber) {
         setValue("bank_account_number", r.accountNumber);
-        // OCR auto-fill should NOT auto-confirm — the point is the EPC
-        // re-types it as a verification step. Clear confirm so they have to.
+        // Auto-fill must NOT auto-confirm — the EPC re-types it as a
+        // verification step. Clear confirm so they have to.
         setValue("confirm_account_number", "");
       }
       if (r.bankName) setValue("bank_name", r.bankName);
-      setOcrRaw(r);
+      setOcrRaw(r.raw_text ?? null);
 
-      // Persist audit trail on the doc row. Best-effort — failure here
-      // logs a warning but doesn't disturb the form.
+      // Persist audit trail on the doc row. Best-effort.
       try {
         await supabase()
           .from("epc_documents")
           .update({
             metadata: {
-              ocr_raw_text: r.raw ?? null,
+              ocr_raw_text: r.raw_text ?? null,
               accountNumber: r.accountNumber ?? null,
               ifsc: r.ifsc ?? null,
               bankName: r.bankName ?? null,
@@ -252,31 +239,21 @@ export default function Step4Page() {
 
         <Card className="p-6 sm:p-7">
           <form className="grid gap-5 sm:grid-cols-2">
-            {/* Top box: display transform driven by acctReadOnly.        */}
-            {/* Masked + locked when valid + matches; unmasked + editable  */}
-            {/* while short/empty or on mismatch. Raw digits are stored   */}
-            {/* in bank_account_number regardless — mask is display-only.  */}
+            {/* Plain editable field — digits only. Prefilled from cheque
+                OCR when detected; always editable so any-length account
+                number can be typed/corrected without getting locked. */}
             <Input
               label="Account number"
               placeholder=""
               inputMode="numeric"
-              value={acctDisplay}
-              readOnly={acctReadOnly}
-              onChange={(e) => {
-                // Belt-and-suspenders: don't accept edits while readOnly.
-                // (The browser also refuses; this guards against a mis-typed
-                //  imperative setValue.)
-                if (acctReadOnly) return;
-                const digits = e.target.value.replace(/\D/g, "");
-                setValue("bank_account_number", digits);
-              }}
+              value={acct}
+              onChange={(e) => setValue("bank_account_number", e.target.value.replace(/\D/g, ""))}
               error={errors.bank_account_number?.message}
               hint={
                 acctMismatch
-                  ? "OCR may have read the wrong value — please edit the account number."
+                  ? "Doesn't match the re-entered number — please check both boxes."
                   : undefined
               }
-              className={acctReadOnly ? "bg-bg-soft cursor-not-allowed" : undefined}
             />
             {/* Bottom box: user re-enters, always visible, always editable. */}
             {/* Mismatch is not shown until the user commits their re-entry  */}
