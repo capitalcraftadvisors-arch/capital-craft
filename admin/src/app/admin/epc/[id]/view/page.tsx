@@ -45,7 +45,7 @@ type Doc = {
   stakeholder_id: string | null;
   metadata: Record<string, unknown> | null;
 };
-type LenderRow = { lender: string; docs_given: boolean; approved: boolean };
+type LenderRow = { lender: string; docs_given: boolean; approved: boolean; rejected?: boolean };
 type AdminInfo = {
   team_size: string | null;
   capacity_residential: number | null;
@@ -156,7 +156,7 @@ function Inner() {
       const [{ data: b }, { data: d }, { data: l }, { data: ai }] = await Promise.all([
         supabase().from("epc_business").select("*").eq("id", params.id).maybeSingle(),
         supabase().from("epc_documents").select("id, category, file_name, mime_type, stakeholder_id, metadata").eq("business_id", params.id),
-        supabase().from("epc_lender_status").select("lender, docs_given, approved").eq("business_id", params.id),
+        supabase().from("epc_lender_status").select("lender, docs_given, approved, rejected").eq("business_id", params.id),
         supabase().from("epc_admin_info").select("*").eq("business_id", params.id).maybeSingle(),
       ]);
       setBiz(b);
@@ -365,7 +365,7 @@ function Inner() {
                   : biz.pm_surya_ghar ? cap(biz.pm_surya_ghar) : "—"
               } />
               {biz.pm_surya_ghar === "yes" && (
-                <KV k="Surya Ghar capacity" v={biz.pm_surya_ghar_capacity} />
+                <KV k="Surya Ghar installs" v={biz.pm_surya_ghar_capacity} />
               )}
             </SectionCard>
 
@@ -461,7 +461,9 @@ function Inner() {
               {(["creditfair", "aerem", "solfin"] as const).map((key) => {
                 const l = lender.find((x) => x.lender === key);
                 const label = key === "creditfair" ? "CreditFair" : key === "aerem" ? "Aerem" : "Solfin";
-                const state = l ? (l.approved ? "approved" : l.docs_given ? "docs" : "none") : "none";
+                const state = l
+                  ? ((l as any).rejected ? "rejected" : l.approved ? "approved" : l.docs_given ? "docs" : "none")
+                  : "none";
                 return (
                   <div key={key} className="flex items-center justify-between text-[14px] py-1">
                     <span className="text-[#0f3d2e] font-medium">{label}</span>
@@ -760,7 +762,12 @@ function KV({ k, v, valueClass }: { k: string; v: unknown; valueClass?: string }
   );
 }
 
-function LenderStatePill({ state }: { state: "approved" | "docs" | "none" }) {
+function LenderStatePill({ state }: { state: "approved" | "docs" | "none" | "rejected" }) {
+  if (state === "rejected") {
+    return <span className="text-[13px] text-[#dc2626] font-semibold inline-flex items-center gap-1.5">
+      <span className="inline-block w-2.5 h-2.5 rounded-full bg-[#dc2626]" /> rejected
+    </span>;
+  }
   if (state === "approved") {
     return <span className="text-[13px] text-[#178a5c] font-semibold inline-flex items-center gap-1.5">
       <span className="inline-block w-2.5 h-2.5 rounded-full bg-[#178a5c]" /> approved

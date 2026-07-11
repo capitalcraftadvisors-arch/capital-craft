@@ -302,8 +302,9 @@ export default function Step2Page() {
           )}
           {suryaGhar === "yes" && (
             <Input
-              label="What is the total installed capacity under PM Surya Ghar Yojana?"
-              placeholder="e.g. 500 KW"
+              label="Total No of installations on PM Surya Ghar Scheme"
+              placeholder="e.g. 25"
+              inputMode="numeric"
               leftIcon={IconSun}
               {...register("pm_surya_ghar_capacity")}
               error={errors.pm_surya_ghar_capacity?.message}

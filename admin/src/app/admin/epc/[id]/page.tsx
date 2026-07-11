@@ -261,10 +261,10 @@ function Inner() {
           )}
           {biz.pm_surya_ghar === "yes" && (
             <EditableField
-              label="Total installed capacity under PM Surya Ghar Yojana"
+              label="Total No of installations on PM Surya Ghar Scheme"
               value={biz.pm_surya_ghar_capacity}
               onSave={saveField("pm_surya_ghar_capacity")}
-              hint='Free text — e.g. "500 KW".'
+              hint="Number of installations — e.g. 25."
             />
           )}
         </Section>

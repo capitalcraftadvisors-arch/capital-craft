@@ -91,7 +91,7 @@ const LENDERS: { key: Lender; label: string }[] = [
   { key: "solfin",     label: "Solfin" },
 ];
 
-type LenderState = { docs_given: boolean; approved: boolean };
+type LenderState = { docs_given: boolean; approved: boolean; rejected: boolean };
 type LenderMap = Partial<Record<Lender, LenderState>>;
 
 type SortKey = "created_at" | "status";
@@ -212,12 +212,12 @@ function EpcsTab() {
       const ids = rs.map((r) => r.id);
       const { data: lenderRows } = await supabase()
         .from("epc_lender_status")
-        .select("business_id, lender, docs_given, approved")
+        .select("business_id, lender, docs_given, approved, rejected")
         .in("business_id", ids);
       const map: Record<string, LenderMap> = {};
-      for (const lr of (lenderRows ?? []) as { business_id: string; lender: Lender; docs_given: boolean; approved: boolean }[]) {
+      for (const lr of (lenderRows ?? []) as { business_id: string; lender: Lender; docs_given: boolean; approved: boolean; rejected: boolean }[]) {
         if (!map[lr.business_id]) map[lr.business_id] = {};
-        map[lr.business_id][lr.lender] = { docs_given: lr.docs_given, approved: lr.approved };
+        map[lr.business_id][lr.lender] = { docs_given: lr.docs_given, approved: lr.approved, rejected: !!lr.rejected };
       }
       setLenderState(map);
     } else {
@@ -262,19 +262,40 @@ function EpcsTab() {
     else { setSortKey(k); setSortDir("desc"); }
   }
 
-  async function toggleLender(epcId: string, lender: Lender, field: "docs_given" | "approved", value: boolean) {
+  async function toggleLender(epcId: string, lender: Lender, field: "docs_given" | "approved" | "rejected", value: boolean) {
     if (field === "approved") {
       const msg = value === true
         ? "Are you sure for this approval?"
         : "Are you sure you want to un-approve this?";
       if (!window.confirm(msg)) return;
     }
+    if (field === "rejected") {
+      const msg = value === true
+        ? "Mark this lender as Rejected?"
+        : "Clear the Rejected mark for this lender?";
+      if (!window.confirm(msg)) return;
+    }
+
+    // Approved and Rejected are mutually exclusive — ticking one clears
+    // the other. Docs is independent. Build the boolean patch + the DB
+    // patch (incl. rejected_at) together so both fields move atomically.
+    const boolPatch: Partial<LenderState> = { [field]: value } as Partial<LenderState>;
+    const dbPatch: Record<string, unknown> = { [field]: value };
+    if (field === "approved" && value) {
+      boolPatch.rejected = false;
+      dbPatch.rejected = false;
+      dbPatch.rejected_at = null;
+    } else if (field === "rejected") {
+      dbPatch.rejected_at = value ? new Date().toISOString() : null;
+      if (value) { boolPatch.approved = false; dbPatch.approved = false; }
+    }
+
     const prevState = lenderState;
     setLenderState((s) => {
       const next = { ...s };
       const cur = (next[epcId] ?? {}) as LenderMap;
-      const lenderCur = (cur[lender] ?? { docs_given: false, approved: false }) as LenderState;
-      next[epcId] = { ...cur, [lender]: { ...lenderCur, [field]: value } };
+      const lenderCur = (cur[lender] ?? { docs_given: false, approved: false, rejected: false }) as LenderState;
+      next[epcId] = { ...cur, [lender]: { ...lenderCur, ...boolPatch } };
       return next;
     });
     try {
@@ -287,13 +308,13 @@ function EpcsTab() {
       if (existing) {
         await supabase()
           .from("epc_lender_status")
-          .update({ [field]: value })
+          .update(dbPatch)
           .eq("id", (existing as { id: string }).id);
       } else {
         const row: Record<string, unknown> = {
-          business_id: epcId, lender, docs_given: false, approved: false,
+          business_id: epcId, lender, docs_given: false, approved: false, rejected: false,
+          ...dbPatch,
         };
-        row[field] = value;
         await supabase().from("epc_lender_status").insert(row);
       }
     } catch (e) {
@@ -533,12 +554,12 @@ function LenderCell({
   state, onToggle,
 }: {
   state: LenderMap;
-  onToggle: (lender: Lender, field: "docs_given" | "approved", value: boolean) => void;
+  onToggle: (lender: Lender, field: "docs_given" | "approved" | "rejected", value: boolean) => void;
 }) {
   return (
-    <div className="space-y-1.5 min-w-[220px]">
+    <div className="space-y-1.5 min-w-[300px]">
       {LENDERS.map((l) => {
-        const s = state[l.key] ?? { docs_given: false, approved: false };
+        const s = state[l.key] ?? { docs_given: false, approved: false, rejected: false };
         return (
           <div key={l.key} className="flex items-center gap-3 text-[11px]">
             <span className="min-w-[64px] font-medium text-[#0f3d2e]">{l.label}</span>
@@ -559,6 +580,15 @@ function LenderCell({
                 className="h-3.5 w-3.5 accent-[#178a5c]"
               />
               <span className="text-[#5a8a76]">Approved</span>
+            </label>
+            <label className="flex items-center gap-1 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={!!s.rejected}
+                onChange={(e) => onToggle(l.key, "rejected", e.target.checked)}
+                className="h-3.5 w-3.5 accent-[#dc2626]"
+              />
+              <span className="text-[#5a8a76]">Rejected</span>
             </label>
           </div>
         );
