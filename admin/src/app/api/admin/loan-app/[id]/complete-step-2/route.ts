@@ -64,14 +64,10 @@ export async function POST(
     const aadhaar_back_path     = strOrNull(b.aadhaar_back_path);
     const aadhaar_face_path     = strOrNull(b.aadhaar_face_path);
 
-    if (!aadhaar_front_path || !aadhaar_back_path) {
-      return err("Front and back Aadhaar uploads are required.", 400);
-    }
-    if (!aadhaar_number_raw || !/^\d{12}$/.test(aadhaar_number_raw)) {
-      return err("Aadhaar number must be exactly 12 digits.", 400);
-    }
+    // Admin-only route — no required-field blocking. Store whatever's present;
+    // the masked form is derived only when digits exist.
     const aadhaar_number        = aadhaar_number_raw;
-    const aadhaar_number_masked = "xxxxxxxx" + aadhaar_number_raw.slice(-4);
+    const aadhaar_number_masked = aadhaar_number_raw ? "xxxxxxxx" + aadhaar_number_raw.slice(-4) : null;
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
       global: { headers: { Authorization: `Bearer ${token}` } },

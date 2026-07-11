@@ -17,7 +17,7 @@ import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import Card from "@/components/ui/Card";
 import WizardProgress from "@/components/WizardProgress";
-import { getBusiness, setBusiness } from "@/lib/auth";
+import { getBusiness, setBusiness, isImpersonating } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { MOBILE_RE } from "@/lib/validators";
 
@@ -93,7 +93,7 @@ export default function Step6Page() {
       }
     }
 
-    const isDraft = biz.status === "draft";
+    const isDraft = biz.status === "draft" && !isImpersonating();
     if (isDraft) {
       const validCust = filledCust.filter(isValid).length;
       const validSupp = filledSupp.filter(isValid).length;
@@ -122,7 +122,7 @@ export default function Step6Page() {
     router.push("/onboarding/review");
   }
 
-  const isDraft = getBusiness()?.status === "draft";
+  const isDraft = getBusiness()?.status === "draft" && !isImpersonating();
 
   return (
     <>

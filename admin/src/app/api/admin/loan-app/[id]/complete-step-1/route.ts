@@ -106,25 +106,14 @@ export async function PATCH(
     const plant_use_type   = String(b.plant_use_type   ?? "").trim();
     const consent_policies_raw = Array.isArray(b.consent_policies) ? b.consent_policies : [];
 
-    if (!PIN_RE.test(install_pincode))    return err("Enter a valid 6-digit pincode.", 400);
-    if (!install_state)                    return err("Installation state is required.", 400);
-    if (!MOBILE_RE.test(borrower_mobile)) return err("Enter a valid 10-digit mobile.", 400);
-    if (!EMAIL_RE.test(borrower_email))    return err("Enter a valid email.", 400);
-    if (!PAN_RE.test(borrower_pan))        return err("Enter a valid PAN (AAAAA9999A).", 400);
-    if (!SYSTEM_TYPES.has(system_type))    return err("Choose a valid system type.", 400);
-    if (plant_use_type !== "residential" && plant_use_type !== "commercial") {
-      return err("Choose Residential or Commercial.", 400);
-    }
-
-    // Filter policies to the known set — anything else is discarded.
-    // If the caller didn't tick anything (impossible via the UI but
-    // easy to skip in a hand-crafted request), reject.
+    // Admin-only route (verified above) — NO required-field blocking. Admin
+    // can save a partial application and continue. Enum-constrained fields
+    // (system_type, plant_use_type) are coerced to null when absent/invalid
+    // so the DB CHECK constraints hold; free-text fields save as-is (empty →
+    // null in the patch below).
     const consent_policies = (consent_policies_raw as unknown[])
       .map((v) => String(v))
       .filter((v) => KNOWN_POLICIES.has(v));
-    if (consent_policies.length === 0) {
-      return err("Consent is required to continue.", 400);
-    }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
       global: { headers: { Authorization: `Bearer ${token}` } },
@@ -153,15 +142,15 @@ export async function PATCH(
     const consent_user_agent = (req.headers.get("user-agent") ?? "").slice(0, 500);
 
     const patch: Record<string, unknown> = {
-      install_pincode,
-      install_state,
+      install_pincode: install_pincode || null,
+      install_state:   install_state || null,
       install_district,
       install_city,
-      borrower_mobile,
-      borrower_email,
-      borrower_pan,
-      system_type,
-      plant_use_type,
+      borrower_mobile: borrower_mobile || null,
+      borrower_email:  borrower_email || null,
+      borrower_pan:    borrower_pan || null,
+      system_type:     SYSTEM_TYPES.has(system_type) ? system_type : null,
+      plant_use_type:  (plant_use_type === "residential" || plant_use_type === "commercial") ? plant_use_type : null,
       consent_at,
       // Only overwrite the photo path when the client sent one — preserves
       // an existing photo on an edit-pass re-save.

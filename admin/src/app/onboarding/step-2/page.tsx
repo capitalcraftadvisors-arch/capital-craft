@@ -10,7 +10,7 @@ import Card from "@/components/ui/Card";
 import FieldGroup from "@/components/ui/FieldGroup";
 import WizardProgress from "@/components/WizardProgress";
 import FileUpload from "@/components/FileUpload";
-import { getBusiness, setBusiness } from "@/lib/auth";
+import { getBusiness, setBusiness, isImpersonating } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { extractPan, extractGstLegalName } from "@/lib/ocr";
 import { PAN_RE } from "@/lib/validators";
@@ -175,7 +175,10 @@ export default function Step2Page() {
     if (!biz) return;
     if (!values.business_type) return alert("Please pick a business type.");
 
-    const isDraft = biz.status === "draft";
+    // Admins run onboarding under impersonation — treat as non-draft so
+    // every required check is relaxed (admin can skip anything). Real EPCs
+    // (status draft, not impersonating) keep all validations.
+    const isDraft = biz.status === "draft" && !isImpersonating();
 
     // ── Draft-only required checks. Legacy/self-edit never re-checked. ──
     if (isDraft) {
@@ -241,7 +244,7 @@ export default function Step2Page() {
   }
 
   const extraLabel = extraDocLabel(bt);
-  const isDraft = getBusiness()?.status === "draft";
+  const isDraft = getBusiness()?.status === "draft" && !isImpersonating();
 
   return (
     <>

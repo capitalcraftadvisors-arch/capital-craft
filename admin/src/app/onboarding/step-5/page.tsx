@@ -6,7 +6,7 @@ import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import WizardProgress from "@/components/WizardProgress";
 import GeoOfficeUpload from "@/components/GeoOfficeUpload";
-import { getBusiness, setBusiness } from "@/lib/auth";
+import { getBusiness, setBusiness, isImpersonating } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 
 // Step 5 — Office verification.
@@ -37,7 +37,9 @@ export default function Step5Page() {
   const [businessType, setBusinessType] = useState<BusinessType>(null);
   const [saving, setSaving] = useState(false);
 
-  const isDraft = getBusiness()?.status === "draft";
+  // Admin (impersonating) → relaxed like a non-draft self-edit (Skip shown,
+  // office photos optional). Real EPCs on a draft must upload all three.
+  const isDraft = getBusiness()?.status === "draft" && !isImpersonating();
 
   useEffect(() => {
     const biz = getBusiness();

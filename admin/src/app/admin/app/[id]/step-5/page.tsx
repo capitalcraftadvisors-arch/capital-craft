@@ -135,7 +135,7 @@ function Inner() {
   const canSave = roiValid && selectedTenure !== null && !saving;
 
   async function saveAndNext() {
-    if (!loan || !canSave) return;
+    if (!loan) return; // admin-only flow: never block on missing fields
     setSaveError(null);
     setSaving(true);
     try {
@@ -414,7 +414,7 @@ function Inner() {
               variant="primary"
               onClick={saveAndNext}
               loading={saving}
-              disabled={!canSave}
+              disabled={saving}
             >
               Save &amp; Continue
             </Button>

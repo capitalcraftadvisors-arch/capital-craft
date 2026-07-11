@@ -22,7 +22,7 @@ import Input from "@/components/ui/Input";
 import Card from "@/components/ui/Card";
 import WizardProgress from "@/components/WizardProgress";
 import FileUpload from "@/components/FileUpload";
-import { getBusiness, setBusiness } from "@/lib/auth";
+import { getBusiness, setBusiness, isImpersonating } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { MOBILE_RE, EMAIL_RE } from "@/lib/validators";
 
@@ -81,7 +81,9 @@ export default function Step3Page() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const cfg = configFor(businessType);
-  const isDraft = getBusiness()?.status === "draft";
+  // Admin (impersonating) → relaxed like a non-draft self-edit: no required
+  // fields / docs. Real EPCs on a draft keep every validation.
+  const isDraft = getBusiness()?.status === "draft" && !isImpersonating();
 
   useEffect(() => {
     const biz = getBusiness();

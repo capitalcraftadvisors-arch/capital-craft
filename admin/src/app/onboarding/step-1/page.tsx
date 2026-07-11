@@ -8,7 +8,7 @@ import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
 import Card from "@/components/ui/Card";
 import WizardProgress from "@/components/WizardProgress";
-import { getBusiness, setBusiness } from "@/lib/auth";
+import { getBusiness, setBusiness, isImpersonating } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { EMAIL_RE } from "@/lib/validators";
 
@@ -153,6 +153,9 @@ export default function Step1Page() {
   }
 
   const inSelfEdit = getBusiness()?.status === "under_review";
+  // Admin (impersonating) → no required fields; they can save a blank POC
+  // and move on. Real EPCs keep every required rule.
+  const bypass = isImpersonating();
 
   return (
     <>
@@ -187,8 +190,7 @@ export default function Step1Page() {
                 placeholder="First name"
                 leftIcon={IconUser}
                 {...register("first_name", {
-                  required: "First name is required",
-                  minLength: { value: 1, message: "Required" },
+                  required: bypass ? false : "First name is required",
                   maxLength: { value: 40, message: "Too long" },
                 })}
                 error={errors.first_name?.message}
@@ -197,8 +199,7 @@ export default function Step1Page() {
                 placeholder="Last name"
                 leftIcon={IconUser}
                 {...register("last_name", {
-                  required: "Last name is required",
-                  minLength: { value: 1, message: "Required" },
+                  required: bypass ? false : "Last name is required",
                   maxLength: { value: 60, message: "Too long" },
                 })}
                 error={errors.last_name?.message}
@@ -213,8 +214,8 @@ export default function Step1Page() {
             autoComplete="email"
             leftIcon={IconMail}
             {...register("contact_email", {
-              required: "Email is required",
-              pattern: { value: EMAIL_RE, message: "Enter a valid email address" },
+              required: bypass ? false : "Email is required",
+              pattern: bypass ? undefined : { value: EMAIL_RE, message: "Enter a valid email address" },
               maxLength: { value: 120, message: "Email is too long" },
             })}
             error={errors.contact_email?.message}
@@ -236,7 +237,7 @@ export default function Step1Page() {
             options={DESIGNATION_OPTIONS}
             leftIcon={IconBriefcase}
             {...register("designation_choice", {
-              required: "Designation is required",
+              required: bypass ? false : "Designation is required",
             })}
             error={errors.designation_choice?.message}
           />
@@ -248,6 +249,7 @@ export default function Step1Page() {
               leftIcon={IconBriefcase}
               {...register("designation_custom", {
                 validate: (v) => {
+                  if (bypass) return true;
                   if (designationChoice !== "Other") return true;
                   if (!v || !v.trim()) return "Please specify the designation";
                   if (v.trim().length > 80) return "Too long";

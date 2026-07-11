@@ -62,22 +62,25 @@ export async function POST(
     const selected_monthly_emi = num(b.selected_monthly_emi);
     const selected_subsidy_emi = num(b.selected_subsidy_emi);
 
-    if (roi_percent === null || roi_percent < 7.5 || roi_percent > 10.8) {
+    // Admin-only route — no required-field blocking. Every offer field is
+    // optional; reject only present-and-out-of-range values (tenure stays
+    // within the DB CHECK because a present value must be 1-5).
+    if (roi_percent !== null && (roi_percent < 7.5 || roi_percent > 10.8)) {
       return err("ROI must be between 7.5% and 10.8%.", 400);
     }
-    if (central_subsidy === null || central_subsidy < 0 || central_subsidy > CENTRAL_SUBSIDY_CAP) {
+    if (central_subsidy !== null && (central_subsidy < 0 || central_subsidy > CENTRAL_SUBSIDY_CAP)) {
       return err("Central subsidy is out of range.", 400);
     }
-    if (state_subsidy === null || state_subsidy < 0) {
-      return err("State subsidy must be zero or positive.", 400);
+    if (state_subsidy !== null && state_subsidy < 0) {
+      return err("State subsidy cannot be negative.", 400);
     }
-    if (selected_tenure_years === null || !ALLOWED_TENURES.has(selected_tenure_years)) {
-      return err("Select a tenure between 1 and 5 years.", 400);
+    if (selected_tenure_years !== null && !ALLOWED_TENURES.has(selected_tenure_years)) {
+      return err("Tenure must be between 1 and 5 years.", 400);
     }
-    if (selected_monthly_emi === null || selected_monthly_emi <= 0) {
+    if (selected_monthly_emi !== null && selected_monthly_emi <= 0) {
       return err("Monthly EMI must be positive.", 400);
     }
-    if (selected_subsidy_emi === null || selected_subsidy_emi < 0) {
+    if (selected_subsidy_emi !== null && selected_subsidy_emi < 0) {
       return err("Subsidy EMI cannot be negative.", 400);
     }
 

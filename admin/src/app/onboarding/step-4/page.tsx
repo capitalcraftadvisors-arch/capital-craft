@@ -8,7 +8,7 @@ import Input from "@/components/ui/Input";
 import Card from "@/components/ui/Card";
 import WizardProgress from "@/components/WizardProgress";
 import FileUpload from "@/components/FileUpload";
-import { getBusiness, setBusiness, getToken } from "@/lib/auth";
+import { getBusiness, setBusiness, getToken, isImpersonating } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { ACCOUNT_RE, IFSC_RE } from "@/lib/validators";
 
@@ -37,7 +37,9 @@ export default function Step4Page() {
   const [saving, setSaving] = useState(false);
   const [ocrRaw, setOcrRaw] = useState<unknown>(null);
 
-  const isDraft = getBusiness()?.status === "draft";
+  // Admin (impersonating) → relaxed like a non-draft self-edit (Skip shown,
+  // no required cheque / account / IFSC). Real EPCs on a draft stay strict.
+  const isDraft = getBusiness()?.status === "draft" && !isImpersonating();
 
   const {
     register, handleSubmit, reset, setValue, watch,

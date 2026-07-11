@@ -22,6 +22,7 @@ import Button from "@/components/ui/Button";
 import DeleteLoanAppModal from "@/components/DeleteLoanAppModal";
 import { supabase } from "@/lib/supabase";
 import { getDocumentUrl } from "@/lib/storage";
+import { getToken } from "@/lib/auth";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL, type LenderOutcome } from "@/lib/loan-status";
 
 // The three loan-status values an admin can set from the View page, and
@@ -76,6 +77,92 @@ function fmtDate(v: string | null | undefined): string {
   return new Date(v).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+// ── Document grouping (missing-doc visibility) ───────────────────────
+//
+// The loan flow stores documents two ways: some as user_application_docs
+// rows (borrower_pan, customer_photo, borrower_photo, quotation — viewed
+// via openDoc/id) and the rest as *_path columns on the epc_applications
+// row (Aadhaar, e-bill, proforma, bank statement, co-applicant — viewed
+// by path via openPath). This builds the full expected set grouped by
+// step so missing documents render greyed as "Not uploaded" beside the
+// uploaded ones.
+
+type LoanSlot = { key: string; label: string; docId: string | null; path: string | null };
+type LoanDocGroup = { title: string; slots: LoanSlot[] };
+
+function buildLoanDocGroups(loan: Loan, docs: Doc[]): LoanDocGroup[] {
+  const usedRowIds = new Set<string>();
+  // Satisfied by the first unused user_application_docs row matching any of
+  // `cats`, else by a non-null column `path`.
+  const slot = (
+    key: string, label: string, cats: string[], path: string | null | undefined,
+  ): LoanSlot => {
+    for (const cat of cats) {
+      const row = docs.find((d) => d.category === cat && !usedRowIds.has(d.id));
+      if (row) { usedRowIds.add(row.id); return { key, label, docId: row.id, path: null }; }
+    }
+    return { key, label, docId: null, path: path ?? null };
+  };
+
+  const groups: LoanDocGroup[] = [];
+
+  groups.push({
+    title: "Identity (Steps 1–2)",
+    slots: [
+      slot("applicant_pan",   "Applicant PAN card", ["borrower_pan"],   null),
+      slot("applicant_photo", "Applicant photo",    ["customer_photo"], loan.customer_photo_path),
+      slot("aadhaar_front",   "Aadhaar (front)",    [], loan.aadhaar_front_path),
+      slot("aadhaar_back",    "Aadhaar (back)",     [], loan.aadhaar_back_path),
+    ],
+  });
+
+  groups.push({
+    title: "Loan requirement (Step 3)",
+    slots: [
+      slot("quotation", "Quotation / Proforma invoice", ["quotation"],        loan.proforma_invoice_path),
+      slot("ebill",     "Electricity bill",             ["electricity_bill"], loan.ebill_path),
+      slot("rooftop",   "Rooftop photo",                ["borrower_photo"],   loan.rooftop_photo_path),
+    ],
+  });
+
+  // Co-applicant documents — only when a co-applicant is on the file.
+  const hasCoapp = loan.bill_on_applicant_name === false ||
+    !!(loan.coapp_pan_path || loan.coapp_aadhaar_front_path || loan.coapp_aadhaar_back_path);
+  if (hasCoapp) {
+    groups.push({
+      title: "Co-applicant (Step 3)",
+      slots: [
+        slot("coapp_pan",           "Co-applicant PAN card",        [], loan.coapp_pan_path),
+        slot("coapp_aadhaar_front", "Co-applicant Aadhaar (front)", [], loan.coapp_aadhaar_front_path),
+        slot("coapp_aadhaar_back",  "Co-applicant Aadhaar (back)",  [], loan.coapp_aadhaar_back_path),
+      ],
+    });
+  }
+
+  groups.push({
+    title: "Financial (Step 4)",
+    slots: [
+      slot("bank_statement", "Bank statement", ["bank_statement"], loan.bank_statement_path),
+    ],
+  });
+
+  // Any uploaded rows not matched above → surface so nothing is hidden.
+  const others = docs.filter((d) => !usedRowIds.has(d.id));
+  if (others.length > 0) {
+    groups.push({
+      title: "Other documents",
+      slots: others.map((d) => ({
+        key: `other-${d.id}`,
+        label: DOC_LABEL[d.category] ?? d.category.replace(/_/g, " "),
+        docId: d.id,
+        path: null,
+      })),
+    });
+  }
+
+  return groups;
+}
+
 export default function LoanAppViewPage() {
   return (
     <AuthGuard allow={["admin"]}>
@@ -127,10 +214,28 @@ function Inner() {
     if (!loan?.epc_business) return "—";
     return loan.epc_business.trade_name || loan.epc_business.legal_name || loan.epc_business.contact_name || "—";
   }, [loan]);
+  const docGroups = useMemo(() => (loan ? buildLoanDocGroups(loan, docs) : []), [loan, docs]);
 
   async function openDoc(id: string) {
     const url = await getDocumentUrl(id);
     if (url) window.open(url, "_blank", "noopener");
+  }
+
+  // View a document stored as a *_path column (Aadhaar, e-bill, proforma,
+  // bank statement, co-applicant) — these have no user_application_docs
+  // row, so they're signed by path via the admin-only sign-doc route.
+  async function openPath(path: string) {
+    try {
+      const res = await fetch(`/api/admin/loan-app/${params.id}/sign-doc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({ path }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.ok && data.url) window.open(data.url, "_blank", "noopener");
+    } catch {
+      /* ignore — the eye icon just won't open */
+    }
   }
 
   // Admin sets the loan's status directly on epc_applications.status.
@@ -395,35 +500,50 @@ function Inner() {
               <FieldRow label="IP"          value={loan.consent_ip} mono />
             </SectionCard>
 
-            {/* Documents */}
+            {/* Documents — expected set grouped by step; missing ones greyed. */}
             <SectionCard title="Documents">
-              {docs.length === 0 ? (
-                <p className="text-[13px] text-text-muted">No documents uploaded.</p>
-              ) : (
-                <ul className="space-y-2">
-                  {docs.map((d) => (
-                    <li key={d.id} className="flex items-center justify-between gap-3 px-3 py-2 bg-white border border-line rounded-input">
-                      <div className="min-w-0">
-                        <p className="text-[12px] text-text-muted uppercase tracking-wide font-semibold">
-                          {DOC_LABEL[d.category] ?? d.category.replace(/_/g, " ")}
-                        </p>
-                        <p className="text-[13px] text-text truncate">{d.file_name || "Document"}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => void openDoc(d.id)}
-                        title="View document"
-                        className="p-1.5 rounded hover:bg-bg-tint text-[#185fa5] transition-colors"
-                      >
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                          <circle cx="12" cy="12" r="3" />
-                        </svg>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <div className="space-y-4">
+                {docGroups.map((g) => (
+                  <div key={g.title}>
+                    <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold mb-1.5">
+                      {g.title}
+                    </p>
+                    <ul className="space-y-2">
+                      {g.slots.map((s) => {
+                        const present = !!(s.docId || s.path);
+                        return (
+                          <li
+                            key={s.key}
+                            className={
+                              "flex items-center justify-between gap-3 px-3 py-2 rounded-input border " +
+                              (present ? "bg-white border-line" : "bg-bg-tint/40 border-dashed border-line")
+                            }
+                          >
+                            <p className={"text-[13px] truncate " + (present ? "text-text font-medium" : "text-text-muted")}>
+                              {s.label}
+                            </p>
+                            {present ? (
+                              <button
+                                type="button"
+                                onClick={() => { if (s.docId) void openDoc(s.docId); else if (s.path) void openPath(s.path); }}
+                                title="View document"
+                                className="p-1.5 rounded hover:bg-bg-tint text-[#185fa5] transition-colors shrink-0"
+                              >
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                                  <circle cx="12" cy="12" r="3" />
+                                </svg>
+                              </button>
+                            ) : (
+                              <span className="text-[11px] text-text-muted shrink-0 whitespace-nowrap">Not uploaded</span>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ))}
+              </div>
             </SectionCard>
 
             {/* Submission */}

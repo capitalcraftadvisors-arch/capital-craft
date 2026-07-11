@@ -71,27 +71,22 @@ export async function POST(
     const proforma_uploaded_at  = strOrNull(b.proforma_uploaded_at);
     const ebill_path            = strOrNull(b.ebill_path);
     const ebill_uploaded_at     = strOrNull(b.ebill_uploaded_at);
-    if (!proforma_invoice_path) return err("Proforma invoice upload is required.", 400);
-    if (!ebill_path)            return err("Electricity bill upload is required.", 400);
+    // Admin-only route — no required-doc/field blocking (see below).
 
     // ── Project + loan ────────────────────────────────────
     const project_size         = numOrNull(b.project_size);
-    const project_size_unit    = strOrNull(b.project_size_unit)?.toLowerCase() ?? null;
+    const project_size_unit_raw = strOrNull(b.project_size_unit)?.toLowerCase() ?? null;
+    // Coerce to a valid enum or null so the DB CHECK (kw|mw) always holds.
+    const project_size_unit    = project_size_unit_raw && UNITS.has(project_size_unit_raw) ? project_size_unit_raw : null;
     const total_project_cost   = numOrNull(b.total_project_cost);
     const loan_amount_required = numOrNull(b.loan_amount_required);
 
+    // Admin-only route — no required-field blocking. Reject only present-and-
+    // invalid values; missing values save as null.
     if (project_size !== null && project_size <= 0) return err("Project size must be positive.", 400);
-    if (project_size_unit && !UNITS.has(project_size_unit)) return err("Project size unit must be kw or mw.", 400);
-    if ((project_size === null) !== (project_size_unit === null)) {
-      return err("Project size and unit must both be set (or both empty).", 400);
-    }
-    if (total_project_cost === null || total_project_cost <= 0) {
-      return err("Total project cost is required.", 400);
-    }
-    if (loan_amount_required === null || loan_amount_required <= 0) {
-      return err("Loan amount required is required.", 400);
-    }
-    if (loan_amount_required > total_project_cost) {
+    if (total_project_cost !== null && total_project_cost <= 0) return err("Total project cost must be positive.", 400);
+    if (loan_amount_required !== null && loan_amount_required <= 0) return err("Loan amount must be positive.", 400);
+    if (loan_amount_required !== null && total_project_cost !== null && loan_amount_required > total_project_cost) {
       return err("Loan amount cannot exceed total project cost.", 400);
     }
 
@@ -107,16 +102,15 @@ export async function POST(
     const ebill_address_line = strOrNull(b.ebill_address_line);
     const ebill_name         = strOrNull(b.ebill_name);
 
-    if (!install_pincode || !PIN_RE.test(install_pincode)) {
+    // Installation address optional for admin (only reject a present-invalid PIN).
+    if (install_pincode && !PIN_RE.test(install_pincode)) {
       return err("Installation pincode must be a valid 6-digit PIN.", 400);
     }
-    if (!install_state) return err("Installation state is required.", 400);
 
     // ── Bill ownership + co-applicant ─────────────────────
-    if (typeof b.bill_on_applicant_name !== "boolean") {
-      return err("Answer the bill-ownership question before continuing.", 400);
-    }
-    const bill_on_applicant_name = b.bill_on_applicant_name;
+    // Optional for admin — null when unanswered.
+    const bill_on_applicant_name =
+      typeof b.bill_on_applicant_name === "boolean" ? b.bill_on_applicant_name : null;
 
     let coapp_pan:         string | null = null;
     let coapp_name:        string | null = null;
@@ -160,15 +154,11 @@ export async function POST(
       coapp_aadhaar_back_path     = strOrNull(b.coapp_aadhaar_back_path);
       coapp_aadhaar_face_path     = strOrNull(b.coapp_aadhaar_face_path);
 
-      if (!coapp_pan)         return err("Co-applicant PAN is required.", 400);
-      if (!PAN_RE.test(coapp_pan)) return err("Co-applicant PAN is invalid.", 400);
-      if (!coapp_name)        return err("Co-applicant name is required.", 400);
-      if (!coapp_father_name) return err("Co-applicant father's name is required.", 400);
-      if (!coapp_dob)         return err("Co-applicant date of birth is required.", 400);
-      if (!coapp_relation)    return err("Co-applicant relation is required.", 400);
-      if (!coapp_mobile || !MOBILE_RE.test(coapp_mobile)) return err("Co-applicant mobile is invalid.", 400);
-      if (!coapp_email  || !EMAIL_RE.test(coapp_email))   return err("Co-applicant email is invalid.", 400);
-      if (!coapp_pan_path)    return err("Co-applicant PAN upload is required.", 400);
+      // Admin-only route — co-applicant fields optional; reject only
+      // present-and-invalid values.
+      if (coapp_pan && !PAN_RE.test(coapp_pan)) return err("Co-applicant PAN is invalid.", 400);
+      if (coapp_mobile && !MOBILE_RE.test(coapp_mobile)) return err("Co-applicant mobile is invalid.", 400);
+      if (coapp_email && !EMAIL_RE.test(coapp_email)) return err("Co-applicant email is invalid.", 400);
 
       if (coapp_aadhaar_number) {
         if (!/^\d{12}$/.test(coapp_aadhaar_number)) {

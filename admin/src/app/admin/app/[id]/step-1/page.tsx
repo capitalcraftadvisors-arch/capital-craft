@@ -219,7 +219,8 @@ function Inner() {
     !sending;
 
   async function send() {
-    if (!canSend || !loan) return;
+    // Admin-only flow: never block on missing fields — save whatever's there.
+    if (!loan) return;
     setSending(true);
     setSendError(null);
     try {
@@ -584,13 +585,18 @@ function Inner() {
             </div>
           )}
 
-          <div className="flex justify-end pt-2">
+          <div className="flex flex-col items-end gap-2 pt-2">
+            {!canSend && (
+              <p className="text-[12px] text-amber-600">
+                Some fields are incomplete — you can still continue as admin.
+              </p>
+            )}
             <Button
               type="button"
               variant="primary"
               onClick={send}
               loading={sending}
-              disabled={!canSend}
+              disabled={sending}
             >
               Next
             </Button>

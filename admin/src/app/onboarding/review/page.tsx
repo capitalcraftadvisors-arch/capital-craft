@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import WizardProgress from "@/components/WizardProgress";
-import { getBusiness, setBusiness } from "@/lib/auth";
+import { getBusiness, setBusiness, isImpersonating } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { PAN_RE } from "@/lib/validators";
 
@@ -57,8 +57,10 @@ export default function ReviewPage() {
 
   async function submit() {
     if (!biz) return;
+    // Admin (impersonating) can submit an incomplete profile; real EPCs
+    // must complete the required fields first.
     const missing = missingRequired(biz);
-    if (missing.length) {
+    if (missing.length && !isImpersonating()) {
       alert(`Please complete: ${missing.join(", ")}.`);
       return;
     }

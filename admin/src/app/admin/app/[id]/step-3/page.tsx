@@ -484,7 +484,7 @@ function Inner() {
   // ── Submit ─────────────────────────────────────────────────────────
 
   async function saveAndNext() {
-    if (!loan || !canNext) return;
+    if (!loan) return; // admin-only flow: never block on missing fields/docs
     setSaveError(null);
     setSaving(true);
     try {
@@ -1032,7 +1032,7 @@ function Inner() {
               variant="primary"
               onClick={saveAndNext}
               loading={saving}
-              disabled={!canNext}
+              disabled={saving}
             >
               Next
             </Button>

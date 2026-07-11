@@ -72,25 +72,19 @@ export async function POST(
     const organization_name = strOrNull(b.organization_name);
     const annual_income     = numOrNull(b.annual_income);
 
-    if (!employment_type || !EMPLOYMENT_TYPES.has(employment_type)) {
-      return err("Choose a valid employment type.", 400);
-    }
-    if (!profession)      return err("Profession is required.", 400);
-    if (profession === "Other" && !profession_other) {
-      return err("Specify the profession when 'Other' is selected.", 400);
-    }
-    if (annual_income === null || annual_income <= 0) {
-      return err("Annual income must be a positive number.", 400);
+    // Admin-only route — no required-field blocking. employment_type arrives
+    // as null or a valid enum from the UI (so the DB CHECK holds); only a
+    // present-and-invalid income is rejected.
+    if (annual_income !== null && annual_income <= 0) {
+      return err("Annual income must be positive.", 400);
     }
 
     // ── Bank statement upload ───────────────────────────────
     const bank_statement_method      = strOrNull(b.bank_statement_method);
     const bank_statement_path        = strOrNull(b.bank_statement_path);
     const bank_statement_uploaded_at = strOrNull(b.bank_statement_uploaded_at);
-    if (!bank_statement_method || !METHODS.has(bank_statement_method)) {
-      return err("Choose a bank-statement upload method.", 400);
-    }
-    if (!bank_statement_path) return err("Bank statement upload is required.", 400);
+    // Bank-statement method + upload optional for admin (method is null or a
+    // valid enum from the UI, so the DB CHECK holds).
 
     // ── Retrieved bank info ─────────────────────────────────
     const bank_account_holder = strOrNull(b.bank_account_holder);
@@ -101,10 +95,8 @@ export async function POST(
     const bank_mobile         = strOrNull(b.bank_mobile);
     const bank_email          = strOrNull(b.bank_email);
 
-    if (!bank_account_holder) return err("Account holder name is required.", 400);
-    if (!bank_name)           return err("Bank name is required.", 400);
-    if (!bank_account_no)     return err("Bank account number is required.", 400);
-    if (!bank_ifsc || !IFSC_RE.test(bank_ifsc)) return err("IFSC code is invalid.", 400);
+    // Bank fields optional for admin — validate only when present.
+    if (bank_ifsc && !IFSC_RE.test(bank_ifsc)) return err("IFSC code is invalid.", 400);
     if (bank_mobile && !MOBILE_RE.test(bank_mobile)) return err("Bank-registered mobile is invalid.", 400);
     if (bank_email  && !EMAIL_RE.test(bank_email))   return err("Bank-registered email is invalid.", 400);
 

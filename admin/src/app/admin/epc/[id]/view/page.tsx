@@ -811,6 +811,29 @@ const STAKEHOLDER_CATS = [
 const BANK_CATS   = ["cancelled_cheque"] as const;
 const OFFICE_CATS = ["office_exterior", "office_interior", "office_selfie"] as const;
 
+type DocSlot = { key: string; label: string; doc: Doc | null };
+
+// Build the slot list for a doc family: one slot per expected category
+// (present → eye-View, absent → greyed "Not uploaded"), followed by any
+// extra uploaded docs that don't map to an expected slot so nothing is
+// hidden.
+function buildSlots(
+  familyDocs: Doc[],
+  expectedCats: string[],
+  labelFn: (cat: string) => string,
+): DocSlot[] {
+  const used = new Set<string>();
+  const slots: DocSlot[] = expectedCats.map((cat, i) => {
+    const doc = familyDocs.find((d) => d.category === cat && !used.has(d.id)) ?? null;
+    if (doc) used.add(doc.id);
+    return { key: `${cat}-${i}`, label: labelFn(cat), doc };
+  });
+  familyDocs
+    .filter((d) => !used.has(d.id))
+    .forEach((d) => slots.push({ key: `x-${d.id}`, label: labelFn(d.category), doc: d }));
+  return slots;
+}
+
 function DocumentsBySteps({
   docs, stakeholders, businessType, openDoc, eyeIcon,
 }: {
@@ -845,35 +868,45 @@ function DocumentsBySteps({
     (d) => !d.stakeholder_id || !stakeholderIndex.has(d.stakeholder_id),
   );
 
+  // Expected document sets — missing ones render greyed as "Not uploaded".
+  const hasExtraDoc =
+    businessType === "partnership" || businessType === "pvt_ltd" || businessType === "llp";
+  const bizExpected = hasExtraDoc
+    ? ["pan_business", "gstin", "extra_doc"]
+    : ["pan_business", "gstin"];
+  const bizSlots    = buildSlots(bizDocs, bizExpected, (c) => businessDocLabel(c, businessType));
+  const bankSlots   = buildSlots(bankDocs, ["cancelled_cheque"], () => "Empty cheque copy / picture");
+  const officeSlots = buildSlots(
+    officeDocs,
+    ["office_exterior", "office_interior", "office_selfie"],
+    (c) => officeDocLabel(c, businessType),
+  );
+  const STK_EXPECTED = ["stakeholder_pan", "stakeholder_aadhaar_front", "stakeholder_aadhaar_back"];
+
   return (
     <div className="space-y-4">
-      {bizDocs.length > 0 && (
-        <StepBlock title="Business (Step 2)">
-          <DocGrid docs={bizDocs} label={(d) => businessDocLabel(d.category, businessType)} openDoc={openDoc} eyeIcon={eyeIcon} />
-        </StepBlock>
-      )}
+      <StepBlock title="Business (Step 2)">
+        <DocGrid slots={bizSlots} openDoc={openDoc} eyeIcon={eyeIcon} />
+      </StepBlock>
 
-      {(stakeholderGroups.some((g) => g.docs.length > 0) || orphanStakeholderDocs.length > 0) && (
+      {(stakeholderGroups.length > 0 || orphanStakeholderDocs.length > 0) && (
         <StepBlock title="Stakeholders (Step 3)">
           <div className="space-y-2.5">
             {stakeholderGroups.map((g, i) => (
-              g.docs.length === 0 ? null : (
-                <StakeholderDocs
-                  key={g.stakeholder.id ?? i}
-                  header={stakeholderRoleTag(businessType, i, stakeholders.length) +
-                          (g.stakeholder.name ? ` — ${g.stakeholder.name}` : "")}
-                  docs={g.docs}
-                  label={(d) => stakeholderDocLabel(businessType, i, stakeholders.length, d.category)}
-                  openDoc={openDoc}
-                  eyeIcon={eyeIcon}
-                />
-              )
+              <StakeholderDocs
+                key={g.stakeholder.id ?? i}
+                header={stakeholderRoleTag(businessType, i, stakeholders.length) +
+                        (g.stakeholder.name ? ` — ${g.stakeholder.name}` : "")}
+                slots={buildSlots(g.docs, STK_EXPECTED,
+                  (c) => stakeholderDocLabel(businessType, i, stakeholders.length, c))}
+                openDoc={openDoc}
+                eyeIcon={eyeIcon}
+              />
             ))}
             {orphanStakeholderDocs.length > 0 && (
               <StakeholderDocs
                 header="Legacy stakeholder documents"
-                docs={orphanStakeholderDocs}
-                label={(d) => plainStakeholderCatLabel(d.category)}
+                slots={buildSlots(orphanStakeholderDocs, [], (c) => plainStakeholderCatLabel(c))}
                 openDoc={openDoc}
                 eyeIcon={eyeIcon}
               />
@@ -882,21 +915,17 @@ function DocumentsBySteps({
         </StepBlock>
       )}
 
-      {bankDocs.length > 0 && (
-        <StepBlock title="Bank (Step 4)">
-          <DocGrid docs={bankDocs} label={() => "Empty cheque copy / picture"} openDoc={openDoc} eyeIcon={eyeIcon} />
-        </StepBlock>
-      )}
+      <StepBlock title="Bank (Step 4)">
+        <DocGrid slots={bankSlots} openDoc={openDoc} eyeIcon={eyeIcon} />
+      </StepBlock>
 
-      {officeDocs.length > 0 && (
-        <StepBlock title="Office (Step 5)">
-          <DocGrid docs={officeDocs} label={(d) => officeDocLabel(d.category, businessType)} openDoc={openDoc} eyeIcon={eyeIcon} />
-        </StepBlock>
-      )}
+      <StepBlock title="Office (Step 5)">
+        <DocGrid slots={officeSlots} openDoc={openDoc} eyeIcon={eyeIcon} />
+      </StepBlock>
 
       {otherDocs.length > 0 && (
         <StepBlock title="Other">
-          <DocGrid docs={otherDocs} label={(d) => DOC_LABEL(d.category)} openDoc={openDoc} eyeIcon={eyeIcon} />
+          <DocGrid slots={buildSlots(otherDocs, [], (c) => DOC_LABEL(c))} openDoc={openDoc} eyeIcon={eyeIcon} />
         </StepBlock>
       )}
     </div>
@@ -915,43 +944,52 @@ function StepBlock({ title, children }: { title: string; children: React.ReactNo
 }
 
 function StakeholderDocs({
-  header, docs, label, openDoc, eyeIcon,
+  header, slots, openDoc, eyeIcon,
 }: {
   header: string;
-  docs: Doc[];
-  label: (d: Doc) => string;
+  slots: DocSlot[];
   openDoc: (id: string) => void;
   eyeIcon: React.ReactNode;
 }) {
   return (
     <div>
       <p className="text-[12px] font-semibold text-[#0f3d2e] mb-1.5">{header}</p>
-      <DocGrid docs={docs} label={label} openDoc={openDoc} eyeIcon={eyeIcon} />
+      <DocGrid slots={slots} openDoc={openDoc} eyeIcon={eyeIcon} />
     </div>
   );
 }
 
 function DocGrid({
-  docs, label, openDoc, eyeIcon,
+  slots, openDoc, eyeIcon,
 }: {
-  docs: Doc[];
-  label: (d: Doc) => string;
+  slots: DocSlot[];
   openDoc: (id: string) => void;
   eyeIcon: React.ReactNode;
 }) {
   return (
     <div className="grid grid-cols-2 gap-2">
-      {docs.map((d) => (
-        <button
-          key={d.id}
-          type="button"
-          onClick={() => openDoc(d.id)}
-          className="border border-[#e0f0e8] bg-[#f7fcfa] hover:bg-[#f0faf5] rounded-[8px] px-3 py-2.5 text-[13px] flex items-center justify-between gap-2 min-w-0"
-          title={d.file_name ?? undefined}
-        >
-          <span className="text-[#0f3d2e] font-medium truncate">{label(d)}</span>
-          <span className="text-[#185fa5] shrink-0" style={{ transform: "scale(1.2)" }}>{eyeIcon}</span>
-        </button>
+      {slots.map((s) => (
+        s.doc ? (
+          <button
+            key={s.key}
+            type="button"
+            onClick={() => openDoc(s.doc!.id)}
+            className="border border-[#e0f0e8] bg-[#f7fcfa] hover:bg-[#f0faf5] rounded-[8px] px-3 py-2.5 text-[13px] flex items-center justify-between gap-2 min-w-0"
+            title={s.doc.file_name ?? undefined}
+          >
+            <span className="text-[#0f3d2e] font-medium truncate">{s.label}</span>
+            <span className="text-[#185fa5] shrink-0" style={{ transform: "scale(1.2)" }}>{eyeIcon}</span>
+          </button>
+        ) : (
+          <div
+            key={s.key}
+            className="border border-dashed border-[#dfe4e2] bg-[#f6f7f7] rounded-[8px] px-3 py-2.5 text-[13px] flex items-center justify-between gap-2 min-w-0"
+            title="Not uploaded"
+          >
+            <span className="text-[#9aa5a0] font-medium truncate">{s.label}</span>
+            <span className="text-[#aeb8b3] text-[11px] shrink-0 whitespace-nowrap">Not uploaded</span>
+          </div>
+        )
       ))}
     </div>
   );
