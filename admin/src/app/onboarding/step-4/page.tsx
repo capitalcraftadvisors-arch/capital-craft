@@ -31,11 +31,26 @@ type Form = {
   bank_name: string;
 };
 
+// Masks all but the last 4 digits, e.g. "1000009414001643" → "••••••••••••1643".
+function maskAccount(s: string): string {
+  if (!s) return "";
+  if (s.length <= 4) return s;
+  return "•".repeat(s.length - 4) + s.slice(-4);
+}
+
 export default function Step4Page() {
   const router = useRouter();
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [ocrRaw, setOcrRaw] = useState<unknown>(null);
+  // Masking / verification state for the account-number pair:
+  //   fromOcr    — the fetched value came from OCR (or a prior save); show it
+  //                masked + read-only until it needs correcting. Manual entry
+  //                (no OCR) leaves the field plainly editable.
+  //   revealEdit — the fetched field has been unlocked for editing (set when
+  //                the re-entry doesn't match, so the EPC can fix a bad OCR read).
+  const [fromOcr, setFromOcr] = useState(false);
+  const [revealEdit, setRevealEdit] = useState(false);
 
   // Admin (impersonating) → relaxed like a non-draft self-edit (Skip shown,
   // no required cheque / account / IFSC). Real EPCs on a draft stay strict.
@@ -69,6 +84,14 @@ export default function Step4Page() {
   const acctMismatch =
     acctConfirmComplete && acctConfirm.length > 0 && acct !== acctConfirm;
 
+  // The fetched field is masked + read-only whenever it holds an OCR/loaded
+  // value that hasn't been unlocked. Manual entry (no OCR) stays editable so
+  // the EPC can type the number. A completed mismatch unlocks it for correction.
+  const acctEditable = revealEdit || !fromOcr;
+  useEffect(() => {
+    if (acctMismatch) setRevealEdit(true);
+  }, [acctMismatch]);
+
   useEffect(() => {
     const biz = getBusiness();
     if (!biz) return;
@@ -85,6 +108,9 @@ export default function Step4Page() {
         bank_ifsc: data?.bank_ifsc ?? "",
         bank_name: data?.bank_name ?? "",
       });
+      // A previously-saved account number shows masked + read-only on return.
+      setFromOcr(!!data?.bank_account_number);
+      setRevealEdit(false);
     })();
   }, [reset]);
 
@@ -113,8 +139,12 @@ export default function Step4Page() {
       if (r.accountNumber) {
         setValue("bank_account_number", r.accountNumber);
         // Auto-fill must NOT auto-confirm — the EPC re-types it as a
-        // verification step. Clear confirm so they have to.
+        // verification step. Clear confirm and show the fetched value masked
+        // + read-only until they either confirm it or need to correct it.
         setValue("confirm_account_number", "");
+        setFromOcr(true);
+        setRevealEdit(false);
+        setAcctConfirmBlurred(false);
       }
       if (r.bankName) setValue("bank_name", r.bankName);
       setOcrRaw(r.raw_text ?? null);
@@ -201,9 +231,11 @@ export default function Step4Page() {
   // Non-draft only.
   const onSkip = handleSubmit((v) => save(v, 5));
 
-  const continueDisabled = isDraft
-    ? saving
-    : (acct.length > 0 && !acctMatches) || saving;
+  // Draft (strict EPC flow): the button stays disabled until the re-entered
+  // number matches the fetched one. Non-draft / admin: only gate when a value
+  // is present (they can also Skip). Saving always disables.
+  const continueDisabled =
+    saving || (isDraft ? !acctMatches : acct.length > 0 && !acctMatches);
 
   return (
     <>
@@ -241,19 +273,31 @@ export default function Step4Page() {
 
         <Card className="p-6 sm:p-7">
           <form className="grid gap-5 sm:grid-cols-2">
-            {/* Plain editable field — digits only. Prefilled from cheque
-                OCR when detected; always editable so any-length account
-                number can be typed/corrected without getting locked. */}
+            {/* Fetched account number. When it came from OCR (or a prior
+                save) it's shown MASKED + read-only — only the last 4 digits
+                are visible — so the EPC must re-type the full number on the
+                right to verify it. A completed mismatch unlocks this field
+                (raw value, editable) so a wrong OCR read can be corrected.
+                Manual entry (no OCR) stays plainly editable. The masked
+                string is display-only; the raw digits stay in form state. */}
             <Input
               label="Account number"
               placeholder=""
               inputMode="numeric"
-              value={acct}
-              onChange={(e) => setValue("bank_account_number", e.target.value.replace(/\D/g, ""))}
+              readOnly={!acctEditable}
+              value={acctEditable ? acct : maskAccount(acct)}
+              onChange={
+                acctEditable
+                  ? (e) => setValue("bank_account_number", e.target.value.replace(/\D/g, ""))
+                  : undefined
+              }
+              className={!acctEditable ? "bg-bg-tint/50 tracking-[0.15em] cursor-default" : undefined}
               error={errors.bank_account_number?.message}
               hint={
-                acctMismatch
-                  ? "Doesn't match the re-entered number — please check both boxes."
+                revealEdit
+                  ? "OCR may have read the wrong value — please correct the account number."
+                  : !acctEditable && acct.length > 0
+                  ? "Fetched from your cheque — re-enter it on the right to confirm."
                   : undefined
               }
             />

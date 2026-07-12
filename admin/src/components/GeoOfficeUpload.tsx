@@ -6,17 +6,24 @@
 //
 //   1. "Take photo" → opens a LIVE in-browser camera (getUserMedia). On
 //      mobile this is the rear camera; on desktop the webcam. Capture grabs
-//      a still frame, then reads LIVE GPS via navigator.geolocation. If
-//      location can't be obtained → the capture is rejected with a clear
-//      message. This works on desktop + mobile (unlike <input capture>,
-//      which silently falls back to a file picker on desktop).
+//      a still frame, then reads LIVE GPS via navigator.geolocation. A cold
+//      GPS fix on mobile can take >10s, so we allow a generous timeout and
+//      fall back to a coarse/network fix before giving up.
 //
 //   2. "Upload file" → plain file picker. The uploaded image MUST carry
-//      EXIF GPS (a location-tagged photo). No live-geo fallback — the user
-//      is uploading something taken earlier. No GPS → rejected.
+//      EXIF GPS (a location-tagged photo). We read GPS from the WHOLE file
+//      (no chunked windowing — that can miss the GPS block on some phone
+//      photos) BEFORE the server ever compresses it.
+//
+// Both paths capture the coordinates into the doc row's metadata.gps and
+// then show the latitude/longitude + a resolved address, so the EPC can see
+// exactly where the photo was taken.
 //
 // Uploads go through the same lib/storage primitives FileUpload uses, so
-// row shape, thumbnails, RLS, and admin views are identical.
+// row shape, thumbnails, RLS, and admin views are identical. NOTE: the
+// server (/api/upload) re-encodes images with sharp, which STRIPS EXIF from
+// the stored file — that's why GPS is read client-side and persisted into
+// metadata.gps, never re-derived from the stored image.
 
 import { useEffect, useRef, useState } from "react";
 import { gps as exifrGps } from "exifr";
@@ -32,36 +39,49 @@ type Props = {
   label: string;
 };
 
+type Gps = { lat: number; lng: number; captured_at: string };
+
 type DocRow = {
   id: string;
   storage_path: string;
   mime_type: string | null;
   file_name: string | null;
+  metadata?: { gps?: Gps } | null;
 };
 
-type Gps = { lat: number; lng: number; captured_at: string };
-
-// exifr.gps() resolves to { latitude, longitude } when GPS is present,
-// or undefined when it isn't. Guard on the numeric types anyway.
+// Reads EXIF GPS from the WHOLE file. Passing a fully-loaded ArrayBuffer
+// (instead of the File) means exifr parses the entire image rather than a
+// chunked window, so the GPS IFD is always in range — the chunked reader
+// could miss it on some phone photos and report a genuinely-tagged image as
+// having no location. Throws on a real parse error (so the caller can tell
+// "couldn't read the photo" apart from "photo has no GPS"); returns null
+// only when the image simply carries no GPS.
 async function readExifGps(file: File): Promise<Gps | null> {
-  try {
-    const out = await exifrGps(file);
-    if (out && typeof out.latitude === "number" && typeof out.longitude === "number") {
-      return { lat: out.latitude, lng: out.longitude, captured_at: new Date().toISOString() };
-    }
-    return null;
-  } catch {
-    return null;
+  const buf = await file.arrayBuffer();
+  const out = await exifrGps(buf);
+  if (out && typeof out.latitude === "number" && typeof out.longitude === "number") {
+    return { lat: out.latitude, lng: out.longitude, captured_at: new Date().toISOString() };
   }
+  return null;
 }
 
+// Live GPS for the camera path. A first-fix on mobile can take a while, so we
+// give the high-accuracy attempt a long timeout and fall back to a coarse
+// network fix before giving up.
 function requestLiveGeo(): Promise<Gps | null> {
   return new Promise((resolve) => {
     if (!("geolocation" in navigator)) return resolve(null);
+    const ok = (p: GeolocationPosition) =>
+      resolve({ lat: p.coords.latitude, lng: p.coords.longitude, captured_at: new Date().toISOString() });
     navigator.geolocation.getCurrentPosition(
-      (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude, captured_at: new Date().toISOString() }),
-      () => resolve(null),
-      { timeout: 8000, enableHighAccuracy: true },
+      ok,
+      () =>
+        navigator.geolocation.getCurrentPosition(ok, () => resolve(null), {
+          timeout: 12000,
+          enableHighAccuracy: false,
+          maximumAge: 60000,
+        }),
+      { timeout: 20000, enableHighAccuracy: true, maximumAge: 0 },
     );
   });
 }
@@ -72,6 +92,8 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
   const streamRef = useRef<MediaStream | null>(null);
   const [doc, setDoc] = useState<DocRow | null>(null);
   const [thumb, setThumb] = useState<string | null>(null);
+  const [gps, setGps] = useState<Gps | null>(null);
+  const [address, setAddress] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -83,18 +105,24 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
     (async () => {
       const { data } = await supabase()
         .from("epc_documents")
-        .select("id, storage_path, mime_type, file_name")
+        .select("id, storage_path, mime_type, file_name, metadata")
         .eq("business_id", businessId)
         .eq("category", category)
         .limit(1);
       const row = (data ?? [])[0] as DocRow | undefined;
       if (!row) return;
       setDoc(row);
+      const g = row.metadata?.gps ?? null;
+      if (g && typeof g.lat === "number" && typeof g.lng === "number") {
+        setGps(g);
+        void resolveAddress(g);
+      }
       if ((row.mime_type || "").startsWith("image/")) {
         const u = await getDocumentUrl(row.id);
         if (u) setThumb(u);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessId, category]);
 
   // Always stop the camera when the component unmounts.
@@ -108,10 +136,22 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
     if (videoRef.current) videoRef.current.srcObject = null;
   }
 
-  async function persist(file: File, gps: Gps) {
+  // Reverse-geocode the coordinates to a readable address. Best-effort — a
+  // failure just leaves the lat/lng showing without a street address.
+  async function resolveAddress(g: Gps) {
+    try {
+      const res = await fetch(`/api/reverse-geocode?lat=${g.lat}&lng=${g.lng}`);
+      const d = await res.json().catch(() => ({}));
+      if (d?.ok && d.address) setAddress(d.address);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function persist(file: File, coords: Gps) {
     setUploading(true);
     setStatus("Uploading…");
-    const r = await uploadDocument(file, { table: "epc_documents", category, business_id: businessId, gps });
+    const r = await uploadDocument(file, { table: "epc_documents", category, business_id: businessId, gps: coords });
     setUploading(false);
     setStatus(null);
     if (!r.ok) {
@@ -120,6 +160,9 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
     }
     const row: DocRow = { id: r.id, storage_path: r.storage_path, mime_type: r.mime_type, file_name: file.name };
     setDoc(row);
+    setGps(coords);
+    setAddress(null);
+    void resolveAddress(coords);
     if ((row.mime_type || "").startsWith("image/")) {
       const u = await getDocumentUrl(row.id);
       if (u) setThumb(u);
@@ -177,9 +220,9 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
     const blob: Blob | null = await new Promise((res) => canvas.toBlob((b) => res(b), "image/jpeg", 0.9));
     if (!blob) { setCamBusy(false); setCamError("Couldn't capture the photo. Try again."); return; }
 
-    setCamError("Getting location…");
-    const gps = await requestLiveGeo();
-    if (!gps) {
+    setCamError("Getting your location… please allow location access.");
+    const coords = await requestLiveGeo();
+    if (!coords) {
       setCamBusy(false);
       setCamError("We couldn't get your location. Please allow location access and try again.");
       return;
@@ -188,7 +231,7 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
     stopStream();
     setCamOpen(false);
     setCamBusy(false);
-    await persist(file, gps);
+    await persist(file, coords);
   }
 
   // ── Upload path ("Upload file") — EXIF GPS required ────────────────
@@ -203,14 +246,25 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
       return;
     }
     setStatus("Reading location from photo…");
-    const gps = await readExifGps(file);
-    if (!gps) {
+    let coords: Gps | null = null;
+    try {
+      coords = await readExifGps(file);
+    } catch (err) {
+      // A genuine parse failure (corrupt/unsupported EXIF) — distinct from a
+      // photo that simply has no GPS. Surface the real reason to the console.
+      console.warn("[GeoOfficeUpload] EXIF read failed:", err);
+      setStatus(null);
+      setError("Couldn’t read this photo’s data. Try a different photo, or use “Take photo”.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+    if (!coords) {
       setStatus(null);
       setError("This photo has no location data. Please upload a photo that was taken with location on, or use “Take photo”.");
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
-    await persist(file, gps);
+    await persist(file, coords);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -220,6 +274,8 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
     if (!ok) { setError("Could not delete this file."); return; }
     setDoc(null);
     setThumb(null);
+    setGps(null);
+    setAddress(null);
   }
 
   return (
@@ -227,21 +283,32 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
       <p className="text-[13px] font-medium text-text-mid mb-2">{label}</p>
 
       {doc ? (
-        <div className="flex items-center gap-3 bg-white border border-line rounded-input px-3 py-2 mb-2">
-          {thumb ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img src={thumb} alt="" className="w-10 h-10 object-cover rounded-md" />
-          ) : (
-            <div className="w-10 h-10 bg-bg-tint rounded-md grid place-items-center text-blue text-xs font-bold">PDF</div>
-          )}
-          <div className="flex-1 min-w-0">
-            <p className="text-[13px] text-text truncate">{doc.file_name || "Document"}</p>
-            <p className="text-[11px] text-text-muted">Geo-tagged · Uploaded</p>
+        <>
+          <div className="flex items-center gap-3 bg-white border border-line rounded-input px-3 py-2 mb-2">
+            {thumb ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={thumb} alt="" className="w-10 h-10 object-cover rounded-md" />
+            ) : (
+              <div className="w-10 h-10 bg-bg-tint rounded-md grid place-items-center text-blue text-xs font-bold">PDF</div>
+            )}
+            <div className="flex-1 min-w-0">
+              <p className="text-[13px] text-text truncate">{doc.file_name || "Document"}</p>
+              <p className="text-[11px] text-text-muted">Geo-tagged · Uploaded</p>
+            </div>
+            <button type="button" onClick={remove} className="text-[12px] text-text-muted hover:text-red-500 transition-colors">
+              Remove
+            </button>
           </div>
-          <button type="button" onClick={remove} className="text-[12px] text-text-muted hover:text-red-500 transition-colors">
-            Remove
-          </button>
-        </div>
+          {gps && (
+            <div className="mb-2 px-3 py-2 rounded-input bg-blue-50 border border-blue/15">
+              <p className="text-[12px] text-text-mid flex items-center gap-1.5">
+                <span aria-hidden>📍</span>
+                <span className="font-medium">{gps.lat.toFixed(6)}, {gps.lng.toFixed(6)}</span>
+              </p>
+              {address && <p className="text-[12px] text-text-muted mt-0.5">{address}</p>}
+            </div>
+          )}
+        </>
       ) : (
         <div className="grid grid-cols-2 gap-2">
           <button
@@ -291,7 +358,7 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
             className="max-w-full max-h-[68vh] rounded-lg bg-black"
           />
           {camError && (
-            <p className={"mt-3 text-[13px] " + (camError === "Getting location…" ? "text-white/80" : "text-red-300")}>
+            <p className={"mt-3 text-[13px] " + (camError.startsWith("Getting your location") ? "text-white/80" : "text-red-300")}>
               {camError}
             </p>
           )}
