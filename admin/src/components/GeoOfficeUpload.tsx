@@ -5,30 +5,29 @@
 // Two entry points per slot:
 //
 //   1. "Take photo" → opens a LIVE in-browser camera (getUserMedia). On
-//      mobile this is the rear camera; on desktop the webcam. Capture grabs
-//      a still frame, then reads LIVE GPS via navigator.geolocation. A cold
-//      GPS fix on mobile can take >10s, so we allow a generous timeout and
-//      fall back to a coarse/network fix before giving up.
+//      capture we grab the frame, read LIVE GPS, reverse-geocode it, and
+//      BURN a location banner (title + address + lat/long + IST time)
+//      directly onto the photo pixels — GPS Map Camera style — so the geo
+//      info lives in the image itself and survives the server's compression
+//      (which strips EXIF). A cold GPS fix on mobile can take >10s, so we
+//      allow a generous timeout with a coarse fallback.
 //
-//   2. "Upload file" → plain file picker. The uploaded image MUST carry
-//      EXIF GPS (a location-tagged photo). We read GPS from the WHOLE file
-//      (no chunked windowing — that can miss the GPS block on some phone
-//      photos) BEFORE the server ever compresses it.
+//   2. "Upload file" → plain file picker. The photo must prove its location
+//      one of two ways: EXIF GPS (read from the full file before upload), OR
+//      a visible GPS-stamp banner whose coordinates we OCR (GPS Map Camera
+//      and similar apps burn "Lat …° Long …°" onto the image but usually
+//      write no EXIF). No location either way → rejected.
 //
-// Both paths capture the coordinates into the doc row's metadata.gps and
-// then show the latitude/longitude + a resolved address, so the EPC can see
-// exactly where the photo was taken.
-//
-// Uploads go through the same lib/storage primitives FileUpload uses, so
-// row shape, thumbnails, RLS, and admin views are identical. NOTE: the
-// server (/api/upload) re-encodes images with sharp, which STRIPS EXIF from
-// the stored file — that's why GPS is read client-side and persisted into
-// metadata.gps, never re-derived from the stored image.
+// Uploads go through the same lib/storage primitives FileUpload uses, so row
+// shape, thumbnails, RLS, and admin views are identical. Captured coordinates
+// are persisted to the doc row's metadata.gps and shown as lat/long + a
+// resolved address.
 
 import { useEffect, useRef, useState } from "react";
 import { gps as exifrGps } from "exifr";
 import { supabase } from "@/lib/supabase";
 import { uploadDocument, getDocumentUrl, deleteDocument } from "@/lib/storage";
+import { getToken } from "@/lib/auth";
 import { isAcceptedFileType } from "@/lib/validators";
 
 type Category = "office_exterior" | "office_interior" | "office_selfie";
@@ -51,16 +50,35 @@ type DocRow = {
 
 // Reads EXIF GPS from the WHOLE file. Passing a fully-loaded ArrayBuffer
 // (instead of the File) means exifr parses the entire image rather than a
-// chunked window, so the GPS IFD is always in range — the chunked reader
-// could miss it on some phone photos and report a genuinely-tagged image as
-// having no location. Throws on a real parse error (so the caller can tell
-// "couldn't read the photo" apart from "photo has no GPS"); returns null
-// only when the image simply carries no GPS.
+// chunked window, so the GPS IFD is always in range. Throws on a real parse
+// error (caller falls back to OCR); returns null when the image carries no
+// EXIF GPS.
 async function readExifGps(file: File): Promise<Gps | null> {
   const buf = await file.arrayBuffer();
   const out = await exifrGps(buf);
   if (out && typeof out.latitude === "number" && typeof out.longitude === "number") {
     return { lat: out.latitude, lng: out.longitude, captured_at: new Date().toISOString() };
+  }
+  return null;
+}
+
+// OCR fallback for the upload path: pulls coordinates out of a burned-in
+// GPS-stamp banner via the Vision route. Returns null when none is found.
+async function readStampGps(file: File): Promise<Gps | null> {
+  try {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch("/api/epc/extract-geo", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      body: fd,
+    });
+    const d = await res.json().catch(() => ({}));
+    if (d?.ok && d.found && typeof d.lat === "number" && typeof d.lng === "number") {
+      return { lat: d.lat, lng: d.lng, captured_at: new Date().toISOString() };
+    }
+  } catch {
+    /* ignore — treated as "no location" */
   }
   return null;
 }
@@ -84,6 +102,133 @@ function requestLiveGeo(): Promise<Gps | null> {
       { timeout: 20000, enableHighAccuracy: true, maximumAge: 0 },
     );
   });
+}
+
+// Resolves a title + address for the on-photo stamp / display. Best-effort.
+async function fetchGeoMeta(g: Gps): Promise<{ title: string; address: string }> {
+  try {
+    const res = await fetch(`/api/reverse-geocode?lat=${g.lat}&lng=${g.lng}`);
+    const d = await res.json().catch(() => ({}));
+    if (d?.ok) return { title: d.title || "", address: d.address || "" };
+  } catch {
+    /* ignore */
+  }
+  return { title: "", address: "" };
+}
+
+// "16/06/2026 01:07 PM India Standard Time"
+function formatIST(d: Date): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: true,
+  }).formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  const ap = (get("dayPeriod") || "").toUpperCase();
+  return `${get("day")}/${get("month")}/${get("year")} ${get("hour")}:${get("minute")} ${ap} India Standard Time`;
+}
+
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxW: number): string[] {
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    const test = cur ? cur + " " + w : w;
+    if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = w; }
+    else cur = test;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+function truncate(ctx: CanvasRenderingContext2D, text: string, maxW: number): string {
+  if (ctx.measureText(text).width <= maxW) return text;
+  let s = text;
+  while (s.length > 1 && ctx.measureText(s + "…").width > maxW) s = s.slice(0, -1);
+  return s + "…";
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawPin(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number) {
+  ctx.save();
+  ctx.fillStyle = "#e5342b";
+  ctx.beginPath();
+  ctx.moveTo(cx, cy + r * 1.35);
+  ctx.arc(cx, cy, r, Math.PI * 0.78, Math.PI * 0.22, false);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.42, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.restore();
+}
+
+// Burns the GPS-stamp banner onto a canvas that already holds the captured
+// frame (bottom strip: pin thumbnail + title + address + coords + IST time).
+function drawGeoStamp(
+  canvas: HTMLCanvasElement,
+  info: { title: string; address: string; lat: number; lng: number },
+) {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const W = canvas.width;
+  const H = canvas.height;
+  const fs = Math.max(18, Math.round(W * 0.026));
+  const titleFs = Math.round(fs * 1.35);
+  const lineH = Math.round(fs * 1.32);
+  const pad = Math.round(fs * 0.9);
+
+  ctx.textBaseline = "top";
+  const mapSize = Math.round(fs * 5.4);
+  const textX = pad + mapSize + pad;
+  const textW = W - textX - pad;
+
+  ctx.font = `${fs}px sans-serif`;
+  const addrLines = wrapText(ctx, info.address || "", textW).slice(0, 2);
+  const coordStr = `Lat ${info.lat.toFixed(6)}°  Long ${info.lng.toFixed(6)}°`;
+  const dateStr = formatIST(new Date());
+
+  const bannerH = pad * 2 + titleFs + Math.round(fs * 0.25) + (addrLines.length + 2) * lineH;
+  const bannerY = H - bannerH;
+
+  // Banner background.
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(0, bannerY, W, bannerH);
+
+  // Map placeholder square + pin (keyless — a real map tile would need a
+  // Static Maps API key).
+  const mx = pad;
+  const my = bannerY + pad;
+  ctx.fillStyle = "#6f7f57";
+  roundRect(ctx, mx, my, mapSize, mapSize, Math.round(fs * 0.4));
+  ctx.fill();
+  drawPin(ctx, mx + mapSize / 2, my + mapSize * 0.46, mapSize * 0.22);
+
+  // Text.
+  let ty = bannerY + pad;
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `bold ${titleFs}px sans-serif`;
+  ctx.fillText(truncate(ctx, info.title || "Location captured", textW), textX, ty);
+  ty += titleFs + Math.round(fs * 0.25);
+
+  ctx.font = `${fs}px sans-serif`;
+  ctx.fillStyle = "rgba(255,255,255,0.94)";
+  for (const ln of addrLines) { ctx.fillText(ln, textX, ty); ty += lineH; }
+  ctx.fillText(coordStr, textX, ty); ty += lineH;
+  ctx.fillText(dateStr, textX, ty);
 }
 
 export default function GeoOfficeUpload({ businessId, category, label }: Props) {
@@ -136,16 +281,10 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
     if (videoRef.current) videoRef.current.srcObject = null;
   }
 
-  // Reverse-geocode the coordinates to a readable address. Best-effort — a
-  // failure just leaves the lat/lng showing without a street address.
+  // Reverse-geocode the coordinates to a readable address for the 📍 display.
   async function resolveAddress(g: Gps) {
-    try {
-      const res = await fetch(`/api/reverse-geocode?lat=${g.lat}&lng=${g.lng}`);
-      const d = await res.json().catch(() => ({}));
-      if (d?.ok && d.address) setAddress(d.address);
-    } catch {
-      /* ignore */
-    }
+    const meta = await fetchGeoMeta(g);
+    if (meta.address) setAddress(meta.address);
   }
 
   async function persist(file: File, coords: Gps) {
@@ -211,14 +350,15 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
     }
     setCamBusy(true);
     setCamError(null);
+
+    // Freeze the frame NOW so the photo is the moment of the click, not
+    // whatever the camera sees after the GPS/geocode round-trip.
     const canvas = document.createElement("canvas");
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext("2d");
     if (!ctx) { setCamBusy(false); setCamError("Couldn't capture the photo. Try again."); return; }
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const blob: Blob | null = await new Promise((res) => canvas.toBlob((b) => res(b), "image/jpeg", 0.9));
-    if (!blob) { setCamBusy(false); setCamError("Couldn't capture the photo. Try again."); return; }
 
     setCamError("Getting your location… please allow location access.");
     const coords = await requestLiveGeo();
@@ -227,6 +367,14 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
       setCamError("We couldn't get your location. Please allow location access and try again.");
       return;
     }
+
+    // Resolve the address, then burn the stamp onto the frozen frame.
+    const meta = await fetchGeoMeta(coords);
+    drawGeoStamp(canvas, { title: meta.title, address: meta.address, lat: coords.lat, lng: coords.lng });
+
+    const blob: Blob | null = await new Promise((res) => canvas.toBlob((b) => res(b), "image/jpeg", 0.92));
+    if (!blob) { setCamBusy(false); setCamError("Couldn't capture the photo. Try again."); return; }
+
     const file = new File([blob], `office-${category}-${Date.now()}.jpg`, { type: "image/jpeg" });
     stopStream();
     setCamOpen(false);
@@ -234,7 +382,7 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
     await persist(file, coords);
   }
 
-  // ── Upload path ("Upload file") — EXIF GPS required ────────────────
+  // ── Upload path ("Upload file") — EXIF GPS or a burned-in GPS stamp ──
   async function handleUploadFile(files: FileList | null) {
     setError(null);
     setStatus(null);
@@ -245,22 +393,26 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
+
     setStatus("Reading location from photo…");
     let coords: Gps | null = null;
     try {
       coords = await readExifGps(file);
     } catch (err) {
-      // A genuine parse failure (corrupt/unsupported EXIF) — distinct from a
-      // photo that simply has no GPS. Surface the real reason to the console.
+      // Real parse error — not "no GPS". Fall through to the OCR-stamp check.
       console.warn("[GeoOfficeUpload] EXIF read failed:", err);
-      setStatus(null);
-      setError("Couldn’t read this photo’s data. Try a different photo, or use “Take photo”.");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
+    }
+    // No EXIF GPS? Try to OCR a burned-in GPS-stamp banner (GPS Map Camera etc.).
+    if (!coords) {
+      setStatus("Reading location stamp…");
+      coords = await readStampGps(file);
     }
     if (!coords) {
       setStatus(null);
-      setError("This photo has no location data. Please upload a photo that was taken with location on, or use “Take photo”.");
+      setError(
+        "No location found in this photo. Upload a photo taken with location on, " +
+          "or a GPS-camera photo with the location printed on it, or use “Take photo”.",
+      );
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
@@ -338,7 +490,7 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
               disabled={uploading}
             />
             <p className="text-[13px] text-text-mid font-medium">Upload file</p>
-            <p className="text-[11px] text-text-muted mt-0.5">Must have location</p>
+            <p className="text-[11px] text-text-muted mt-0.5">Location or GPS stamp</p>
           </label>
         </div>
       )}

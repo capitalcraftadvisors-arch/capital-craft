@@ -32,28 +32,36 @@ export async function GET(req: NextRequest) {
     }
     const d = (await res.json()) as Record<string, unknown>;
 
+    const locality = (d.locality as string) || "";
     const city =
-      (d.city as string) || (d.locality as string) || (d.principalSubdivision as string) || "";
+      (d.city as string) || locality || (d.principalSubdivision as string) || "";
     const state = (d.principalSubdivision as string) || "";
     const postcode = (d.postcode as string) || "";
     const country = (d.countryName as string) || "";
 
     // Build a compact, sensible address line from whatever the provider gave.
     const parts = [
-      (d.locality as string) || "",
-      city && city !== d.locality ? city : "",
+      locality,
+      city && city !== locality ? city : "",
       state,
       postcode,
       country,
     ].filter((p, i, arr) => p && arr.indexOf(p) === i);
     const address = parts.join(", ");
 
+    // Short title line for the on-photo stamp, e.g. "Khatoo, Rajasthan, India".
+    const title = [locality || city, state, country]
+      .filter((p, i, arr) => p && arr.indexOf(p) === i)
+      .join(", ");
+
     return NextResponse.json({
       ok: true,
+      title: title || null,
       address: address || null,
       city: city || null,
       state: state || null,
       postcode: postcode || null,
+      country: country || null,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
