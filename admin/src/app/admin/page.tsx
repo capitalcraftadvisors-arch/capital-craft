@@ -392,11 +392,11 @@ function EpcsTab() {
               tightened to give that space back. EPC details flexes. */}
           <colgroup>
             <col style={{ width: "auto" }} />
-            <col style={{ width: "95px" }} />
-            <col style={{ width: "115px" }} />
-            <col style={{ width: "175px" }} />
-            <col style={{ width: "155px" }} />
-            <col style={{ width: "220px" }} />
+            <col style={{ width: "88px" }} />
+            <col style={{ width: "110px" }} />
+            <col style={{ width: "168px" }} />
+            <col style={{ width: "140px" }} />
+            <col style={{ width: "300px" }} />
           </colgroup>
           <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">
             <tr>
@@ -557,12 +557,12 @@ function LenderCell({
   onToggle: (lender: Lender, field: "docs_given" | "approved" | "rejected", value: boolean) => void;
 }) {
   return (
-    <div className="space-y-1.5 min-w-[300px]">
+    <div className="space-y-1.5">
       {LENDERS.map((l) => {
         const s = state[l.key] ?? { docs_given: false, approved: false, rejected: false };
         return (
-          <div key={l.key} className="flex items-center gap-3 text-[11px]">
-            <span className="min-w-[64px] font-medium text-[#0f3d2e]">{l.label}</span>
+          <div key={l.key} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
+            <span className="min-w-[58px] font-medium text-[#0f3d2e] whitespace-nowrap">{l.label}</span>
             <label className="flex items-center gap-1 cursor-pointer select-none">
               <input
                 type="checkbox"

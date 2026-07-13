@@ -25,6 +25,7 @@ import Button from "@/components/ui/Button";
 import StatusBadge from "@/components/StatusBadge";
 import GstR3bSection from "@/components/GstR3bSection";
 import EpcAdminInfoSection from "@/components/EpcAdminInfoSection";
+import EpcProjectsSection from "@/components/EpcProjectsSection";
 import CommentsSection from "@/components/CommentsSection";
 import EditableField from "@/components/EditableField";
 import AdminDocSlot from "@/components/AdminDocSlot";
@@ -282,9 +283,7 @@ function Inner() {
             onSave={async (v) => saveField("bank_ifsc")(v.toUpperCase())}
             validate={(v) => (!v ? null : IFSC_RE.test(v.toUpperCase()) ? null : "Invalid IFSC")}
           />
-          <EditableField label="Branch" value={biz.bank_branch} onSave={saveField("bank_branch")} />
           <EditableField label="Bank name" value={biz.bank_name} onSave={saveField("bank_name")} />
-          <EditableField label="Account holder" value={biz.bank_account_holder} onSave={saveField("bank_account_holder")} />
           <div className="mt-3">
             <AdminDocSlot businessId={params.id} category="cancelled_cheque" label="Cancelled cheque" />
           </div>
@@ -344,6 +343,8 @@ function Inner() {
         </Section>
 
         <EpcAdminInfoSection businessId={params.id} />
+
+        <EpcProjectsSection businessId={params.id} />
 
         <GstR3bSection businessId={params.id} />
 

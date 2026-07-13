@@ -46,6 +46,15 @@ type Doc = {
   metadata: Record<string, unknown> | null;
 };
 type LenderRow = { lender: string; docs_given: boolean; approved: boolean; rejected?: boolean };
+type EpcProjSeg = {
+  applications_submitted?: number | null;
+  applications_rejected?: number | null;
+  sanction_amount?: number | null;
+  disbursed?: number | null;
+  pending_disbursal?: number | null;
+};
+type EpcProjects = { residential?: EpcProjSeg; commercial?: EpcProjSeg } | null;
+
 type AdminInfo = {
   team_size: string | null;
   capacity_residential: number | null;
@@ -53,7 +62,22 @@ type AdminInfo = {
   capacity_commercial: number | null;
   capacity_commercial_unit: "KW" | "MW" | null;
   turnover_last_fy: string | null;
+  epc_projects: EpcProjects;
 };
+
+const EPC_PROJ_ROWS: { key: keyof EpcProjSeg; label: string; money: boolean }[] = [
+  { key: "applications_submitted", label: "Applications submitted", money: false },
+  { key: "applications_rejected",  label: "Applications rejected",  money: false },
+  { key: "sanction_amount",        label: "Sanction amount",        money: true },
+  { key: "disbursed",              label: "Disbursed",              money: true },
+  { key: "pending_disbursal",      label: "Pending disbursal",      money: true },
+];
+
+function fmtProj(v: number | null | undefined, money: boolean): string {
+  if (v === null || v === undefined || !Number.isFinite(Number(v))) return "—";
+  const n = Number(v);
+  return money ? "₹" + Math.round(n).toLocaleString("en-IN") : String(n);
+}
 
 const BUSINESS_TYPE_LABEL: Record<string, string> = {
   proprietorship: "Proprietorship",
@@ -392,6 +416,10 @@ function Inner() {
               <KV k="Account" v={maskAcct(biz.bank_account_number)} />
               <KV k="IFSC" v={biz.bank_ifsc} />
               <KV k="Bank" v={biz.bank_name} />
+            </SectionCard>
+
+            <SectionCard title="EPC Projects" accent="blue" icon={I.bank} adminOnly>
+              <EpcProjectsTable data={adminInfo?.epc_projects ?? null} />
             </SectionCard>
           </div>
 
@@ -748,6 +776,35 @@ function SectionCard({
         {adminOnly && <span className="ml-1.5 text-[11px] text-[#8ab3a1] font-normal">admin</span>}
       </div>
       <div>{children}</div>
+    </div>
+  );
+}
+
+// Read-only 2×5 EPC Projects grid (Residential | Commercial). Mirrors the
+// editable EpcProjectsSection on the Edit page. Empty/absent values show "—".
+function EpcProjectsTable({ data }: { data: EpcProjects }) {
+  const res = data?.residential ?? {};
+  const com = data?.commercial ?? {};
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-[14px] border-collapse">
+        <thead>
+          <tr className="text-[12px] uppercase tracking-wide text-[#5a8a76]">
+            <th className="text-left font-medium pb-2 pr-3"></th>
+            <th className="text-right font-medium pb-2 px-2">Residential</th>
+            <th className="text-right font-medium pb-2 px-2">Commercial</th>
+          </tr>
+        </thead>
+        <tbody>
+          {EPC_PROJ_ROWS.map((row) => (
+            <tr key={row.key} className="border-t border-[#e0f0e8]">
+              <td className="py-1.5 pr-3 text-[13px] text-[#5a8a76]">{row.label}</td>
+              <td className="py-1.5 px-2 text-right font-medium text-[#0f3d2e]">{fmtProj(res[row.key], row.money)}</td>
+              <td className="py-1.5 px-2 text-right font-medium text-[#0f3d2e]">{fmtProj(com[row.key], row.money)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
