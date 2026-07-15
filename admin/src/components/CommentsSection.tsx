@@ -27,10 +27,26 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getBusiness } from "@/lib/auth";
-import type { CommentRow } from "@/components/CommentsPanel";
 
+// Row shape shared by epc_comments and loan_comments (the owning key —
+// business_id / application_id — isn't needed for rendering).
+type Row = {
+  id: string;
+  author_id: string | null;
+  author_name: string | null;
+  comment_text: string;
+  created_at: string;
+  updated_at: string;
+};
+
+// Exactly ONE of businessId / applicationId is expected:
+//   businessId    → EPC profile comments   (epc_comments)
+//   applicationId → loan application notes (loan_comments)
+// Both tables are admin-only and permanent (no UPDATE policy), so the same
+// UI serves both — no styling fork.
 type Props = {
-  businessId: string;
+  businessId?: string;
+  applicationId?: string;
   epcName?: string | null;
   onChanged?: () => void;
   // Optional height cap for the scroll list.
@@ -38,9 +54,9 @@ type Props = {
 };
 
 export default function CommentsSection({
-  businessId, onChanged, maxListHeight = 360,
+  businessId, applicationId, onChanged, maxListHeight = 360,
 }: Props) {
-  const [rows, setRows] = useState<CommentRow[]>([]);
+  const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -48,26 +64,32 @@ export default function CommentsSection({
   const me = getBusiness();
   const myId = me?.id ?? null;
 
+  const isLoan = !!applicationId;
+  const table  = isLoan ? "loan_comments" : "epc_comments";
+  const keyCol = isLoan ? "application_id" : "business_id";
+  const keyVal = (isLoan ? applicationId : businessId) ?? "";
+
   async function load() {
+    if (!keyVal) { setRows([]); setLoading(false); return; }
     setLoading(true);
     const { data, error } = await supabase()
-      .from("epc_comments")
-      .select("id, business_id, author_id, author_name, comment_text, created_at, updated_at")
-      .eq("business_id", businessId)
+      .from(table)
+      .select("id, author_id, author_name, comment_text, created_at, updated_at")
+      .eq(keyCol, keyVal)
       .order("created_at", { ascending: false });
     if (error) console.warn("[comments-section] load failed:", error.message);
-    setRows((data ?? []) as CommentRow[]);
+    setRows((data ?? []) as unknown as Row[]);
     setLoading(false);
   }
 
-  useEffect(() => { void load(); }, [businessId]);
+  useEffect(() => { void load(); }, [table, keyCol, keyVal]);
 
   async function add() {
     const t = text.trim();
-    if (!t) return;
+    if (!t || !keyVal) return;
     setBusy(true);
-    const { error } = await supabase().from("epc_comments").insert({
-      business_id: businessId,
+    const { error } = await supabase().from(table).insert({
+      [keyCol]: keyVal,
       author_id: myId,
       author_name: me?.contact_name ?? null,
       comment_text: t,

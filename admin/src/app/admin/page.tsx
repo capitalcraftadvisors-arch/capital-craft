@@ -28,6 +28,15 @@ export default function AdminHomePage() {
 function Inner() {
   const router = useRouter();
   const [tab, setTab] = useState<Tab>("epcs");
+
+  // Coming back from a loan-application View should land on the Loan
+  // applications tab (the list then restores scroll + highlights the row you
+  // came from). Consumed once, so a fresh visit still defaults to EPCs.
+  useEffect(() => {
+    if (sessionStorage.getItem("adminList.tab") === "apps") setTab("apps");
+    sessionStorage.removeItem("adminList.tab");
+  }, []);
+
   return (
     <main className="min-h-screen bg-bg-soft">
       <header className="border-b border-line bg-white">
@@ -620,6 +629,40 @@ function AppsTab() {
   const [statusFilter, setStatusFilter] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [zipBusy, setZipBusy] = useState<string | null>(null);
+  // Row highlighted after returning from View — same behaviour as the EPC
+  // list, with its own sessionStorage keys.
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+
+  // On mount (and after rows load) restore scroll position and mark the
+  // last-viewed row for a brief highlight, then clear the sessionStorage so a
+  // fresh session doesn't inherit stale state.
+  useEffect(() => {
+    if (rows.length === 0) return;
+    const savedScroll = sessionStorage.getItem("appsList.scroll");
+    const savedRow    = sessionStorage.getItem("appsList.lastRowId");
+    if (savedScroll) {
+      const y = parseInt(savedScroll, 10);
+      if (!isNaN(y)) window.scrollTo(0, y);
+    }
+    if (savedRow) {
+      setHighlightId(savedRow);
+      const t = window.setTimeout(() => setHighlightId(null), 2100);
+      sessionStorage.removeItem("appsList.lastRowId");
+      sessionStorage.removeItem("appsList.scroll");
+      return () => window.clearTimeout(t);
+    }
+    sessionStorage.removeItem("appsList.lastRowId");
+    sessionStorage.removeItem("appsList.scroll");
+  }, [rows.length]);
+
+  // Save scroll + row id + the active tab, then navigate to View. The tab key
+  // is what brings Back to the Loan applications tab rather than EPCs.
+  function navigateToView(row: Row) {
+    sessionStorage.setItem("appsList.scroll", String(window.scrollY));
+    sessionStorage.setItem("appsList.lastRowId", row.id);
+    sessionStorage.setItem("adminList.tab", "apps");
+    router.push(`/admin/app/${row.id}/view` as any);
+  }
 
   useEffect(() => {
     (async () => {
@@ -729,56 +772,66 @@ function AppsTab() {
             <col style={{ width: "105px" }} />
             <col style={{ width: "150px" }} />
           </colgroup>
-          <thead className="bg-bg-soft border-b border-line text-left text-text-muted">
+          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">
             <tr>
-              <th className="px-5 py-3 font-medium">Borrower Details</th>
-              <th className="px-5 py-3 font-medium">EPC Partner</th>
-              <th className="px-5 py-3 font-medium">Amount</th>
-              <th className="px-5 py-3 font-medium">Status</th>
-              <th className="px-5 py-3 font-medium">By</th>
-              <th className="px-5 py-3 font-medium">Action</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Borrower details</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">EPC partner</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Amount</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Status</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">By</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Action</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={6} className="px-5 py-10 text-center text-text-muted">No applications match.</td></tr>
-            ) : filtered.map((r) => (
-              <tr key={r.id} onClick={() => router.push(`/admin/app/${r.id}/view` as any)}
-                  className="border-b border-line cursor-pointer hover:bg-[#f0faf5] transition-colors">
-                {/* Borrower detail box: name + LA id + masked Aadhaar */}
-                <td className="px-5 py-4">
-                  <div className="font-semibold text-text truncate">{displayBorrower(r)}</div>
+              <tr><td colSpan={6} className="px-5 py-10 text-center text-[#5a8a76]">No applications match.</td></tr>
+            ) : filtered.map((r) => {
+              const isHighlighted = highlightId === r.id;
+              return (
+              <tr
+                key={r.id}
+                data-highlighted={isHighlighted ? "yes" : undefined}
+                style={{
+                  transition: "background-color 2s ease-out",
+                  backgroundColor: isHighlighted ? "#dceffb" : undefined,
+                }}
+                onClick={() => navigateToView(r)}
+                className="border-b border-[#eaf3ee] cursor-pointer hover:bg-[#f7fcfa] align-top"
+              >
+                {/* Borrower detail box: name + CC id + masked Aadhaar */}
+                <td className="px-3 py-3">
+                  <p className="text-[13px] font-semibold text-[#0f3d2e] truncate">{displayBorrower(r)}</p>
                   {r.loan_display_id && (
-                    <div className="text-[11px] font-mono text-[#185fa5] mt-0.5">{r.loan_display_id}</div>
+                    <p className="text-[11px] font-mono text-[#185fa5] mt-0.5">{r.loan_display_id}</p>
                   )}
                   {displayMaskedAadhaar(r) && (
-                    <div className="text-[11px] font-mono text-text-muted mt-0.5">{displayMaskedAadhaar(r)}</div>
+                    <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{displayMaskedAadhaar(r)}</p>
                   )}
                 </td>
-                <td className="px-5 py-4 truncate">
-                  <div className="text-text">{displayEpc(r)}</div>
+                <td className="px-3 py-3 truncate">
+                  <p className="text-[13px] text-[#0f3d2e] truncate">{displayEpc(r)}</p>
                   {r.epc_business?.epc_display_id && (
-                    <div className="text-[11px] font-mono text-text-muted mt-0.5">{r.epc_business.epc_display_id}</div>
+                    <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.epc_business.epc_display_id}</p>
                   )}
                 </td>
-                <td className="px-5 py-4 font-semibold text-[#0f3d2e]">{displayAmount(r)}</td>
+                <td className="px-3 py-3 text-[13px] font-semibold text-[#0f3d2e]">{displayAmount(r)}</td>
                 {/* Loan apps have no internal admin status — show the
                     lender outcome (same 3 buckets as the EPC's own view). */}
-                <td className="px-5 py-4">
+                <td className="px-3 py-3">
                   <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${OUTCOME_PILL[lenderOutcome(r.status)]}`}>
                     {OUTCOME_LABEL[lenderOutcome(r.status)]}
                   </span>
                 </td>
-                <td className="px-5 py-4 text-text-muted">
+                <td className="px-3 py-3 text-[13px] text-[#5a8a76]">
                   {r.created_by === "admin" ? "Admin" : "Customer"}
                 </td>
                 {/* Action: View + Download ZIP. stopPropagation so the
                     buttons don't also trigger the row's navigate. */}
-                <td className="px-5 py-4" onClick={(e) => e.stopPropagation()}>
+                <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => router.push(`/admin/app/${r.id}/view` as any)}
+                      onClick={() => navigateToView(r)}
                       className="px-2.5 py-1.5 text-[12px] font-semibold text-[#185fa5] border border-[#d3e9f7] rounded hover:bg-[#dceffb] transition-colors"
                     >
                       View
@@ -795,7 +848,8 @@ function AppsTab() {
                   </div>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </Card>

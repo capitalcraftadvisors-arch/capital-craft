@@ -1,46 +1,41 @@
 "use client";
 
-// Loan Application — full-page View dashboard for admin.
+// Loan Application — full-page dense 3-column dashboard for admin.
 //
-// Mirrors the EPC View page pattern: a dense, brand-colored dashboard
-// that surfaces all data captured across Steps 1-5 plus the submit
-// state on Step 6. Every document has an eye-View link.
+// This page is a STRUCTURAL COPY of the EPC View
+// (admin/src/app/admin/epc/[id]/view/page.tsx). Same shell, same header card,
+// same status band shape, same progress tracker, same 3-column grid, same
+// actions strip, same modals — only the DATA and the labels differ.
 //
-// Data source: the epc_applications row. This never touches
-// epc_business except for read-only display of the linked EPC partner
-// (trade name + display id).
+// Every piece of chrome comes from @/components/view/ViewKit, which is the
+// SAME kit the EPC View imports. Do NOT re-implement layout/CSS here: change
+// ViewKit instead, and both dashboards move together. Re-implementing the
+// chrome by hand is exactly what made these two pages drift apart before.
 //
-// The "Edit" button routes back to Step 1 of the flow — every step is
-// editable, nothing is locked (even after submit), so the customer /
-// admin can navigate to whichever step they need.
+// Read-only summary — "Edit application" jumps to /admin/app/[id]/step-1
+// (every step stays editable, nothing is locked, even after submit).
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
-import Card from "@/components/ui/Card";
-import Button from "@/components/ui/Button";
-import DeleteLoanAppModal from "@/components/DeleteLoanAppModal";
 import { supabase } from "@/lib/supabase";
+import { getToken, getBusiness } from "@/lib/auth";
 import { getDocumentUrl } from "@/lib/storage";
-import { getToken } from "@/lib/auth";
-import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL, type LenderOutcome } from "@/lib/loan-status";
-
-// The three loan-status values an admin can set from the View page, and
-// the epc_applications.status each maps to. Loan applications have NO
-// internal admin status — this IS the status.
-const LOAN_STATUS_ACTIONS: Array<{ outcome: LenderOutcome; status: string; label: string; kind: "review" | "approve" | "reject" }> = [
-  { outcome: "review",   status: "under_review", label: "Under Review",       kind: "review" },
-  { outcome: "approved", status: "approved",     label: "Approved by lender",  kind: "approve" },
-  { outcome: "rejected", status: "rejected",     label: "Rejected by lender",  kind: "reject" },
-];
+import DeleteLoanAppModal from "@/components/DeleteLoanAppModal";
+import CommentsSection from "@/components/CommentsSection";
+import LoanActivityLogModal from "@/components/LoanActivityLogModal";
+import {
+  I, StatusBtn, Pill, BigProgressStep, BigConnector, SectionCard, KV,
+  StepBlock, DocGrid, type ViewDocSlot,
+} from "@/components/view/ViewKit";
 
 type Loan = Record<string, any>;
 type Doc  = { id: string; category: string; storage_path: string; file_name: string | null; mime_type: string | null };
 
 const SYSTEM_LABEL: Record<string, string> = {
-  on_grid:  "On-Grid Solar System",
-  off_grid: "Off-Grid Solar System",
-  hybrid:   "Hybrid Solar System",
+  on_grid:  "On-Grid",
+  off_grid: "Off-Grid",
+  hybrid:   "Hybrid",
 };
 const EMPLOYMENT_LABEL: Record<string, string> = {
   salaried: "Salaried", self_employed: "Self-employed",
@@ -48,8 +43,17 @@ const EMPLOYMENT_LABEL: Record<string, string> = {
 const METHOD_LABEL: Record<string, string> = {
   manual_epdf: "Manual E-PDF Upload", scanned_pdf: "Scanned PDF Upload",
 };
-// Friendly labels for the user_application_docs categories surfaced in
-// the Documents card. Falls back to the underscored category name.
+// Loan applications have exactly one status — the lender outcome. There is no
+// separate "internal" status the way EPC profiles have.
+const LOAN_STATUS_LABEL: Record<string, string> = {
+  draft:        "Draft",
+  submitted:    "Submitted",
+  under_review: "Under Review",
+  approved:     "Approved by lender",
+  rejected:     "Rejected by lender",
+};
+// Friendly labels for user_application_docs categories not covered by an
+// expected slot (surfaced under "Other documents").
 const DOC_LABEL: Record<string, string> = {
   customer_photo:   "Applicant photo",
   borrower_photo:   "Rooftop photo",
@@ -62,8 +66,9 @@ const DOC_LABEL: Record<string, string> = {
   property_doc:     "Property document",
 };
 
-// Prefers the stored loan_display_id (LA-<last5>-<seq>, migration 0030);
-// uuid-derived fallback for rows created before the mobile landed.
+// Prefers the stored loan_display_id (CC-RES/CC-COM-#####, migration 0036);
+// uuid-derived fallback for rows created before the format landed (or with no
+// plant_use_type, which is what assigns the sequence).
 function displayId(loan: Loan): string {
   if (loan.loan_display_id) return loan.loan_display_id;
   return "LA-" + String(loan.id).replace(/-/g, "").slice(0, 8).toUpperCase();
@@ -76,24 +81,29 @@ function fmtDate(v: string | null | undefined): string {
   if (!v) return "—";
   return new Date(v).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
+function maskAcct(a: string | null | undefined): string {
+  if (!a) return "—";
+  if (a.length <= 4) return "•".repeat(6) + a;
+  return "•".repeat(Math.max(6, a.length - 4)) + a.slice(-4);
+}
+function cap(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
 
 // ── Document grouping (missing-doc visibility) ───────────────────────
 //
-// The loan flow stores documents two ways: some as user_application_docs
-// rows (borrower_pan, customer_photo, borrower_photo, quotation — viewed
-// via openDoc/id) and the rest as *_path columns on the epc_applications
-// row (Aadhaar, e-bill, proforma, bank statement, co-applicant — viewed
-// by path via openPath). This builds the full expected set grouped by
-// step so missing documents render greyed as "Not uploaded" beside the
-// uploaded ones.
+// The loan flow stores documents two ways: some as user_application_docs rows
+// (borrower_pan, customer_photo, borrower_photo, quotation — viewed via
+// openDoc/id) and the rest as *_path columns on the epc_applications row
+// (Aadhaar, e-bill, proforma, bank statement, co-applicant — viewed by path
+// via openPath). This builds the full expected set grouped by step so missing
+// documents render greyed as "Not uploaded" beside the uploaded ones.
 
 type LoanSlot = { key: string; label: string; docId: string | null; path: string | null };
 type LoanDocGroup = { title: string; slots: LoanSlot[] };
 
 function buildLoanDocGroups(loan: Loan, docs: Doc[]): LoanDocGroup[] {
   const usedRowIds = new Set<string>();
-  // Satisfied by the first unused user_application_docs row matching any of
-  // `cats`, else by a non-null column `path`.
   const slot = (
     key: string, label: string, cats: string[], path: string | null | undefined,
   ): LoanSlot => {
@@ -125,7 +135,6 @@ function buildLoanDocGroups(loan: Loan, docs: Doc[]): LoanDocGroup[] {
     ],
   });
 
-  // Co-applicant documents — only when a co-applicant is on the file.
   const hasCoapp = loan.bill_on_applicant_name === false ||
     !!(loan.coapp_pan_path || loan.coapp_aadhaar_front_path || loan.coapp_aadhaar_back_path);
   if (hasCoapp) {
@@ -146,7 +155,6 @@ function buildLoanDocGroups(loan: Loan, docs: Doc[]): LoanDocGroup[] {
     ],
   });
 
-  // Any uploaded rows not matched above → surface so nothing is hidden.
   const others = docs.filter((d) => !usedRowIds.has(d.id));
   if (others.length > 0) {
     groups.push({
@@ -181,6 +189,8 @@ function Inner() {
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [delOpen, setDelOpen] = useState(false);
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -207,9 +217,10 @@ function Inner() {
     })();
   }, [params.id]);
 
-  const applicantName = useMemo(() => {
-    return loan?.borrower_name || loan?.aadhaar_name || "(unnamed applicant)";
-  }, [loan]);
+  const applicantName = useMemo(
+    () => loan?.borrower_name || loan?.aadhaar_name || "(unnamed applicant)",
+    [loan],
+  );
   const epcName = useMemo(() => {
     if (!loan?.epc_business) return "—";
     return loan.epc_business.trade_name || loan.epc_business.legal_name || loan.epc_business.contact_name || "—";
@@ -222,8 +233,8 @@ function Inner() {
   }
 
   // View a document stored as a *_path column (Aadhaar, e-bill, proforma,
-  // bank statement, co-applicant) — these have no user_application_docs
-  // row, so they're signed by path via the admin-only sign-doc route.
+  // bank statement, co-applicant) — these have no user_application_docs row,
+  // so they're signed by path via the admin-only sign-doc route.
   async function openPath(path: string) {
     try {
       const res = await fetch(`/api/admin/loan-app/${params.id}/sign-doc`, {
@@ -238,411 +249,399 @@ function Inner() {
     }
   }
 
-  // Admin sets the loan's status directly on epc_applications.status.
-  // The three buttons map to the same pipeline values the lender-outcome
-  // display reads back (under_review / approved / rejected). This is the
-  // ONLY status a loan application has — there is no separate internal
-  // admin status the way EPC profiles have.
-  async function changeStatus(nextStatus: string) {
-    if (!loan || statusBusy || loan.status === nextStatus) return;
+  // Map a group's slots onto the shared ViewKit DocGrid slots: a row-backed
+  // doc opens by id, a column-path doc opens by path, neither → "Not uploaded".
+  function toViewSlots(g: LoanDocGroup): ViewDocSlot[] {
+    return g.slots.map((s) => ({
+      key: s.key,
+      label: s.label,
+      onView: s.docId
+        ? () => void openDoc(s.docId!)
+        : s.path
+        ? () => void openPath(s.path!)
+        : undefined,
+    }));
+  }
+
+  // Admin sets the loan's status directly on epc_applications.status. Each
+  // change is appended to status_history so the Activity log has a trail
+  // (that jsonb column is the loan's equivalent of admin_edit_log).
+  async function changeStatus(next: "under_review" | "approved" | "rejected") {
+    if (!loan || statusBusy || loan.status === next) return;
     setStatusBusy(true);
     setStatusMsg(null);
+    const me = getBusiness();
+    const by = me?.contact_name || "admin";
+    const entry = { from: loan.status ?? "", to: next, by, at: new Date().toISOString(), note: "" };
+    const history = Array.isArray(loan.status_history) ? [...loan.status_history, entry] : [entry];
     const { error } = await supabase()
       .from("epc_applications")
-      .update({ status: nextStatus, reviewed_at: loan.reviewed_at ?? new Date().toISOString() })
+      .update({
+        status: next,
+        status_history: history,
+        reviewed_by: by,
+        reviewed_at: new Date().toISOString(),
+      })
       .eq("id", loan.id);
     if (error) {
       setStatusMsg("Couldn't update status — " + error.message);
     } else {
-      setLoan({ ...loan, status: nextStatus });
+      setLoan({ ...loan, status: next, status_history: history });
       setStatusMsg("Status updated.");
     }
     setStatusBusy(false);
   }
 
+  async function downloadZip() {
+    if (!loan || downloading) return;
+    setDownloading(true);
+    try {
+      const res = await fetch(`/api/admin/loan-app/${loan.id}/download-zip`, {
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert("ZIP failed: " + (d?.error || `HTTP ${res.status}`));
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${displayId(loan)}_${String(applicantName).replace(/[^\w-]+/g, "_")}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Download failed: " + (e as Error).message);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   if (loading) {
-    return <main className="min-h-screen grid place-items-center"><p className="text-text-muted">Loading…</p></main>;
+    return <main className="min-h-screen grid place-items-center"><p className="text-[#5a8a76]">Loading…</p></main>;
   }
   if (!loan) {
     return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Loan application not found.</p></main>;
   }
 
+  const stepsDone   = Math.min(Number(loan.current_step ?? 1), 6);
+  const submitted   = !!loan.submitted_at;
+  const approved    = loan.status === "approved";
+  const rejected    = loan.status === "rejected";
+  const underReview = loan.status === "under_review";
+  const hasCoapp    = loan.bill_on_applicant_name === false;
+
   return (
-    <main className="min-h-screen bg-bg-soft">
-      <header className="border-b border-line bg-white">
-        <div className="w-full px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="font-display font-bold text-[20px] grad-text">Capital Craft</span>
-            <span className="text-[12px] px-2 py-0.5 rounded-full bg-bg-tint text-blue-dark font-semibold uppercase tracking-wide">
-              Loan Application
-            </span>
-          </div>
-          <a href="/admin" className="text-[13px] text-text-muted hover:text-text">← Back to console</a>
+    <main className="min-h-screen bg-white">
+      <header className="border-b border-[#cdeadd] bg-white sticky top-0 z-30">
+        <div className="w-full px-5 sm:px-8 h-14 flex items-center justify-between">
+          <button
+            onClick={() => router.push("/admin")}
+            className="text-[14px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1"
+          >
+            ← Back
+          </button>
+          <span className="font-display font-bold text-[18px] text-[#0f3d2e]">Capital Craft</span>
         </div>
       </header>
 
-      <section className="w-full px-4 sm:px-6 py-6 max-w-[1400px] mx-auto space-y-5">
-        {/* Header banner — applicant + EPC + amount + status + actions */}
-        <div className="rounded-card border border-[#cdeadd] bg-gradient-to-r from-[#f0faf5] via-white to-[#dceffb] p-5 sm:p-6 flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0 flex-1 flex items-start gap-4">
-            {/* Applicant passport photo (falls back to a monogram avatar) */}
-            <div className="w-16 h-20 shrink-0 rounded-lg overflow-hidden border border-[#cdeadd] bg-white grid place-items-center">
-              {photoUrl ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img src={photoUrl} alt={applicantName} className="w-full h-full object-cover" />
-              ) : (
-                <span className="font-display font-bold text-[22px] text-[#178a5c]">
-                  {applicantName.trim().charAt(0).toUpperCase() || "?"}
-                </span>
-              )}
-            </div>
-            <div className="min-w-0">
-              <p className="text-[11px] uppercase tracking-widest text-[#5a8a76] font-bold">Applicant</p>
-              <h1 className="mt-1 font-display text-[26px] sm:text-[30px] font-bold text-[#0f3d2e] truncate">
-                {applicantName}
-              </h1>
-              <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-[13px]">
-                <span className="text-text-muted">via</span>
-                <span className="font-semibold text-[#185fa5]">{epcName}</span>
-                {loan.epc_business?.epc_display_id && (
-                  <span className="text-[11px] font-mono text-text-muted">{loan.epc_business.epc_display_id}</span>
+      <div className="w-full px-5 sm:px-8 py-6" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
+
+        {/* ── HEADER CARD ─────────────────────────────────────────── */}
+        <div className="rounded-[12px] border border-[#cdeadd] bg-[#f0faf5] p-5 sm:p-6 mb-4">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="w-14 h-14 rounded-[12px] bg-[#d6efe3] text-[#178a5c] grid place-items-center shrink-0 overflow-hidden" style={photoUrl ? undefined : { transform: "scale(1.3)", transformOrigin: "left center" }}>
+                {photoUrl ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={photoUrl} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  I.user
                 )}
               </div>
+              <div className="min-w-0">
+                <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">{applicantName}</div>
+                <div className="text-[14px] text-[#5a8a76] truncate mt-0.5">via {epcName}</div>
+              </div>
+            </div>
+            <div className="flex gap-2 items-center flex-wrap">
+              <Pill tint="blue" icon={I.id}>{displayId(loan)}</Pill>
+              {loan.plant_use_type && <Pill tint="blue">{cap(loan.plant_use_type)}</Pill>}
+              {loan.system_type && <Pill tint="blue">{SYSTEM_LABEL[loan.system_type] ?? loan.system_type}</Pill>}
+              {loan.loan_amount_required != null && (
+                <Pill tint="blue">{fmtRupees(loan.loan_amount_required)}</Pill>
+              )}
+              <Pill tint="amber">{LOAN_STATUS_LABEL[loan.status] ?? loan.status ?? "Draft"}</Pill>
             </div>
           </div>
-          <div className="flex flex-col items-end gap-2">
-            {/* Lender outcome — loan apps have no internal admin status. */}
-            <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${OUTCOME_PILL[lenderOutcome(loan.status)]}`}>
-              {OUTCOME_LABEL[lenderOutcome(loan.status)]}
-            </span>
-            <p className="text-[11px] uppercase tracking-widest text-text-muted font-bold">Loan Amount</p>
-            <p className="font-display font-bold text-[22px] text-[#0f3d2e]">
-              {fmtRupees(loan.loan_amount_required)}
-            </p>
-            <p className="text-[10px] font-mono text-text-muted">{displayId(loan)}</p>
+        </div>
+
+        {/* ── LOAN STATUS BAND — admin-only, slate palette (same shape as
+            the EPC View's internal-status band). ───────────────────── */}
+        <LoanStatusBand current={loan.status ?? "draft"} busy={statusBusy} onChange={changeStatus} />
+        {statusMsg && <p className="text-[12px] text-[#5a8a76] -mt-2 mb-3">{statusMsg}</p>}
+
+        {/* ── PROGRESS TRACKER — prominent standalone band ─────────── */}
+        <div className="rounded-[12px] border border-[#cdeadd] bg-white p-6 sm:p-8 mb-4">
+          <div className="flex items-center gap-3 sm:gap-6">
+            <BigProgressStep
+              icon={I.check}
+              done={stepsDone >= 6}
+              inProgress={stepsDone > 1 && stepsDone < 6}
+              label="Application complete"
+              sub={`${stepsDone}/6 steps`}
+            />
+            <BigConnector active={stepsDone >= 6} />
+            <BigProgressStep
+              icon={I.send}
+              done={submitted}
+              label="Submitted"
+              sub={submitted ? fmtDate(loan.submitted_at) : "Pending"}
+            />
+            <BigConnector active={submitted} />
+            <BigProgressStep
+              icon={I.circleCheck}
+              done={approved}
+              inProgress={underReview}
+              label={approved ? "Approved by lender" : rejected ? "Rejected by lender" : "Decision pending"}
+              sub={approved ? "Loan approved" : rejected ? "Not approved" : underReview ? "With the lender" : "Awaiting review"}
+              mutedIfPending
+            />
           </div>
         </div>
 
-        {/* Action strip */}
-        <div className="flex flex-wrap gap-3">
-          <Button variant="primary" onClick={() => router.push(`/admin/app/${loan.id}/step-1` as any)}>
-            Edit application
-          </Button>
-          <Button variant="outline" onClick={() => router.push(`/admin/app/${loan.id}/step-6` as any)}>
-            Review page
-          </Button>
-          <button
-            type="button"
-            onClick={() => setDelOpen(true)}
-            className="ml-auto px-4 py-2 rounded-input text-[13px] font-semibold border border-red-200 text-red-700 hover:bg-red-50 transition-colors"
-          >
-            Delete application
-          </button>
-        </div>
+        {/* ── 3-COLUMN GRID ──────────────────────────────────────────── */}
+        <div className="grid gap-4 lg:grid-cols-3">
 
-        <DeleteLoanAppModal
-          open={delOpen}
-          onClose={() => setDelOpen(false)}
-          onDeleted={() => router.replace("/admin" as any)}
-          applicationId={loan.id}
-          displayId={displayId(loan)}
-          applicant={applicantName}
-          mobile={loan.borrower_mobile ?? null}
-        />
-
-        {/* Loan status band — admin sets the application's status here.
-            The active choice is derived from the current pipeline status. */}
-        <div className="rounded-card border border-line bg-white p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="font-display font-semibold text-[15px] text-[#0f3d2e]">Loan status</h2>
-              <p className="text-[12px] text-text-muted mt-0.5">
-                Set where this application stands with the lender. Visible to the EPC partner on their dashboard.
-              </p>
-            </div>
-            {statusMsg && (
-              <span className="text-[12px] text-text-muted">{statusMsg}</span>
-            )}
-          </div>
-          <div className="mt-4 flex flex-wrap gap-2.5">
-            {LOAN_STATUS_ACTIONS.map((a) => {
-              const active = lenderOutcome(loan.status) === a.outcome;
-              return (
-                <StatusBtn
-                  key={a.status}
-                  label={a.label}
-                  kind={a.kind}
-                  active={active}
-                  disabled={statusBusy}
-                  onClick={() => void changeStatus(a.status)}
-                />
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 2-column dense layout */}
-        <div className="grid lg:grid-cols-2 gap-5">
           {/* COL 1 */}
-          <div className="space-y-5">
-            {/* Applicant identity */}
-            <SectionCard title="Applicant identity">
-              <FieldRow label="Name"        value={loan.aadhaar_name || loan.borrower_name} />
-              <FieldRow label="DOB"         value={loan.aadhaar_dob} />
-              <FieldRow label="Gender"      value={loan.aadhaar_gender} />
-              <FieldRow label="Aadhaar"     value={loan.aadhaar_number ?? loan.aadhaar_number_masked} mono />
-              <FieldRow label="Care of"     value={loan.aadhaar_care_of} />
-              <FieldRow label="Address"     value={loan.aadhaar_address} multiline />
-              <FieldRow label="PAN"         value={loan.borrower_pan} mono />
-              <FieldRow label="Mobile"      value={loan.borrower_mobile ? `+91 ${loan.borrower_mobile}` : null} />
-              <FieldRow label="Email"       value={loan.borrower_email} />
+          <div className="flex flex-col gap-2.5">
+            <SectionCard title="Applicant identity" accent="blue" icon={I.user}>
+              <KV k="Name" v={loan.aadhaar_name || loan.borrower_name} />
+              <KV k="DOB" v={loan.aadhaar_dob} />
+              <KV k="Gender" v={loan.aadhaar_gender} />
+              <KV k="Aadhaar" v={loan.aadhaar_number_masked} />
+              <KV k="PAN" v={loan.borrower_pan} />
+              <KV k="Mobile" v={loan.borrower_mobile ? `+91 ${loan.borrower_mobile}` : null} />
+              <KV k="Email" v={loan.borrower_email} />
+              <KV k="Care of" v={loan.aadhaar_care_of} />
+              <KV k="Address" v={loan.aadhaar_address} />
             </SectionCard>
 
-            {/* Co-applicant */}
-            {loan.bill_on_applicant_name === false && (
-              <SectionCard title="Co-applicant" tint="green">
-                <FieldRow label="Name"          value={loan.coapp_name} />
-                <FieldRow label="Father's name" value={loan.coapp_father_name} />
-                <FieldRow label="DOB"           value={loan.coapp_dob} />
-                <FieldRow label="Relation"      value={loan.coapp_relation} />
-                <FieldRow label="PAN"           value={loan.coapp_pan} mono />
-                <FieldRow label="Mobile"        value={loan.coapp_mobile ? `+91 ${loan.coapp_mobile}` : null} />
-                <FieldRow label="Email"         value={loan.coapp_email} />
+            {hasCoapp && (
+              <SectionCard title="Co-applicant" accent="green" icon={I.users}>
+                <KV k="Name" v={loan.coapp_name} />
+                <KV k="Father's name" v={loan.coapp_father_name} />
+                <KV k="DOB" v={loan.coapp_dob} />
+                <KV k="Relation" v={loan.coapp_relation} />
+                <KV k="PAN" v={loan.coapp_pan} />
+                <KV k="Mobile" v={loan.coapp_mobile ? `+91 ${loan.coapp_mobile}` : null} />
+                <KV k="Email" v={loan.coapp_email} />
                 {loan.coapp_aadhaar_number_masked && (
                   <>
-                    <div className="pt-2 mt-2 border-t border-line">
-                      <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold">Co-applicant Aadhaar</p>
-                    </div>
-                    <FieldRow label="Aadhaar name" value={loan.coapp_aadhaar_name} />
-                    <FieldRow label="Aadhaar DOB"  value={loan.coapp_aadhaar_dob} />
-                    <FieldRow label="Number"       value={loan.coapp_aadhaar_number ?? loan.coapp_aadhaar_number_masked} mono />
-                    <FieldRow label="Care of"      value={loan.coapp_aadhaar_care_of} />
-                    <FieldRow label="Address"      value={loan.coapp_aadhaar_address} multiline />
+                    <KV k="Aadhaar name" v={loan.coapp_aadhaar_name} />
+                    <KV k="Aadhaar" v={loan.coapp_aadhaar_number_masked} />
+                    <KV k="Address" v={loan.coapp_aadhaar_address} />
                   </>
                 )}
               </SectionCard>
             )}
 
-            {/* Loan requirements */}
-            <SectionCard title="Loan requirements">
-              <FieldRow label="Project size"    value={loan.project_size ? `${loan.project_size} ${(loan.project_size_unit ?? "kw").toUpperCase()}` : null} />
-              <FieldRow label="Project cost"    value={fmtRupees(loan.total_project_cost)} />
-              <FieldRow label="Loan required"   value={fmtRupees(loan.loan_amount_required)} highlight />
-              <FieldRow label="Down payment"    value={
-                loan.total_project_cost && loan.loan_amount_required
-                  ? fmtRupees(Math.max(0, Number(loan.total_project_cost) - Number(loan.loan_amount_required)))
-                  : null
-              } />
-              <FieldRow label="System type"     value={loan.system_type ? SYSTEM_LABEL[loan.system_type] ?? loan.system_type : null} />
-              <FieldRow label="Monthly bill"    value={fmtRupees(loan.monthly_bill_amount)} />
-              <FieldRow label="DISCOM"          value={loan.discom_name} />
-              <FieldRow label="CA number"       value={loan.ca_number} mono />
-            </SectionCard>
-
-            {/* Installation site */}
-            <SectionCard title="Installation site">
-              <FieldRow label="Address"  value={loan.ebill_address_line} multiline />
-              <FieldRow label="Pincode"  value={loan.install_pincode} mono />
-              <FieldRow label="City"     value={loan.install_city} />
-              <FieldRow label="State"    value={loan.install_state} />
+            <SectionCard title="Installation site" accent="blue" icon={I.building}>
+              <KV k="Address" v={loan.ebill_address_line} />
+              <KV k="Pincode" v={loan.install_pincode} />
+              <KV k="City" v={loan.install_city} />
+              <KV k="District" v={loan.install_district} />
+              <KV k="State" v={loan.install_state} />
+              <KV k="Bill name" v={loan.ebill_name} />
+              <KV
+                k="Bill on applicant"
+                v={loan.bill_on_applicant_name === null || loan.bill_on_applicant_name === undefined
+                  ? null
+                  : loan.bill_on_applicant_name ? "Yes" : "No — co-applicant"}
+              />
               {loan.rooftop_photo_gps && (
-                <FieldRow
-                  label="Rooftop GPS"
-                  value={`${(loan.rooftop_photo_gps as any).lat?.toFixed?.(5) ?? "?"}, ${(loan.rooftop_photo_gps as any).lng?.toFixed?.(5) ?? "?"}`}
-                  mono
+                <KV
+                  k="Rooftop GPS"
+                  v={`${(loan.rooftop_photo_gps as any).lat?.toFixed?.(5) ?? "?"}, ${(loan.rooftop_photo_gps as any).lng?.toFixed?.(5) ?? "?"}`}
                 />
               )}
             </SectionCard>
           </div>
 
           {/* COL 2 */}
-          <div className="space-y-5">
-            {/* Employment + bank */}
-            <SectionCard title="Employment &amp; bank" tint="sky">
-              <FieldRow label="Employment"   value={loan.employment_type ? EMPLOYMENT_LABEL[loan.employment_type] ?? loan.employment_type : null} />
-              <FieldRow label="Profession"   value={
-                loan.profession === "Other" && loan.profession_other
-                  ? `Other — ${loan.profession_other}` : loan.profession
-              } />
-              <FieldRow label="Organization" value={loan.organization_name} />
-              <FieldRow label="Annual income" value={fmtRupees(loan.annual_income)} />
-              <div className="pt-2 mt-2 border-t border-line">
-                <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold">Bank</p>
-              </div>
-              <FieldRow label="Account holder" value={loan.bank_account_holder} />
-              <FieldRow label="Bank"           value={loan.bank_name} />
-              <FieldRow label="Account no."    value={loan.bank_account_no} mono />
-              <FieldRow label="IFSC"           value={loan.bank_ifsc} mono />
-              <FieldRow label="Type"           value={loan.bank_account_type} />
-              <FieldRow label="Statement source" value={
-                loan.bank_statement_method ? METHOD_LABEL[loan.bank_statement_method] ?? loan.bank_statement_method : null
-              } />
-            </SectionCard>
-
-            {/* Loan offer */}
-            <SectionCard title="Loan offer selected" tint="green">
-              <FieldRow label="ROI"            value={loan.roi_percent != null ? `${loan.roi_percent}%` : null} />
-              <FieldRow label="Central subsidy" value={fmtRupees(loan.central_subsidy)} />
-              <FieldRow label="State subsidy"   value={fmtRupees(loan.state_subsidy)} />
-              <FieldRow label="Tenure"          value={loan.selected_tenure_years ? `${loan.selected_tenure_years} ${loan.selected_tenure_years === 1 ? "year" : "years"}` : null} />
-              <FieldRow label="Monthly EMI"    value={fmtRupees(loan.selected_monthly_emi)} highlight />
-              <FieldRow label="Subsidy EMI"    value={fmtRupees(loan.selected_subsidy_emi)} />
-            </SectionCard>
-
-            {/* Consent */}
-            <SectionCard title="Consent record" tint="sky">
-              <FieldRow label="Recorded on" value={fmtDate(loan.consent_at)} />
-              <FieldRow label="Policies"    value={
-                Array.isArray(loan.consent_policies) && loan.consent_policies.length > 0
-                  ? loan.consent_policies.join(", ")
-                  : null
-              } />
-              <FieldRow label="IP"          value={loan.consent_ip} mono />
-            </SectionCard>
-
-            {/* Documents — expected set grouped by step; missing ones greyed. */}
-            <SectionCard title="Documents">
+          <div className="flex flex-col gap-2.5">
+            <SectionCard title="Documents" accent="green" icon={I.files}>
               <div className="space-y-4">
                 {docGroups.map((g) => (
-                  <div key={g.title}>
-                    <p className="text-[11px] text-text-muted uppercase tracking-wider font-semibold mb-1.5">
-                      {g.title}
-                    </p>
-                    <ul className="space-y-2">
-                      {g.slots.map((s) => {
-                        const present = !!(s.docId || s.path);
-                        return (
-                          <li
-                            key={s.key}
-                            className={
-                              "flex items-center justify-between gap-3 px-3 py-2 rounded-input border " +
-                              (present ? "bg-white border-line" : "bg-bg-tint/40 border-dashed border-line")
-                            }
-                          >
-                            <p className={"text-[13px] truncate " + (present ? "text-text font-medium" : "text-text-muted")}>
-                              {s.label}
-                            </p>
-                            {present ? (
-                              <button
-                                type="button"
-                                onClick={() => { if (s.docId) void openDoc(s.docId); else if (s.path) void openPath(s.path); }}
-                                title="View document"
-                                className="p-1.5 rounded hover:bg-bg-tint text-[#185fa5] transition-colors shrink-0"
-                              >
-                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                                  <circle cx="12" cy="12" r="3" />
-                                </svg>
-                              </button>
-                            ) : (
-                              <span className="text-[11px] text-text-muted shrink-0 whitespace-nowrap">Not uploaded</span>
-                            )}
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
+                  <StepBlock key={g.title} title={g.title}>
+                    <DocGrid slots={toViewSlots(g)} eyeIcon={I.eye} />
+                  </StepBlock>
                 ))}
               </div>
             </SectionCard>
 
-            {/* Submission */}
-            <SectionCard title="Submission">
-              <FieldRow label="Current step" value={String(loan.current_step ?? "—")} />
-              <FieldRow label="Step 1 done"  value={fmtDate(loan.consent_at)} />
-              <FieldRow label="Step 2 done"  value={fmtDate(loan.kyc_extracted_at)} />
-              <FieldRow label="Step 3 done"  value={fmtDate(loan.step3_completed_at)} />
-              <FieldRow label="Step 4 done"  value={fmtDate(loan.step4_completed_at)} />
-              <FieldRow label="Step 5 done"  value={fmtDate(loan.step5_completed_at)} />
-              <FieldRow label="Submitted"    value={fmtDate(loan.submitted_at)} highlight />
+            <SectionCard title="Loan requirements" accent="green" icon={I.money}>
+              <KV k="Project size" v={loan.project_size ? `${loan.project_size} ${(loan.project_size_unit ?? "kw").toUpperCase()}` : null} />
+              <KV k="Project cost" v={fmtRupees(loan.total_project_cost)} />
+              <KV k="Loan required" v={fmtRupees(loan.loan_amount_required)} valueClass="text-[#178a5c]" />
+              <KV
+                k="Down payment"
+                v={loan.total_project_cost && loan.loan_amount_required
+                  ? fmtRupees(Math.max(0, Number(loan.total_project_cost) - Number(loan.loan_amount_required)))
+                  : null}
+              />
+              <KV k="System type" v={loan.system_type ? SYSTEM_LABEL[loan.system_type] ?? loan.system_type : null} />
+              <KV k="Monthly bill" v={fmtRupees(loan.monthly_bill_amount)} />
+              <KV k="DISCOM" v={loan.discom_name} />
+              <KV k="CA number" v={loan.ca_number} />
+            </SectionCard>
+          </div>
+
+          {/* COL 3 — admin only */}
+          <div className="flex flex-col gap-2.5">
+            <SectionCard title="Loan offer" tint icon={I.money} adminOnly>
+              <KV k="ROI" v={loan.roi_percent != null ? `${loan.roi_percent}%` : null} />
+              <KV k="Tenure" v={loan.selected_tenure_years ? `${loan.selected_tenure_years} ${loan.selected_tenure_years === 1 ? "year" : "years"}` : null} />
+              <KV k="Monthly EMI" v={fmtRupees(loan.selected_monthly_emi)} valueClass="text-[#178a5c]" />
+              <KV k="Subsidy EMI" v={fmtRupees(loan.selected_subsidy_emi)} />
+              <KV k="Central subsidy" v={fmtRupees(loan.central_subsidy)} />
+              <KV k="State subsidy" v={fmtRupees(loan.state_subsidy)} />
+            </SectionCard>
+
+            <SectionCard title="Employment & bank" tint icon={I.bank} adminOnly>
+              <KV k="Employment" v={loan.employment_type ? EMPLOYMENT_LABEL[loan.employment_type] ?? loan.employment_type : null} />
+              <KV k="Profession" v={loan.profession === "Other" && loan.profession_other ? `Other — ${loan.profession_other}` : loan.profession} />
+              <KV k="Organization" v={loan.organization_name} />
+              <KV k="Annual income" v={fmtRupees(loan.annual_income)} />
+              <KV k="Bank" v={loan.bank_name} />
+              <KV k="Account" v={maskAcct(loan.bank_account_no)} />
+              <KV k="IFSC" v={loan.bank_ifsc} />
+              <KV k="Type" v={loan.bank_account_type} />
+              <KV k="Statement source" v={loan.bank_statement_method ? METHOD_LABEL[loan.bank_statement_method] ?? loan.bank_statement_method : null} />
+            </SectionCard>
+
+            <SectionCard title="Consent & submission" tint icon={I.lock} adminOnly>
+              <KV k="Consent on" v={fmtDate(loan.consent_at)} />
+              <KV k="Policies" v={Array.isArray(loan.consent_policies) && loan.consent_policies.length > 0 ? loan.consent_policies.length + " accepted" : null} />
+              <KV k="IP" v={loan.consent_ip} />
+              <KV k="Current step" v={String(loan.current_step ?? "—")} />
+              <KV k="Submitted" v={fmtDate(loan.submitted_at)} valueClass="text-[#178a5c]" />
+              <KV k="Reviewed" v={fmtDate(loan.reviewed_at)} />
+            </SectionCard>
+
+            <SectionCard title="Comments" tint icon={I.lock} adminOnly>
+              <CommentsSection
+                applicationId={loan.id}
+                epcName={applicantName}
+                maxListHeight={260}
+              />
             </SectionCard>
           </div>
         </div>
-      </section>
+
+        {/* ── Actions strip — Activity log · Edit application · Download ZIP */}
+        <div className="flex gap-3 mt-4">
+          <button
+            type="button"
+            onClick={() => setActivityOpen(true)}
+            className="flex-1 py-3.5 text-[15px] font-semibold bg-white border-2 border-[#178a5c] text-[#178a5c] rounded-[10px] hover:bg-[#f0faf5] inline-flex items-center justify-center gap-2"
+          >
+            {I.eye} Activity log
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push(`/admin/app/${loan.id}/step-1` as any)}
+            className="flex-1 py-3.5 text-[15px] font-semibold bg-[#178a5c] text-white rounded-[10px] hover:bg-[#12734c] inline-flex items-center justify-center gap-2"
+          >
+            {I.edit} Edit application
+          </button>
+          <button
+            type="button"
+            onClick={() => void downloadZip()}
+            disabled={downloading}
+            className="flex-1 py-3.5 text-[15px] font-semibold bg-[#185fa5] text-white rounded-[10px] hover:bg-[#144d84] disabled:opacity-70 inline-flex items-center justify-center gap-2"
+          >
+            {I.download} {downloading ? "Preparing…" : "Download ZIP"}
+          </button>
+        </div>
+
+        {/* Danger zone — Delete application (type-to-confirm). */}
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            onClick={() => setDelOpen(true)}
+            className="px-4 py-2 text-[13px] font-semibold border border-red-300 text-red-700 rounded-[8px] hover:bg-red-50 hover:border-red-500 transition-colors"
+          >
+            Delete application
+          </button>
+        </div>
+
+      </div>
+
+      <LoanActivityLogModal
+        open={activityOpen}
+        onClose={() => setActivityOpen(false)}
+        loan={loan}
+        borrowerName={applicantName}
+      />
+      <DeleteLoanAppModal
+        open={delOpen}
+        onClose={() => setDelOpen(false)}
+        onDeleted={() => router.replace("/admin" as any)}
+        applicationId={loan.id}
+        displayId={displayId(loan)}
+        applicant={applicantName}
+        mobile={loan.borrower_mobile ?? null}
+      />
     </main>
   );
 }
 
-// ── Small helpers ────────────────────────────────────────────────────
-
-function StatusBtn({
-  label, kind, active, disabled, onClick,
+// ── Loan status band ────────────────────────────────────────────────
+//
+// Same markup/palette as the EPC View's InternalStatusBand (deliberately
+// slate, not brand green), but driven by the loan's three lender outcomes.
+function LoanStatusBand({
+  current, busy, onChange,
 }: {
-  label: string;
-  kind: "review" | "approve" | "reject";
-  active: boolean;
-  disabled?: boolean;
-  onClick: () => void;
+  current: string;
+  busy: boolean;
+  onChange: (next: "under_review" | "approved" | "rejected") => void;
 }) {
-  // Active = current status, shown filled; inactive = outline the admin
-  // can click to switch to.
-  const filled =
-    kind === "approve" ? "bg-green-dark text-white border-green-dark" :
-    kind === "reject"  ? "bg-red-700 text-white border-red-700" :
-                         "bg-[#185fa5] text-white border-[#185fa5]";
-  const outline =
-    kind === "approve" ? "text-green-dark border-[#cdeadd] hover:bg-[#f0faf5]" :
-    kind === "reject"  ? "text-red-700 border-red-200 hover:bg-red-50" :
-                         "text-[#185fa5] border-[#d3e9f7] hover:bg-[#dceffb]";
+  const label = LOAN_STATUS_LABEL[current] ?? current;
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={[
-        "px-4 py-2 rounded-input text-[13px] font-semibold border transition-colors",
-        "disabled:opacity-50 disabled:cursor-not-allowed",
-        active ? filled : `bg-white ${outline}`,
-      ].join(" ")}
-    >
-      {active && "✓ "}{label}
-    </button>
-  );
-}
-
-function SectionCard({
-  title, tint = "neutral", children,
-}: {
-  title: string;
-  tint?: "neutral" | "green" | "sky";
-  children: React.ReactNode;
-}) {
-  const styles =
-    tint === "green" ? "bg-[#f0faf5] border-[#cdeadd]" :
-    tint === "sky"   ? "bg-[#dceffb] border-[#d3e9f7]" :
-                       "bg-white border-line";
-  return (
-    <Card className={`p-5 border ${styles}`}>
-      <h2 className="font-display font-semibold text-[15px] text-[#0f3d2e] mb-3">{title}</h2>
-      <dl className="space-y-1.5 text-[13px]">
-        {children}
-      </dl>
-    </Card>
-  );
-}
-
-function FieldRow({
-  label, value, mono, multiline, highlight,
-}: {
-  label: string;
-  value: string | number | null | undefined;
-  mono?: boolean;
-  multiline?: boolean;
-  highlight?: boolean;
-}) {
-  const shown = value == null || value === "" ? "—" : String(value);
-  return (
-    <div className={multiline ? "" : "flex flex-wrap gap-2"}>
-      <dt className="text-text-muted min-w-[130px] shrink-0">{label}</dt>
-      <dd
-        className={[
-          mono ? "font-mono " : "",
-          highlight ? "font-bold text-[15px] text-[#185fa5] " : "font-semibold text-text ",
-          multiline ? "block mt-0.5" : "",
-        ].join("")}
-      >
-        {shown}
-      </dd>
+    <div className="rounded-[12px] border border-slate-300 bg-slate-50 p-4 sm:p-5 mb-4">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
+            Loan status <span className="normal-case font-normal text-slate-400">· admin only</span>
+          </div>
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="text-[18px] font-semibold text-slate-800">{label}</span>
+            <span className="text-[12px] text-slate-500">
+              The lender outcome for this application. Every change is recorded in the activity log.
+            </span>
+          </div>
+        </div>
+        <div className="flex gap-2 flex-wrap items-center">
+          {current === "approved" ? (
+            <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("under_review")}>Move back to review</StatusBtn>
+          ) : current === "rejected" ? (
+            <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("under_review")}>Re-open</StatusBtn>
+          ) : (
+            <>
+              {current !== "under_review" && (
+                <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("under_review")}>Mark under review</StatusBtn>
+              )}
+              <StatusBtn kind="approve" busy={busy} onClick={() => onChange("approved")}>Approved by lender</StatusBtn>
+              <StatusBtn kind="danger" busy={busy} onClick={() => onChange("rejected")}>Rejected by lender</StatusBtn>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
