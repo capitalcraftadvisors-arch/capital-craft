@@ -22,6 +22,7 @@
 
 import React from "react";
 import type { LenderKey } from "@/components/LenderPickerModal";
+import { rupeesInWords, yearsInWords } from "@/lib/numberToWords";
 
 export const LENDER_LABEL: Record<string, string> = {
   creditfair: "CreditFair",
@@ -52,23 +53,26 @@ type RowDef = {
   approvedKey: keyof ApprovalDetails;
   money: boolean;
   suffix?: string;
+  // Spelled-out form shown under the entered value, so the admin can see at a
+  // glance that what they typed is what they meant.
+  words: (n: number) => string;
 };
 
 const ROWS: RowDef[] = [
   {
     appliedLabel: "Applied Loan Amount",  appliedKey: "applied_loan_amount",
     approvedLabel: "Approved Loan Amount", approvedKey: "approved_loan_amount",
-    money: true,
+    money: true, words: rupeesInWords,
   },
   {
     appliedLabel: "Applied Tenure",       appliedKey: "applied_tenure_years",
     approvedLabel: "Tenure",              approvedKey: "approved_tenure_years",
-    money: false, suffix: "years",
+    money: false, suffix: "years", words: yearsInWords,
   },
   {
     appliedLabel: "Tentative EMI",        appliedKey: "tentative_emi",
     approvedLabel: "EMI",                 approvedKey: "approved_emi",
-    money: true,
+    money: true, words: rupeesInWords,
   },
 ];
 
@@ -139,6 +143,16 @@ export default function ApprovalDetailsTable({ value, onChange, readOnly }: Prop
                     onChange={(e) => set(row.approvedKey, e.target.value)}
                   />
                 )}
+                {/* Spelled out, right under the box. */}
+                {(() => {
+                  const n = value[row.approvedKey];
+                  if (n === null || n === undefined || !Number.isFinite(Number(n))) return null;
+                  return (
+                    <p className="text-[11px] text-[#5a8a76] text-right mt-1 leading-snug">
+                      {row.words(Number(n))}
+                    </p>
+                  );
+                })()}
               </td>
             </tr>
           ))}

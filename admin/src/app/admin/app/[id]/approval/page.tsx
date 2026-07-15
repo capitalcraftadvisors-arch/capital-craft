@@ -22,7 +22,12 @@ import { getBusiness } from "@/lib/auth";
 import { logLoanActivity } from "@/lib/loanAudit";
 import ApprovalDetailsTable, { LENDER_LABEL, type ApprovalDetails } from "@/components/ApprovalDetailsTable";
 import type { LenderKey } from "@/components/LenderPickerModal";
+import { rupeesInWords } from "@/lib/numberToWords";
 import { I, SectionCard } from "@/components/view/ViewKit";
+
+function fmtRs(n: number): string {
+  return "₹" + Math.round(n).toLocaleString("en-IN");
+}
 
 export default function LoanApprovalPage() {
   return (
@@ -54,16 +59,17 @@ function Inner() {
       setLoan(data);
       if (data) {
         // Seed the table: lender from the popup, "applied" columns snapshotted
-        // from what the applicant asked for. Approved columns start blank and
-        // default to the applied value so the common case is one click.
+        // from what the applicant asked for. The APPROVED columns start at
+        // ZERO — the admin must type what the lender actually sanctioned, so
+        // a pre-filled value can never be saved by accident.
         setDetails({
           approved_by: lender || data.approved_lender || null,
           applied_loan_amount:   data.loan_amount_required ?? null,
-          approved_loan_amount:  data.loan_amount_required ?? null,
+          approved_loan_amount:  0,
           applied_tenure_years:  data.selected_tenure_years ?? null,
-          approved_tenure_years: data.selected_tenure_years ?? null,
+          approved_tenure_years: 0,
           tentative_emi:         data.selected_monthly_emi ?? null,
-          approved_emi:          data.selected_monthly_emi ?? null,
+          approved_emi:          0,
         });
       }
       setLoading(false);
@@ -81,6 +87,21 @@ function Inner() {
       setError("No lender selected — go back to the View and start the approval again.");
       return;
     }
+
+    // Sanctioning MORE than the applicant asked for is legitimate but unusual
+    // — make the admin say so out loud before it's written.
+    const applied = Number(details.applied_loan_amount ?? 0);
+    const approvedAmt = Number(details.approved_loan_amount ?? 0);
+    if (applied > 0 && approvedAmt > applied) {
+      const ok = window.confirm(
+        `The Approved Loan Amount is MORE than the Applied Loan Amount.\n\n` +
+        `Applied:  ${fmtRs(applied)}\n${rupeesInWords(applied)}\n\n` +
+        `Approved: ${fmtRs(approvedAmt)}\n${rupeesInWords(approvedAmt)}\n\n` +
+        `Are you sure you want to save this?`,
+      );
+      if (!ok) return;
+    }
+
     setSaving(true);
     setError(null);
 
