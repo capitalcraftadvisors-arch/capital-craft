@@ -24,6 +24,10 @@ import { getDocumentUrl } from "@/lib/storage";
 import DeleteLoanAppModal from "@/components/DeleteLoanAppModal";
 import CommentsSection from "@/components/CommentsSection";
 import LoanActivityLogModal from "@/components/LoanActivityLogModal";
+import LenderDecisionModal from "@/components/LenderDecisionModal";
+import ApprovalDetailsTable, { LENDER_LABEL, type ApprovalDetails } from "@/components/ApprovalDetailsTable";
+import type { LenderKey } from "@/components/LenderPickerModal";
+import { logLoanActivity } from "@/lib/loanAudit";
 import {
   I, StatusBtn, Pill, BigProgressStep, BigConnector, SectionCard, KV,
   StepBlock, DocGrid, type ViewDocSlot,
@@ -191,6 +195,8 @@ function Inner() {
   const [delOpen, setDelOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [approveOpen, setApproveOpen] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -263,33 +269,50 @@ function Inner() {
     }));
   }
 
-  // Admin sets the loan's status directly on epc_applications.status. Each
-  // change is appended to status_history so the Activity log has a trail
-  // (that jsonb column is the loan's equivalent of admin_edit_log).
-  async function changeStatus(next: "under_review" | "approved" | "rejected") {
-    if (!loan || statusBusy || loan.status === next) return;
+  // Plain status move (used for "Mark under review" / re-open). Approval and
+  // rejection go through their own flows below — they also record WHICH
+  // lender decided. Every change appends to status_history and writes a
+  // loan_activity_log row so the Activity log has the trail.
+  async function changeStatus(next: "under_review" | "approved" | "rejected", extra: Record<string, unknown> = {}, note = "") {
+    if (!loan || statusBusy) return;
     setStatusBusy(true);
     setStatusMsg(null);
     const me = getBusiness();
     const by = me?.contact_name || "admin";
-    const entry = { from: loan.status ?? "", to: next, by, at: new Date().toISOString(), note: "" };
+    const now = new Date().toISOString();
+    const entry = { from: loan.status ?? "", to: next, by, at: now, note };
     const history = Array.isArray(loan.status_history) ? [...loan.status_history, entry] : [entry];
-    const { error } = await supabase()
-      .from("epc_applications")
-      .update({
-        status: next,
-        status_history: history,
-        reviewed_by: by,
-        reviewed_at: new Date().toISOString(),
-      })
-      .eq("id", loan.id);
+    const patch = { status: next, status_history: history, reviewed_by: by, reviewed_at: now, ...extra };
+    const { error } = await supabase().from("epc_applications").update(patch).eq("id", loan.id);
     if (error) {
       setStatusMsg("Couldn't update status — " + error.message);
-    } else {
-      setLoan({ ...loan, status: next, status_history: history });
-      setStatusMsg("Status updated.");
+      setStatusBusy(false);
+      return;
     }
+    setLoan({ ...loan, ...patch });
+    setStatusMsg("Status updated.");
+    await logLoanActivity(loan.id, next === "approved" ? "approved" : next === "rejected" ? "rejected" : "status_change", {
+      detail: note || `Status → ${LOAN_STATUS_LABEL[next] ?? next}`,
+    });
     setStatusBusy(false);
+  }
+
+  // APPROVAL — popup picked a lender + confirmed. Hand off to the approval
+  // details screen; the status is written there, on Save, together with the
+  // filled table (so a half-finished approval never lands).
+  function onApproveConfirm(lender: LenderKey) {
+    if (!loan) return;
+    router.push(`/admin/app/${loan.id}/approval?lender=${lender}` as any);
+  }
+
+  // REJECTION — no table; record the lender + flip the status immediately.
+  async function onRejectConfirm(lender: LenderKey) {
+    if (!loan) return;
+    await changeStatus(
+      "rejected",
+      { rejected_lender: lender, rejected_at: new Date().toISOString(), approved_lender: null, approved_at: null },
+      `Rejected by ${LENDER_LABEL[lender] ?? lender}`,
+    );
   }
 
   async function downloadZip() {
@@ -334,6 +357,12 @@ function Inner() {
   const underReview = loan.status === "under_review";
   const hasCoapp    = loan.bill_on_applicant_name === false;
 
+  // Which lender decided — shown in the status band, the header pill, and
+  // (for an approval) above the read-only approval table.
+  const decidedLender = approved ? loan.approved_lender : rejected ? loan.rejected_lender : null;
+  const decidedByLabel = decidedLender ? (LENDER_LABEL[String(decidedLender)] ?? String(decidedLender)) : null;
+  const approvalDetails = (loan.approval_details ?? null) as ApprovalDetails | null;
+
   return (
     <main className="min-h-screen bg-white">
       <header className="border-b border-[#cdeadd] bg-white sticky top-0 z-30">
@@ -374,14 +403,28 @@ function Inner() {
               {loan.loan_amount_required != null && (
                 <Pill tint="blue">{fmtRupees(loan.loan_amount_required)}</Pill>
               )}
+              {decidedByLabel && (
+                <Pill tint="blue" icon={I.circleCheck}>
+                  {approved ? "Approved by" : "Rejected by"} {decidedByLabel}
+                </Pill>
+              )}
               <Pill tint="amber">{LOAN_STATUS_LABEL[loan.status] ?? loan.status ?? "Draft"}</Pill>
             </div>
           </div>
         </div>
 
         {/* ── LOAN STATUS BAND — admin-only, slate palette (same shape as
-            the EPC View's internal-status band). ───────────────────── */}
-        <LoanStatusBand current={loan.status ?? "draft"} busy={statusBusy} onChange={changeStatus} />
+            the EPC View's internal-status band). "Approval"/"Rejection"
+            open the lender popup; approval then routes to the details
+            screen, rejection writes straight away. ─────────────────── */}
+        <LoanStatusBand
+          current={loan.status ?? "draft"}
+          busy={statusBusy}
+          decidedBy={decidedByLabel}
+          onApprove={() => setApproveOpen(true)}
+          onReject={() => setRejectOpen(true)}
+          onReview={() => void changeStatus("under_review")}
+        />
         {statusMsg && <p className="text-[12px] text-[#5a8a76] -mt-2 mb-3">{statusMsg}</p>}
 
         {/* ── PROGRESS TRACKER — prominent standalone band ─────────── */}
@@ -502,6 +545,17 @@ function Inner() {
 
           {/* COL 3 — admin only */}
           <div className="flex flex-col gap-2.5">
+            {/* Approval details — filled once on the approval screen, then
+                read-only here for good. */}
+            {approved && approvalDetails && (
+              <SectionCard title="Approval details" accent="green" icon={I.circleCheck} adminOnly>
+                <ApprovalDetailsTable value={approvalDetails} readOnly />
+                <p className="text-[12px] text-[#5a8a76] mt-2">
+                  Recorded {fmtDate(loan.approved_at)} · read-only
+                </p>
+              </SectionCard>
+            )}
+
             <SectionCard title="Loan offer" tint icon={I.money} adminOnly>
               <KV k="ROI" v={loan.roi_percent != null ? `${loan.roi_percent}%` : null} />
               <KV k="Tenure" v={loan.selected_tenure_years ? `${loan.selected_tenure_years} ${loan.selected_tenure_years === 1 ? "year" : "years"}` : null} />
@@ -581,6 +635,20 @@ function Inner() {
 
       </div>
 
+      <LenderDecisionModal
+        open={approveOpen}
+        kind="approve"
+        applicantName={applicantName}
+        onClose={() => setApproveOpen(false)}
+        onConfirm={onApproveConfirm}
+      />
+      <LenderDecisionModal
+        open={rejectOpen}
+        kind="reject"
+        applicantName={applicantName}
+        onClose={() => setRejectOpen(false)}
+        onConfirm={onRejectConfirm}
+      />
       <LoanActivityLogModal
         open={activityOpen}
         onClose={() => setActivityOpen(false)}
@@ -605,13 +673,17 @@ function Inner() {
 // Same markup/palette as the EPC View's InternalStatusBand (deliberately
 // slate, not brand green), but driven by the loan's three lender outcomes.
 function LoanStatusBand({
-  current, busy, onChange,
+  current, busy, decidedBy, onApprove, onReject, onReview,
 }: {
   current: string;
   busy: boolean;
-  onChange: (next: "under_review" | "approved" | "rejected") => void;
+  decidedBy: string | null;      // label of the lender that approved/rejected
+  onApprove: () => void;
+  onReject: () => void;
+  onReview: () => void;
 }) {
   const label = LOAN_STATUS_LABEL[current] ?? current;
+  const decided = current === "approved" || current === "rejected";
   return (
     <div className="rounded-[12px] border border-slate-300 bg-slate-50 p-4 sm:p-5 mb-4">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -621,6 +693,11 @@ function LoanStatusBand({
           </div>
           <div className="flex items-baseline gap-2 flex-wrap">
             <span className="text-[18px] font-semibold text-slate-800">{label}</span>
+            {decided && decidedBy && (
+              <span className={["text-[13px] font-semibold", current === "approved" ? "text-[#178a5c]" : "text-red-700"].join(" ")}>
+                · {decidedBy}
+              </span>
+            )}
             <span className="text-[12px] text-slate-500">
               The lender outcome for this application. Every change is recorded in the activity log.
             </span>
@@ -628,16 +705,16 @@ function LoanStatusBand({
         </div>
         <div className="flex gap-2 flex-wrap items-center">
           {current === "approved" ? (
-            <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("under_review")}>Move back to review</StatusBtn>
+            <StatusBtn kind="neutral" busy={busy} onClick={onReview}>Move back to review</StatusBtn>
           ) : current === "rejected" ? (
-            <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("under_review")}>Re-open</StatusBtn>
+            <StatusBtn kind="neutral" busy={busy} onClick={onReview}>Re-open</StatusBtn>
           ) : (
             <>
               {current !== "under_review" && (
-                <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("under_review")}>Mark under review</StatusBtn>
+                <StatusBtn kind="neutral" busy={busy} onClick={onReview}>Mark under review</StatusBtn>
               )}
-              <StatusBtn kind="approve" busy={busy} onClick={() => onChange("approved")}>Approved by lender</StatusBtn>
-              <StatusBtn kind="danger" busy={busy} onClick={() => onChange("rejected")}>Rejected by lender</StatusBtn>
+              <StatusBtn kind="approve" busy={busy} onClick={onApprove}>Approval</StatusBtn>
+              <StatusBtn kind="danger" busy={busy} onClick={onReject}>Rejection</StatusBtn>
             </>
           )}
         </div>

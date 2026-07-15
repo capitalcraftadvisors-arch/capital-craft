@@ -28,6 +28,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { logLoanActivityServer } from "@/lib/loan-activity-server";
 // Note: sendWhatsAppConfirmation is intentionally NOT imported here —
 // the WhatsApp step is dropped from the current build. See header
 // comment. The stub in @/lib/whatsapp stays for later re-enablement.
@@ -169,6 +170,9 @@ export async function PATCH(
       .update(patch)
       .eq("id", appId);
     if (updErr) return err(`Save failed: ${updErr.message}`, 500);
+
+    // Append-only activity trail (migration 0042). Best-effort.
+    await logLoanActivityServer(supabase, appId, "step_completed", claims.business_id ?? null, { step: 1 });
 
     return NextResponse.json({ ok: true, next_step: 2 });
   } catch (e) {

@@ -25,7 +25,6 @@ import Button from "@/components/ui/Button";
 import StatusBadge from "@/components/StatusBadge";
 import GstR3bSection from "@/components/GstR3bSection";
 import EpcAdminInfoSection from "@/components/EpcAdminInfoSection";
-import EpcProjectsSection from "@/components/EpcProjectsSection";
 import CommentsSection from "@/components/CommentsSection";
 import EditableField from "@/components/EditableField";
 import AdminDocSlot from "@/components/AdminDocSlot";
@@ -343,8 +342,6 @@ function Inner() {
         </Section>
 
         <EpcAdminInfoSection businessId={params.id} />
-
-        <EpcProjectsSection businessId={params.id} />
 
         <GstR3bSection businessId={params.id} />
 

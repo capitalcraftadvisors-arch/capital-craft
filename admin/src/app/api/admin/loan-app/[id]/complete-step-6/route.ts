@@ -17,6 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { logLoanActivityServer } from "@/lib/loan-activity-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,6 +72,9 @@ export async function POST(
       })
       .eq("id", appId);
     if (updErr) return err(`Submit failed: ${updErr.message}`, 500);
+
+    // Append-only activity trail (migration 0042). Best-effort.
+    await logLoanActivityServer(supabase, appId, "submitted", claims.business_id ?? null, { step: 6 });
 
     return NextResponse.json({
       ok: true,

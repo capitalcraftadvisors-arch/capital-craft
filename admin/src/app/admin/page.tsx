@@ -94,6 +94,17 @@ const BUSINESS_TYPE_LABEL: Record<string, string> = {
 };
 
 type Lender = "creditfair" | "aerem" | "solfin";
+// "03 Jul 2026, 5:53 pm" — when the loan application was created.
+function fmtAddedOn(v: string | null | undefined): string {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleString("en-IN", {
+    day: "2-digit", month: "short", year: "numeric",
+    hour: "numeric", minute: "2-digit", hour12: true,
+  });
+}
+
 const LENDERS: { key: Lender; label: string }[] = [
   { key: "creditfair", label: "CreditFair" },
   { key: "aerem",      label: "Aerem" },
@@ -767,10 +778,11 @@ function AppsTab() {
           <colgroup>
             <col />
             <col />
-            <col style={{ width: "130px" }} />
-            <col style={{ width: "140px" }} />
-            <col style={{ width: "105px" }} />
+            <col style={{ width: "120px" }} />
+            <col style={{ width: "135px" }} />
             <col style={{ width: "150px" }} />
+            <col style={{ width: "95px" }} />
+            <col style={{ width: "140px" }} />
           </colgroup>
           <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">
             <tr>
@@ -778,13 +790,14 @@ function AppsTab() {
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">EPC partner</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Amount</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Status</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Added (date &amp; time)</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">By</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Action</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={6} className="px-5 py-10 text-center text-[#5a8a76]">No applications match.</td></tr>
+              <tr><td colSpan={7} className="px-5 py-10 text-center text-[#5a8a76]">No applications match.</td></tr>
             ) : filtered.map((r) => {
               const isHighlighted = highlightId === r.id;
               return (
@@ -822,6 +835,7 @@ function AppsTab() {
                     {OUTCOME_LABEL[lenderOutcome(r.status)]}
                   </span>
                 </td>
+                <td className="px-3 py-3 text-[13px] text-[#5a8a76]">{fmtAddedOn(r.created_at)}</td>
                 <td className="px-3 py-3 text-[13px] text-[#5a8a76]">
                   {r.created_by === "admin" ? "Admin" : "Customer"}
                 </td>
