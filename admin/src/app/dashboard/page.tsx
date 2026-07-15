@@ -22,6 +22,10 @@ import Button from "@/components/ui/Button";
 import { logout } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
+import {
+  deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort,
+  displayAmount as amountFor,
+} from "@/lib/disbursement";
 
 type AppRow = {
   id: string;
@@ -32,6 +36,10 @@ type AppRow = {
   loan_amount_required: number | null;
   project_size: number | null;
   project_size_unit: string | null;
+  // Disbursement (migration 0044) — read-only for EPCs.
+  sanctioned_amount: number | null;
+  first_disbursement_amount: number | null;
+  first_disbursement_date: string | null;
   status: string;
   created_at: string;
 };
@@ -57,6 +65,7 @@ function DashboardInner() {
         .select(
           "id, borrower_name, aadhaar_name, loan_display_id, " +
           "loan_amount, loan_amount_required, project_size, project_size_unit, " +
+          "sanctioned_amount, first_disbursement_amount, first_disbursement_date, " +
           "status, created_at",
         )
         .order("created_at", { ascending: false });
@@ -68,9 +77,9 @@ function DashboardInner() {
   function borrower(r: AppRow): string {
     return r.borrower_name || r.aadhaar_name || "—";
   }
+  // Approved → the SANCTIONED amount; otherwise what was applied for.
   function amount(r: AppRow): string {
-    const n = r.loan_amount_required ?? r.loan_amount;
-    return n ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
+    return fmtRupees(amountFor(r));
   }
   function capacity(r: AppRow): string {
     if (r.project_size == null) return "—";
@@ -117,20 +126,34 @@ function DashboardInner() {
                 <th className="px-5 py-3 font-medium">Loan amount</th>
                 <th className="px-5 py-3 font-medium">Plant capacity</th>
                 <th className="px-5 py-3 font-medium">Status</th>
+                <th className="px-5 py-3 font-medium">Disbursement</th>
+                <th className="px-5 py-3 font-medium">Days remaining</th>
                 <th className="px-5 py-3 font-medium">Login date &amp; time</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={5} className="px-5 py-8 text-center text-text-muted">Loading…</td></tr>
+                <tr><td colSpan={7} className="px-5 py-8 text-center text-text-muted">Loading…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={5} className="px-5 py-12 text-center text-text-muted">
+                <tr><td colSpan={7} className="px-5 py-12 text-center text-text-muted">
                   No applications yet. Click <span className="text-text font-semibold">Apply for Loan</span> to start one.
                 </td></tr>
               ) : rows.map((r) => {
                 const outcome = lenderOutcome(r.status);
+                const approved = r.status === "approved";
+                const dl = deadlineState(r.first_disbursement_date);
+                // An approved application opens straight onto its disbursement
+                // section — that's where the EPC's remaining work lives.
+                const openDisbursement = () => router.push(`/dashboard/${r.id}/disbursement` as any);
                 return (
-                  <tr key={r.id} className="border-b border-line hover:bg-[#f0faf5] transition-colors">
+                  <tr
+                    key={r.id}
+                    onClick={approved ? openDisbursement : undefined}
+                    className={[
+                      "border-b border-line transition-colors",
+                      approved ? "cursor-pointer hover:bg-[#f0faf5]" : "hover:bg-[#f0faf5]",
+                    ].join(" ")}
+                  >
                     <td className="px-5 py-4">
                       <div className="font-semibold text-text">{borrower(r)}</div>
                       {r.loan_display_id && (
@@ -143,6 +166,27 @@ function DashboardInner() {
                       <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${OUTCOME_PILL[outcome]}`}>
                         {OUTCOME_LABEL[outcome]}
                       </span>
+                    </td>
+                    <td className="px-5 py-4">
+                      {!approved ? (
+                        <span className="text-text-muted">—</span>
+                      ) : r.first_disbursement_amount != null ? (
+                        <>
+                          <div className="font-semibold text-[#0f3d2e]">{fmtRupees(r.first_disbursement_amount)}</div>
+                          <div className="text-[11px] text-text-muted mt-0.5">{fmtDateShort(r.first_disbursement_date)}</div>
+                        </>
+                      ) : (
+                        <span className="text-text-muted">—</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">
+                      {!approved ? (
+                        <span className="text-text-muted">—</span>
+                      ) : (
+                        <span className={["inline-block px-2 py-1 rounded-[6px] text-[11px] font-semibold whitespace-nowrap", DEADLINE_PILL[dl.tone]].join(" ")}>
+                          {dl.label}
+                        </span>
+                      )}
                     </td>
                     <td className="px-5 py-4 text-text-muted whitespace-nowrap">{loginDateTime(r)}</td>
                   </tr>

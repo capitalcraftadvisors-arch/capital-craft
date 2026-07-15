@@ -15,7 +15,10 @@ type LoanCategory =
   | "borrower_pan" | "borrower_aadhaar" | "borrower_photo"
   | "customer_photo"
   | "bank_statement" | "income_proof" | "electricity_bill"
-  | "property_doc" | "quotation" | "other";
+  | "property_doc" | "quotation" | "other"
+  // Post-first-disbursement completion docs (migration 0043). Shared slots —
+  // uploaded by either the admin (on behalf) or the EPC.
+  | "completion_invoice" | "completion_plant_photo" | "completion_report";
 
 type Props = {
   businessId?: string;

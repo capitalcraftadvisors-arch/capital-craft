@@ -14,6 +14,10 @@ import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import { supabase } from "@/lib/supabase";
 import { logout, getToken } from "@/lib/auth";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL, OUTCOME_STATUSES, type LenderOutcome } from "@/lib/loan-status";
+import {
+  deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort,
+  displayAmount as amountFor,
+} from "@/lib/disbursement";
 
 type Tab = "epcs" | "apps";
 
@@ -632,6 +636,11 @@ function AppsTab() {
     // the legacy 0001 column — read both, prefer the newer one.
     loan_amount: number | null;
     loan_amount_required: number | null;
+    // Disbursement (migration 0044). sanctioned_amount replaces the applied
+    // amount in the Amount column once the loan is approved.
+    sanctioned_amount: number | null;
+    first_disbursement_amount: number | null;
+    first_disbursement_date: string | null;
     status: string; created_at: string; created_by: string;
     epc_business: { contact_name: string | null; trade_name: string | null; legal_name: string | null; epc_display_id: string | null } | null;
   };
@@ -685,6 +694,7 @@ function AppsTab() {
         .select(
           "id, borrower_name, aadhaar_name, aadhaar_number_masked, loan_display_id, " +
           "loan_amount, loan_amount_required, " +
+          "sanctioned_amount, first_disbursement_amount, first_disbursement_date, " +
           "status, created_at, created_by, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
@@ -708,9 +718,9 @@ function AppsTab() {
         || r.epc_business?.contact_name
         || "—";
   }
+  // Approved → show what the lender SANCTIONED; otherwise what was applied for.
   function displayAmount(r: Row): string {
-    const n = r.loan_amount_required ?? r.loan_amount;
-    return n ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
+    return fmtRupees(amountFor(r));
   }
   // Masked Aadhaar display: "xxxxxxxx1234" (stored) → "XXXX XXXX 1234".
   function displayMaskedAadhaar(r: Row): string | null {
@@ -781,10 +791,12 @@ function AppsTab() {
           <colgroup>
             <col />
             <col />
-            <col style={{ width: "120px" }} />
-            <col style={{ width: "135px" }} />
-            <col style={{ width: "150px" }} />
-            <col style={{ width: "95px" }} />
+            <col style={{ width: "110px" }} />
+            <col style={{ width: "130px" }} />
+            <col style={{ width: "110px" }} />
+            <col style={{ width: "125px" }} />
+            <col style={{ width: "140px" }} />
+            <col style={{ width: "85px" }} />
             <col style={{ width: "140px" }} />
           </colgroup>
           <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">
@@ -793,6 +805,8 @@ function AppsTab() {
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">EPC partner</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Amount</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Status</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Disbursement</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Days remaining</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Added (date &amp; time)</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">By</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Action</th>
@@ -800,7 +814,7 @@ function AppsTab() {
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={7} className="px-5 py-10 text-center text-[#5a8a76]">No applications match.</td></tr>
+              <tr><td colSpan={9} className="px-5 py-10 text-center text-[#5a8a76]">No applications match.</td></tr>
             ) : filtered.map((r) => {
               const isHighlighted = highlightId === r.id;
               return (
@@ -838,6 +852,31 @@ function AppsTab() {
                     {OUTCOME_LABEL[lenderOutcome(r.status)]}
                   </span>
                 </td>
+                {/* Disbursement + countdown — only meaningful once approved. */}
+                <td className="px-3 py-3">
+                  {r.status !== "approved" ? (
+                    <span className="text-[13px] text-[#5a8a76]">—</span>
+                  ) : r.first_disbursement_amount != null ? (
+                    <>
+                      <p className="text-[13px] font-semibold text-[#0f3d2e]">{fmtRupees(r.first_disbursement_amount)}</p>
+                      <p className="text-[11px] text-[#5a8a76] mt-0.5">{fmtDateShort(r.first_disbursement_date)}</p>
+                    </>
+                  ) : (
+                    <span className="text-[13px] text-[#5a8a76]">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-3">
+                  {r.status !== "approved" ? (
+                    <span className="text-[13px] text-[#5a8a76]">—</span>
+                  ) : (() => {
+                    const dl = deadlineState(r.first_disbursement_date);
+                    return (
+                      <span className={["inline-block px-2 py-1 rounded-[6px] text-[11px] font-semibold whitespace-nowrap", DEADLINE_PILL[dl.tone]].join(" ")}>
+                        {dl.label}
+                      </span>
+                    );
+                  })()}
+                </td>
                 <td className="px-3 py-3 text-[13px] text-[#5a8a76]">{fmtAddedOn(r.created_at)}</td>
                 <td className="px-3 py-3 text-[13px] text-[#5a8a76]">
                   {r.created_by === "admin" ? "Admin" : "Customer"}
@@ -868,6 +907,16 @@ function AppsTab() {
                     >
                       {IconDownload} {zipBusy === r.id ? "Preparing…" : "Download ZIP"}
                     </button>
+                    {/* Approved only — the View button above is unchanged. */}
+                    {r.status === "approved" && (
+                      <button
+                        type="button"
+                        onClick={() => router.push(`/admin/app/${r.id}/disbursement` as any)}
+                        className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#854f0b]/30 bg-white text-[#854f0b] hover:bg-[#fef0d6] inline-flex items-center justify-center gap-1.5"
+                      >
+                        Disbursement
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>

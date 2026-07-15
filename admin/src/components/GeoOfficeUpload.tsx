@@ -30,12 +30,16 @@ import { uploadDocument, getDocumentUrl, deleteDocument } from "@/lib/storage";
 import { getToken } from "@/lib/auth";
 import { isAcceptedFileType } from "@/lib/validators";
 
-type Category = "office_exterior" | "office_interior" | "office_selfie";
-
+// EPC office photos (epc_documents) or loan completion photos
+// (user_application_docs) — the geo rules are identical, so one component
+// serves both. Exactly ONE of businessId / applicationId is expected.
 type Props = {
-  businessId: string;
-  category: Category;
+  category: string;
   label: string;
+  businessId?: string;
+  applicationId?: string;
+  uploadedBy?: "epc" | "admin";
+  hint?: string;
 };
 
 type Gps = { lat: number; lng: number; captured_at: string };
@@ -231,7 +235,16 @@ function drawGeoStamp(
   ctx.fillText(dateStr, textX, ty);
 }
 
-export default function GeoOfficeUpload({ businessId, category, label }: Props) {
+export default function GeoOfficeUpload({
+  category, label, businessId, applicationId, uploadedBy, hint,
+}: Props) {
+  // Which table this slot lives in. Loan completion photos hang off the
+  // application; EPC office photos off the business.
+  const isLoan = !!applicationId;
+  const table  = isLoan ? "user_application_docs" : "epc_documents";
+  const keyCol = isLoan ? "application_id" : "business_id";
+  const keyVal = (isLoan ? applicationId : businessId) ?? "";
+
   const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -248,10 +261,11 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
 
   useEffect(() => {
     (async () => {
+      if (!keyVal) return;
       const { data } = await supabase()
-        .from("epc_documents")
+        .from(table)
         .select("id, storage_path, mime_type, file_name, metadata")
-        .eq("business_id", businessId)
+        .eq(keyCol, keyVal)
         .eq("category", category)
         .limit(1);
       const row = (data ?? [])[0] as DocRow | undefined;
@@ -268,7 +282,7 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [businessId, category]);
+  }, [table, keyCol, keyVal, category]);
 
   // Always stop the camera when the component unmounts.
   useEffect(() => () => stopStream(), []);
@@ -290,7 +304,13 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
   async function persist(file: File, coords: Gps) {
     setUploading(true);
     setStatus("Uploading…");
-    const r = await uploadDocument(file, { table: "epc_documents", category, business_id: businessId, gps: coords });
+    const r = await uploadDocument(file, {
+      table: table as "epc_documents" | "user_application_docs",
+      category,
+      ...(isLoan ? { application_id: applicationId } : { business_id: businessId }),
+      ...(uploadedBy ? { uploaded_by: uploadedBy } : {}),
+      gps: coords,
+    });
     setUploading(false);
     setStatus(null);
     if (!r.ok) {
@@ -432,7 +452,9 @@ export default function GeoOfficeUpload({ businessId, category, label }: Props) 
 
   return (
     <div>
-      <p className="text-[13px] font-medium text-text-mid mb-2">{label}</p>
+      <p className="text-[13px] font-medium text-text-mid mb-0.5">{label}</p>
+      {hint && <p className="text-[11px] text-text-muted mb-2">{hint}</p>}
+      {!hint && <div className="mb-2" />}
 
       {doc ? (
         <>

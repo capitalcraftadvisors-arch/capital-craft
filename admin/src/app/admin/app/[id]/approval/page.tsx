@@ -118,6 +118,10 @@ function Inner() {
         approved_lender: details.approved_by,
         approved_at: now,
         approval_details: details,
+        // Denormalised out of approval_details so disbursement math, the
+        // lists and sorting key off a real column — approval_details is a
+        // free-form table whose fields may be restructured later.
+        sanctioned_amount: details.approved_loan_amount ?? null,
         // A fresh approval supersedes any previous rejection.
         rejected_lender: null,
         rejected_at: null,
