@@ -640,6 +640,9 @@ function AppsTab() {
   const [statusFilter, setStatusFilter] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [zipBusy, setZipBusy] = useState<string | null>(null);
+  // Row whose Download ZIP popup is open — the lender picker is the same
+  // component the EPC list uses.
+  const [zipPickerRow, setZipPickerRow] = useState<Row | null>(null);
   // Row highlighted after returning from View — same behaviour as the EPC
   // list, with its own sessionStorage keys.
   const [highlightId, setHighlightId] = useState<string | null>(null);
@@ -719,11 +722,11 @@ function AppsTab() {
 
   // Streams the loan-app ZIP through the admin's bearer token and
   // triggers a browser download. Mirrors the EPC list's ZIP flow.
-  async function downloadLoanZip(r: Row) {
+  async function downloadLoanZip(r: Row, lender: LenderKey) {
     if (zipBusy) return;
     setZipBusy(r.id);
     try {
-      const res = await fetch(`/api/admin/loan-app/${r.id}/download-zip`, {
+      const res = await fetch(`/api/admin/loan-app/${r.id}/download-zip?lender=${lender}`, {
         headers: { Authorization: `Bearer ${getToken() ?? ""}` },
       });
       if (!res.ok) {
@@ -841,23 +844,29 @@ function AppsTab() {
                 </td>
                 {/* Action: View + Download ZIP. stopPropagation so the
                     buttons don't also trigger the row's navigate. */}
+                {/* Action buttons — same shape/icons as the EPC list. */}
                 <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-col gap-1.5">
                     <button
                       type="button"
                       onClick={() => navigateToView(r)}
-                      className="px-2.5 py-1.5 text-[12px] font-semibold text-[#185fa5] border border-[#d3e9f7] rounded hover:bg-[#dceffb] transition-colors"
+                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#185fa5]/30 bg-white text-[#185fa5] hover:bg-[#dceffb] inline-flex items-center justify-center gap-1.5"
                     >
-                      View
+                      {IconEye} View
                     </button>
                     <button
                       type="button"
-                      onClick={() => void downloadLoanZip(r)}
                       disabled={zipBusy === r.id}
+                      onClick={() => setZipPickerRow(r)}
                       title="Download all documents + summary as ZIP"
-                      className="px-2.5 py-1.5 text-[12px] font-semibold text-[#178a5c] border border-[#cdeadd] rounded hover:bg-[#f0faf5] disabled:opacity-60 transition-colors"
+                      className={[
+                        "text-[12px] font-semibold px-2.5 py-1.5 rounded-input border transition-colors inline-flex items-center justify-center gap-1.5",
+                        zipBusy === r.id
+                          ? "border-line bg-bg-soft text-text-muted cursor-not-allowed"
+                          : "border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5]",
+                      ].join(" ")}
                     >
-                      {zipBusy === r.id ? "…" : "ZIP"}
+                      {IconDownload} {zipBusy === r.id ? "Preparing…" : "Download ZIP"}
                     </button>
                   </div>
                 </td>
@@ -869,6 +878,19 @@ function AppsTab() {
       </Card>
 
       <AddNewLoanAppModal open={addOpen} onClose={() => setAddOpen(false)} />
+
+      {/* Same lender picker the EPC list uses — the chosen lender stamps
+          "Submitted to" in the Excel and lands in the ZIP filename. */}
+      <LenderPickerModal
+        open={!!zipPickerRow}
+        onClose={() => setZipPickerRow(null)}
+        epcName={zipPickerRow ? displayBorrower(zipPickerRow) : null}
+        onConfirm={async (lender) => {
+          const row = zipPickerRow;
+          if (!row) return;
+          await downloadLoanZip(row, lender);
+        }}
+      />
     </>
   );
 }

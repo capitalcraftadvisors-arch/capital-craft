@@ -111,24 +111,24 @@ export default function ApprovalDetailsTable({ value, onChange, readOnly }: Prop
         <tbody>
           {/* Approved By — the lender chosen in the confirmation popup. */}
           <tr className="border-b border-[#e0f0e8]">
-            <td className="py-2.5 pr-3 text-[13px] text-[#5a8a76] font-medium w-[26%]">Approved By</td>
-            <td className="py-2.5 px-2 text-[15px] font-semibold text-[#178a5c]" colSpan={3}>
+            <td className="py-5 pr-4 text-[14px] text-[#5a8a76] font-medium w-[26%]">Approved By</td>
+            <td className="py-5 px-3 text-[17px] font-bold text-[#178a5c]" colSpan={3}>
               {lender}
             </td>
           </tr>
 
           {ROWS.map((row) => (
             <tr key={row.approvedKey} className="border-b border-[#e0f0e8]">
-              <td className="py-2.5 pr-3 text-[13px] text-[#5a8a76] font-medium w-[26%]">
+              <td className="py-5 pr-4 text-[14px] text-[#5a8a76] font-medium w-[26%]">
                 {row.appliedLabel}
               </td>
-              <td className="py-2.5 px-2 text-right font-medium text-[#0f3d2e] w-[24%]">
+              <td className="py-5 px-3 text-right text-[15px] font-semibold text-[#0f3d2e] w-[24%]">
                 {fmt(value[row.appliedKey] as number | null, row.money, row.suffix)}
               </td>
-              <td className="py-2.5 pl-4 pr-3 text-[13px] text-[#5a8a76] font-medium w-[26%]">
+              <td className="py-5 pl-6 pr-4 text-[14px] text-[#5a8a76] font-medium w-[26%]">
                 {row.approvedLabel}
               </td>
-              <td className="py-2.5 px-2 w-[24%]">
+              <td className="py-5 px-3 w-[24%]">
                 {ro ? (
                   <div className="text-right font-semibold text-[#0f3d2e]">
                     {fmt(value[row.approvedKey] as number | null, row.money, row.suffix)}
@@ -143,13 +143,16 @@ export default function ApprovalDetailsTable({ value, onChange, readOnly }: Prop
                     onChange={(e) => set(row.approvedKey, e.target.value)}
                   />
                 )}
-                {/* Spelled out, right under the box. */}
+                {/* Spelled out, right under the box — bold + highlighted so
+                    it reads as a check on what was typed. */}
                 {(() => {
                   const n = value[row.approvedKey];
                   if (n === null || n === undefined || !Number.isFinite(Number(n))) return null;
                   return (
-                    <p className="text-[11px] text-[#5a8a76] text-right mt-1 leading-snug">
-                      {row.words(Number(n))}
+                    <p className="mt-2 text-right">
+                      <span className="inline-block rounded-[6px] bg-[#f0faf5] border border-[#cdeadd] px-2.5 py-1 text-[12px] font-bold text-[#178a5c] leading-snug">
+                        {row.words(Number(n))}
+                      </span>
                     </p>
                   );
                 })()}

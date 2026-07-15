@@ -26,7 +26,7 @@ import CommentsSection from "@/components/CommentsSection";
 import LoanActivityLogModal from "@/components/LoanActivityLogModal";
 import LenderDecisionModal from "@/components/LenderDecisionModal";
 import ApprovalDetailsTable, { LENDER_LABEL, type ApprovalDetails } from "@/components/ApprovalDetailsTable";
-import type { LenderKey } from "@/components/LenderPickerModal";
+import LenderPickerModal, { type LenderKey } from "@/components/LenderPickerModal";
 import { logLoanActivity } from "@/lib/loanAudit";
 import {
   I, StatusBtn, Pill, BigProgressStep, BigConnector, SectionCard, KV,
@@ -197,6 +197,7 @@ function Inner() {
   const [downloading, setDownloading] = useState(false);
   const [approveOpen, setApproveOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
+  const [zipPickerOpen, setZipPickerOpen] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -315,11 +316,13 @@ function Inner() {
     );
   }
 
-  async function downloadZip() {
+  // The ZIP is lender-specific (the Excel stamps "Submitted to"), so the
+  // picker popup supplies the lender — same flow as the EPC View.
+  async function downloadZip(lender: LenderKey) {
     if (!loan || downloading) return;
     setDownloading(true);
     try {
-      const res = await fetch(`/api/admin/loan-app/${loan.id}/download-zip`, {
+      const res = await fetch(`/api/admin/loan-app/${loan.id}/download-zip?lender=${lender}`, {
         headers: { Authorization: `Bearer ${getToken() ?? ""}` },
       });
       if (!res.ok) {
@@ -329,9 +332,12 @@ function Inner() {
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
+      // Prefer the server's lender-stamped filename.
+      const cd = res.headers.get("content-disposition") || "";
+      const m = /filename="?([^"]+)"?/.exec(cd);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${displayId(loan)}_${String(applicantName).replace(/[^\w-]+/g, "_")}.zip`;
+      a.download = m?.[1] || `${displayId(loan)}_${String(applicantName).replace(/[^\w-]+/g, "_")}.zip`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -614,7 +620,7 @@ function Inner() {
           </button>
           <button
             type="button"
-            onClick={() => void downloadZip()}
+            onClick={() => setZipPickerOpen(true)}
             disabled={downloading}
             className="flex-1 py-3.5 text-[15px] font-semibold bg-[#185fa5] text-white rounded-[10px] hover:bg-[#144d84] disabled:opacity-70 inline-flex items-center justify-center gap-2"
           >
@@ -635,6 +641,12 @@ function Inner() {
 
       </div>
 
+      <LenderPickerModal
+        open={zipPickerOpen}
+        onClose={() => setZipPickerOpen(false)}
+        epcName={applicantName}
+        onConfirm={(lender) => downloadZip(lender)}
+      />
       <LenderDecisionModal
         open={approveOpen}
         kind="approve"

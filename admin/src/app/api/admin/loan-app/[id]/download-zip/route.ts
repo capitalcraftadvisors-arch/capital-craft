@@ -1,6 +1,11 @@
-// GET /api/admin/loan-app/[id]/download-zip
+// GET /api/admin/loan-app/[id]/download-zip?lender=creditfair|aerem|solfin
 //
-// Admin-only. Streams a fresh ZIP for the given loan application:
+// Admin-only. Streams a fresh ZIP for the given loan application. The lender
+// is REQUIRED (same contract as /api/epc/[id]/download-zip): it stamps
+// "Submitted to" in the Excel summary and goes into the ZIP filename, so
+// downloads for the same application across lenders don't collide.
+//
+// Contents:
 //   - summary.xlsx                     applicant / loan / bank / offer sheet
 //   - aadhaar/{front,back,face}        applicant KYC images
 //   - coapp/{aadhaar_front,back,pan}   co-applicant docs (when present)
@@ -39,6 +44,15 @@ const SUPABASE_ANON =
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Same 3 lenders (and same labels) as the EPC ZIP route.
+const LENDER_KEYS = ["creditfair", "aerem", "solfin"] as const;
+type LenderKey = typeof LENDER_KEYS[number];
+const LENDER_LABEL: Record<LenderKey, string> = {
+  creditfair: "CreditFair",
+  aerem:      "Aerem",
+  solfin:     "Solfin",
+};
+
 function err(message: string, status: number) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
@@ -64,6 +78,13 @@ export async function GET(
 
     const appId = params.id;
     if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);
+
+    // Lender is required — the picker popup always supplies it.
+    const lenderParam = (new URL(req.url).searchParams.get("lender") ?? "").toLowerCase();
+    if (!LENDER_KEYS.includes(lenderParam as LenderKey)) {
+      return err("missing_or_invalid_lender", 400);
+    }
+    const lender = lenderParam as LenderKey;
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
       global: { headers: { Authorization: `Bearer ${token}` } },
@@ -98,6 +119,7 @@ export async function GET(
     ws.addRow([]);
     const rows: Array<[string, string]> = [
       ["Application ID",     displayId],
+      ["Submitted to",       LENDER_LABEL[lender]],
       ["Status",             String(loan.status ?? "—")],
       ["Submitted",          loan.submitted_at ? new Date(loan.submitted_at).toLocaleString("en-IN") : "—"],
       ["EPC Partner",        `${epcName}${loan.epc_business?.epc_display_id ? ` (${loan.epc_business.epc_display_id})` : ""}`],
@@ -129,12 +151,9 @@ export async function GET(
       ["Account no.",        loan.bank_account_no ?? "—"],
       ["IFSC",               loan.bank_ifsc ?? "—"],
       ["", ""],
-      ["ROI",                loan.roi_percent != null ? `${loan.roi_percent}%` : "—"],
-      ["Central subsidy",    rupees(loan.central_subsidy)],
-      ["State subsidy",      rupees(loan.state_subsidy)],
+      // ROI / Central subsidy / State subsidy / Monthly EMI / Subsidy EMI are
+      // deliberately NOT in the lender pack — the lender sets its own terms.
       ["Tenure",             loan.selected_tenure_years ? `${loan.selected_tenure_years} years` : "—"],
-      ["Monthly EMI",        rupees(loan.selected_monthly_emi)],
-      ["Subsidy EMI",        rupees(loan.selected_subsidy_emi)],
     ];
     if (loan.bill_on_applicant_name === false) {
       rows.push(["", ""]);
@@ -193,7 +212,11 @@ export async function GET(
 
     void archive.finalize();
 
-    const safeName = `${displayId}_${borrowerName}`.replace(/[^\w-]+/g, "_").slice(0, 80);
+    // Filename includes the lender so downloads for the same application
+    // across multiple lenders don't collide (same as the EPC ZIP).
+    const safeName = `${displayId}_${borrowerName}_${LENDER_LABEL[lender]}`
+      .replace(/[^\w-]+/g, "_")
+      .slice(0, 80);
     const webStream = Readable.toWeb(archive) as unknown as ReadableStream;
     return new NextResponse(webStream, {
       headers: {

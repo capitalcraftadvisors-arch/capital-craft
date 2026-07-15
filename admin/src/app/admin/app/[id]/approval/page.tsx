@@ -161,7 +161,7 @@ function Inner() {
         </div>
       </header>
 
-      <div className="w-full max-w-4xl mx-auto px-5 sm:px-8 py-6" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
+      <div className="w-full max-w-5xl mx-auto px-5 sm:px-8 py-8" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
         <div className="rounded-[12px] border border-[#cdeadd] bg-[#f0faf5] p-5 sm:p-6 mb-4">
           <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">Approval details</div>
           <div className="text-[14px] text-[#5a8a76] mt-0.5 truncate">
