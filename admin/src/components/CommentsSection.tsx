@@ -54,15 +54,13 @@ type Props = {
 };
 
 export default function CommentsSection({
-  businessId, applicationId, epcName, onChanged, maxListHeight = 360,
+  businessId, applicationId, onChanged, maxListHeight = 360,
 }: Props) {
-  // The label on each comment is the PROFILE name (trade name for an EPC,
-  // applicant name for a loan) — NOT the admin who typed it. author_name
-  // stores the logged-in admin (e.g. "Sunil jadaun"), which is meaningless
-  // on a profile page; the human identity, when relevant, is written into
-  // the comment text itself ("Manish - …"). Falls back to author_name only
-  // when no profile name was supplied.
-  const profileName = epcName && epcName.trim() && epcName.trim() !== "—" ? epcName.trim() : null;
+  // Every note is labelled simply "Admin" — this is the single admin (CEO)
+  // console. We deliberately don't surface the individual admin's name
+  // (author_name still stores it for audit). When the regional-manager
+  // hierarchy lands, this label is where each portal's own identity will
+  // surface instead; the epcName prop is kept on Props for that.
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState("");
@@ -151,7 +149,7 @@ export default function CommentsSection({
             {rows.map((r) => (
               <li key={r.id} className="p-3">
                 <div className="text-[12px] text-text-mid min-w-0 mb-1">
-                  <span className="font-semibold text-[#0f3d2e]">{profileName || r.author_name || "Admin"}</span>
+                  <span className="font-semibold text-[#0f3d2e]">Admin</span>
                   <span className="mx-1 text-text-muted">·</span>
                   <span>{fmtWhen(r.created_at)}</span>
                   {r.updated_at !== r.created_at && (
