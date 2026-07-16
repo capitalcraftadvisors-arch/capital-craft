@@ -2,7 +2,7 @@
 
 import { ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Business, getBusiness, getToken, routeForBusiness, setBusiness } from "@/lib/auth";
+import { Business, getBusiness, getToken, routeForBusiness, setBusiness, portalAccess } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 
 type Allow = "any" | "draft" | "approved" | "admin" | "status" | "self_edit";
@@ -45,7 +45,7 @@ export default function AuthGuard({ children, allow }: Props) {
     // date with the parent flags.
     supabase()
       .from("epc_business")
-      .select("id, status, business_type, current_step, contact_name, epc_self_edited, epc_self_edited_at, loan_app_unlocked")
+      .select("id, status, business_type, current_step, contact_name, epc_self_edited, epc_self_edited_at, loan_app_unlocked, service_type")
       .eq("id", biz.id)
       .maybeSingle()
       .then(({ data }: { data: Business | null }) => {
@@ -74,15 +74,15 @@ function matches(b: Business, allow: Allow[]): boolean {
   if (b.business_type === "admin") return allow.includes("admin");
   if (b.status === "draft") return allow.includes("draft");
 
-  // Loan-app dashboard: decoupled from admin.status. Only loan_app_unlocked
+  // Portal dashboard: decoupled from admin.status. Loan OR insurance access
   // grants entry to a page tagged "approved".
-  if (allow.includes("approved") && b.loan_app_unlocked === true) return true;
+  if (allow.includes("approved") && portalAccess(b)) return true;
 
-  // Everything else routes through the "Under review" bucket. If the EPC's
-  // loan_app is unlocked they shouldn't be here — refuse and let
-  // routeForBusiness send them to /dashboard.
+  // Everything else routes through the "Under review" bucket. If the EPC has
+  // portal access they shouldn't be here — refuse and let routeForBusiness
+  // send them to /dashboard.
   if (b.status === "under_review" || b.status === "on_hold" || b.status === "rejected" || b.status === "approved") {
-    if (b.loan_app_unlocked === true) return false;
+    if (portalAccess(b)) return false;
     if (allow.includes("status")) return true;
     // self_edit is a one-time pass available to any submitted EPC (status of
     // under_review / on_hold / approved / rejected — the outer branch above

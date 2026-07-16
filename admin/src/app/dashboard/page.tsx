@@ -19,7 +19,7 @@ import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import { logout } from "@/lib/auth";
+import { logout, getBusiness, getToken, loanAccess, insuranceAccess } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
 import {
@@ -56,6 +56,34 @@ function DashboardInner() {
   const router = useRouter();
   const [rows, setRows] = useState<AppRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [insBusy, setInsBusy] = useState(false);
+
+  const me = getBusiness();
+  const canLoan = loanAccess(me);
+  const canInsurance = insuranceAccess(me);
+
+  // "Apply for Insurance" → create (or resume) a draft insurance application,
+  // then jump to Step 1. Server enforces service_type in (insurance, both).
+  async function startInsurance() {
+    if (insBusy) return;
+    setInsBusy(true);
+    try {
+      const res = await fetch("/api/epc/insurance/create", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) {
+        alert("Couldn't start the insurance application: " + (data?.error || `HTTP ${res.status}`));
+        return;
+      }
+      router.push(`/dashboard/insurance/${data.application.id}/step-1` as any);
+    } catch (e) {
+      alert("Network error: " + (e as Error).message);
+    } finally {
+      setInsBusy(false);
+    }
+  }
 
   useEffect(() => {
     (async () => {
@@ -107,17 +135,31 @@ function DashboardInner() {
         <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
           <div>
             <h1 className="font-display text-[26px] sm:text-[30px] font-bold text-[#0f3d2e]">
-              Your loan applications
+              {canLoan ? "Your loan applications" : "Your applications"}
             </h1>
             <p className="text-text-mid mt-1">
-              Applications you&rsquo;ve submitted and where each one stands with the lender.
+              {canLoan
+                ? "Applications you’ve submitted and where each one stands with the lender."
+                : "Apply for insurance for your installed plants."}
             </p>
           </div>
-          <Button variant="primary" onClick={() => router.push("/dashboard/apply" as any)}>
-            Apply for Loan
-          </Button>
+          {/* Buttons follow the admin's Service selection + lender approval. */}
+          <div className="flex gap-3 flex-wrap">
+            {canInsurance && (
+              <Button variant="primary" onClick={() => void startInsurance()} loading={insBusy}>
+                Apply for Insurance
+              </Button>
+            )}
+            {canLoan && (
+              <Button variant={canInsurance ? "outline" : "primary"} onClick={() => router.push("/dashboard/apply" as any)}>
+                Apply for Loan
+              </Button>
+            )}
+          </div>
         </div>
 
+        {/* The loan table is only meaningful for EPCs with loan access. */}
+        {canLoan && (
         <Card className="overflow-hidden">
           <table className="w-full text-[14px]">
             <thead className="bg-bg-soft border-b border-line">
@@ -195,6 +237,17 @@ function DashboardInner() {
             </tbody>
           </table>
         </Card>
+        )}
+
+        {/* Insurance-only EPCs: a simple prompt in place of the loan table. */}
+        {!canLoan && canInsurance && (
+          <Card className="p-8 text-center">
+            <p className="text-[15px] text-text">
+              Click <span className="font-semibold text-[#178a5c]">Apply for Insurance</span> above to insure an
+              installed plant. Our team will reach out after you submit.
+            </p>
+          </Card>
+        )}
       </section>
     </main>
   );

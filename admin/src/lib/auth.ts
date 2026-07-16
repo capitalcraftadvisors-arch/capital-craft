@@ -23,7 +23,24 @@ export type Business = {
   epc_self_edited?: boolean;
   epc_self_edited_at?: string | null;
   loan_app_unlocked?: boolean;
+  // Admin-set service on an approved EPC. Governs the portal buttons:
+  //   insurance needs NO lender approval; loan still needs loan_app_unlocked.
+  service_type?: "loans" | "insurance" | "both" | null;
 };
+
+// ── Portal access gating ──────────────────────────────────────────────
+// Insurance unlocks purely from the service selection. Loan keeps its
+// existing rule (a lender "Approved" tick, via loan_app_unlocked) AND now
+// also requires the service to include loans.
+export function insuranceAccess(b: Business | null | undefined): boolean {
+  return b?.service_type === "insurance" || b?.service_type === "both";
+}
+export function loanAccess(b: Business | null | undefined): boolean {
+  return b?.loan_app_unlocked === true && (b?.service_type === "loans" || b?.service_type === "both");
+}
+export function portalAccess(b: Business | null | undefined): boolean {
+  return loanAccess(b) || insuranceAccess(b);
+}
 
 const TOKEN_KEY = "cc_token";
 const BUSINESS_KEY = "cc_business";
@@ -108,6 +125,8 @@ export function getImpersonatedBusiness(): Business | null {
 export function routeForBusiness(b: Business): string {
   if (b.business_type === "admin") return "/admin";
   if (b.status === "draft") return `/onboarding/step-${Math.max(1, Math.min(b.current_step || 1, 7))}`;
-  if (b.loan_app_unlocked === true) return "/dashboard";
+  // The dashboard is reachable when EITHER loans or insurance is unlocked;
+  // the dashboard itself shows whichever apply buttons the EPC is entitled to.
+  if (portalAccess(b)) return "/dashboard";
   return "/status";
 }

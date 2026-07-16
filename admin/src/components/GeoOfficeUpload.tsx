@@ -33,6 +33,8 @@ import { isAcceptedFileType } from "@/lib/validators";
 // EPC office photos (epc_documents) or loan completion photos
 // (user_application_docs) — the geo rules are identical, so one component
 // serves both. Exactly ONE of businessId / applicationId is expected.
+type Gps = { lat: number; lng: number; captured_at: string };
+
 type Props = {
   category: string;
   label: string;
@@ -40,9 +42,16 @@ type Props = {
   applicationId?: string;
   uploadedBy?: "epc" | "admin";
   hint?: string;
+  // Custom-upload override: when provided, the component skips the built-in
+  // epc_documents / user_application_docs write and calls this instead (used
+  // by the insurance flow, whose photo lives as a column path, not a doc
+  // row). The geo capture — EXIF read, live camera, Vision stamp fallback,
+  // lat/long + address — is identical either way.
+  uploadFn?: (file: File, gps: Gps) => Promise<{ ok: boolean; error?: string }>;
+  // Seed an already-uploaded photo when using uploadFn (no DB row to read).
+  initialGps?: Gps | null;
+  onUploaded?: (gps: Gps) => void;
 };
-
-type Gps = { lat: number; lng: number; captured_at: string };
 
 type DocRow = {
   id: string;
@@ -237,6 +246,7 @@ function drawGeoStamp(
 
 export default function GeoOfficeUpload({
   category, label, businessId, applicationId, uploadedBy, hint,
+  uploadFn, initialGps, onUploaded,
 }: Props) {
   // Which table this slot lives in. Loan completion photos hang off the
   // application; EPC office photos off the business.
@@ -261,6 +271,16 @@ export default function GeoOfficeUpload({
 
   useEffect(() => {
     (async () => {
+      // Custom-upload mode (insurance): no doc row to read. Seed from the
+      // already-stored coordinates, if any.
+      if (uploadFn) {
+        if (initialGps && typeof initialGps.lat === "number" && typeof initialGps.lng === "number") {
+          setDoc({ id: "", storage_path: "", mime_type: "image/jpeg", file_name: "Plant photo" });
+          setGps(initialGps);
+          void resolveAddress(initialGps);
+        }
+        return;
+      }
       if (!keyVal) return;
       const { data } = await supabase()
         .from(table)
@@ -304,6 +324,23 @@ export default function GeoOfficeUpload({
   async function persist(file: File, coords: Gps) {
     setUploading(true);
     setStatus("Uploading…");
+
+    // Custom-upload mode (insurance): hand the file + coords to the caller's
+    // uploader, then show a local preview (no signed-URL round-trip).
+    if (uploadFn) {
+      const r = await uploadFn(file, coords);
+      setUploading(false);
+      setStatus(null);
+      if (!r.ok) { setError(r.error || "Upload failed. Please try again."); return; }
+      setDoc({ id: "", storage_path: "", mime_type: file.type, file_name: file.name });
+      setGps(coords);
+      setAddress(null);
+      void resolveAddress(coords);
+      if (file.type.startsWith("image/")) setThumb(URL.createObjectURL(file));
+      onUploaded?.(coords);
+      return;
+    }
+
     const r = await uploadDocument(file, {
       table: table as "epc_documents" | "user_application_docs",
       category,
@@ -442,6 +479,12 @@ export default function GeoOfficeUpload({
 
   async function remove() {
     if (!doc) return;
+    // Custom-upload mode: just clear locally; the next upload overwrites the
+    // stored path (there's no doc row to delete).
+    if (uploadFn) {
+      setDoc(null); setThumb(null); setGps(null); setAddress(null);
+      return;
+    }
     const ok = await deleteDocument(doc.id);
     if (!ok) { setError("Could not delete this file."); return; }
     setDoc(null);

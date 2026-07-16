@@ -127,6 +127,7 @@ function Inner() {
   const [adminInfo, setAdminInfo] = useState<AdminInfo | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [serviceBusy, setServiceBusy] = useState(false);
   const [zipPickerOpen, setZipPickerOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -205,6 +206,24 @@ function Inner() {
       setBiz({ ...biz, status: next, ...(firstReview ? { reviewed_at: firstReview } : {}) });
     } finally {
       setStatusBusy(false);
+    }
+  }
+
+  // Admin picks the EPC's service. Insurance unlocks purely from this;
+  // loan still additionally needs a lender "Approved" tick.
+  async function setService(next: "loans" | "insurance" | "both") {
+    if (!biz || serviceBusy) return;
+    setServiceBusy(true);
+    try {
+      const { error } = await supabase()
+        .from("epc_business")
+        .update({ service_type: next })
+        .eq("id", biz.id);
+      if (error) { alert("Service update failed: " + error.message); return; }
+      await logAudit(biz.id, "field_edit", "service_type", biz.service_type ?? null, next);
+      setBiz({ ...biz, service_type: next });
+    } finally {
+      setServiceBusy(false);
     }
   }
 
@@ -302,6 +321,16 @@ function Inner() {
           busy={statusBusy}
           onChange={changeStatus}
         />
+
+        {/* ── SERVICE — only when internally Approved. Governs which portal
+            buttons the EPC sees (insurance needs no lender approval). ── */}
+        {biz.status === "approved" && (
+          <ServiceBand
+            current={biz.service_type ?? null}
+            busy={serviceBusy}
+            onChange={setService}
+          />
+        )}
 
         {/* ── PROGRESS TRACKER — prominent standalone band ─────────── */}
         <div className="rounded-[12px] border border-[#cdeadd] bg-white p-6 sm:p-8 mb-4">
@@ -557,6 +586,64 @@ function Inner() {
 }
 
 // ── Reusable pieces ─────────────────────────────────────────────────
+
+// Service band — same shape as the internal-status band, but green (brand)
+// since this is a positive, EPC-affecting choice. Sets epc_business.service_type.
+const SERVICE_LABEL: Record<string, string> = {
+  loans:     "Service provided: Loan",
+  insurance: "Service provided: Insurance",
+  both:      "Service provided: Both loan and insurance",
+};
+
+function ServiceBand({
+  current, busy, onChange,
+}: {
+  current: "loans" | "insurance" | "both" | null;
+  busy: boolean;
+  onChange: (next: "loans" | "insurance" | "both") => void;
+}) {
+  const badge = current ? SERVICE_LABEL[current] : null;
+  const btn = (val: "loans" | "insurance" | "both", label: string) => {
+    const active = current === val;
+    return (
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => onChange(val)}
+        className={[
+          "text-[13px] font-semibold px-3.5 py-1.5 rounded-md border transition-colors disabled:opacity-60",
+          active
+            ? "bg-[#178a5c] text-white border-[#178a5c]"
+            : "bg-white text-[#178a5c] border-[#cdeadd] hover:bg-[#f0faf5]",
+        ].join(" ")}
+      >
+        {label}
+      </button>
+    );
+  };
+  return (
+    <div className="rounded-[12px] border border-[#cdeadd] bg-[#f0faf5] p-4 sm:p-5 mb-4">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="min-w-0">
+          <div className="text-[11px] font-semibold text-[#5a8a76] uppercase tracking-wider mb-1">
+            Service <span className="normal-case font-normal text-[#8ab3a1]">· admin only</span>
+          </div>
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="text-[18px] font-semibold text-[#0f3d2e]">{badge ?? "Not set"}</span>
+            <span className="text-[12px] text-[#5a8a76]">
+              Insurance unlocks with this choice alone; loan still needs a lender &ldquo;Approved&rdquo; tick.
+            </span>
+          </div>
+        </div>
+        <div className="flex gap-2 flex-wrap items-center">
+          {btn("loans", "Only Loans")}
+          {btn("insurance", "Only Insurance")}
+          {btn("both", "Loan and Insurance")}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const INTERNAL_STATUS_LABEL: Record<string, string> = {
   draft:        "Draft",

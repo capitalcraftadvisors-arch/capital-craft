@@ -19,7 +19,7 @@ import {
   displayAmount as amountFor,
 } from "@/lib/disbursement";
 
-type Tab = "epcs" | "apps";
+type Tab = "epcs" | "apps" | "insurance";
 
 export default function AdminHomePage() {
   return (
@@ -37,7 +37,8 @@ function Inner() {
   // applications tab (the list then restores scroll + highlights the row you
   // came from). Consumed once, so a fresh visit still defaults to EPCs.
   useEffect(() => {
-    if (sessionStorage.getItem("adminList.tab") === "apps") setTab("apps");
+    const t = sessionStorage.getItem("adminList.tab");
+    if (t === "apps" || t === "insurance") setTab(t);
     sessionStorage.removeItem("adminList.tab");
   }, []);
 
@@ -61,6 +62,7 @@ function Inner() {
         <div className="flex gap-2 mb-6 border-b border-line">
           <TabBtn active={tab === "epcs"} onClick={() => setTab("epcs")}>EPCs</TabBtn>
           <TabBtn active={tab === "apps"} onClick={() => setTab("apps")}>Loan applications</TabBtn>
+          <TabBtn active={tab === "insurance"} onClick={() => setTab("insurance")}>Insurance</TabBtn>
           {/* Analytics is a dedicated full page — the tab acts as a
               navigation link, not an inline tab body. */}
           <TabBtn active={false} onClick={() => router.push("/admin/analytics" as any)}>
@@ -68,7 +70,7 @@ function Inner() {
           </TabBtn>
         </div>
 
-        {tab === "epcs" ? <EpcsTab /> : <AppsTab />}
+        {tab === "epcs" ? <EpcsTab /> : tab === "apps" ? <AppsTab /> : <InsuranceTab />}
       </section>
     </main>
   );
@@ -940,6 +942,180 @@ function AppsTab() {
           await downloadLoanZip(row, lender);
         }}
       />
+    </>
+  );
+}
+
+// ── Insurance tab ──────────────────────────────────────────────────────────
+//
+// Same chrome as the EPC / Loan tables (green header, #eaf3ee rows). Lists
+// insurance_applications with View + Edit + Download ZIP. Shares the loan
+// list's scroll-restore + #dceffb highlight (appsList.* keys); the
+// "insurance" tab is restored on Back.
+function InsuranceTab() {
+  const router = useRouter();
+  type Row = {
+    id: string;
+    insurance_display_id: string | null;
+    aadhaar_name: string | null;
+    pan_number: string | null;
+    invoice_confirmed_amount: number | null;
+    invoice_amount: number | null;
+    status: string;
+    created_at: string;
+    epc_business: { contact_name: string | null; trade_name: string | null; legal_name: string | null; epc_display_id: string | null } | null;
+  };
+  const [rows, setRows] = useState<Row[]>([]);
+  const [q, setQ] = useState("");
+  const [zipBusy, setZipBusy] = useState<string | null>(null);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase()
+        .from("insurance_applications")
+        .select(
+          "id, insurance_display_id, aadhaar_name, pan_number, invoice_confirmed_amount, invoice_amount, status, created_at, " +
+          "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
+        )
+        .order("created_at", { ascending: false });
+      setRows((data ?? []) as unknown as Row[]);
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (rows.length === 0) return;
+    const savedScroll = sessionStorage.getItem("appsList.scroll");
+    const savedRow = sessionStorage.getItem("appsList.lastRowId");
+    if (savedScroll) { const y = parseInt(savedScroll, 10); if (!isNaN(y)) window.scrollTo(0, y); }
+    if (savedRow) {
+      setHighlightId(savedRow);
+      const t = window.setTimeout(() => setHighlightId(null), 2100);
+      sessionStorage.removeItem("appsList.lastRowId");
+      sessionStorage.removeItem("appsList.scroll");
+      return () => window.clearTimeout(t);
+    }
+  }, [rows.length]);
+
+  function navigateToView(row: Row) {
+    sessionStorage.setItem("appsList.scroll", String(window.scrollY));
+    sessionStorage.setItem("appsList.lastRowId", row.id);
+    sessionStorage.setItem("adminList.tab", "insurance");
+    router.push(`/admin/insurance/${row.id}/view` as any);
+  }
+  function editRow(row: Row) {
+    sessionStorage.setItem("adminList.tab", "insurance");
+    router.push(`/dashboard/insurance/${row.id}/step-1` as any);
+  }
+
+  function applicant(r: Row): string { return r.aadhaar_name || "—"; }
+  function epc(r: Row): string {
+    return r.epc_business?.trade_name || r.epc_business?.legal_name || r.epc_business?.contact_name || "—";
+  }
+  function amount(r: Row): string { return fmtRupees(r.invoice_confirmed_amount ?? r.invoice_amount); }
+
+  async function downloadZip(r: Row) {
+    if (zipBusy) return;
+    setZipBusy(r.id);
+    try {
+      const res = await fetch(`/api/admin/insurance/${r.id}/download-zip`, {
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert("ZIP failed: " + (d?.error || `HTTP ${res.status}`)); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${r.insurance_display_id || r.id.slice(0, 8)}_${(applicant(r) || "insurance").replace(/[^\w-]+/g, "_")}.zip`;
+      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    } finally { setZipBusy(null); }
+  }
+
+  const filtered = q.trim()
+    ? rows.filter((r) =>
+        applicant(r).toLowerCase().includes(q.toLowerCase()) ||
+        (r.insurance_display_id ?? "").toLowerCase().includes(q.toLowerCase()) ||
+        epc(r).toLowerCase().includes(q.toLowerCase()))
+    : rows;
+
+  const STATUS_PILL: Record<string, string> = {
+    draft: "bg-[#eef1f0] text-[#5a8a76]",
+    submitted: "bg-[#dceffb] text-[#185fa5]",
+    under_review: "bg-[#fef0d6] text-[#854f0b]",
+    approved: "bg-[#e6f6ee] text-[#178a5c]",
+    rejected: "bg-red-50 text-red-700",
+  };
+
+  return (
+    <>
+      <div className="mb-5">
+        <Input placeholder="Search by applicant, INS id, or EPC…" value={q} onChange={(e) => setQ(e.target.value)} />
+      </div>
+      <Card className="overflow-hidden">
+        <table className="w-full text-[14px] table-fixed">
+          <colgroup>
+            <col /><col /><col style={{ width: "150px" }} /><col style={{ width: "120px" }} />
+            <col style={{ width: "120px" }} /><col style={{ width: "140px" }} /><col style={{ width: "150px" }} />
+          </colgroup>
+          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">
+            <tr>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Applicant</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">EPC partner</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Insurance ID</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Invoice</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Status</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Added</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr><td colSpan={7} className="px-5 py-10 text-center text-[#5a8a76]">No insurance applications yet.</td></tr>
+            ) : filtered.map((r) => {
+              const hl = highlightId === r.id;
+              return (
+              <tr key={r.id}
+                  style={{ transition: "background-color 2s ease-out", backgroundColor: hl ? "#dceffb" : undefined }}
+                  className="border-b border-[#eaf3ee] hover:bg-[#f7fcfa] align-top">
+                <td className="px-3 py-3 cursor-pointer" onClick={() => navigateToView(r)}>
+                  <p className="text-[13px] font-semibold text-[#0f3d2e] truncate">{applicant(r)}</p>
+                  {r.pan_number && <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.pan_number}</p>}
+                </td>
+                <td className="px-3 py-3 truncate">
+                  <p className="text-[13px] text-[#0f3d2e] truncate">{epc(r)}</p>
+                  {r.epc_business?.epc_display_id && <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.epc_business.epc_display_id}</p>}
+                </td>
+                <td className="px-3 py-3 text-[12px] font-mono text-[#185fa5]">{r.insurance_display_id ?? "—"}</td>
+                <td className="px-3 py-3 text-[13px] font-semibold text-[#0f3d2e]">{amount(r)}</td>
+                <td className="px-3 py-3">
+                  <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${STATUS_PILL[r.status] ?? STATUS_PILL.draft}`}>
+                    {r.status.replace(/_/g, " ")}
+                  </span>
+                </td>
+                <td className="px-3 py-3 text-[13px] text-[#5a8a76]">{fmtAddedOn(r.created_at)}</td>
+                <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex flex-col gap-1.5">
+                    <button type="button" onClick={() => navigateToView(r)}
+                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#185fa5]/30 bg-white text-[#185fa5] hover:bg-[#dceffb] inline-flex items-center justify-center gap-1.5">
+                      {IconEye} View
+                    </button>
+                    <button type="button" onClick={() => editRow(r)}
+                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5] inline-flex items-center justify-center gap-1.5">
+                      Edit
+                    </button>
+                    <button type="button" disabled={zipBusy === r.id} onClick={() => void downloadZip(r)}
+                      className={["text-[12px] font-semibold px-2.5 py-1.5 rounded-input border transition-colors inline-flex items-center justify-center gap-1.5",
+                        zipBusy === r.id ? "border-line bg-bg-soft text-text-muted cursor-not-allowed" : "border-[#854f0b]/30 bg-white text-[#854f0b] hover:bg-[#fef0d6]"].join(" ")}>
+                      {IconDownload} {zipBusy === r.id ? "Preparing…" : "Download ZIP"}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </Card>
     </>
   );
 }

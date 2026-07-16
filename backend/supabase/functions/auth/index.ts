@@ -66,7 +66,7 @@ serve(async (req) => {
     // Find or create
     let { data: biz } = await supabase
       .from("epc_business")
-      .select("id, status, business_type, current_step, contact_name, loan_app_unlocked")
+      .select("id, status, business_type, current_step, contact_name, loan_app_unlocked, service_type")
       .eq("contact_mobile", mobile)
       .maybeSingle();
 
@@ -74,7 +74,7 @@ serve(async (req) => {
       const { data: created, error } = await supabase
         .from("epc_business")
         .insert({ contact_mobile: mobile })
-        .select("id, status, business_type, current_step, contact_name, loan_app_unlocked")
+        .select("id, status, business_type, current_step, contact_name, loan_app_unlocked, service_type")
         .single();
       if (error) return json({ ok: false, error: error.message }, 500);
       biz = created;
