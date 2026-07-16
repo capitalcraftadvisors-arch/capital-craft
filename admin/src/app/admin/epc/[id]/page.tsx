@@ -351,7 +351,7 @@ function Inner() {
           <h3 className="font-display font-semibold text-[16px] mb-3">Comments</h3>
           <CommentsSection
             businessId={params.id}
-            epcName={biz.contact_name || biz.trade_name || biz.legal_name}
+            epcName={biz.trade_name || biz.legal_name || biz.contact_name}
           />
         </Card>
 
