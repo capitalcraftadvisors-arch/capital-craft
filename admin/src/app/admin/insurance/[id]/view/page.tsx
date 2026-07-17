@@ -10,7 +10,7 @@ import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
-import { I, SectionCard, KV, Pill, DocGrid, type ViewDocSlot } from "@/components/view/ViewKit";
+import { I, SectionCard, KV, Pill, DocGrid, StatusBtn, type ViewDocSlot } from "@/components/view/ViewKit";
 
 type App = Record<string, any>;
 
@@ -23,7 +23,7 @@ function fmtDate(v: string | null | undefined): string {
   return new Date(v).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 const STATUS_LABEL: Record<string, string> = {
-  draft: "Draft", submitted: "Submitted", under_review: "Under Review", approved: "Approved", rejected: "Rejected",
+  draft: "Draft", under_review: "Under Review", issued: "Issued", rejected: "Rejected", hold: "Hold",
 };
 
 export default function InsuranceViewPage() {
@@ -40,6 +40,20 @@ function Inner() {
   const [app, setApp] = useState<App | null>(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [statusBusy, setStatusBusy] = useState(false);
+
+  // Admin moves the policy through Under Review → Issued / Hold / Rejected.
+  async function changeStatus(next: "under_review" | "issued" | "hold" | "rejected") {
+    if (!app || statusBusy || app.status === next) return;
+    setStatusBusy(true);
+    const { error } = await supabase()
+      .from("insurance_applications")
+      .update({ status: next })
+      .eq("id", app.id);
+    if (error) alert("Status update failed: " + error.message);
+    else setApp({ ...app, status: next });
+    setStatusBusy(false);
+  }
 
   useEffect(() => {
     void (async () => {
@@ -98,11 +112,20 @@ function Inner() {
     { key: "aad_f", label: "Aadhaar (front)", path: app.aadhaar_front_path },
     { key: "aad_b", label: "Aadhaar (back)", path: app.aadhaar_back_path },
     { key: "gst", label: "GST certificate", path: app.gst_path },
-    { key: "plant", label: "Plant photo (geo-tagged)", path: app.plant_photo_path },
-    { key: "invoice", label: "Invoice", path: app.invoice_path },
+    { key: "panel", label: "Customer with panel", path: app.photo_panel_path },
+    { key: "inverter", label: "Customer with inverter", path: app.photo_inverter_path },
+    { key: "meter", label: "Customer with meter", path: app.photo_meter_path },
+    { key: "invoice", label: "Final invoice / commission cert.", path: app.invoice_path },
+    // Legacy single plant photo — only shown when an old draft has one.
+    ...(app.plant_photo_path ? [{ key: "plant", label: "Plant photo (legacy)", path: app.plant_photo_path }] : []),
   ].map((s) => ({ key: s.key, label: s.label, onView: s.path ? () => void openPath(s.path as string) : undefined }));
 
-  const gps = app.plant_photo_gps as { lat?: number; lng?: number } | null;
+  // Coordinates from the three site photos.
+  const GEO: { label: string; g: { lat?: number; lng?: number } | null }[] = [
+    { label: "Panel photo GPS", g: app.photo_panel_gps ?? null },
+    { label: "Inverter photo GPS", g: app.photo_inverter_gps ?? null },
+    { label: "Meter photo GPS", g: app.photo_meter_gps ?? null },
+  ];
 
   return (
     <main className="min-h-screen bg-white">
@@ -131,6 +154,26 @@ function Inner() {
           </div>
         </div>
 
+        {/* Status band — slate, like the other admin status controls. */}
+        <div className="rounded-[12px] border border-slate-300 bg-slate-50 p-4 sm:p-5 mb-4">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="min-w-0">
+              <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
+                Insurance status <span className="normal-case font-normal text-slate-400">· admin only</span>
+              </div>
+              <span className="text-[18px] font-semibold text-slate-800">{STATUS_LABEL[app.status] ?? app.status}</span>
+            </div>
+            <div className="flex gap-2 flex-wrap items-center">
+              {app.status !== "under_review" && (
+                <StatusBtn kind="neutral" busy={statusBusy} onClick={() => void changeStatus("under_review")}>Under review</StatusBtn>
+              )}
+              <StatusBtn kind="approve" busy={statusBusy} onClick={() => void changeStatus("issued")}>Issued</StatusBtn>
+              <StatusBtn kind="neutral" busy={statusBusy} onClick={() => void changeStatus("hold")}>Hold</StatusBtn>
+              <StatusBtn kind="danger" busy={statusBusy} onClick={() => void changeStatus("rejected")}>Rejected</StatusBtn>
+            </div>
+          </div>
+        </div>
+
         <div className="grid gap-4 lg:grid-cols-3">
           <div className="flex flex-col gap-2.5">
             <SectionCard title="Applicant" accent="blue" icon={I.user}>
@@ -146,10 +189,16 @@ function Inner() {
 
           <div className="flex flex-col gap-2.5">
             <SectionCard title="Plant & invoice" accent="green" icon={I.money}>
+              <KV k="Sum insured" v={fmtRupees(app.sum_insured ?? app.invoice_confirmed_amount)} valueClass="text-[#178a5c]" />
+              <KV k="Insurance partner" v={app.insurance_partner} />
               <KV k="Plant address" v={app.plant_address} />
-              <KV k="Invoice amount" v={fmtRupees(app.invoice_confirmed_amount ?? app.invoice_amount)} valueClass="text-[#178a5c]" />
+              <KV k="Final invoice amount" v={fmtRupees(app.invoice_confirmed_amount)} />
               <KV k="OCR amount" v={fmtRupees(app.invoice_amount)} />
-              {gps && (gps.lat != null) && <KV k="Plant GPS" v={`${gps.lat?.toFixed?.(5)}, ${gps.lng?.toFixed?.(5)}`} />}
+              {GEO.map((x) => (
+                x.g && x.g.lat != null
+                  ? <KV key={x.label} k={x.label} v={`${x.g.lat?.toFixed?.(5)}, ${x.g.lng?.toFixed?.(5)}`} />
+                  : null
+              ))}
             </SectionCard>
 
             <SectionCard title="Submission" accent="green" icon={I.check}>

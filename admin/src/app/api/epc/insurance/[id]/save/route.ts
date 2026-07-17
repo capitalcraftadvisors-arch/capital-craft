@@ -39,8 +39,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       const addr = typeof b.plant_address === "string" ? b.plant_address.trim() || null : null;
       const conf = b.invoice_confirmed_amount == null || b.invoice_confirmed_amount === ""
         ? null : Number(b.invoice_confirmed_amount);
+      const amount = Number.isFinite(conf as number) ? (conf as number) : null;
       patch.plant_address = addr;
-      patch.invoice_confirmed_amount = Number.isFinite(conf as number) ? conf : null;
+      patch.invoice_confirmed_amount = amount;
+      // Sum insured is AUTO-TAGGED from the confirmed final-invoice amount —
+      // never typed by the EPC. An admin can override it later.
+      patch.sum_insured = amount;
       patch.step2_completed_at = now;
       patch.current_step = 3;
     }

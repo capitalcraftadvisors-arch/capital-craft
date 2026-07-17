@@ -38,7 +38,9 @@ function Inner() {
     void (async () => {
       const { data } = await supabase().from("insurance_applications").select("*").eq("id", params.id).maybeSingle();
       setApp(data);
-      if (data?.status === "submitted") setDone(true);
+      // Anything past draft has been submitted (status is under_review once
+      // submitted, then issued/hold/rejected as the admin works it).
+      if (data?.status && data.status !== "draft") setDone(true);
     })();
   }, [params.id]);
 
@@ -108,8 +110,11 @@ function Inner() {
         <Card className="p-6 mb-4">
           <p className="text-[13px] font-semibold text-[#178a5c] mb-2">Plant &amp; invoice</p>
           <KV k="Plant address" v={app.plant_address} />
-          <KV k="Plant photo" v={app.plant_photo_path ? "Geo-tagged · uploaded" : "—"} />
-          <KV k="Invoice amount" v={fmtRupees(app.invoice_confirmed_amount ?? app.invoice_amount)} />
+          <KV k="Customer with panel" v={app.photo_panel_path ? "Geo-tagged · uploaded" : "—"} />
+          <KV k="Customer with inverter" v={app.photo_inverter_path ? "Geo-tagged · uploaded" : "—"} />
+          <KV k="Customer with meter" v={app.photo_meter_path ? "Geo-tagged · uploaded" : "—"} />
+          <KV k="Final invoice amount" v={fmtRupees(app.invoice_confirmed_amount ?? app.invoice_amount)} />
+          <KV k="Sum insured" v={fmtRupees(app.sum_insured ?? app.invoice_confirmed_amount)} />
         </Card>
 
         <div className="flex justify-between">

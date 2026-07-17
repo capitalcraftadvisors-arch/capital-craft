@@ -51,6 +51,9 @@ type Props = {
   // Seed an already-uploaded photo when using uploadFn (no DB row to read).
   initialGps?: Gps | null;
   onUploaded?: (gps: Gps) => void;
+  // Hide the live-camera tile and offer upload only (insurance photos are
+  // taken on the customer's site beforehand, then uploaded).
+  uploadOnly?: boolean;
 };
 
 type DocRow = {
@@ -246,7 +249,7 @@ function drawGeoStamp(
 
 export default function GeoOfficeUpload({
   category, label, businessId, applicationId, uploadedBy, hint,
-  uploadFn, initialGps, onUploaded,
+  uploadFn, initialGps, onUploaded, uploadOnly,
 }: Props) {
   // Which table this slot lives in. Loan completion photos hang off the
   // application; EPC office photos off the business.
@@ -527,7 +530,10 @@ export default function GeoOfficeUpload({
           )}
         </>
       ) : (
-        <div className="grid grid-cols-2 gap-2">
+        <div className={uploadOnly ? "grid grid-cols-1 gap-2" : "grid grid-cols-2 gap-2"}>
+          {/* Live camera is hidden in upload-only mode (insurance photos are
+              taken on site beforehand, then uploaded). */}
+          {!uploadOnly && (
           <button
             type="button"
             onClick={openCamera}
@@ -540,6 +546,7 @@ export default function GeoOfficeUpload({
             <p className="text-[13px] text-text-mid font-medium">Take photo</p>
             <p className="text-[11px] text-text-muted mt-0.5">Live camera + GPS</p>
           </button>
+          )}
           <label
             className={[
               "block border-2 border-dashed border-line rounded-input bg-white",
@@ -554,8 +561,8 @@ export default function GeoOfficeUpload({
               onChange={(e) => handleUploadFile(e.target.files)}
               disabled={uploading}
             />
-            <p className="text-[13px] text-text-mid font-medium">Upload file</p>
-            <p className="text-[11px] text-text-muted mt-0.5">Location or GPS stamp</p>
+            <p className="text-[13px] text-text-mid font-medium">Upload photo</p>
+            <p className="text-[11px] text-text-muted mt-0.5">Must be geo-tagged (location or GPS stamp)</p>
           </label>
         </div>
       )}

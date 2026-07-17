@@ -23,15 +23,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const id = params.id;
     if (!UUID_RE.test(id)) return err("Invalid application id.", 400);
 
+    // Submitting puts it in the admin's queue. 'submitted' is no longer a valid
+    // status (migration 0047) — an application awaiting our review IS
+    // under_review; the admin then moves it to issued / hold / rejected.
     const now = new Date().toISOString();
     const supabase = insuranceClient(token);
     const { error: updErr } = await supabase
       .from("insurance_applications")
-      .update({ status: "submitted", submitted_at: now })
+      .update({ status: "under_review", submitted_at: now })
       .eq("id", id);
     if (updErr) return err(`Submit failed: ${updErr.message}`, 500);
 
-    return NextResponse.json({ ok: true, status: "submitted", submitted_at: now });
+    return NextResponse.json({ ok: true, status: "under_review", submitted_at: now });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[insurance/submit] error:", msg);

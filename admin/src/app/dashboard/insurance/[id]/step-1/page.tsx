@@ -27,12 +27,24 @@ export default function InsuranceStep1() {
   );
 }
 
+// What the OCR read, shown back to the EPC — same idea as the loan Step-2 KYC
+// review and the EPC onboarding OCR fields.
+type Kyc = {
+  name: string | null;
+  dob: string | null;
+  gender: string | null;
+  masked: string | null;
+  care_of: string | null;
+  address: string | null;
+};
+
 function Inner() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const [app, setApp] = useState<App | null>(null);
   const [pan, setPan] = useState<string | null>(null);
-  const [aadhaarName, setAadhaarName] = useState<string | null>(null);
+  const [panName, setPanName] = useState<string | null>(null);
+  const [kyc, setKyc] = useState<Kyc | null>(null);
   const [aadhaarDone, setAadhaarDone] = useState(false);
   const [aadhaarBusy, setAadhaarBusy] = useState(false);
   const [aadhaarErr, setAadhaarErr] = useState<string | null>(null);
@@ -45,7 +57,17 @@ function Inner() {
       const { data } = await supabase().from("insurance_applications").select("*").eq("id", params.id).maybeSingle();
       setApp(data);
       if (data?.pan_number) setPan(data.pan_number);
-      if (data?.aadhaar_name) { setAadhaarName(data.aadhaar_name); setAadhaarDone(!!data.aadhaar_front_path); }
+      if (data?.aadhaar_front_path) {
+        setAadhaarDone(true);
+        setKyc({
+          name: data.aadhaar_name ?? null,
+          dob: data.aadhaar_dob ?? null,
+          gender: data.aadhaar_gender ?? null,
+          masked: data.aadhaar_number_masked ?? null,
+          care_of: data.aadhaar_care_of ?? null,
+          address: data.aadhaar_address ?? null,
+        });
+      }
     })();
   }, [params.id]);
 
@@ -66,7 +88,15 @@ function Inner() {
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok || !d?.ok) { setAadhaarErr(d?.error || `Failed (HTTP ${res.status}).`); return; }
-      setAadhaarName(d.fields?.name ?? "Captured");
+      const f = (d.fields ?? {}) as Record<string, string | null>;
+      setKyc({
+        name: f.name ?? null,
+        dob: f.dob ?? null,
+        gender: f.gender ?? null,
+        masked: f.aadhaar_masked ?? null,
+        care_of: f.care_of ?? null,
+        address: f.address ?? null,
+      });
       setAadhaarDone(true);
     } catch (e) {
       setAadhaarErr((e as Error).message);
@@ -96,6 +126,19 @@ function Inner() {
 
   const fileCls = "block w-full text-[13px] text-text-mid file:mr-3 file:py-2 file:px-3 file:rounded-input file:border-0 file:bg-[#f0faf5] file:text-[#178a5c] file:font-semibold";
 
+  // One extracted field. Blank values read "—" rather than vanishing, so a
+  // gap in the OCR is visible instead of silent.
+  function Row({ k, v, mono }: { k: string; v: string | null; mono?: boolean }) {
+    return (
+      <div className="flex justify-between gap-3 text-[13px] py-[3px]">
+        <span className="text-[#5a8a76] shrink-0">{k}</span>
+        <span className={["text-right min-w-0 font-medium text-[#0f3d2e]", mono ? "font-mono" : ""].join(" ")}>
+          {v || "—"}
+        </span>
+      </div>
+    );
+  }
+
   return (
     <main className="min-h-screen bg-bg-soft">
       <InsuranceStepHeader step={1} />
@@ -110,9 +153,20 @@ function Inner() {
               label="PAN card (required)"
               hint="JPG, PNG, WEBP or PDF."
               initiallyDone={!!pan}
-              onDone={(d) => setPan(((d.fields as any)?.pan as string) ?? "captured")}
+              onDone={(d) => {
+                const f = (d.fields ?? {}) as Record<string, string | null>;
+                setPan(f.pan ?? null);
+                setPanName(f.name ?? null);
+              }}
             />
-            {pan && <p className="text-[12px] text-[#178a5c] mt-2 font-medium">PAN: {pan}</p>}
+            {/* What the OCR read back — shown for the EPC to eyeball. */}
+            {pan && (
+              <div className="mt-3 rounded-input border border-[#cdeadd] bg-[#f7fcfa] p-3">
+                <p className="text-[11px] font-semibold text-[#5a8a76] uppercase tracking-wider mb-1.5">Read from PAN</p>
+                <Row k="PAN number" v={pan} mono />
+                {panName && <Row k="Name" v={panName} />}
+              </div>
+            )}
           </Card>
 
           <Card className="p-6">
@@ -131,9 +185,22 @@ function Inner() {
               <Button variant="outline" onClick={() => void readAadhaar()} loading={aadhaarBusy}>
                 {aadhaarDone ? "Re-read Aadhaar" : "Read Aadhaar"}
               </Button>
-              {aadhaarDone && aadhaarName && <span className="text-[12px] text-[#178a5c] font-medium">✓ {aadhaarName}</span>}
+              {aadhaarDone && <span className="text-[12px] text-[#178a5c] font-medium">✓ Details read</span>}
             </div>
             {aadhaarErr && <p className="text-[12px] text-red-500 mt-2">{aadhaarErr}</p>}
+
+            {/* Extracted Aadhaar details, shown back for review. */}
+            {kyc && (
+              <div className="mt-3 rounded-input border border-[#cdeadd] bg-[#f7fcfa] p-3">
+                <p className="text-[11px] font-semibold text-[#5a8a76] uppercase tracking-wider mb-1.5">Read from Aadhaar</p>
+                <Row k="Name" v={kyc.name} />
+                <Row k="Date of birth" v={kyc.dob} />
+                <Row k="Gender" v={kyc.gender} />
+                <Row k="Aadhaar number" v={kyc.masked} mono />
+                <Row k="Care of" v={kyc.care_of} />
+                <Row k="Address" v={kyc.address} />
+              </div>
+            )}
           </Card>
 
           <Card className="p-6">

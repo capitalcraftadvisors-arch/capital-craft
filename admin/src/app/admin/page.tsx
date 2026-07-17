@@ -959,8 +959,10 @@ function InsuranceTab() {
     insurance_display_id: string | null;
     aadhaar_name: string | null;
     pan_number: string | null;
+    sum_insured: number | null;
     invoice_confirmed_amount: number | null;
     invoice_amount: number | null;
+    insurance_partner: string | null;
     status: string;
     created_at: string;
     epc_business: { contact_name: string | null; trade_name: string | null; legal_name: string | null; epc_display_id: string | null } | null;
@@ -975,7 +977,8 @@ function InsuranceTab() {
       const { data } = await supabase()
         .from("insurance_applications")
         .select(
-          "id, insurance_display_id, aadhaar_name, pan_number, invoice_confirmed_amount, invoice_amount, status, created_at, " +
+          "id, insurance_display_id, aadhaar_name, pan_number, sum_insured, invoice_confirmed_amount, " +
+          "invoice_amount, insurance_partner, status, created_at, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .order("created_at", { ascending: false });
@@ -1012,7 +1015,11 @@ function InsuranceTab() {
   function epc(r: Row): string {
     return r.epc_business?.trade_name || r.epc_business?.legal_name || r.epc_business?.contact_name || "—";
   }
-  function amount(r: Row): string { return fmtRupees(r.invoice_confirmed_amount ?? r.invoice_amount); }
+  // Sum insured is auto-tagged from the final invoice amount at Step 2; the
+  // fallbacks cover rows saved before that column existed.
+  function amount(r: Row): string {
+    return fmtRupees(r.sum_insured ?? r.invoice_confirmed_amount ?? r.invoice_amount);
+  }
 
   async function downloadZip(r: Row) {
     if (zipBusy) return;
@@ -1038,12 +1045,16 @@ function InsuranceTab() {
         epc(r).toLowerCase().includes(q.toLowerCase()))
     : rows;
 
+  // Issued / Rejected / Hold / Draft / Under Review (migration 0047).
+  const STATUS_LABEL: Record<string, string> = {
+    draft: "Draft", under_review: "Under Review", issued: "Issued", rejected: "Rejected", hold: "Hold",
+  };
   const STATUS_PILL: Record<string, string> = {
     draft: "bg-[#eef1f0] text-[#5a8a76]",
-    submitted: "bg-[#dceffb] text-[#185fa5]",
     under_review: "bg-[#fef0d6] text-[#854f0b]",
-    approved: "bg-[#e6f6ee] text-[#178a5c]",
+    issued: "bg-[#e6f6ee] text-[#178a5c]",
     rejected: "bg-red-50 text-red-700",
+    hold: "bg-[#dceffb] text-[#185fa5]",
   };
 
   return (
@@ -1054,17 +1065,17 @@ function InsuranceTab() {
       <Card className="overflow-hidden">
         <table className="w-full text-[14px] table-fixed">
           <colgroup>
-            <col /><col /><col style={{ width: "150px" }} /><col style={{ width: "120px" }} />
+            <col /><col /><col style={{ width: "130px" }} /><col style={{ width: "130px" }} />
             <col style={{ width: "120px" }} /><col style={{ width: "140px" }} /><col style={{ width: "150px" }} />
           </colgroup>
           <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">
             <tr>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Applicant</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Insured name</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">EPC partner</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Insurance ID</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Invoice</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Sum insured</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Insurance partner</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Status</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Added</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Created on</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Action</th>
             </tr>
           </thead>
@@ -1077,19 +1088,22 @@ function InsuranceTab() {
               <tr key={r.id}
                   style={{ transition: "background-color 2s ease-out", backgroundColor: hl ? "#dceffb" : undefined }}
                   className="border-b border-[#eaf3ee] hover:bg-[#f7fcfa] align-top">
+                {/* Insured name with the INS id beneath — same shape as the
+                    EPC name/ID cell on the EPCs tab. */}
                 <td className="px-3 py-3 cursor-pointer" onClick={() => navigateToView(r)}>
                   <p className="text-[13px] font-semibold text-[#0f3d2e] truncate">{applicant(r)}</p>
+                  {r.insurance_display_id && <p className="text-[11px] font-mono text-[#185fa5] mt-0.5">{r.insurance_display_id}</p>}
                   {r.pan_number && <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.pan_number}</p>}
                 </td>
                 <td className="px-3 py-3 truncate">
                   <p className="text-[13px] text-[#0f3d2e] truncate">{epc(r)}</p>
                   {r.epc_business?.epc_display_id && <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.epc_business.epc_display_id}</p>}
                 </td>
-                <td className="px-3 py-3 text-[12px] font-mono text-[#185fa5]">{r.insurance_display_id ?? "—"}</td>
                 <td className="px-3 py-3 text-[13px] font-semibold text-[#0f3d2e]">{amount(r)}</td>
+                <td className="px-3 py-3 text-[13px] text-[#0f3d2e]">{r.insurance_partner || "—"}</td>
                 <td className="px-3 py-3">
                   <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${STATUS_PILL[r.status] ?? STATUS_PILL.draft}`}>
-                    {r.status.replace(/_/g, " ")}
+                    {STATUS_LABEL[r.status] ?? r.status.replace(/_/g, " ")}
                   </span>
                 </td>
                 <td className="px-3 py-3 text-[13px] text-[#5a8a76]">{fmtAddedOn(r.created_at)}</td>

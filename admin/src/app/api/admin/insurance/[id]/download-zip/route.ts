@@ -62,6 +62,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     ws.addRow([]);
     const rows: Array<[string, string]> = [
       ["Insurance ID", displayId],
+      ["Insurance partner", app.insurance_partner ?? "—"],
+      ["Sum insured", rupees(app.sum_insured ?? app.invoice_confirmed_amount)],
       ["Status", String(app.status ?? "—")],
       ["Submitted", app.submitted_at ? new Date(app.submitted_at).toLocaleString("en-IN") : "—"],
       ["EPC Partner", `${epcName}${app.epc_business?.epc_display_id ? ` (${app.epc_business.epc_display_id})` : ""}`],
@@ -77,8 +79,14 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       ["Invoice amount (confirmed)", rupees(app.invoice_confirmed_amount)],
       ["Invoice amount (OCR)", rupees(app.invoice_amount)],
     ];
-    const gps = app.plant_photo_gps as { lat?: number; lng?: number } | null;
-    if (gps && gps.lat != null) rows.push(["Plant GPS", `${gps.lat}, ${gps.lng}`]);
+    for (const [label, col] of [
+      ["Panel photo GPS", "photo_panel_gps"],
+      ["Inverter photo GPS", "photo_inverter_gps"],
+      ["Meter photo GPS", "photo_meter_gps"],
+    ] as const) {
+      const g = app[col] as { lat?: number; lng?: number } | null;
+      if (g && g.lat != null) rows.push([label, `${g.lat}, ${g.lng}`]);
+    }
     for (const [k, v] of rows) {
       const r = ws.addRow([k, v]);
       r.getCell(1).font = { bold: true, color: { argb: "FF0F3D2E" } };
@@ -92,13 +100,16 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     archive.append(xlsxBuffer, { name: "summary.xlsx" });
 
     const docs: Array<{ path: string | null; folder: string }> = [
-      { path: app.pan_path,            folder: "pan" },
-      { path: app.aadhaar_front_path,  folder: "aadhaar" },
-      { path: app.aadhaar_back_path,   folder: "aadhaar" },
-      { path: app.aadhaar_face_path,   folder: "aadhaar" },
-      { path: app.gst_path,            folder: "gst" },
-      { path: app.plant_photo_path,    folder: "plant" },
-      { path: app.invoice_path,        folder: "invoice" },
+      { path: app.pan_path,             folder: "pan" },
+      { path: app.aadhaar_front_path,   folder: "aadhaar" },
+      { path: app.aadhaar_back_path,    folder: "aadhaar" },
+      { path: app.aadhaar_face_path,    folder: "aadhaar" },
+      { path: app.gst_path,             folder: "gst" },
+      { path: app.photo_panel_path,     folder: "photos" },
+      { path: app.photo_inverter_path,  folder: "photos" },
+      { path: app.photo_meter_path,     folder: "photos" },
+      { path: app.invoice_path,         folder: "invoice" },
+      { path: app.plant_photo_path,     folder: "photos" },  // legacy
     ];
     for (const d of docs) {
       if (!d.path) continue;

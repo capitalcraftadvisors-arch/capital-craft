@@ -52,9 +52,34 @@ export default function DashboardPage() {
   );
 }
 
+// The EPC's own insurance applications. RLS (own_insurance) scopes this to the
+// logged-in EPC server-side — the query carries no business filter of its own.
+type InsRow = {
+  id: string;
+  insurance_display_id: string | null;
+  aadhaar_name: string | null;
+  sum_insured: number | null;
+  invoice_confirmed_amount: number | null;
+  insurance_partner: string | null;
+  status: string;
+  created_at: string;
+};
+
+const INS_STATUS_LABEL: Record<string, string> = {
+  draft: "Draft", under_review: "Under Review", issued: "Issued", rejected: "Rejected", hold: "Hold",
+};
+const INS_STATUS_PILL: Record<string, string> = {
+  draft: "bg-[#eef1f0] text-[#5a8a76]",
+  under_review: "bg-[#fef0d6] text-[#854f0b]",
+  issued: "bg-[#e6f6ee] text-[#178a5c]",
+  rejected: "bg-red-50 text-red-700",
+  hold: "bg-[#dceffb] text-[#185fa5]",
+};
+
 function DashboardInner() {
   const router = useRouter();
   const [rows, setRows] = useState<AppRow[]>([]);
+  const [insRows, setInsRows] = useState<InsRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [insBusy, setInsBusy] = useState(false);
 
@@ -98,6 +123,16 @@ function DashboardInner() {
         )
         .order("created_at", { ascending: false });
       setRows((data ?? []) as unknown as AppRow[]);
+
+      // Insurance applications — RLS scopes to this EPC only.
+      const { data: ins } = await supabase()
+        .from("insurance_applications")
+        .select(
+          "id, insurance_display_id, aadhaar_name, sum_insured, invoice_confirmed_amount, " +
+          "insurance_partner, status, created_at",
+        )
+        .order("created_at", { ascending: false });
+      setInsRows((ins ?? []) as unknown as InsRow[]);
       setLoading(false);
     })();
   }, []);
@@ -239,14 +274,65 @@ function DashboardInner() {
         </Card>
         )}
 
-        {/* Insurance-only EPCs: a simple prompt in place of the loan table. */}
-        {!canLoan && canInsurance && (
-          <Card className="p-8 text-center">
-            <p className="text-[15px] text-text">
-              Click <span className="font-semibold text-[#178a5c]">Apply for Insurance</span> above to insure an
-              installed plant. Our team will reach out after you submit.
+        {/* ── Insurance applications — this EPC's own, RLS-scoped. ── */}
+        {canInsurance && (
+          <div className={canLoan ? "mt-10" : ""}>
+            <h2 className="font-display text-[20px] sm:text-[22px] font-bold text-[#0f3d2e] mb-1">
+              Your insurance applications
+            </h2>
+            <p className="text-text-mid mb-4 text-[14px]">
+              Plants you&rsquo;ve submitted for insurance and where each one stands.
             </p>
-          </Card>
+            <Card className="overflow-hidden">
+              <table className="w-full text-[14px]">
+                <thead className="bg-bg-soft border-b border-line">
+                  <tr className="text-left text-text-muted">
+                    <th className="px-5 py-3 font-medium">Insured name</th>
+                    <th className="px-5 py-3 font-medium">Sum insured</th>
+                    <th className="px-5 py-3 font-medium">Insurance partner</th>
+                    <th className="px-5 py-3 font-medium">Status</th>
+                    <th className="px-5 py-3 font-medium">Created on</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading ? (
+                    <tr><td colSpan={5} className="px-5 py-8 text-center text-text-muted">Loading…</td></tr>
+                  ) : insRows.length === 0 ? (
+                    <tr><td colSpan={5} className="px-5 py-12 text-center text-text-muted">
+                      No insurance applications yet. Click <span className="text-text font-semibold">Apply for Insurance</span> to start one.
+                    </td></tr>
+                  ) : insRows.map((r) => (
+                    <tr
+                      key={r.id}
+                      onClick={() => router.push(`/dashboard/insurance/${r.id}/step-1` as any)}
+                      className="border-b border-line cursor-pointer hover:bg-[#f0faf5] transition-colors"
+                    >
+                      <td className="px-5 py-4">
+                        <div className="font-semibold text-text">{r.aadhaar_name || "—"}</div>
+                        {r.insurance_display_id && (
+                          <div className="text-[11px] font-mono text-[#185fa5] mt-0.5">{r.insurance_display_id}</div>
+                        )}
+                      </td>
+                      <td className="px-5 py-4 font-semibold text-[#0f3d2e]">
+                        {fmtRupees(r.sum_insured ?? r.invoice_confirmed_amount)}
+                      </td>
+                      <td className="px-5 py-4">{r.insurance_partner || "—"}</td>
+                      <td className="px-5 py-4">
+                        <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${INS_STATUS_PILL[r.status] ?? INS_STATUS_PILL.draft}`}>
+                          {INS_STATUS_LABEL[r.status] ?? r.status}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4 text-text-muted whitespace-nowrap">
+                        {new Date(r.created_at).toLocaleString("en-IN", {
+                          day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+                        })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </Card>
+          </div>
         )}
       </section>
     </main>
