@@ -26,6 +26,7 @@ import {
   deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort,
   displayAmount as amountFor,
 } from "@/lib/disbursement";
+import { policyValidityParts, VALIDITY_TEXT } from "@/lib/insurance-validity";
 
 type AppRow = {
   id: string;
@@ -61,6 +62,8 @@ type InsRow = {
   sum_insured: number | null;
   invoice_confirmed_amount: number | null;
   insurance_partner: string | null;
+  policy_from_date: string | null;
+  policy_to_date: string | null;
   status: string;
   created_at: string;
 };
@@ -129,7 +132,7 @@ function DashboardInner() {
         .from("insurance_applications")
         .select(
           "id, insurance_display_id, aadhaar_name, sum_insured, invoice_confirmed_amount, " +
-          "insurance_partner, status, created_at",
+          "insurance_partner, policy_from_date, policy_to_date, status, created_at",
         )
         .order("created_at", { ascending: false });
       setInsRows((ins ?? []) as unknown as InsRow[]);
@@ -291,14 +294,15 @@ function DashboardInner() {
                     <th className="px-5 py-3 font-medium">Sum insured</th>
                     <th className="px-5 py-3 font-medium">Insurance partner</th>
                     <th className="px-5 py-3 font-medium">Status</th>
+                    <th className="px-5 py-3 font-medium">Policy Validity</th>
                     <th className="px-5 py-3 font-medium">Created on</th>
                   </tr>
                 </thead>
                 <tbody>
                   {loading ? (
-                    <tr><td colSpan={5} className="px-5 py-8 text-center text-text-muted">Loading…</td></tr>
+                    <tr><td colSpan={6} className="px-5 py-8 text-center text-text-muted">Loading…</td></tr>
                   ) : insRows.length === 0 ? (
-                    <tr><td colSpan={5} className="px-5 py-12 text-center text-text-muted">
+                    <tr><td colSpan={6} className="px-5 py-12 text-center text-text-muted">
                       No insurance applications yet. Click <span className="text-text font-semibold">Apply for Insurance</span> to start one.
                     </td></tr>
                   ) : insRows.map((r) => (
@@ -321,6 +325,15 @@ function DashboardInner() {
                         <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${INS_STATUS_PILL[r.status] ?? INS_STATUS_PILL.draft}`}>
                           {INS_STATUS_LABEL[r.status] ?? r.status}
                         </span>
+                      </td>
+                      {/* Coverage dates + days left — same as the admin table. */}
+                      <td className="px-5 py-4">
+                        {(() => {
+                          const v = policyValidityParts(r.policy_from_date, r.policy_to_date);
+                          return v
+                            ? <span className={`text-[12px] font-medium ${VALIDITY_TEXT[v.tone]}`}>{v.text}</span>
+                            : <span className="text-text-muted">—</span>;
+                        })()}
                       </td>
                       <td className="px-5 py-4 text-text-muted whitespace-nowrap">
                         {new Date(r.created_at).toLocaleString("en-IN", {
