@@ -44,6 +44,8 @@ function Inner() {
   const router = useRouter();
   const [app, setApp] = useState<App | null>(null);
   const [address, setAddress] = useState("");
+  const [ebillDone, setEbillDone] = useState(false);
+  const [addrSaved, setAddrSaved] = useState(false);
   const [ocrAmount, setOcrAmount] = useState<number | null>(null);
   const [invoiceDone, setInvoiceDone] = useState(false);
   const [confirmAmount, setConfirmAmount] = useState("");
@@ -55,6 +57,7 @@ function Inner() {
       const { data } = await supabase().from("insurance_applications").select("*").eq("id", params.id).maybeSingle();
       setApp(data);
       if (data?.plant_address) setAddress(data.plant_address);
+      if (data?.ebill_path) setEbillDone(true);
       if (data?.invoice_amount != null) { setOcrAmount(Number(data.invoice_amount)); setInvoiceDone(!!data.invoice_path); }
       if (data?.invoice_confirmed_amount != null) setConfirmAmount(String(data.invoice_confirmed_amount));
       setPlantDone(!!data?.plant_photo_path);
@@ -77,6 +80,20 @@ function Inner() {
     if (!res.ok || !d?.ok) return { ok: false, error: d?.error || `Upload failed (HTTP ${res.status}).` };
     setPlantDone(true);
     return { ok: true };
+  }
+
+  // Confirm the plant address matches the electricity bill (persist without
+  // advancing).
+  async function saveAddress() {
+    setAddrSaved(false);
+    const res = await fetch(`/api/epc/insurance/${params.id}/save-fields`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+      body: JSON.stringify({ plant_address: address }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok && d?.ok) setAddrSaved(true);
+    else alert("Couldn't save the address: " + (d?.error || res.status));
   }
 
   const confirmNum = confirmAmount.trim() === "" ? null : Number(confirmAmount.replace(/[^\d.]/g, ""));
@@ -123,13 +140,40 @@ function Inner() {
           </Card>
 
           <Card className="p-6">
-            <Input label="Plant address" placeholder="Where the plant is installed" value={address} onChange={(e) => setAddress(e.target.value)} />
+            <p className="text-[13px] font-semibold text-[#0f3d2e] mb-1">Plant address</p>
+            <p className="text-[12px] text-text-muted mb-3">
+              Upload the electricity bill of the site — we&rsquo;ll read the address; check it matches the bill and save.
+            </p>
+            <InsuranceUpload
+              endpoint={`/api/epc/insurance/${params.id}/extract-ebill`}
+              label="Electricity bill"
+              hint="JPG, PNG, WEBP or PDF."
+              initiallyDone={ebillDone}
+              onDone={(d) => {
+                setEbillDone(true);
+                const a = d.address as string | null;
+                if (a && !address.trim()) setAddress(a);
+                setAddrSaved(false);
+              }}
+            />
+            <div className="mt-4">
+              <Input
+                label="Plant address"
+                placeholder="Where the plant is installed"
+                value={address}
+                onChange={(e) => { setAddress(e.target.value); setAddrSaved(false); }}
+              />
+              <div className="mt-3 flex items-center gap-3">
+                <Button variant="outline" onClick={() => void saveAddress()}>Save address</Button>
+                {addrSaved && <span className="text-[12px] text-[#178a5c] font-medium">✓ Saved</span>}
+              </div>
+            </div>
           </Card>
 
           <Card className="p-6">
             <InsuranceUpload
               endpoint={`/api/epc/insurance/${params.id}/extract-invoice`}
-              label="Final Invoice (required)"
+              label="Final Invoice"
               hint="We'll read the final invoice amount — please confirm it below. This becomes the sum insured."
               initiallyDone={invoiceDone}
               onDone={(d) => { setOcrAmount((d.amount as number) ?? null); setInvoiceDone(true); }}

@@ -11,6 +11,8 @@ import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
 import { I, SectionCard, KV, Pill, DocGrid, StatusBtn, type ViewDocSlot } from "@/components/view/ViewKit";
+import InsuranceUpload from "@/components/InsuranceUpload";
+import { policyValidity } from "@/lib/insurance-validity";
 
 type App = Record<string, any>;
 
@@ -41,6 +43,32 @@ function Inner() {
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
+  // Policy document — OCR'd coverage dates, editable.
+  const [policyFrom, setPolicyFrom] = useState("");
+  const [policyTo, setPolicyTo] = useState("");
+  const [policyDone, setPolicyDone] = useState(false);
+  const [policySaved, setPolicySaved] = useState(false);
+
+  // Seed the policy fields once the row loads.
+  useEffect(() => {
+    if (!app) return;
+    setPolicyDone(!!app.policy_path);
+    setPolicyFrom(app.policy_from_date ? String(app.policy_from_date).slice(0, 10) : "");
+    setPolicyTo(app.policy_to_date ? String(app.policy_to_date).slice(0, 10) : "");
+  }, [app]);
+
+  async function savePolicy() {
+    if (!app) return;
+    setPolicySaved(false);
+    const res = await fetch(`/api/admin/insurance/${app.id}/save-policy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+      body: JSON.stringify({ policy_from_date: policyFrom || null, policy_to_date: policyTo || null }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok && d?.ok) { setPolicySaved(true); setApp({ ...app, policy_from_date: policyFrom || null, policy_to_date: policyTo || null }); }
+    else alert("Couldn't save policy dates: " + (d?.error || res.status));
+  }
 
   // Admin moves the policy through Under Review → Issued / Hold / Rejected.
   async function changeStatus(next: "under_review" | "issued" | "hold" | "rejected") {
@@ -112,8 +140,10 @@ function Inner() {
     { key: "aad_f", label: "Aadhaar (front)", path: app.aadhaar_front_path },
     { key: "aad_b", label: "Aadhaar (back)", path: app.aadhaar_back_path },
     { key: "gst", label: "GST certificate", path: app.gst_path },
+    { key: "ebill", label: "Electricity bill", path: app.ebill_path },
     { key: "plant", label: "Plant photo (geo-tagged)", path: app.plant_photo_path },
     { key: "invoice", label: "Final invoice", path: app.invoice_path },
+    { key: "policy", label: "Insurance policy", path: app.policy_path },
     // Legacy 3-photo set from the earlier build — shown only if present.
     ...(app.photo_panel_path ? [{ key: "panel", label: "Customer with panel (legacy)", path: app.photo_panel_path }] : []),
     ...(app.photo_inverter_path ? [{ key: "inverter", label: "Customer with inverter (legacy)", path: app.photo_inverter_path }] : []),
@@ -175,7 +205,49 @@ function Inner() {
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-3">
+        {/* ── Insurance policy — under the status bar. Admin uploads the
+            SBI-issued policy; we OCR the coverage period; dates editable. ── */}
+        <SectionCard title="Insurance policy" accent="blue" icon={I.files} adminOnly>
+          <p className="text-[12px] text-[#5a8a76] mb-3">
+            Upload the policy issued by {app.insurance_partner || "the insurer"}. We&rsquo;ll read the coverage period; correct it if needed.
+          </p>
+          <div className="max-w-md">
+            <InsuranceUpload
+              endpoint={`/api/admin/insurance/${app.id}/extract-policy`}
+              label="Policy document"
+              hint="JPG, PNG, WEBP or PDF."
+              initiallyDone={policyDone}
+              onDone={(d) => {
+                setPolicyDone(true);
+                if (d.from) setPolicyFrom(String(d.from).slice(0, 10));
+                if (d.to) setPolicyTo(String(d.to).slice(0, 10));
+                setPolicySaved(false);
+              }}
+            />
+          </div>
+          <div className="grid sm:grid-cols-2 gap-3 mt-4 max-w-md">
+            <div>
+              <p className="text-[12px] text-[#5a8a76] mb-1">Coverage from</p>
+              <input type="date" value={policyFrom} onChange={(e) => { setPolicyFrom(e.target.value); setPolicySaved(false); }}
+                className="w-full border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] bg-white focus:border-[#185fa5] outline-none" />
+            </div>
+            <div>
+              <p className="text-[12px] text-[#5a8a76] mb-1">Coverage to (renewal deadline)</p>
+              <input type="date" value={policyTo} onChange={(e) => { setPolicyTo(e.target.value); setPolicySaved(false); }}
+                className="w-full border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] bg-white focus:border-[#185fa5] outline-none" />
+            </div>
+          </div>
+          <div className="mt-3 flex items-center gap-3 flex-wrap">
+            <button type="button" onClick={() => void savePolicy()}
+              className="px-4 py-2 bg-[#178a5c] text-white rounded text-[13px] font-semibold hover:bg-[#12734c]">Save policy dates</button>
+            {policySaved && <span className="text-[12px] text-[#178a5c] font-medium">✓ Saved</span>}
+            {policyFrom && policyTo && (
+              <span className="text-[13px] font-semibold text-[#0f3d2e]">{policyValidity(policyFrom, policyTo)}</span>
+            )}
+          </div>
+        </SectionCard>
+
+        <div className="grid gap-4 lg:grid-cols-3 mt-4">
           <div className="flex flex-col gap-2.5">
             <SectionCard title="Applicant" accent="blue" icon={I.user}>
               <KV k="Name" v={app.aadhaar_name} />
@@ -185,6 +257,13 @@ function Inner() {
               <KV k="Gender" v={app.aadhaar_gender} />
               <KV k="Care of" v={app.aadhaar_care_of} />
               <KV k="Address" v={app.aadhaar_address} />
+              {(app.gstin || app.gst_legal_name) && (
+                <>
+                  <KV k="GST legal name" v={app.gst_legal_name} />
+                  <KV k="GST trade name" v={app.gst_trade_name} />
+                  <KV k="GSTIN" v={app.gstin} />
+                </>
+              )}
             </SectionCard>
           </div>
 

@@ -16,9 +16,8 @@ export const dynamic = "force-dynamic";
 
 const PATH_COLUMNS = [
   "pan_path", "aadhaar_front_path", "aadhaar_back_path", "aadhaar_face_path",
-  "gst_path", "invoice_path",
+  "gst_path", "ebill_path", "invoice_path", "policy_path", "plant_photo_path",
   "photo_panel_path", "photo_inverter_path", "photo_meter_path",
-  "plant_photo_path", // legacy single plant photo
 ] as const;
 
 function err(message: string, status: number) {

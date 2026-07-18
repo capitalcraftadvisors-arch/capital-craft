@@ -18,6 +18,7 @@ import {
   deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort,
   displayAmount as amountFor,
 } from "@/lib/disbursement";
+import { policyValidityParts, VALIDITY_TEXT } from "@/lib/insurance-validity";
 
 type Tab = "epcs" | "apps" | "insurance";
 
@@ -955,6 +956,8 @@ function InsuranceTab() {
     invoice_confirmed_amount: number | null;
     invoice_amount: number | null;
     insurance_partner: string | null;
+    policy_from_date: string | null;
+    policy_to_date: string | null;
     status: string;
     created_at: string;
     epc_business: { contact_name: string | null; trade_name: string | null; legal_name: string | null; epc_display_id: string | null } | null;
@@ -970,7 +973,7 @@ function InsuranceTab() {
         .from("insurance_applications")
         .select(
           "id, insurance_display_id, aadhaar_name, pan_number, sum_insured, invoice_confirmed_amount, " +
-          "invoice_amount, insurance_partner, status, created_at, " +
+          "invoice_amount, insurance_partner, policy_from_date, policy_to_date, status, created_at, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .order("created_at", { ascending: false });
@@ -1057,8 +1060,9 @@ function InsuranceTab() {
       <Card className="overflow-hidden">
         <table className="w-full text-[14px] table-fixed">
           <colgroup>
-            <col /><col /><col style={{ width: "130px" }} /><col style={{ width: "130px" }} />
-            <col style={{ width: "120px" }} /><col style={{ width: "140px" }} /><col style={{ width: "150px" }} />
+            <col /><col /><col style={{ width: "120px" }} /><col style={{ width: "110px" }} />
+            <col style={{ width: "100px" }} /><col style={{ width: "210px" }} />
+            <col style={{ width: "140px" }} /><col style={{ width: "150px" }} />
           </colgroup>
           <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">
             <tr>
@@ -1067,13 +1071,14 @@ function InsuranceTab() {
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Sum insured</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Insurance partner</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Status</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Policy Validity</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Created on</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Action</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={7} className="px-5 py-10 text-center text-[#5a8a76]">No insurance applications yet.</td></tr>
+              <tr><td colSpan={8} className="px-5 py-10 text-center text-[#5a8a76]">No insurance applications yet.</td></tr>
             ) : filtered.map((r) => {
               const hl = highlightId === r.id;
               return (
@@ -1096,6 +1101,15 @@ function InsuranceTab() {
                   <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${STATUS_PILL[r.status] ?? STATUS_PILL.draft}`}>
                     {STATUS_LABEL[r.status] ?? r.status.replace(/_/g, " ")}
                   </span>
+                </td>
+                {/* Policy Validity — coverage dates + days left, colour-coded. */}
+                <td className="px-3 py-3">
+                  {(() => {
+                    const v = policyValidityParts(r.policy_from_date, r.policy_to_date);
+                    return v
+                      ? <span className={`text-[12px] font-medium ${VALIDITY_TEXT[v.tone]}`}>{v.text}</span>
+                      : <span className="text-[13px] text-[#5a8a76]">—</span>;
+                  })()}
                 </td>
                 <td className="px-3 py-3 text-[13px] text-[#5a8a76]">{fmtAddedOn(r.created_at)}</td>
                 <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>

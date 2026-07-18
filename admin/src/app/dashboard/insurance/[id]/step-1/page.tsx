@@ -12,6 +12,7 @@ import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
+import Input from "@/components/ui/Input";
 import InsuranceUpload from "@/components/InsuranceUpload";
 import InsuranceStepHeader from "@/components/InsuranceStepHeader";
 import { supabase } from "@/lib/supabase";
@@ -49,6 +50,12 @@ function Inner() {
   const [aadhaarBusy, setAadhaarBusy] = useState(false);
   const [aadhaarErr, setAadhaarErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // GST OCR (editable).
+  const [gstDone, setGstDone] = useState(false);
+  const [gstLegal, setGstLegal] = useState("");
+  const [gstTrade, setGstTrade] = useState("");
+  const [gstin, setGstin] = useState("");
+  const [gstSaved, setGstSaved] = useState(false);
   const frontRef = useRef<HTMLInputElement>(null);
   const backRef = useRef<HTMLInputElement>(null);
 
@@ -57,6 +64,12 @@ function Inner() {
       const { data } = await supabase().from("insurance_applications").select("*").eq("id", params.id).maybeSingle();
       setApp(data);
       if (data?.pan_number) setPan(data.pan_number);
+      if (data?.gst_path) {
+        setGstDone(true);
+        setGstLegal(data.gst_legal_name ?? "");
+        setGstTrade(data.gst_trade_name ?? "");
+        setGstin(data.gstin ?? "");
+      }
       if (data?.aadhaar_front_path) {
         setAadhaarDone(true);
         setKyc({
@@ -105,10 +118,24 @@ function Inner() {
     }
   }
 
+  // Persist the (editable) GST fields without advancing.
+  async function saveGst() {
+    setGstSaved(false);
+    const res = await fetch(`/api/epc/insurance/${params.id}/save-fields`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+      body: JSON.stringify({ gst_legal_name: gstLegal, gst_trade_name: gstTrade, gstin }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (res.ok && d?.ok) setGstSaved(true);
+    else alert("Couldn't save GST details: " + (d?.error || res.status));
+  }
+
   async function saveContinue() {
     if (saving) return;
+    // Required-doc checks surface as errors here (no "required" labels).
     if (!pan) { alert("Please upload the PAN card."); return; }
-    if (!aadhaarDone) { alert("Please upload and read the Aadhaar (front + back)."); return; }
+    if (!aadhaarDone) { alert("Please upload the Aadhaar (front + back) and read it."); return; }
     setSaving(true);
     try {
       const res = await fetch(`/api/epc/insurance/${params.id}/save`, {
@@ -150,7 +177,7 @@ function Inner() {
           <Card className="p-6">
             <InsuranceUpload
               endpoint={`/api/epc/insurance/${params.id}/extract-pan`}
-              label="PAN card (required)"
+              label="PAN card"
               hint="JPG, PNG, WEBP or PDF."
               initiallyDone={!!pan}
               onDone={(d) => {
@@ -170,7 +197,7 @@ function Inner() {
           </Card>
 
           <Card className="p-6">
-            <p className="text-[13px] font-medium text-text-mid mb-2">Aadhaar card (required)</p>
+            <p className="text-[13px] font-medium text-text-mid mb-2">Aadhaar card</p>
             <div className="grid sm:grid-cols-2 gap-3">
               <div>
                 <p className="text-[12px] text-text-muted mb-1">Front</p>
@@ -205,12 +232,32 @@ function Inner() {
 
           <Card className="p-6">
             <InsuranceUpload
-              endpoint={`/api/epc/insurance/${params.id}/upload`}
-              label="GST certificate (optional)"
+              endpoint={`/api/epc/insurance/${params.id}/extract-gst`}
+              label="GST certificate"
               hint="JPG, PNG, WEBP or PDF."
-              extra={{ kind: "gst" }}
               initiallyDone={!!app?.gst_path}
+              onDone={(d) => {
+                const f = (d.fields ?? {}) as Record<string, string | null>;
+                setGstLegal(f.legal_name ?? "");
+                setGstTrade(f.trade_name ?? "");
+                setGstin(f.gstin ?? "");
+                setGstDone(true);
+                setGstSaved(false);
+              }}
             />
+            {/* Fetched GST details — editable, with a Save. */}
+            {gstDone && (
+              <div className="mt-4 space-y-3">
+                <p className="text-[11px] font-semibold text-[#5a8a76] uppercase tracking-wider">Read from GST certificate</p>
+                <Input label="Legal Name" value={gstLegal} onChange={(e) => { setGstLegal(e.target.value); setGstSaved(false); }} />
+                <Input label="Trade Name" value={gstTrade} onChange={(e) => { setGstTrade(e.target.value); setGstSaved(false); }} />
+                <Input label="Registration No (GSTIN)" value={gstin} onChange={(e) => { setGstin(e.target.value.toUpperCase()); setGstSaved(false); }} />
+                <div className="flex items-center gap-3">
+                  <Button variant="outline" onClick={() => void saveGst()}>Save GST details</Button>
+                  {gstSaved && <span className="text-[12px] text-[#178a5c] font-medium">✓ Saved</span>}
+                </div>
+              </div>
+            )}
           </Card>
         </div>
 
