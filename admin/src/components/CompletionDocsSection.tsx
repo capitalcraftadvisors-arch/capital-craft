@@ -1,20 +1,24 @@
 "use client";
 
-// The 3 completion documents collected AFTER the first disbursement, to
-// unlock the second:
-//   1. Invoice / tax invoice        — image or PDF
-//   2. Geo-tagged plant + inverter  — must carry a location (GeoOfficeUpload)
-//   3. Work completion report       — image or PDF
+// The completion documents collected AFTER the first disbursement, to unlock
+// the second:
+//   1. Invoice / tax invoice                 — image or PDF
+//   2. Customer with panel     (geo-tagged)  — GeoOfficeUpload, upload-only
+//   3. Customer with inverter  (geo-tagged)  — GeoOfficeUpload, upload-only
+//   4. Customer with meter     (geo-tagged)  — GeoOfficeUpload, upload-only
+//   5. Work Completion Report / Commission Report — image or PDF
 //
 // SHARED SLOTS: the admin (on behalf of the customer) and the EPC upload into
-// the SAME three categories on the SAME application, so whoever gets there
-// first fills the slot and the other side sees it. That's why this component
-// takes only an applicationId + who's uploading — nothing else differs.
+// the SAME categories on the SAME application, so whoever gets there first
+// fills the slot and the other side sees it.
 //
-// The geo-tagged photo reuses GeoOfficeUpload verbatim, so it inherits the
-// full-buffer EXIF read (GPS extracted BEFORE the server compresses and
-// strips it), the live-camera + GPS capture, the Vision OCR fallback for
-// burned-in GPS stamps, and the lat/long + address display.
+// The three geo photos reuse GeoOfficeUpload, so they inherit the full-buffer
+// EXIF read (GPS extracted BEFORE the server compresses and strips it) and the
+// Vision OCR fallback for burned-in GPS stamps. They're upload-only (no live
+// camera) — the site photos are taken beforehand.
+//
+// LEGACY: a single 'completion_plant_photo' from the earlier build is shown
+// read-only if present, so nothing already uploaded is orphaned.
 
 import { useEffect, useState } from "react";
 import FileUpload from "@/components/FileUpload";
@@ -24,11 +28,20 @@ import { getDocumentUrl } from "@/lib/storage";
 
 export const COMPLETION_CATEGORIES = [
   "completion_invoice",
-  "completion_plant_photo",
+  "completion_panel_photo",
+  "completion_inverter_photo",
+  "completion_meter_photo",
   "completion_report",
 ] as const;
 
 export type CompletionCategory = typeof COMPLETION_CATEGORIES[number];
+
+// The three geo photos, in order.
+const GEO_PHOTOS: { category: CompletionCategory; title: string }[] = [
+  { category: "completion_panel_photo",    title: "Customer with panel" },
+  { category: "completion_inverter_photo", title: "Customer with inverter" },
+  { category: "completion_meter_photo",    title: "Customer with meter" },
+];
 
 type DocRow = { id: string; category: string; file_name: string | null; mime_type: string | null };
 
@@ -58,10 +71,12 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
         .from("user_application_docs")
         .select("id, category, file_name, mime_type")
         .eq("application_id", applicationId)
-        .in("category", COMPLETION_CATEGORIES as unknown as string[]);
+        // Also pull the legacy plant photo so it can be shown read-only.
+        .in("category", [...COMPLETION_CATEGORIES, "completion_plant_photo"] as unknown as string[]);
       if (cancelled) return;
       const rows = (data ?? []) as DocRow[];
       setDocs(rows);
+      // The gate counts only the current set (not the legacy photo).
       const have = new Set(rows.map((r) => r.category));
       onCountChange?.(COMPLETION_CATEGORIES.filter((c) => have.has(c)).length, COMPLETION_CATEGORIES.length);
     })();
@@ -69,7 +84,8 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applicationId, refreshKey, tick]);
 
-  const byCat = (c: CompletionCategory) => docs.find((d) => d.category === c) ?? null;
+  const byCat = (c: string) => docs.find((d) => d.category === c) ?? null;
+  const legacyPlant = byCat("completion_plant_photo");
 
   async function open(id: string) {
     const u = await getDocumentUrl(id);
@@ -97,23 +113,24 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
         />
       </DocSlot>
 
-      {/* 2 — Geo-tagged plant + inverter photo */}
-      <div>
-        <p className="text-[13px] font-semibold text-[#0f3d2e] mb-1">
-          Geo-tagged photo — plant with inverter
-        </p>
-        <GeoOfficeUpload
-          applicationId={applicationId}
-          uploadedBy={uploadedBy}
-          category="completion_plant_photo"
-          label=""
-          hint="Must carry a location — take it live, or upload a photo with GPS / a GPS-camera stamp."
-        />
-      </div>
+      {/* 2-4 — Three geo-tagged site photos (upload only). */}
+      {GEO_PHOTOS.map((p) => (
+        <div key={p.category}>
+          <p className="text-[13px] font-semibold text-[#0f3d2e] mb-1">{p.title} (geo-tagged)</p>
+          <GeoOfficeUpload
+            applicationId={applicationId}
+            uploadedBy={uploadedBy}
+            category={p.category}
+            label=""
+            uploadOnly
+            hint="Must carry a location — upload a photo with GPS / a GPS-camera stamp."
+          />
+        </div>
+      ))}
 
-      {/* 3 — Work completion report */}
+      {/* 5 — Work completion / commission report */}
       <DocSlot
-        title="Work completion report"
+        title="Work Completion Report / Commission Report"
         hint="Image or PDF."
         doc={byCat("completion_report")}
         onOpen={open}
@@ -129,6 +146,13 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
           onUploaded={() => setTick((n) => n + 1)}
         />
       </DocSlot>
+
+      {/* Legacy single plant photo from the earlier build — read-only. */}
+      {legacyPlant && (
+        <DocSlot title="Plant photo (legacy)" doc={legacyPlant} onOpen={open}>
+          <span />
+        </DocSlot>
+      )}
     </div>
   );
 }

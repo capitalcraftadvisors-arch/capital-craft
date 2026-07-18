@@ -112,19 +112,20 @@ function Inner() {
     { key: "aad_f", label: "Aadhaar (front)", path: app.aadhaar_front_path },
     { key: "aad_b", label: "Aadhaar (back)", path: app.aadhaar_back_path },
     { key: "gst", label: "GST certificate", path: app.gst_path },
-    { key: "panel", label: "Customer with panel", path: app.photo_panel_path },
-    { key: "inverter", label: "Customer with inverter", path: app.photo_inverter_path },
-    { key: "meter", label: "Customer with meter", path: app.photo_meter_path },
-    { key: "invoice", label: "Final invoice / commission cert.", path: app.invoice_path },
-    // Legacy single plant photo — only shown when an old draft has one.
-    ...(app.plant_photo_path ? [{ key: "plant", label: "Plant photo (legacy)", path: app.plant_photo_path }] : []),
+    { key: "plant", label: "Plant photo (geo-tagged)", path: app.plant_photo_path },
+    { key: "invoice", label: "Final invoice", path: app.invoice_path },
+    // Legacy 3-photo set from the earlier build — shown only if present.
+    ...(app.photo_panel_path ? [{ key: "panel", label: "Customer with panel (legacy)", path: app.photo_panel_path }] : []),
+    ...(app.photo_inverter_path ? [{ key: "inverter", label: "Customer with inverter (legacy)", path: app.photo_inverter_path }] : []),
+    ...(app.photo_meter_path ? [{ key: "meter", label: "Customer with meter (legacy)", path: app.photo_meter_path }] : []),
   ].map((s) => ({ key: s.key, label: s.label, onView: s.path ? () => void openPath(s.path as string) : undefined }));
 
-  // Coordinates from the three site photos.
+  // Coordinates — the single plant photo, plus any legacy site photos.
   const GEO: { label: string; g: { lat?: number; lng?: number } | null }[] = [
-    { label: "Panel photo GPS", g: app.photo_panel_gps ?? null },
-    { label: "Inverter photo GPS", g: app.photo_inverter_gps ?? null },
-    { label: "Meter photo GPS", g: app.photo_meter_gps ?? null },
+    { label: "Plant photo GPS", g: app.plant_photo_gps ?? null },
+    { label: "Panel photo GPS (legacy)", g: app.photo_panel_gps ?? null },
+    { label: "Inverter photo GPS (legacy)", g: app.photo_inverter_gps ?? null },
+    { label: "Meter photo GPS (legacy)", g: app.photo_meter_gps ?? null },
   ];
 
   return (

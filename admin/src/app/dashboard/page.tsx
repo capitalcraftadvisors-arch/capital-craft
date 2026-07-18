@@ -308,9 +308,9 @@ function DashboardInner() {
                       className="border-b border-line cursor-pointer hover:bg-[#f0faf5] transition-colors"
                     >
                       <td className="px-5 py-4">
-                        <div className="font-semibold text-text">{r.aadhaar_name || "—"}</div>
+                        <div className="text-[15px] font-semibold text-text">{r.aadhaar_name || "—"}</div>
                         {r.insurance_display_id && (
-                          <div className="text-[11px] font-mono text-[#185fa5] mt-0.5">{r.insurance_display_id}</div>
+                          <div className="text-[12px] font-mono text-[#185fa5] mt-0.5">{r.insurance_display_id}</div>
                         )}
                       </td>
                       <td className="px-5 py-4 font-semibold text-[#0f3d2e]">

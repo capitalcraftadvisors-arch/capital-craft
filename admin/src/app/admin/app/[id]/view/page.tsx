@@ -433,6 +433,20 @@ function Inner() {
         />
         {statusMsg && <p className="text-[12px] text-[#5a8a76] -mt-2 mb-3">{statusMsg}</p>}
 
+        {/* Disbursement — sits directly under the status band, only once the
+            loan is approved. Opens the disbursement screen. */}
+        {loan.status === "approved" && (
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() => router.push(`/admin/app/${loan.id}/disbursement` as any)}
+              className="w-full sm:w-auto px-5 py-2.5 text-[14px] font-semibold rounded-[10px] border border-[#854f0b]/30 bg-[#fef8ee] text-[#854f0b] hover:bg-[#fef0d6] inline-flex items-center justify-center gap-2"
+            >
+              {I.money} Disbursement
+            </button>
+          </div>
+        )}
+
         {/* ── PROGRESS TRACKER — prominent standalone band ─────────── */}
         <div className="rounded-[12px] border border-[#cdeadd] bg-white p-6 sm:p-8 mb-4">
           <div className="flex items-center gap-3 sm:gap-6">

@@ -8,7 +8,9 @@
 //   1. Disbursement details — 1st amount (starts the 45-day clock), remaining,
 //      the 3 completion docs, admin review, then the 2nd amount.
 //   2. View profile         — routes to the EXISTING loan View, untouched.
-//   3. Activity log         — opens the EXISTING LoanActivityLogModal, untouched.
+//
+// (No Activity log tab here — the View profile already carries the activity
+// log, so a second copy on this screen was redundant.)
 //
 // Only admins reach this page (AuthGuard) AND only admins can write the
 // amounts — migration 0044's trg_disbursement_admin_only enforces that at the
@@ -21,7 +23,6 @@ import { supabase } from "@/lib/supabase";
 import { getBusiness } from "@/lib/auth";
 import { logLoanActivity } from "@/lib/loanAudit";
 import CompletionDocsSection from "@/components/CompletionDocsSection";
-import LoanActivityLogModal from "@/components/LoanActivityLogModal";
 import { I, SectionCard, KV, Pill, StatusBtn } from "@/components/view/ViewKit";
 import {
   deadlineState, DEADLINE_PILL, remainingAmount, fmtRupees, fmtDateShort,
@@ -29,7 +30,7 @@ import {
 } from "@/lib/disbursement";
 
 type Loan = Record<string, any>;
-type Tab = "disbursement" | "activity";
+type Tab = "disbursement";
 
 // Local calendar date as YYYY-MM-DD (never toISOString — that shifts IST back a day).
 function todayISO(): string {
@@ -53,7 +54,6 @@ function Inner() {
   const [loan, setLoan] = useState<Loan | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>("disbursement");
-  const [activityOpen, setActivityOpen] = useState(false);
 
   const [firstAmt, setFirstAmt]   = useState("");
   const [firstDate, setFirstDate] = useState(todayISO());
@@ -63,7 +63,9 @@ function Inner() {
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [docsUploaded, setDocsUploaded] = useState(0);
-  const [docsTotal, setDocsTotal] = useState(3);
+  // Completion set is now 5 (invoice + 3 geo photos + report); the component
+  // reports the live total via onCountChange, this is just the pre-load default.
+  const [docsTotal, setDocsTotal] = useState(5);
 
   async function load() {
     const { data } = await supabase()
@@ -222,12 +224,12 @@ function Inner() {
         </div>
 
         {/* ── TABS ─────────────────────────────────────────────── */}
+        {/* No Activity log here — the View profile already has one; a second
+            copy on this screen was redundant. */}
         <div className="flex gap-2 mb-4 border-b border-[#cdeadd]">
           <TabBtn active={tab === "disbursement"} onClick={() => setTab("disbursement")}>Disbursement details</TabBtn>
           {/* Leads to the EXISTING View profile — deliberately unchanged. */}
           <TabBtn active={false} onClick={() => router.push(`/admin/app/${loan.id}/view` as any)}>View profile</TabBtn>
-          {/* Opens the EXISTING activity log modal — deliberately unchanged. */}
-          <TabBtn active={false} onClick={() => setActivityOpen(true)}>Activity log</TabBtn>
         </div>
 
         {tab === "disbursement" && (
@@ -359,13 +361,6 @@ function Inner() {
           </div>
         )}
       </div>
-
-      <LoanActivityLogModal
-        open={activityOpen}
-        onClose={() => setActivityOpen(false)}
-        loan={loan}
-        borrowerName={applicantName}
-      />
     </main>
   );
 }

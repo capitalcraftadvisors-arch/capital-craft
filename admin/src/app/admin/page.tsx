@@ -909,16 +909,8 @@ function AppsTab() {
                     >
                       {IconDownload} {zipBusy === r.id ? "Preparing…" : "Download ZIP"}
                     </button>
-                    {/* Approved only — the View button above is unchanged. */}
-                    {r.status === "approved" && (
-                      <button
-                        type="button"
-                        onClick={() => router.push(`/admin/app/${r.id}/disbursement` as any)}
-                        className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#854f0b]/30 bg-white text-[#854f0b] hover:bg-[#fef0d6] inline-flex items-center justify-center gap-1.5"
-                      >
-                        Disbursement
-                      </button>
-                    )}
+                    {/* Disbursement moved to the View profile (under the status
+                        band) — approved rows reach it via View. */}
                   </div>
                 </td>
               </tr>
@@ -1091,9 +1083,8 @@ function InsuranceTab() {
                 {/* Insured name with the INS id beneath — same shape as the
                     EPC name/ID cell on the EPCs tab. */}
                 <td className="px-3 py-3 cursor-pointer" onClick={() => navigateToView(r)}>
-                  <p className="text-[13px] font-semibold text-[#0f3d2e] truncate">{applicant(r)}</p>
-                  {r.insurance_display_id && <p className="text-[11px] font-mono text-[#185fa5] mt-0.5">{r.insurance_display_id}</p>}
-                  {r.pan_number && <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.pan_number}</p>}
+                  <p className="text-[15px] font-semibold text-[#0f3d2e] truncate">{applicant(r)}</p>
+                  {r.insurance_display_id && <p className="text-[12px] font-mono text-[#185fa5] mt-0.5">{r.insurance_display_id}</p>}
                 </td>
                 <td className="px-3 py-3 truncate">
                   <p className="text-[13px] text-[#0f3d2e] truncate">{epc(r)}</p>
