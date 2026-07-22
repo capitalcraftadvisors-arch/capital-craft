@@ -163,6 +163,7 @@ export async function POST(req: NextRequest) {
       // validates what's present).
       const borrower_pan = strOrNull(b.borrower_pan)?.toUpperCase() ?? null;
       if (borrower_pan && !PAN_RE.test(borrower_pan)) return err("PAN format is invalid.", 400);
+      const borrower_father_name = strOrNull(b.borrower_father_name);
 
       const aadhaar_number_raw = strOrNull(b.aadhaar_number)?.replace(/\D/g, "") ?? null;
       if (aadhaar_number_raw && !/^\d{12}$/.test(aadhaar_number_raw)) {
@@ -222,6 +223,7 @@ export async function POST(req: NextRequest) {
         .update({
           // Page 2 — applicant docs
           borrower_pan,
+          borrower_father_name,
           aadhaar_name:           strOrNull(b.aadhaar_name),
           aadhaar_dob:            strOrNull(b.aadhaar_dob),
           aadhaar_gender:         strOrNull(b.aadhaar_gender),

@@ -29,6 +29,7 @@ import { MOBILE_RE, EMAIL_RE } from "@/lib/validators";
 
 export type EpcApplyDocsPayload = {
   borrower_pan: string | null;
+  borrower_father_name: string | null;
   aadhaar_name: string | null;
   aadhaar_dob: string | null;
   aadhaar_gender: string | null;
@@ -83,6 +84,9 @@ function Inner() {
   // Applicant PAN
   const [panUploaded, setPanUploaded] = useState(false);
   const [panNumber, setPanNumber]     = useState("");
+  // Father's name — read from the PAN OCR, editable. Persisted to
+  // borrower_father_name (migration 0050).
+  const [panFather, setPanFather]     = useState("");
 
   // Applicant Aadhaar
   const [aFront, setAFront] = useState<File | null>(null);
@@ -268,6 +272,7 @@ function Inner() {
     try {
       const r = await extractPan(info.file);
       if (r.ok && r.pan && !panNumber) setPanNumber(r.pan);
+      if (r.ok && r.father_name && !panFather) setPanFather(r.father_name);
     } catch { /* manual entry fallback */ }
   }
 
@@ -306,6 +311,7 @@ function Inner() {
   function continueToLoan() {
     const payload: EpcApplyDocsPayload = {
       borrower_pan: panNumber.trim().toUpperCase(),
+      borrower_father_name: panFather.trim() || null,
       aadhaar_name: aName || null,
       aadhaar_dob: aDob || null,
       aadhaar_gender: aGender || null,

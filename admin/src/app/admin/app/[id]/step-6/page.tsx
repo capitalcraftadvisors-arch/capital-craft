@@ -198,6 +198,7 @@ function Inner() {
           <ReviewRow label="Customer phone"  value={loan.borrower_mobile ? `+91 ${loan.borrower_mobile}` : "—"} />
           <ReviewRow label="Email"           value={loan.borrower_email ?? "—"} />
           <ReviewRow label="PAN"             value={loan.borrower_pan ?? "—"} mono />
+          <ReviewRow label="Father's name"   value={loan.borrower_father_name ?? "—"} />
           <ReviewRow label="System type"     value={loan.system_type ? SYSTEM_LABEL[loan.system_type] ?? loan.system_type : "—"} />
           <ReviewRow label="Plant use"       value={
             loan.plant_use_type === "residential" ? "Residential" :

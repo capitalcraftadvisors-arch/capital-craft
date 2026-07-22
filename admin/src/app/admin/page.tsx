@@ -10,6 +10,7 @@ import Button from "@/components/ui/Button";
 import StatusBadge from "@/components/StatusBadge";
 import AddNewEpcModal from "@/components/AddNewEpcModal";
 import AddNewLoanAppModal from "@/components/AddNewLoanAppModal";
+import AddNewInsuranceModal from "@/components/AddNewInsuranceModal";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import { supabase } from "@/lib/supabase";
 import { logout, getToken } from "@/lib/auth";
@@ -841,19 +842,32 @@ function AppsTab() {
                     <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{displayMaskedAadhaar(r)}</p>
                   )}
                 </td>
-                <td className="px-3 py-3 truncate">
-                  <p className="text-[13px] text-[#0f3d2e] truncate">{displayEpc(r)}</p>
-                  {r.epc_business?.epc_display_id && (
-                    <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.epc_business.epc_display_id}</p>
-                  )}
+                <td className="px-3 py-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <InitialsBadge name={displayEpc(r)} />
+                    <div className="min-w-0">
+                      <p className="text-[13px] text-[#0f3d2e] truncate">{displayEpc(r)}</p>
+                      {r.epc_business?.epc_display_id && (
+                        <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.epc_business.epc_display_id}</p>
+                      )}
+                    </div>
+                  </div>
                 </td>
                 <td className="px-3 py-3 text-[13px] font-semibold text-[#0f3d2e]">{displayAmount(r)}</td>
-                {/* Loan apps have no internal admin status — show the
-                    lender outcome (same 3 buckets as the EPC's own view). */}
+                {/* Loan apps have no internal admin status — show the lender
+                    outcome (same 3 buckets as the EPC's own view). Once the 1st
+                    disbursement is entered, surface that instead — display-only,
+                    the underlying status field is unchanged. */}
                 <td className="px-3 py-3">
-                  <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${OUTCOME_PILL[lenderOutcome(r.status)]}`}>
-                    {OUTCOME_LABEL[lenderOutcome(r.status)]}
-                  </span>
+                  {r.status === "approved" && r.first_disbursement_amount != null ? (
+                    <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#dceffb] text-[#185fa5]">
+                      1st Disbursement Done
+                    </span>
+                  ) : (
+                    <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${OUTCOME_PILL[lenderOutcome(r.status)]}`}>
+                      {OUTCOME_LABEL[lenderOutcome(r.status)]}
+                    </span>
+                  )}
                 </td>
                 {/* Disbursement + countdown — only meaningful once approved. */}
                 <td className="px-3 py-3">
@@ -966,6 +980,7 @@ function InsuranceTab() {
   const [q, setQ] = useState("");
   const [zipBusy, setZipBusy] = useState<string | null>(null);
   const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -1054,8 +1069,13 @@ function InsuranceTab() {
 
   return (
     <>
-      <div className="mb-5">
-        <Input placeholder="Search by applicant, INS id, or EPC…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="mb-5 flex items-center gap-3">
+        <div className="flex-1">
+          <Input placeholder="Search by applicant, INS id, or EPC…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <Button type="button" variant="primary" onClick={() => setAddOpen(true)} className="whitespace-nowrap">
+          + Add New Insurance Application
+        </Button>
       </div>
       <Card className="overflow-hidden">
         <table className="w-full text-[14px] table-fixed">
@@ -1091,24 +1111,44 @@ function InsuranceTab() {
                   <p className="text-[15px] font-semibold text-[#0f3d2e] truncate">{applicant(r)}</p>
                   {r.insurance_display_id && <p className="text-[12px] font-mono text-[#185fa5] mt-0.5">{r.insurance_display_id}</p>}
                 </td>
-                <td className="px-3 py-3 truncate">
-                  <p className="text-[13px] text-[#0f3d2e] truncate">{epc(r)}</p>
-                  {r.epc_business?.epc_display_id && <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.epc_business.epc_display_id}</p>}
+                <td className="px-3 py-3">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <InitialsBadge name={epc(r)} />
+                    <div className="min-w-0">
+                      <p className="text-[13px] text-[#0f3d2e] truncate">{epc(r)}</p>
+                      {r.epc_business?.epc_display_id && <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.epc_business.epc_display_id}</p>}
+                    </div>
+                  </div>
                 </td>
                 <td className="px-3 py-3 text-[13px] font-semibold text-[#0f3d2e]">{amount(r)}</td>
-                <td className="px-3 py-3 text-[13px] text-[#0f3d2e]">{r.insurance_partner || "—"}</td>
+                <td className="px-3 py-3"><PartnerBadge name={r.insurance_partner} /></td>
                 <td className="px-3 py-3">
                   <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${STATUS_PILL[r.status] ?? STATUS_PILL.draft}`}>
                     {STATUS_LABEL[r.status] ?? r.status.replace(/_/g, " ")}
                   </span>
                 </td>
-                {/* Policy Validity — coverage dates + days left, colour-coded. */}
+                {/* Policy Validity — "Valid until" date + a colour-coded
+                    days-left badge, split so expiring policies scan fast. */}
                 <td className="px-3 py-3">
                   {(() => {
                     const v = policyValidityParts(r.policy_from_date, r.policy_to_date);
-                    return v
-                      ? <span className={`text-[12px] font-medium ${VALIDITY_TEXT[v.tone]}`}>{v.text}</span>
-                      : <span className="text-[13px] text-[#5a8a76]">—</span>;
+                    if (!v) return <span className="text-[13px] text-[#5a8a76]">—</span>;
+                    const badge =
+                      v.tone === "red"   ? "bg-red-50 text-red-700 border-red-200" :
+                      v.tone === "amber" ? "bg-[#fef0d6] text-[#854f0b] border-[#f3d9a4]" :
+                                           "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd]";
+                    const daysText =
+                      v.daysLeft == null ? null :
+                      v.daysLeft < 0 ? `Expired ${Math.abs(v.daysLeft)}d ago` :
+                      `${v.daysLeft} ${v.daysLeft === 1 ? "day" : "days"} left`;
+                    return (
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[12px] text-[#5a8a76]">Valid until <span className="font-semibold text-[#0f3d2e]">{v.toLabel ?? "—"}</span></span>
+                        {daysText && (
+                          <span className={`inline-flex self-start px-2 py-0.5 rounded-full border text-[11px] font-semibold ${badge}`}>{daysText}</span>
+                        )}
+                      </div>
+                    );
                   })()}
                 </td>
                 <td className="px-3 py-3 text-[13px] text-[#5a8a76]">{fmtAddedOn(r.created_at)}</td>
@@ -1135,6 +1175,35 @@ function InsuranceTab() {
           </tbody>
         </table>
       </Card>
+
+      <AddNewInsuranceModal open={addOpen} onClose={() => setAddOpen(false)} />
     </>
+  );
+}
+
+// ── Table badges — icon "logos" for scannability (no logo assets in repo,
+// so we stand in with initials chips). ──────────────────────────────
+function InitialsBadge({ name, tone = "green" }: { name: string; tone?: "green" | "blue" }) {
+  const initials =
+    (name || "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "—";
+  const cls = tone === "blue" ? "bg-[#dceffb] text-[#185fa5]" : "bg-[#e6f6ee] text-[#178a5c]";
+  return (
+    <span className={`shrink-0 w-8 h-8 rounded-[8px] grid place-items-center text-[12px] font-bold ${cls}`} aria-hidden>
+      {initials}
+    </span>
+  );
+}
+
+// Insurance-partner chip — initials in a coloured pill + the name.
+function PartnerBadge({ name }: { name: string | null | undefined }) {
+  if (!name) return <span className="text-[13px] text-[#5a8a76]">—</span>;
+  const initials =
+    name.replace(/[^A-Za-z ]/g, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase()
+    || name.slice(0, 2).toUpperCase();
+  return (
+    <span className="inline-flex items-center gap-2 min-w-0">
+      <span className="shrink-0 w-7 h-7 rounded-full bg-[#dceffb] text-[#185fa5] grid place-items-center text-[11px] font-bold">{initials}</span>
+      <span className="text-[13px] text-[#0f3d2e] truncate">{name}</span>
+    </span>
   );
 }

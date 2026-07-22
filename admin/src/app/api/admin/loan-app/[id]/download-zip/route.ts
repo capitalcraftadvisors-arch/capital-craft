@@ -177,10 +177,14 @@ export async function GET(
     archive.append(xlsxBuffer, { name: "summary.xlsx" });
 
     // Doc paths stored directly on the row (extract-* uploads).
+    // NOTE: approval documents — none are stored (approval_details is numeric
+    // only). Disbursement/completion docs live in user_application_docs and are
+    // swept up by the docs loop below, so they're already in the ZIP.
     const rowDocs: Array<{ path: string | null; folder: string }> = [
       { path: loan.aadhaar_front_path,       folder: "aadhaar" },
       { path: loan.aadhaar_back_path,        folder: "aadhaar" },
       { path: loan.aadhaar_face_path,        folder: "aadhaar" },
+      { path: loan.customer_photo_path,      folder: "applicant_photo" },
       { path: loan.coapp_aadhaar_front_path, folder: "coapp" },
       { path: loan.coapp_aadhaar_back_path,  folder: "coapp" },
       { path: loan.coapp_aadhaar_face_path,  folder: "coapp" },

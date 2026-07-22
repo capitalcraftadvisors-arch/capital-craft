@@ -97,6 +97,7 @@ export async function PATCH(
     const borrower_mobile  = String(b.borrower_mobile  ?? "").replace(/\D/g, "");
     const borrower_email   = String(b.borrower_email   ?? "").trim();
     const borrower_pan     = String(b.borrower_pan     ?? "").trim().toUpperCase();
+    const borrower_father_name = String(b.borrower_father_name ?? "").trim() || null;
     // Applicant passport-size photo — the FileUpload already persisted the
     // file to user_application_docs (category customer_photo); this is just
     // the storage path so the View page can surface it directly. Optional
@@ -150,6 +151,7 @@ export async function PATCH(
       borrower_mobile: borrower_mobile || null,
       borrower_email:  borrower_email || null,
       borrower_pan:    borrower_pan || null,
+      borrower_father_name,
       system_type:     SYSTEM_TYPES.has(system_type) ? system_type : null,
       plant_use_type:  (plant_use_type === "residential" || plant_use_type === "commercial") ? plant_use_type : null,
       consent_at,

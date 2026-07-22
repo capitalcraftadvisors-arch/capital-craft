@@ -22,16 +22,29 @@ function fmt(d: Date): string {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
+export type ValidityParts = {
+  text: string;
+  tone: ValidityTone;
+  daysLeft: number | null;
+  // Individually formatted endpoints (same safe local-date parse as `text`),
+  // so callers can show a "Valid until" date without re-parsing the raw
+  // "YYYY-MM-DD" (which risks an IST off-by-one).
+  fromLabel: string | null;
+  toLabel: string | null;
+};
+
 export function policyValidityParts(
   from: string | null | undefined,
   to: string | null | undefined,
-): { text: string; tone: ValidityTone; daysLeft: number | null } | null {
+): ValidityParts | null {
   const f = from ? parseISO(from) : null;
   const t = to ? parseISO(to) : null;
   if (!f && !t) return null;
 
-  const range = `${f ? fmt(f) : "?"} – ${t ? fmt(t) : "?"}`;
-  if (!t) return { text: range, tone: "green", daysLeft: null };
+  const fromLabel = f ? fmt(f) : null;
+  const toLabel = t ? fmt(t) : null;
+  const range = `${fromLabel ?? "?"} – ${toLabel ?? "?"}`;
+  if (!t) return { text: range, tone: "green", daysLeft: null, fromLabel, toLabel };
 
   const today = startOfDay(new Date());
   const daysLeft = Math.round((t.getTime() - today.getTime()) / DAY);
@@ -45,7 +58,7 @@ export function policyValidityParts(
     tone = daysLeft <= 30 ? "amber" : "green";
     tail = `${daysLeft} ${daysLeft === 1 ? "day" : "days"} left`;
   }
-  return { text: `${range} · ${tail}`, tone, daysLeft };
+  return { text: `${range} · ${tail}`, tone, daysLeft, fromLabel, toLabel };
 }
 
 export function policyValidity(

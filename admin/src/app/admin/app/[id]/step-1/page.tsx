@@ -109,6 +109,9 @@ function Inner() {
   const [panUploaded, setPanUploaded] = useState(false);
   // PAN number is a proper editable field — OCR prefills, admin can correct.
   const [panNumber, setPanNumber]     = useState("");
+  // Father's name — read from the PAN OCR, editable. Persisted to
+  // borrower_father_name (migration 0050).
+  const [panFatherName, setPanFatherName] = useState("");
   // Applicant passport-size photo (registration step only).
   const [photoUploaded, setPhotoUploaded] = useState(false);
   const [photoPath, setPhotoPath]         = useState<string | null>(null);
@@ -128,7 +131,7 @@ function Inner() {
         .select(
           "id, epc_business_id, status, current_step, " +
           "install_pincode, install_state, install_district, install_city, " +
-          "borrower_mobile, borrower_email, borrower_pan, system_type, plant_use_type, consent_at, customer_photo_path",
+          "borrower_mobile, borrower_email, borrower_pan, borrower_father_name, system_type, plant_use_type, consent_at, customer_photo_path",
         )
         .eq("id", params.id)
         .maybeSingle();
@@ -143,6 +146,7 @@ function Inner() {
       if (row.borrower_mobile)  setPhone(row.borrower_mobile);
       if (row.borrower_email)   setEmail(row.borrower_email);
       if (row.borrower_pan)     { setPanNumber(row.borrower_pan); setPanUploaded(true); }
+      if (row.borrower_father_name) setPanFatherName(row.borrower_father_name);
       if (row.customer_photo_path) { setPhotoPath(row.customer_photo_path); setPhotoUploaded(true); }
       if (row.system_type)      setSystemType(row.system_type);
       if (row.plant_use_type)   setPlantUse(row.plant_use_type);
@@ -192,6 +196,9 @@ function Inner() {
       if (r.ok && r.pan && !panNumber) {
         setPanNumber(r.pan);
       }
+      if (r.ok && r.father_name && !panFatherName) {
+        setPanFatherName(r.father_name);
+      }
     } catch {
       // OCR silent-fail is fine — admin fills the PAN box manually.
     }
@@ -238,6 +245,7 @@ function Inner() {
           borrower_mobile:  phone,
           borrower_email:   email,
           borrower_pan:     panNumber.trim().toUpperCase(),
+          borrower_father_name: panFatherName.trim() || null,
           customer_photo_path: photoPath,
           system_type:      systemType,
           plant_use_type:   plantUse,
@@ -438,6 +446,20 @@ function Inner() {
               Format: 5 letters + 4 digits + 1 letter (e.g. ABCDE1234F).
               {panNumber && !panValid && " Invalid format."}
             </p>
+          </div>
+
+          {/* Father's name — prefilled from the PAN OCR, editable. */}
+          <div className="rounded-input border-2 border-line bg-[#f8fafc] p-4">
+            <label className="text-[13px] font-semibold text-text block mb-2">
+              Father&rsquo;s name <span className="font-normal text-text-muted">(from PAN)</span>
+            </label>
+            <input
+              type="text"
+              value={panFatherName}
+              onChange={(e) => setPanFatherName(e.target.value)}
+              placeholder="As printed on the PAN card"
+              className="w-full rounded-input border-2 border-line focus:border-[#185fa5] px-4 py-3 text-[15px] outline-none transition-colors bg-white"
+            />
           </div>
         </Card>
 
