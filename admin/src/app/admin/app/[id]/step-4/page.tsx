@@ -264,6 +264,14 @@ function Inner() {
 
   async function saveAndNext() {
     if (!loan) return; // admin-only flow: never block on missing fields/docs
+    // The bank statement upload must have succeeded before we can persist its
+    // storage path. If it was skipped or its upload failed silently, `bankDoc`
+    // is null — stop with a clear message instead of crashing on `.method`/
+    // `.path` ("Cannot read properties of null").
+    if (!bankDoc) {
+      setSaveError("Please upload the bank statement before continuing.");
+      return;
+    }
     setSaveError(null);
     setSaving(true);
     try {
@@ -273,9 +281,9 @@ function Inner() {
         profession_other:  profession === "Other" ? professionOther.trim() : null,
         organization_name: organization.trim() || null,
         annual_income:     Number(annualIncome),
-        bank_statement_method:      bankDoc!.method,
-        bank_statement_path:        bankDoc!.path,
-        bank_statement_uploaded_at: bankDoc!.uploaded_at,
+        bank_statement_method:      bankDoc.method,
+        bank_statement_path:        bankDoc.path,
+        bank_statement_uploaded_at: bankDoc.uploaded_at,
         bank_account_holder: accountHolder.trim(),
         bank_name:           bankName.trim(),
         bank_account_no:     accountNo.trim(),
@@ -587,7 +595,7 @@ function Inner() {
               variant="primary"
               onClick={saveAndNext}
               loading={saving}
-              disabled={saving}
+              disabled={saving || !canNext}
             >
               Next
             </Button>
