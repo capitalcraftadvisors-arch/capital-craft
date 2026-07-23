@@ -678,8 +678,9 @@ function AppsTab() {
   // Client-side filters over the already-loaded list.
   const [epcFilter, setEpcFilter]       = useState("");
   const [lenderFilter, setLenderFilter] = useState("");
-  const [dateFrom, setDateFrom]         = useState("");
-  const [dateTo, setDateTo]             = useState("");
+  // Single month+year picker ("YYYY-MM") — filters to applications created in
+  // that calendar month.
+  const [createdMonth, setCreatedMonth] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [zipBusy, setZipBusy] = useState<string | null>(null);
   // Row whose Download ZIP popup is open — the lender picker is the same
@@ -807,8 +808,13 @@ function AppsTab() {
   // the very top), everything else below, newest first. The query is untouched.
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const fromMs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
-    const toMs   = dateTo   ? new Date(`${dateTo}T23:59:59`).getTime()   : null;
+    // Local calendar month of a row's created_at, as "YYYY-MM".
+    const monthOf = (v: string) => {
+      const d = new Date(v);
+      return isNaN(d.getTime())
+        ? ""
+        : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    };
 
     const out = rows.filter((r) => {
       if (needle &&
@@ -817,11 +823,7 @@ function AppsTab() {
             displayEpc(r).toLowerCase().includes(needle))) return false;
       if (epcFilter && displayEpc(r) !== epcFilter) return false;
       if (lenderFilter && String(r.approved_lender ?? r.rejected_lender ?? "") !== lenderFilter) return false;
-      if (fromMs !== null || toMs !== null) {
-        const t = new Date(r.created_at).getTime();
-        if (fromMs !== null && t < fromMs) return false;
-        if (toMs !== null && t > toMs) return false;
-      }
+      if (createdMonth && monthOf(r.created_at) !== createdMonth) return false;
       return true;
     });
 
@@ -836,7 +838,7 @@ function AppsTab() {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, q, epcFilter, lenderFilter, dateFrom, dateTo]);
+  }, [rows, q, epcFilter, lenderFilter, createdMonth]);
 
   return (
     <>
@@ -847,7 +849,7 @@ function AppsTab() {
       </div>
       {/* Search + filters. Status stays server-side; EPC / lender / date range
           filter the already-loaded list client-side. */}
-      <div className="grid gap-3 mb-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-3 mb-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Input placeholder="Search by borrower or EPC…" value={q} onChange={(e) => setQ(e.target.value)} />
         <Select
           placeholder="Status filter"
@@ -875,8 +877,14 @@ function AppsTab() {
           value={lenderFilter}
           onChange={(e) => setLenderFilter(e.target.value)}
         />
-        <Input type="date" aria-label="Created from" title="Created from" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-        <Input type="date" aria-label="Created to" title="Created to" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+        {/* Single month+year bar — shows mm-yyyy, filters to that month. */}
+        <Input
+          type="month"
+          aria-label="Created month"
+          title="Created month"
+          value={createdMonth}
+          onChange={(e) => setCreatedMonth(e.target.value)}
+        />
       </div>
 
       <Card className="overflow-hidden">
