@@ -20,9 +20,12 @@ function fmtRupees(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(Number(n))) return "—";
   return "₹" + Math.round(Number(n)).toLocaleString("en-IN");
 }
-function fmtDate(v: string | null | undefined): string {
-  if (!v) return "—";
-  return new Date(v).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+// DISPLAY-ONLY label for the insurer. The stored insurance_partner value is
+// never changed and nothing keyed on it is affected; anything that isn't SBI
+// renders exactly as stored.
+function insurerLabel(v: string | null | undefined): string | null {
+  if (!v) return v ?? null;
+  return /^sbi\b/i.test(v.trim()) ? "SBI General Insurance" : v;
 }
 const STATUS_LABEL: Record<string, string> = {
   draft: "Draft", under_review: "Under Review", issued: "Issued", rejected: "Rejected", hold: "Hold",
@@ -209,7 +212,7 @@ function Inner() {
             SBI-issued policy; we OCR the coverage period; dates editable. ── */}
         <SectionCard title="Insurance policy" accent="blue" icon={I.files} adminOnly>
           <p className="text-[12px] text-[#5a8a76] mb-3">
-            Upload the policy issued by {app.insurance_partner || "the insurer"}. We&rsquo;ll read the coverage period; correct it if needed.
+            Upload the policy issued by {insurerLabel(app.insurance_partner) || "the insurer"}. We&rsquo;ll read the coverage period; correct it if needed.
           </p>
           <div className="max-w-md">
             <InsuranceUpload
@@ -270,7 +273,7 @@ function Inner() {
           <div className="flex flex-col gap-2.5">
             <SectionCard title="Plant & invoice" accent="green" icon={I.money}>
               <KV k="Sum insured" v={fmtRupees(app.sum_insured ?? app.invoice_confirmed_amount)} valueClass="text-[#178a5c]" />
-              <KV k="Insurance partner" v={app.insurance_partner} />
+              <KV k="Insurance partner" v={insurerLabel(app.insurance_partner)} />
               <KV k="Plant address" v={app.plant_address} />
               <KV k="Final invoice amount" v={fmtRupees(app.invoice_confirmed_amount)} />
               <KV k="OCR amount" v={fmtRupees(app.invoice_amount)} />
@@ -281,12 +284,6 @@ function Inner() {
               ))}
             </SectionCard>
 
-            <SectionCard title="Submission" accent="green" icon={I.check}>
-              <KV k="Current step" v={String(app.current_step ?? "—")} />
-              <KV k="Step 1 done" v={fmtDate(app.step1_completed_at)} />
-              <KV k="Step 2 done" v={fmtDate(app.step2_completed_at)} />
-              <KV k="Submitted" v={fmtDate(app.submitted_at)} valueClass="text-[#178a5c]" />
-            </SectionCard>
           </div>
 
           <div className="flex flex-col gap-2.5">

@@ -88,23 +88,30 @@ export function Pill({ children, tint, icon }: {
   );
 }
 
-export function BigProgressStep({ icon, done, inProgress, label, sub, mutedIfPending }: {
+export function BigProgressStep({ icon, done, inProgress, failed, label, sub, mutedIfPending }: {
   icon: React.ReactNode;
   done?: boolean;
   inProgress?: boolean;
+  /** Terminal-negative stage (e.g. a rejected decision) — renders red.
+   *  Optional and opt-in: callers that omit it render exactly as before. */
+  failed?: boolean;
   label: React.ReactNode;
   sub?: React.ReactNode;
   mutedIfPending?: boolean;
 }) {
-  const bg = done
+  const bg = failed
+    ? "bg-[#dc2626] text-white ring-4 ring-[#dc2626]/15"
+    : done
     ? "bg-[#178a5c] text-white ring-4 ring-[#178a5c]/15"
     : inProgress
     ? "bg-[#ef9f27] text-white ring-4 ring-[#ef9f27]/15"
     : "bg-[#e3eeff] text-[#6b93c4]";
-  const labelCls = done || inProgress
+  const labelCls = failed
+    ? "text-red-700 font-semibold"
+    : done || inProgress
     ? "text-[#0f3d2e] font-semibold"
     : (mutedIfPending ? "text-[#5a8a76] font-medium" : "text-[#0f3d2e] font-semibold");
-  const subCls = done || inProgress ? "text-[#5a8a76]" : "text-[#8ab3a1]";
+  const subCls = failed ? "text-red-700" : done || inProgress ? "text-[#5a8a76]" : "text-[#8ab3a1]";
   return (
     <div className="flex-1 flex flex-col items-center gap-3 min-w-0">
       <div className={["w-[56px] h-[56px] rounded-full grid place-items-center shrink-0 transition-all", bg].join(" ")} style={{ transform: "scale(1.35)" }}>

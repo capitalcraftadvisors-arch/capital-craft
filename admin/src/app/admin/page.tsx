@@ -112,6 +112,27 @@ function fmtAddedOn(v: string | null | undefined): string {
     hour: "numeric", minute: "2-digit", hour12: true,
   });
 }
+// Same instant, split so the loan table can show the date bold with the time
+// muted underneath: "22 Jul 2026" / "10:43 am".
+function fmtAddedDate(v: string | null | undefined): string {
+  if (!v) return "—";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+}
+function fmtAddedTime(v: string | null | undefined): string {
+  if (!v) return "";
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }).toLowerCase();
+}
+// DISPLAY-ONLY short label for the insurer in the table. The stored
+// insurance_partner value is untouched and nothing keyed on it changes;
+// anything that isn't SBI renders exactly as stored.
+function insurerLabelShort(v: string | null | undefined): string {
+  if (!v) return "—";
+  return /^sbi\b/i.test(v.trim()) ? "SBI-GI" : v;
+}
 
 const LENDERS: { key: Lender; label: string }[] = [
   { key: "creditfair", label: "CreditFair" },
@@ -646,11 +667,19 @@ function AppsTab() {
     first_disbursement_amount: number | null;
     first_disbursement_date: string | null;
     status: string; created_at: string; created_by: string;
+    // Which lender decided — powers the Lender filter (display/filter only).
+    approved_lender: string | null;
+    rejected_lender: string | null;
     epc_business: { contact_name: string | null; trade_name: string | null; legal_name: string | null; epc_display_id: string | null } | null;
   };
   const [rows, setRows] = useState<Row[]>([]);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  // Client-side filters over the already-loaded list.
+  const [epcFilter, setEpcFilter]       = useState("");
+  const [lenderFilter, setLenderFilter] = useState("");
+  const [dateFrom, setDateFrom]         = useState("");
+  const [dateTo, setDateTo]             = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [zipBusy, setZipBusy] = useState<string | null>(null);
   // Row whose Download ZIP popup is open — the lender picker is the same
@@ -699,7 +728,7 @@ function AppsTab() {
           "id, borrower_name, aadhaar_name, aadhaar_number_masked, loan_display_id, " +
           "loan_amount, loan_amount_required, " +
           "sanctioned_amount, first_disbursement_amount, first_disbursement_date, " +
-          "status, created_at, created_by, " +
+          "status, created_at, created_by, approved_lender, rejected_lender, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .order("created_at", { ascending: false });
@@ -762,12 +791,52 @@ function AppsTab() {
     }
   }
 
-  const filtered = q.trim()
-    ? rows.filter((r) =>
-        displayBorrower(r).toLowerCase().includes(q.toLowerCase()) ||
-        (r.loan_display_id ?? "").toLowerCase().includes(q.toLowerCase()) ||
-        displayEpc(r).toLowerCase().includes(q.toLowerCase()))
-    : rows;
+  // EPC options for the filter dropdown — only EPCs actually present in the list.
+  const epcOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const r of rows) {
+      const name = displayEpc(r);
+      if (name && name !== "—") seen.add(name);
+    }
+    return [...seen].sort((a, b) => a.localeCompare(b)).map((n) => ({ value: n, label: n }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
+
+  // Client-side filter, then sort: rows with a RUNNING disbursement countdown
+  // first (fewest days remaining on top — overdue is negative, so it floats to
+  // the very top), everything else below, newest first. The query is untouched.
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const fromMs = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : null;
+    const toMs   = dateTo   ? new Date(`${dateTo}T23:59:59`).getTime()   : null;
+
+    const out = rows.filter((r) => {
+      if (needle &&
+          !(displayBorrower(r).toLowerCase().includes(needle) ||
+            (r.loan_display_id ?? "").toLowerCase().includes(needle) ||
+            displayEpc(r).toLowerCase().includes(needle))) return false;
+      if (epcFilter && displayEpc(r) !== epcFilter) return false;
+      if (lenderFilter && String(r.approved_lender ?? r.rejected_lender ?? "") !== lenderFilter) return false;
+      if (fromMs !== null || toMs !== null) {
+        const t = new Date(r.created_at).getTime();
+        if (fromMs !== null && t < fromMs) return false;
+        if (toMs !== null && t > toMs) return false;
+      }
+      return true;
+    });
+
+    const running = (r: Row) => r.status === "approved" && !!r.first_disbursement_date;
+    return out.sort((a, b) => {
+      const ra = running(a), rb = running(b);
+      if (ra !== rb) return ra ? -1 : 1;
+      if (ra && rb) {
+        return deadlineState(a.first_disbursement_date).daysRemaining
+             - deadlineState(b.first_disbursement_date).daysRemaining;
+      }
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, q, epcFilter, lenderFilter, dateFrom, dateTo]);
 
   return (
     <>
@@ -776,7 +845,9 @@ function AppsTab() {
           + Add New Loan Application
         </Button>
       </div>
-      <div className="grid sm:grid-cols-[1fr_220px] gap-3 mb-5">
+      {/* Search + filters. Status stays server-side; EPC / lender / date range
+          filter the already-loaded list client-side. */}
+      <div className="grid gap-3 mb-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <Input placeholder="Search by borrower or EPC…" value={q} onChange={(e) => setQ(e.target.value)} />
         <Select
           placeholder="Status filter"
@@ -788,32 +859,53 @@ function AppsTab() {
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         />
+        <Select
+          placeholder="EPC partner"
+          options={epcOptions}
+          value={epcFilter}
+          onChange={(e) => setEpcFilter(e.target.value)}
+        />
+        <Select
+          placeholder="Lender"
+          options={[
+            { value: "creditfair", label: "CreditFair" },
+            { value: "aerem",      label: "Aerem" },
+            { value: "solfin",     label: "Solfin" },
+          ]}
+          value={lenderFilter}
+          onChange={(e) => setLenderFilter(e.target.value)}
+        />
+        <Input type="date" aria-label="Created from" title="Created from" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+        <Input type="date" aria-label="Created to" title="Created to" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
       </div>
 
       <Card className="overflow-hidden">
         <table className="w-full text-[14px] table-fixed">
+          {/* Percentage widths — the table fills the page evenly and never
+              needs a horizontal scrollbar. */}
           <colgroup>
-            <col />
-            <col />
-            <col style={{ width: "110px" }} />
-            <col style={{ width: "130px" }} />
-            <col style={{ width: "110px" }} />
-            <col style={{ width: "125px" }} />
-            <col style={{ width: "140px" }} />
-            <col style={{ width: "85px" }} />
-            <col style={{ width: "140px" }} />
+            <col style={{ width: "17%" }} />
+            <col style={{ width: "14%" }} />
+            <col style={{ width: "9%"  }} />
+            <col style={{ width: "11%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "9%"  }} />
+            <col style={{ width: "11%" }} />
+            <col style={{ width: "8%"  }} />
+            <col style={{ width: "11%" }} />
           </colgroup>
-          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">
+          {/* Everything centred except Borrower details, which stays left. */}
+          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-[#5a8a76]">
             <tr>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Borrower details</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">EPC partner</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Amount</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Status</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Disbursement</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Days remaining</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Added (date &amp; time)</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">By</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Action</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-left">Borrower details</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">EPC partner</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Amount</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Status</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Disbursement</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Days remaining</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Added on</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Created by</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -842,23 +934,19 @@ function AppsTab() {
                     <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{displayMaskedAadhaar(r)}</p>
                   )}
                 </td>
-                <td className="px-3 py-3">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <InitialsBadge name={displayEpc(r)} />
-                    <div className="min-w-0">
-                      <p className="text-[13px] text-[#0f3d2e] truncate">{displayEpc(r)}</p>
-                      {r.epc_business?.epc_display_id && (
-                        <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.epc_business.epc_display_id}</p>
-                      )}
-                    </div>
-                  </div>
+                {/* EPC partner — name + EPC ID text only. */}
+                <td className="px-3 py-3 text-center">
+                  <p className="text-[13px] text-[#0f3d2e] truncate">{displayEpc(r)}</p>
+                  {r.epc_business?.epc_display_id && (
+                    <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.epc_business.epc_display_id}</p>
+                  )}
                 </td>
-                <td className="px-3 py-3 text-[13px] font-semibold text-[#0f3d2e]">{displayAmount(r)}</td>
+                <td className="px-3 py-3 text-center text-[13px] font-semibold text-[#0f3d2e]">{displayAmount(r)}</td>
                 {/* Loan apps have no internal admin status — show the lender
                     outcome (same 3 buckets as the EPC's own view). Once the 1st
                     disbursement is entered, surface that instead — display-only,
                     the underlying status field is unchanged. */}
-                <td className="px-3 py-3">
+                <td className="px-3 py-3 text-center">
                   {r.status === "approved" && r.first_disbursement_amount != null ? (
                     <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#dceffb] text-[#185fa5]">
                       1st Disbursement Done
@@ -870,7 +958,7 @@ function AppsTab() {
                   )}
                 </td>
                 {/* Disbursement + countdown — only meaningful once approved. */}
-                <td className="px-3 py-3">
+                <td className="px-3 py-3 text-center">
                   {r.status !== "approved" ? (
                     <span className="text-[13px] text-[#5a8a76]">—</span>
                   ) : r.first_disbursement_amount != null ? (
@@ -882,7 +970,7 @@ function AppsTab() {
                     <span className="text-[13px] text-[#5a8a76]">—</span>
                   )}
                 </td>
-                <td className="px-3 py-3">
+                <td className="px-3 py-3 text-center">
                   {r.status !== "approved" ? (
                     <span className="text-[13px] text-[#5a8a76]">—</span>
                   ) : (() => {
@@ -894,14 +982,18 @@ function AppsTab() {
                     );
                   })()}
                 </td>
-                <td className="px-3 py-3 text-[13px] text-[#5a8a76]">{fmtAddedOn(r.created_at)}</td>
-                <td className="px-3 py-3 text-[13px] text-[#5a8a76]">
+                {/* Added on — date bold dark, time smaller grey beneath. */}
+                <td className="px-3 py-3 text-center">
+                  <p className="text-[13px] font-semibold text-[#0f3d2e]">{fmtAddedDate(r.created_at)}</p>
+                  <p className="text-[11px] text-[#5a8a76] mt-0.5">{fmtAddedTime(r.created_at)}</p>
+                </td>
+                <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">
                   {r.created_by === "admin" ? "Admin" : "Customer"}
                 </td>
                 {/* Action: View + Download ZIP. stopPropagation so the
                     buttons don't also trigger the row's navigate. */}
                 {/* Action buttons — same shape/icons as the EPC list. */}
-                <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <div className="flex flex-col gap-1.5">
                     <button
                       type="button"
@@ -981,6 +1073,10 @@ function InsuranceTab() {
   const [zipBusy, setZipBusy] = useState<string | null>(null);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  // Client-side filters over the already-loaded list (the query is untouched).
+  const [statusFilter, setStatusFilter] = useState("");
+  const [epcFilter, setEpcFilter]       = useState("");
+  const [expiryFilter, setExpiryFilter] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -1048,12 +1144,52 @@ function InsuranceTab() {
     } finally { setZipBusy(null); }
   }
 
-  const filtered = q.trim()
-    ? rows.filter((r) =>
-        applicant(r).toLowerCase().includes(q.toLowerCase()) ||
-        (r.insurance_display_id ?? "").toLowerCase().includes(q.toLowerCase()) ||
-        epc(r).toLowerCase().includes(q.toLowerCase()))
-    : rows;
+  // EPC options for the filter dropdown — only EPCs present in the list.
+  const epcOptions = useMemo(() => {
+    const seen = new Set<string>();
+    for (const r of rows) {
+      const name = epc(r);
+      if (name && name !== "—") seen.add(name);
+    }
+    return [...seen].sort((a, b) => a.localeCompare(b)).map((n) => ({ value: n, label: n }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
+
+  // Client-side filter, then sort: rows WITH policy dates first, fewest days
+  // left on top (expired is negative, so it floats to the very top); rows with
+  // no policy below, newest first. The query is untouched.
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const daysOf = (r: Row) =>
+      policyValidityParts(r.policy_from_date, r.policy_to_date)?.daysLeft ?? null;
+
+    const out = rows.filter((r) => {
+      if (needle &&
+          !(applicant(r).toLowerCase().includes(needle) ||
+            (r.insurance_display_id ?? "").toLowerCase().includes(needle) ||
+            epc(r).toLowerCase().includes(needle))) return false;
+      if (statusFilter && r.status !== statusFilter) return false;
+      if (epcFilter && epc(r) !== epcFilter) return false;
+      if (expiryFilter) {
+        const d = daysOf(r);
+        if (expiryFilter === "none")    { if (d !== null) return false; }
+        else if (d === null)            { return false; }
+        else if (expiryFilter === "expired") { if (d >= 0) return false; }
+        else if (expiryFilter === "30")      { if (d < 0 || d > 30) return false; }
+        else if (expiryFilter === "90")      { if (d < 0 || d > 90) return false; }
+      }
+      return true;
+    });
+
+    return out.sort((a, b) => {
+      const da = daysOf(a), db = daysOf(b);
+      const ha = da !== null, hb = db !== null;
+      if (ha !== hb) return ha ? -1 : 1;
+      if (ha && hb) return (da as number) - (db as number);
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, q, statusFilter, epcFilter, expiryFilter]);
 
   // Issued / Rejected / Hold / Draft / Under Review (migration 0047).
   const STATUS_LABEL: Record<string, string> = {
@@ -1069,7 +1205,7 @@ function InsuranceTab() {
 
   return (
     <>
-      <div className="mb-5 flex items-center gap-3">
+      <div className="mb-3 flex items-center gap-3">
         <div className="flex-1">
           <Input placeholder="Search by applicant, INS id, or EPC…" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
@@ -1077,23 +1213,62 @@ function InsuranceTab() {
           + Add New Insurance Application
         </Button>
       </div>
+      {/* Filters — all client-side over the loaded list. */}
+      <div className="grid gap-3 mb-5 sm:grid-cols-2 lg:grid-cols-3">
+        <Select
+          placeholder="Status filter"
+          options={[
+            { value: "draft",        label: "Draft" },
+            { value: "under_review", label: "Under Review" },
+            { value: "issued",       label: "Issued" },
+            { value: "rejected",     label: "Rejected" },
+            { value: "hold",         label: "Hold" },
+          ]}
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+        />
+        <Select
+          placeholder="EPC partner"
+          options={epcOptions}
+          value={epcFilter}
+          onChange={(e) => setEpcFilter(e.target.value)}
+        />
+        <Select
+          placeholder="Policy expiry"
+          options={[
+            { value: "30",      label: "Expiring in 30 days" },
+            { value: "90",      label: "Expiring in 90 days" },
+            { value: "expired", label: "Expired" },
+            { value: "none",    label: "No policy" },
+          ]}
+          value={expiryFilter}
+          onChange={(e) => setExpiryFilter(e.target.value)}
+        />
+      </div>
       <Card className="overflow-hidden">
         <table className="w-full text-[14px] table-fixed">
+          {/* Percentage widths — fills the page evenly, never scrolls sideways. */}
           <colgroup>
-            <col /><col /><col style={{ width: "120px" }} /><col style={{ width: "110px" }} />
-            <col style={{ width: "100px" }} /><col style={{ width: "210px" }} />
-            <col style={{ width: "140px" }} /><col style={{ width: "150px" }} />
+            <col style={{ width: "17%" }} />
+            <col style={{ width: "15%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "11%" }} />
+            <col style={{ width: "10%" }} />
+            <col style={{ width: "13%" }} />
+            <col style={{ width: "12%" }} />
+            <col style={{ width: "12%" }} />
           </colgroup>
-          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">
+          {/* Everything centred except Insured name, which stays left. */}
+          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-[#5a8a76]">
             <tr>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Insured name</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">EPC partner</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Sum insured</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Insurance partner</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Status</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Policy Validity</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Created on</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Action</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-left">Insured name</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">EPC partner</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Sum insured</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Insurance partner</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Status</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Policy Validity</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Created on</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -1111,25 +1286,21 @@ function InsuranceTab() {
                   <p className="text-[15px] font-semibold text-[#0f3d2e] truncate">{applicant(r)}</p>
                   {r.insurance_display_id && <p className="text-[12px] font-mono text-[#185fa5] mt-0.5">{r.insurance_display_id}</p>}
                 </td>
-                <td className="px-3 py-3">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <InitialsBadge name={epc(r)} />
-                    <div className="min-w-0">
-                      <p className="text-[13px] text-[#0f3d2e] truncate">{epc(r)}</p>
-                      {r.epc_business?.epc_display_id && <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.epc_business.epc_display_id}</p>}
-                    </div>
-                  </div>
+                {/* EPC partner — name + EPC ID text only. */}
+                <td className="px-3 py-3 text-center">
+                  <p className="text-[13px] text-[#0f3d2e] truncate">{epc(r)}</p>
+                  {r.epc_business?.epc_display_id && <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.epc_business.epc_display_id}</p>}
                 </td>
-                <td className="px-3 py-3 text-[13px] font-semibold text-[#0f3d2e]">{amount(r)}</td>
-                <td className="px-3 py-3"><PartnerBadge name={r.insurance_partner} /></td>
-                <td className="px-3 py-3">
+                <td className="px-3 py-3 text-center text-[13px] font-semibold text-[#0f3d2e]">{amount(r)}</td>
+                <td className="px-3 py-3 text-center text-[13px] text-[#0f3d2e]">{insurerLabelShort(r.insurance_partner)}</td>
+                <td className="px-3 py-3 text-center">
                   <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${STATUS_PILL[r.status] ?? STATUS_PILL.draft}`}>
                     {STATUS_LABEL[r.status] ?? r.status.replace(/_/g, " ")}
                   </span>
                 </td>
-                {/* Policy Validity — "Valid until" date + a colour-coded
-                    days-left badge, split so expiring policies scan fast. */}
-                <td className="px-3 py-3">
+                {/* Policy Validity — end date, with the colour-coded days-left
+                    badge on the line below. */}
+                <td className="px-3 py-3 text-center">
                   {(() => {
                     const v = policyValidityParts(r.policy_from_date, r.policy_to_date);
                     if (!v) return <span className="text-[13px] text-[#5a8a76]">—</span>;
@@ -1142,17 +1313,21 @@ function InsuranceTab() {
                       v.daysLeft < 0 ? `Expired ${Math.abs(v.daysLeft)}d ago` :
                       `${v.daysLeft} ${v.daysLeft === 1 ? "day" : "days"} left`;
                     return (
-                      <div className="flex flex-col gap-1">
-                        <span className="text-[12px] text-[#5a8a76]">Valid until <span className="font-semibold text-[#0f3d2e]">{v.toLabel ?? "—"}</span></span>
+                      <div className="flex flex-col items-center gap-1">
+                        <span className="text-[13px] font-semibold text-[#0f3d2e]">{v.toLabel ?? "—"}</span>
                         {daysText && (
-                          <span className={`inline-flex self-start px-2 py-0.5 rounded-full border text-[11px] font-semibold ${badge}`}>{daysText}</span>
+                          <span className={`inline-flex px-2 py-0.5 rounded-full border text-[11px] font-semibold ${badge}`}>{daysText}</span>
                         )}
                       </div>
                     );
                   })()}
                 </td>
-                <td className="px-3 py-3 text-[13px] text-[#5a8a76]">{fmtAddedOn(r.created_at)}</td>
-                <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                {/* Created on — date bold dark, time smaller grey beneath. */}
+                <td className="px-3 py-3 text-center">
+                  <p className="text-[13px] font-semibold text-[#0f3d2e]">{fmtAddedDate(r.created_at)}</p>
+                  <p className="text-[11px] text-[#5a8a76] mt-0.5">{fmtAddedTime(r.created_at)}</p>
+                </td>
+                <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <div className="flex flex-col gap-1.5">
                     <button type="button" onClick={() => navigateToView(r)}
                       className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#185fa5]/30 bg-white text-[#185fa5] hover:bg-[#dceffb] inline-flex items-center justify-center gap-1.5">
@@ -1181,29 +1356,3 @@ function InsuranceTab() {
   );
 }
 
-// ── Table badges — icon "logos" for scannability (no logo assets in repo,
-// so we stand in with initials chips). ──────────────────────────────
-function InitialsBadge({ name, tone = "green" }: { name: string; tone?: "green" | "blue" }) {
-  const initials =
-    (name || "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "—";
-  const cls = tone === "blue" ? "bg-[#dceffb] text-[#185fa5]" : "bg-[#e6f6ee] text-[#178a5c]";
-  return (
-    <span className={`shrink-0 w-8 h-8 rounded-[8px] grid place-items-center text-[12px] font-bold ${cls}`} aria-hidden>
-      {initials}
-    </span>
-  );
-}
-
-// Insurance-partner chip — initials in a coloured pill + the name.
-function PartnerBadge({ name }: { name: string | null | undefined }) {
-  if (!name) return <span className="text-[13px] text-[#5a8a76]">—</span>;
-  const initials =
-    name.replace(/[^A-Za-z ]/g, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join("").toUpperCase()
-    || name.slice(0, 2).toUpperCase();
-  return (
-    <span className="inline-flex items-center gap-2 min-w-0">
-      <span className="shrink-0 w-7 h-7 rounded-full bg-[#dceffb] text-[#185fa5] grid place-items-center text-[11px] font-bold">{initials}</span>
-      <span className="text-[13px] text-[#0f3d2e] truncate">{name}</span>
-    </span>
-  );
-}

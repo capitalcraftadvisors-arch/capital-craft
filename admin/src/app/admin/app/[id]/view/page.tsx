@@ -2,14 +2,10 @@
 
 // Loan Application — admin View profile.
 //
-// Dense, single-window operations layout (modeled on the EPC View's packed
-// multi-column grid). Deliberately NOT a long column of collapsible cards.
-//
-// PALETTE (this page only): sky-blue #185fa5 is PRIMARY, brand-green #178a5c is
-// the ACCENT — the inverse of the rest of the console. Chrome still comes from
-// @/components/view/ViewKit (SectionCard/KV/DocGrid/Pill); we drive it blue via
-// accent props + local components, WITHOUT editing ViewKit (so the EPC View,
-// which shares the kit, is untouched).
+// Dense, single-window operations layout on the SAME green design language as
+// the EPC View (green #178a5c primary, sky-blue #185fa5 accents, white).
+// Chrome comes from @/components/view/ViewKit (SectionCard/KV/DocGrid/Pill/
+// BigProgressStep), so the two dashboards stay visually in step.
 //
 // Read-only summary — "Edit" jumps to /admin/app/[id]/step-1. Disbursement
 // entry stays on the dedicated /disbursement screen; this page only displays it.
@@ -29,7 +25,7 @@ import LenderPickerModal, { type LenderKey } from "@/components/LenderPickerModa
 import { logLoanActivity } from "@/lib/loanAudit";
 import { deadlineState, DEADLINE_PILL, remainingAmount, fmtDateShort } from "@/lib/disbursement";
 import {
-  I, SectionCard, KV, StepBlock, DocGrid, type ViewDocSlot,
+  I, SectionCard, KV, StepBlock, DocGrid, BigProgressStep, BigConnector, type ViewDocSlot,
 } from "@/components/view/ViewKit";
 
 type Loan = Record<string, any>;
@@ -51,8 +47,6 @@ const LOAN_STATUS_LABEL: Record<string, string> = {
   approved:     "Approved by lender",
   rejected:     "Rejected by lender",
 };
-// Friendly labels for user_application_docs categories not covered by an
-// expected slot (surfaced under "Other documents").
 const DOC_LABEL: Record<string, string> = {
   customer_photo:   "Applicant photo",
   borrower_photo:   "Rooftop photo",
@@ -64,6 +58,15 @@ const DOC_LABEL: Record<string, string> = {
   income_proof:     "Income proof",
   property_doc:     "Property document",
 };
+
+// Local trash glyph — kept here (not in ViewKit) so the shared kit and the
+// EPC View that imports it stay untouched.
+const TRASH = (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+    <path d="M10 11v6M14 11v6" />
+  </svg>
+);
 
 function displayId(loan: Loan): string {
   if (loan.loan_display_id) return loan.loan_display_id;
@@ -82,8 +85,10 @@ function maskAcct(a: string | null | undefined): string {
   if (a.length <= 4) return "•".repeat(6) + a;
   return "•".repeat(Math.max(6, a.length - 4)) + a.slice(-4);
 }
-// Approval-details cell: money → ₹ rounded, tenure → "<n> years". Numbers only
-// (no spelled-out amounts anywhere on this page).
+function cap(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+// Approval-details cell: money → ₹ rounded, tenure → "<n> years". Numbers only.
 function fmtApproval(v: number | null | undefined, money: boolean, suffix?: string): string {
   if (v === null || v === undefined || !Number.isFinite(Number(v))) return "—";
   const n = Number(v);
@@ -92,12 +97,6 @@ function fmtApproval(v: number | null | undefined, money: boolean, suffix?: stri
 }
 
 // ── Document grouping (missing-doc visibility) ───────────────────────
-//
-// Documents live two ways: user_application_docs rows (borrower_pan,
-// customer_photo, borrower_photo, quotation, and ALL completion docs — viewed
-// by id) and *_path columns on the row (Aadhaar, e-bill, proforma, bank
-// statement, co-applicant — viewed by path). This builds the FULL lifecycle
-// set grouped by stage so missing docs render greyed "Not uploaded".
 
 type LoanSlot = { key: string; label: string; docId: string | null; path: string | null };
 type LoanDocGroup = { title: string; slots: LoanSlot[] };
@@ -155,9 +154,6 @@ function buildLoanDocGroups(loan: Loan, docs: Doc[]): LoanDocGroup[] {
     ],
   });
 
-  // Disbursement / completion documents — collected AFTER the 1st disbursement
-  // (all user_application_docs rows). Shown greyed until uploaded so the
-  // lifecycle set is complete.
   groups.push({
     title: "Disbursement & completion",
     slots: [
@@ -248,7 +244,6 @@ function Inner() {
     if (url) window.open(url, "_blank", "noopener");
   }
 
-  // View a document stored as a *_path column, signed via the admin sign-doc route.
   async function openPath(path: string) {
     try {
       const res = await fetch(`/api/admin/loan-app/${params.id}/sign-doc`, {
@@ -275,9 +270,6 @@ function Inner() {
     }));
   }
 
-  // Plain status move (Mark under review / re-open). Approval + rejection go
-  // through their own flows below. Every change writes status_history + an
-  // activity-log row.
   async function changeStatus(next: "under_review" | "approved" | "rejected", extra: Record<string, unknown> = {}, note = "") {
     if (!loan || statusBusy) return;
     setStatusBusy(true);
@@ -302,13 +294,11 @@ function Inner() {
     setStatusBusy(false);
   }
 
-  // APPROVAL — popup picked a lender; hand off to the approval-details screen.
   function onApproveConfirm(lender: LenderKey) {
     if (!loan) return;
     router.push(`/admin/app/${loan.id}/approval?lender=${lender}` as any);
   }
 
-  // REJECTION — record the lender + flip status immediately.
   async function onRejectConfirm(lender: LenderKey) {
     if (!loan) return;
     await changeStatus(
@@ -318,7 +308,6 @@ function Inner() {
     );
   }
 
-  // The ZIP is lender-specific — the picker popup supplies the lender.
   async function downloadZip(lender: LenderKey) {
     if (!loan || downloading) return;
     setDownloading(true);
@@ -356,9 +345,11 @@ function Inner() {
     return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Loan application not found.</p></main>;
   }
 
+  const submitted   = !!loan.submitted_at;
   const approved    = loan.status === "approved";
   const rejected    = loan.status === "rejected";
   const underReview = loan.status === "under_review";
+  const decided     = approved || rejected;
   const statusVal   = loan.status ?? "draft";
   const hasCoapp    = loan.bill_on_applicant_name === false;
 
@@ -366,16 +357,21 @@ function Inner() {
   const decidedByLabel = decidedLender ? (LENDER_LABEL[String(decidedLender)] ?? String(decidedLender)) : null;
   const approvalDetails = (loan.approval_details ?? null) as ApprovalDetails | null;
 
-  // Disbursement — same shared 45-day countdown the tables use. Read-only.
   const dl = deadlineState(loan.first_disbursement_date);
-  const firstDone = loan.first_disbursement_amount != null;
+  const firstDone  = loan.first_disbursement_amount != null;
+  const secondDone = loan.second_disbursement_amount != null;
   const reviewLabel = ["approved", "rejected"].includes(String(loan.completion_docs_status))
     ? "Reviewed" : "Pending";
 
-  // Header status/decision actions — the exact state machine (same handlers).
+  // Header status/decision actions — same state machine, same handlers.
   const statusActions =
     statusVal === "approved" ? (
-      <HAction variant="ghost" disabled={statusBusy} onClick={() => void changeStatus("under_review")}>Move back to review</HAction>
+      <>
+        <span className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border bg-[#178a5c] text-white border-[#178a5c] inline-flex items-center gap-1.5">
+          {I.check} Approved
+        </span>
+        <HAction variant="ghost" disabled={statusBusy} onClick={() => void changeStatus("under_review")}>Move back to review</HAction>
+      </>
     ) : statusVal === "rejected" ? (
       <HAction variant="ghost" disabled={statusBusy} onClick={() => void changeStatus("under_review")}>Re-open</HAction>
     ) : (
@@ -383,27 +379,27 @@ function Inner() {
         {statusVal !== "under_review" && (
           <HAction variant="ghost" disabled={statusBusy} onClick={() => void changeStatus("under_review")}>Mark under review</HAction>
         )}
-        <HAction variant="primary" icon={I.check} disabled={statusBusy} onClick={() => setApproveOpen(true)}>Approval</HAction>
-        <HAction variant="danger" disabled={statusBusy} onClick={() => setRejectOpen(true)}>Rejection</HAction>
+        <HAction variant="approve" icon={I.check} disabled={statusBusy} onClick={() => setApproveOpen(true)}>Approve</HAction>
+        <HAction variant="reject" disabled={statusBusy} onClick={() => setRejectOpen(true)}>Rejection</HAction>
       </>
     );
 
   return (
-    <main className="min-h-screen bg-[#f7fafd]">
-      {/* ── STICKY HEADER — identity (left) + every action (right) ─────── */}
-      <header className="border-b border-[#d3e9f7] bg-white/95 backdrop-blur sticky top-0 z-30">
-        <div className="w-full px-5 sm:px-8 py-2.5 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-3 min-w-0">
+    <main className="min-h-screen bg-white">
+      {/* ── STICKY HEADER — name / loan-ID · created / EPC, + actions ──── */}
+      <header className="border-b border-[#cdeadd] bg-white/95 backdrop-blur sticky top-0 z-30">
+        <div className="w-full px-5 sm:px-8 py-4 flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex items-start gap-4 min-w-0">
             <button
               onClick={() => router.push("/admin")}
-              className="text-[13px] text-[#5f7d95] hover:text-[#0f2f4d] inline-flex items-center gap-1 shrink-0"
+              className="text-[13px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1 shrink-0 mt-1"
             >
               ← Back
             </button>
-            <div className="w-px h-9 bg-[#e2eef7] shrink-0" />
+            <div className="w-px h-14 bg-[#e2efe9] shrink-0" />
             <div
-              className="w-11 h-11 rounded-[10px] bg-[#dceffb] text-[#185fa5] grid place-items-center shrink-0 overflow-hidden"
-              style={photoUrl ? undefined : { transform: "scale(1.2)", transformOrigin: "center" }}
+              className="w-16 h-16 rounded-[12px] bg-[#d6efe3] text-[#178a5c] grid place-items-center shrink-0 overflow-hidden"
+              style={photoUrl ? undefined : { transform: "scale(1.25)", transformOrigin: "center" }}
             >
               {photoUrl ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
@@ -414,20 +410,21 @@ function Inner() {
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
-                <span className="text-[18px] font-semibold text-[#0f2f4d] truncate">{applicantName}</span>
+                <span className="text-[22px] font-semibold text-[#0f3d2e] truncate">{applicantName}</span>
                 <StatusBadge status={loan.status} />
               </div>
-              <div className="text-[12px] text-[#5f7d95] truncate flex items-center gap-1.5 mt-0.5">
+              {/* Loan ID, with "Created …" where "via <EPC>" used to sit. */}
+              <div className="text-[13px] flex items-center gap-2 mt-1 min-w-0">
                 <span className="font-semibold text-[#185fa5]">{displayId(loan)}</span>
-                <span className="text-[#c2d9ea]">·</span>
-                <span className="truncate">via {epcName}</span>
                 {loan.created_at && (
                   <>
-                    <span className="text-[#c2d9ea]">·</span>
-                    <span className="whitespace-nowrap">Created {fmtDateShort(loan.created_at)}</span>
+                    <span className="text-[#c7ddd2]">·</span>
+                    <span className="text-[#5a8a76] whitespace-nowrap">Created {fmtDateShort(loan.created_at)}</span>
                   </>
                 )}
               </div>
+              {/* EPC partner — directly under the loan ID. */}
+              <div className="text-[13px] text-[#5a8a76] truncate mt-0.5">{epcName}</div>
             </div>
           </div>
 
@@ -441,25 +438,79 @@ function Inner() {
             <HAction variant="outline" icon={I.edit} onClick={() => router.push(`/admin/app/${loan.id}/step-1` as any)}>
               Edit
             </HAction>
-            <HAction variant="primary" icon={I.download} disabled={downloading} onClick={() => setZipPickerOpen(true)}>
+            <HAction variant="blue" icon={I.download} disabled={downloading} onClick={() => setZipPickerOpen(true)}>
               {downloading ? "Preparing…" : "Download ZIP"}
             </HAction>
             <HAction variant="ghost" icon={I.eye} onClick={() => setActivityOpen(true)}>
               Activity log
             </HAction>
-            <HAction variant="dangerOutline" onClick={() => setDelOpen(true)}>
-              Delete
-            </HAction>
+            <button
+              type="button"
+              onClick={() => setDelOpen(true)}
+              title="Delete"
+              aria-label="Delete"
+              className="inline-flex items-center justify-center w-9 h-9 rounded-[8px] border border-red-300 bg-white text-red-700 hover:bg-red-50 hover:border-red-500 transition-colors shrink-0"
+            >
+              {TRASH}
+            </button>
           </div>
         </div>
-        {statusMsg && <div className="px-5 sm:px-8 pb-2 text-[12px] text-[#5f7d95]">{statusMsg}</div>}
+        {statusMsg && <div className="px-5 sm:px-8 pb-2 text-[12px] text-[#5a8a76]">{statusMsg}</div>}
       </header>
 
-      {/* ── DENSE GRID — one window, no long scroll ─────────────────────── */}
-      <div className="w-full px-5 sm:px-8 py-4" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f2f4d" }}>
+      <div className="w-full px-5 sm:px-8 py-4" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
+
+        {/* ── PROGRESS TRACKER — 5 stages, EPC View band styling ───────── */}
+        <div className="rounded-[12px] border border-[#cdeadd] bg-white p-5 sm:p-6 mb-4">
+          <div className="flex items-center gap-2 sm:gap-4">
+            <BigProgressStep
+              icon={I.send}
+              done={submitted}
+              label="Submitted"
+              sub={submitted ? fmtDateShort(loan.submitted_at) : "Pending"}
+              mutedIfPending
+            />
+            <BigConnector active={submitted} />
+            <BigProgressStep
+              icon={I.eye}
+              done={decided}
+              inProgress={underReview}
+              label="Under Review"
+              sub={decided ? "Decided" : underReview ? "With the lender" : "Pending"}
+              mutedIfPending
+            />
+            <BigConnector active={decided} />
+            <BigProgressStep
+              icon={I.circleCheck}
+              done={approved}
+              failed={rejected}
+              label={rejected ? "Rejected" : "Approved"}
+              sub={decidedByLabel ?? (decided ? "—" : "Awaiting decision")}
+              mutedIfPending
+            />
+            <BigConnector active={approved} />
+            <BigProgressStep
+              icon={I.money}
+              done={firstDone}
+              label="1st Disbursement"
+              sub={firstDone ? fmtDateShort(loan.first_disbursement_date) : "Pending"}
+              mutedIfPending
+            />
+            <BigConnector active={firstDone} />
+            <BigProgressStep
+              icon={I.check}
+              done={secondDone}
+              label="2nd Disbursement"
+              sub={secondDone ? "Complete" : "Pending"}
+              mutedIfPending
+            />
+          </div>
+        </div>
+
+        {/* ── DENSE GRID ────────────────────────────────────────────────── */}
         <div className="grid gap-3 lg:grid-cols-3 items-start">
 
-          {/* COL 1 — identity */}
+          {/* COL 1 — applicant, co-applicant, employment & bank */}
           <div className="flex flex-col gap-3">
             <SectionCard title="Applicant identity" accent="blue" icon={I.user}>
               <KV k="Name" v={loan.aadhaar_name || loan.borrower_name} />
@@ -504,7 +555,7 @@ function Inner() {
               </SectionCard>
             )}
 
-            <SectionCard title="Employment & bank" accent="blue" icon={I.bank} adminOnly>
+            <SectionCard title="Employment & bank" tint icon={I.bank} adminOnly>
               <StepBlock title="Employment">
                 <KV k="Employment" v={loan.employment_type ? EMPLOYMENT_LABEL[loan.employment_type] ?? loan.employment_type : null} />
                 <KV k="Organization" v={loan.organization_name} />
@@ -522,7 +573,7 @@ function Inner() {
             </SectionCard>
           </div>
 
-          {/* COL 2 — site & loan requirements */}
+          {/* COL 2 — site & loan requirements, then Comments */}
           <div className="flex flex-col gap-3">
             <SectionCard title="Installation site details" accent="blue" icon={I.building}>
               <KV k="Address" v={loan.ebill_address_line} />
@@ -554,15 +605,24 @@ function Inner() {
                 </StepBlock>
               </div>
             </SectionCard>
+
+            {/* Comments — sits under Installation site details. */}
+            <SectionCard title="Comments" tint icon={I.lock} adminOnly>
+              <CommentsSection
+                applicationId={loan.id}
+                epcName={applicantName}
+                maxListHeight={200}
+              />
+            </SectionCard>
           </div>
 
-          {/* COL 3 — decision, sanction, documents, comments */}
+          {/* COL 3 — decision, sanction, documents */}
           <div className="flex flex-col gap-3">
             {approved && approvalDetails && (
-              <SectionCard title="Approval details" accent="blue" icon={I.circleCheck} adminOnly>
+              <SectionCard title="Approval details" accent="green" icon={I.circleCheck} adminOnly>
                 <div className="text-[14px] mb-2">
-                  <span className="text-[#5f7d95] font-medium">Approved By: </span>
-                  <span className="text-[#185fa5] font-bold">
+                  <span className="text-[#5a8a76] font-medium">Approved By: </span>
+                  <span className="text-[#178a5c] font-bold">
                     {approvalDetails.approved_by
                       ? (LENDER_LABEL[String(approvalDetails.approved_by)] ?? String(approvalDetails.approved_by))
                       : (decidedByLabel ?? "—")}
@@ -571,10 +631,10 @@ function Inner() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-[14px] border-collapse">
                     <thead>
-                      <tr className="border-b border-[#e2eef7]">
-                        <th className="py-1.5 pr-4 text-left font-medium text-[#5f7d95]"></th>
-                        <th className="py-1.5 px-3 text-right text-[11px] font-semibold uppercase tracking-wider text-[#8aa6bd]">Applied</th>
-                        <th className="py-1.5 px-3 text-right text-[11px] font-semibold uppercase tracking-wider text-[#185fa5]">Approved</th>
+                      <tr className="border-b border-[#e0f0e8]">
+                        <th className="py-1.5 pr-4 text-left font-medium text-[#5a8a76]"></th>
+                        <th className="py-1.5 px-3 text-right text-[11px] font-semibold uppercase tracking-wider text-[#8ab3a1]">Applied</th>
+                        <th className="py-1.5 px-3 text-right text-[11px] font-semibold uppercase tracking-wider text-[#178a5c]">Approved</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -583,26 +643,27 @@ function Inner() {
                         { label: "Tenure",      applied: approvalDetails.applied_tenure_years, approved: approvalDetails.approved_tenure_years, money: false, suffix: "years" },
                         { label: "EMI",         applied: approvalDetails.tentative_emi,         approved: approvalDetails.approved_emi,         money: true, suffix: undefined },
                       ].map((r) => (
-                        <tr key={r.label} className="border-b border-[#e2eef7] last:border-0">
-                          <td className="py-2 pr-4 text-[#5f7d95] font-medium">{r.label}</td>
-                          <td className="py-2 px-3 text-right font-semibold text-[#0f2f4d]">{fmtApproval(r.applied, r.money, r.suffix)}</td>
-                          <td className="py-2 px-3 text-right font-semibold text-[#185fa5]">{fmtApproval(r.approved, r.money, r.suffix)}</td>
+                        <tr key={r.label} className="border-b border-[#e0f0e8] last:border-0">
+                          <td className="py-2 pr-4 text-[#5a8a76] font-medium">{r.label}</td>
+                          {/* Applied = muted; Approved = bold dark. */}
+                          <td className="py-2 px-3 text-right font-medium text-[#9aa5a0]">{fmtApproval(r.applied, r.money, r.suffix)}</td>
+                          <td className="py-2 px-3 text-right font-bold text-[#0f3d2e]">{fmtApproval(r.approved, r.money, r.suffix)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                <p className="text-[12px] text-[#5f7d95] mt-2">Recorded {fmtDate(loan.approved_at)} · read-only</p>
+                <p className="text-[12px] text-[#5a8a76] mt-2">Recorded {fmtDate(loan.approved_at)} · read-only</p>
               </SectionCard>
             )}
 
             {approved && (
-              <SectionCard title="Sanction details" accent="blue" icon={I.money} adminOnly>
+              <SectionCard title="Sanction details" accent="green" icon={I.money} adminOnly>
                 <StepBlock title="1st Disbursement">
                   <KV k="Amount" v={fmtRupees(loan.first_disbursement_amount)} valueClass="text-[#178a5c]" />
                   <KV k="Date" v={fmtDateShort(loan.first_disbursement_date)} />
                   <div className="flex justify-between items-center text-[14px] py-[5px] gap-3">
-                    <span className="text-[#5f7d95] shrink-0">Countdown to 2nd</span>
+                    <span className="text-[#5a8a76] shrink-0">Countdown to 2nd</span>
                     <span className={["inline-flex px-2 py-0.5 rounded-[6px] text-[12px] font-semibold", DEADLINE_PILL[dl.tone]].join(" ")}>
                       {firstDone ? dl.label : "—"}
                     </span>
@@ -614,7 +675,7 @@ function Inner() {
                     <KV k="Amount" v={fmtRupees(loan.second_disbursement_amount)} valueClass="text-[#178a5c]" />
                     <KV k="Date" v={fmtDateShort(loan.second_disbursement_date)} />
                     <div className="flex justify-between items-center text-[14px] py-[5px] gap-3">
-                      <span className="text-[#5f7d95] shrink-0">Documents review</span>
+                      <span className="text-[#5a8a76] shrink-0">Documents review</span>
                       <span className={["inline-flex px-2 py-0.5 rounded-[6px] text-[12px] font-semibold",
                         reviewLabel === "Reviewed" ? "bg-[#e6f6ee] text-[#178a5c]" : "bg-[#fef0d6] text-[#854f0b]"].join(" ")}>
                         {reviewLabel}
@@ -625,7 +686,7 @@ function Inner() {
               </SectionCard>
             )}
 
-            <SectionCard title="Documents" accent="blue" icon={I.files}>
+            <SectionCard title="Documents" accent="green" icon={I.files}>
               <div className="space-y-3">
                 {docGroups.map((g) => (
                   <StepBlock key={g.title} title={g.title}>
@@ -633,15 +694,6 @@ function Inner() {
                   </StepBlock>
                 ))}
               </div>
-            </SectionCard>
-
-            {/* Comments — inline (existing behavior). Sits under Documents. */}
-            <SectionCard title="Comments" accent="blue" icon={I.lock} adminOnly>
-              <CommentsSection
-                applicationId={loan.id}
-                epcName={applicantName}
-                maxListHeight={200}
-              />
             </SectionCard>
           </div>
         </div>
@@ -686,29 +738,30 @@ function Inner() {
   );
 }
 
-// ── Header action button (blue-primary theme, local to this page) ────
+// ── Header action button — green-primary theme, soft shades. ─────────
 function HAction({
   children, onClick, variant = "ghost", icon, disabled,
 }: {
   children: ReactNode;
   onClick: () => void;
-  variant?: "primary" | "amber" | "outline" | "ghost" | "danger" | "dangerOutline";
+  variant?: "approve" | "reject" | "primary" | "blue" | "amber" | "outline" | "ghost";
   icon?: ReactNode;
   disabled?: boolean;
 }) {
   const cls =
-    variant === "primary"       ? "bg-[#185fa5] text-white border-[#185fa5] hover:bg-[#144d84]" :
-    variant === "amber"         ? "bg-[#fef8ee] text-[#854f0b] border-[#854f0b]/30 hover:bg-[#fef0d6]" :
-    variant === "outline"       ? "bg-white text-[#185fa5] border-[#9dc7e8] hover:bg-[#eff6fc]" :
-    variant === "danger"        ? "bg-white text-red-700 border-red-300 hover:bg-red-50" :
-    variant === "dangerOutline" ? "bg-white text-red-700 border-red-300 hover:bg-red-50 hover:border-red-500" :
-                                  "bg-white text-[#0f2f4d] border-[#d3e9f7] hover:bg-[#eff6fc]";
+    variant === "approve" ? "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd] hover:bg-[#d6efe3]" :
+    variant === "reject"  ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100" :
+    variant === "primary" ? "bg-[#178a5c] text-white border-[#178a5c] hover:bg-[#12734c]" :
+    variant === "blue"    ? "bg-[#dceffb] text-[#185fa5] border-[#bfe0f5] hover:bg-[#cde6f8]" :
+    variant === "amber"   ? "bg-[#fef8ee] text-[#854f0b] border-[#854f0b]/30 hover:bg-[#fef0d6]" :
+    variant === "outline" ? "bg-white text-[#178a5c] border-[#cdeadd] hover:bg-[#f0faf5]" :
+                            "bg-white text-[#0f3d2e] border-[#cdeadd] hover:bg-[#f0faf5]";
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={["text-[13px] font-semibold px-3 py-1.5 rounded-[8px] border transition-colors disabled:opacity-60 inline-flex items-center gap-1.5", cls].join(" ")}
+      className={["text-[13px] font-semibold px-3 py-2 rounded-[8px] border transition-colors disabled:opacity-60 inline-flex items-center gap-1.5", cls].join(" ")}
     >
       {icon && <span className="shrink-0" style={{ display: "inline-flex" }}>{icon}</span>}
       {children}
@@ -723,7 +776,7 @@ function StatusBadge({ status }: { status: string | null | undefined }) {
   const cls =
     s === "approved" ? "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd]" :
     s === "rejected" ? "bg-red-50 text-red-700 border-red-200" :
-    s === "under_review" ? "bg-[#dceffb] text-[#185fa5] border-[#bfe0f5]" :
+    s === "under_review" ? "bg-[#fef0d6] text-[#854f0b] border-[#f3d9a4]" :
                        "bg-slate-100 text-slate-600 border-slate-200";
   return (
     <span className={["shrink-0 inline-flex px-2 py-0.5 rounded-full border text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap", cls].join(" ")}>

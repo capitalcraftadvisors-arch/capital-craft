@@ -56,13 +56,16 @@ type RowDef = {
   // Spelled-out form shown under the entered value, so the admin can see at a
   // glance that what they typed is what they meant.
   words: (n: number) => string;
+  // Only rows opting in render the spelled-out helper. Kept to the loan amount
+  // — "Zero years" / "Zero Rupees Only" under Tenure and EMI added noise.
+  showWords?: boolean;
 };
 
 const ROWS: RowDef[] = [
   {
     appliedLabel: "Applied Loan Amount",  appliedKey: "applied_loan_amount",
     approvedLabel: "Approved Loan Amount", approvedKey: "approved_loan_amount",
-    money: true, words: rupeesInWords,
+    money: true, words: rupeesInWords, showWords: true,
   },
   {
     appliedLabel: "Applied Tenure",       appliedKey: "applied_tenure_years",
@@ -146,6 +149,7 @@ export default function ApprovalDetailsTable({ value, onChange, readOnly }: Prop
                 {/* Spelled out, right under the box — bold + highlighted so
                     it reads as a check on what was typed. */}
                 {(() => {
+                  if (!row.showWords) return null;
                   const n = value[row.approvedKey];
                   if (n === null || n === undefined || !Number.isFinite(Number(n))) return null;
                   return (
