@@ -1419,6 +1419,14 @@ function LeadsTab() {
     else setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, status } : x)));
     setBusy(null);
   }
+  async function deleteLead(r: Lead) {
+    if (!window.confirm(`Delete this lead${r.name ? ` — ${r.name}` : ""} (+91 ${r.mobile})?\n\nThis permanently removes it and cannot be undone.`)) return;
+    setBusy(r.id);
+    const { error } = await supabase().from("customer_leads").delete().eq("id", r.id);
+    if (error) alert("Couldn't delete: " + error.message);
+    else { setRows((rs) => rs.filter((x) => x.id !== r.id)); setViewLead(null); }
+    setBusy(null);
+  }
   const maskAadhaar = (a: string | null) => (a ? "XXXX XXXX " + a.slice(-4) : "—");
 
   const filtered = rows.filter((r) => {
@@ -1525,7 +1533,18 @@ function LeadsTab() {
               <LeadRow k="Status" v={viewLead.status[0].toUpperCase() + viewLead.status.slice(1)} />
               <LeadRow k="Received" v={fmtAddedDate(viewLead.created_at) + " · " + fmtAddedTime(viewLead.created_at)} />
             </div>
-            <p className="text-[12px] text-[#5a8a76] mt-4">Basic lead details — the customer isn&rsquo;t under any EPC. Use these to reach out and build the full profile.</p>
+            <div className="mt-5 flex items-center justify-between gap-3 flex-wrap">
+              <p className="text-[12px] text-[#5a8a76] max-w-xs">Basic lead details — not under any EPC. Use these to reach out and build the full profile.</p>
+              <button
+                type="button"
+                disabled={busy === viewLead.id}
+                onClick={() => void deleteLead(viewLead)}
+                className="text-[13px] font-semibold px-3.5 py-2 rounded-[8px] border border-red-300 text-red-700 hover:bg-red-50 hover:border-red-500 disabled:opacity-60 shrink-0 inline-flex items-center gap-1.5"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+                Delete lead
+              </button>
+            </div>
           </div>
         </div>
       )}
