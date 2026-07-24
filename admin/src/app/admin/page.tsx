@@ -1400,6 +1400,7 @@ function LeadsTab() {
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [viewLead, setViewLead] = useState<Lead | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -1451,7 +1452,7 @@ function LeadsTab() {
             {filtered.length === 0 ? (
               <tr><td colSpan={6} className="px-5 py-10 text-center text-[#5a8a76]">No leads yet.</td></tr>
             ) : filtered.map((r) => (
-              <tr key={r.id} className="border-b border-[#eaf3ee] hover:bg-[#f7fcfa] align-top">
+              <tr key={r.id} onClick={() => setViewLead(r)} className="border-b border-[#eaf3ee] hover:bg-[#f7fcfa] align-top cursor-pointer">
                 <td className="px-3 py-3">
                   <p className="text-[15px] font-semibold text-[#0f3d2e]">{r.name || "—"}</p>
                   <p className="text-[12px] text-[#5a8a76] mt-0.5">+91 {r.mobile}</p>
@@ -1475,7 +1476,7 @@ function LeadsTab() {
                   <p className="text-[13px] font-semibold text-[#0f3d2e]">{fmtAddedDate(r.created_at)}</p>
                   <p className="text-[11px] text-[#5a8a76] mt-0.5">{fmtAddedTime(r.created_at)}</p>
                 </td>
-                <td className="px-3 py-3 text-center">
+                <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <select
                     disabled={busy === r.id}
                     value={r.status}
@@ -1493,7 +1494,52 @@ function LeadsTab() {
           </tbody>
         </table>
       </Card>
+
+      {viewLead && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setViewLead(null)}>
+          <div className="w-full max-w-lg bg-white rounded-card-lg shadow-lg p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-4">
+              <div>
+                <h3 className="font-display font-semibold text-[19px] text-[#0f3d2e]">{viewLead.name || "(no name given)"}</h3>
+                <p className="text-[13px] text-[#5a8a76] mt-0.5">Non-EPC lead · <span className="uppercase font-semibold text-[#185fa5]">{viewLead.lead_type}</span></p>
+              </div>
+              <button type="button" onClick={() => setViewLead(null)} className="text-[22px] text-[#5a8a76] hover:text-[#0f3d2e] leading-none" aria-label="Close">×</button>
+            </div>
+            <div className="border border-[#e6f1ec] rounded-[12px] px-4">
+              <LeadRow k="Mobile" v={"+91 " + viewLead.mobile} />
+              <LeadRow k="City" v={viewLead.city} />
+              <LeadRow k="Pincode" v={viewLead.pincode} />
+              <LeadRow k="PAN" v={viewLead.pan} />
+              <LeadRow k="Aadhaar" v={viewLead.aadhaar} />
+              {viewLead.lead_type === "loan" ? (
+                <>
+                  <LeadRow k="Project cost" v={fmtRupees(viewLead.project_cost)} />
+                  <LeadRow k="Loan amount wanted" v={fmtRupees(viewLead.loan_amount)} />
+                </>
+              ) : (
+                <>
+                  <LeadRow k="Approx. plant value" v={fmtRupees(viewLead.plant_value)} />
+                  <LeadRow k="GSTIN" v={viewLead.gstin} />
+                </>
+              )}
+              <LeadRow k="Status" v={viewLead.status[0].toUpperCase() + viewLead.status.slice(1)} />
+              <LeadRow k="Received" v={fmtAddedDate(viewLead.created_at) + " · " + fmtAddedTime(viewLead.created_at)} />
+            </div>
+            <p className="text-[12px] text-[#5a8a76] mt-4">Basic lead details — the customer isn&rsquo;t under any EPC. Use these to reach out and build the full profile.</p>
+          </div>
+        </div>
+      )}
     </>
+  );
+}
+
+function LeadRow({ k, v }: { k: string; v: unknown }) {
+  const display = v === null || v === undefined || v === "" ? "—" : String(v);
+  return (
+    <div className="flex justify-between items-center gap-4 py-2.5 border-b border-[#eef1f0] last:border-0 text-[14px]">
+      <span className="text-[#5a8a76] shrink-0">{k}</span>
+      <span className="font-medium text-[#0f3d2e] text-right break-all">{display}</span>
+    </div>
   );
 }
 
