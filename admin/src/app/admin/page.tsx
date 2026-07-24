@@ -850,7 +850,7 @@ function AppsTab() {
       {/* Search + filters. Status stays server-side; EPC / lender / date range
           filter the already-loaded list client-side. */}
       <div className="grid gap-3 mb-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <Input placeholder="Search by borrower or EPC…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Input placeholder="Search by borrower…" value={q} onChange={(e) => setQ(e.target.value)} />
         <Select
           placeholder="Status filter"
           options={[
@@ -1072,6 +1072,9 @@ function InsuranceTab() {
     insurance_partner: string | null;
     policy_from_date: string | null;
     policy_to_date: string | null;
+    // Storage path of the uploaded policy document — drives the Download
+    // Policy button (hidden when there's no policy).
+    policy_path: string | null;
     status: string;
     created_at: string;
     epc_business: { contact_name: string | null; trade_name: string | null; legal_name: string | null; epc_display_id: string | null } | null;
@@ -1092,7 +1095,7 @@ function InsuranceTab() {
         .from("insurance_applications")
         .select(
           "id, insurance_display_id, aadhaar_name, pan_number, sum_insured, invoice_confirmed_amount, " +
-          "invoice_amount, insurance_partner, policy_from_date, policy_to_date, status, created_at, " +
+          "invoice_amount, insurance_partner, policy_from_date, policy_to_date, policy_path, status, created_at, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .order("created_at", { ascending: false });
@@ -1135,20 +1138,29 @@ function InsuranceTab() {
     return fmtRupees(r.sum_insured ?? r.invoice_confirmed_amount ?? r.invoice_amount);
   }
 
-  async function downloadZip(r: Row) {
-    if (zipBusy) return;
+  // Download the uploaded policy document. Signed by path through the SAME
+  // admin sign-doc route the View profile's document viewer uses — no new
+  // endpoint. Only ever called for rows that have a policy_path.
+  async function downloadPolicy(r: Row) {
+    if (zipBusy || !r.policy_path) return;
     setZipBusy(r.id);
     try {
-      const res = await fetch(`/api/admin/insurance/${r.id}/download-zip`, {
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      const res = await fetch(`/api/admin/insurance/${r.id}/sign-doc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({ path: r.policy_path }),
       });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert("ZIP failed: " + (d?.error || `HTTP ${res.status}`)); return; }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || !d?.ok || !d.url) {
+        alert("Couldn't open the policy: " + (d?.error || `HTTP ${res.status}`));
+        return;
+      }
       const a = document.createElement("a");
-      a.href = url;
-      a.download = `${r.insurance_display_id || r.id.slice(0, 8)}_${(applicant(r) || "insurance").replace(/[^\w-]+/g, "_")}.zip`;
-      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      a.href = d.url;
+      a.download = `${r.insurance_display_id || r.id.slice(0, 8)}_policy`;
+      a.target = "_blank";
+      a.rel = "noopener";
+      document.body.appendChild(a); a.click(); a.remove();
     } finally { setZipBusy(null); }
   }
 
@@ -1345,11 +1357,14 @@ function InsuranceTab() {
                       className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5] inline-flex items-center justify-center gap-1.5">
                       Edit
                     </button>
-                    <button type="button" disabled={zipBusy === r.id} onClick={() => void downloadZip(r)}
-                      className={["text-[12px] font-semibold px-2.5 py-1.5 rounded-input border transition-colors inline-flex items-center justify-center gap-1.5",
-                        zipBusy === r.id ? "border-line bg-bg-soft text-text-muted cursor-not-allowed" : "border-[#854f0b]/30 bg-white text-[#854f0b] hover:bg-[#fef0d6]"].join(" ")}>
-                      {IconDownload} {zipBusy === r.id ? "Preparing…" : "Download ZIP"}
-                    </button>
+                    {/* Download Policy — only when a policy document exists. */}
+                    {r.policy_path && (
+                      <button type="button" disabled={zipBusy === r.id} onClick={() => void downloadPolicy(r)}
+                        className={["text-[12px] font-semibold px-2.5 py-1.5 rounded-input border transition-colors inline-flex items-center justify-center gap-1.5",
+                          zipBusy === r.id ? "border-line bg-bg-soft text-text-muted cursor-not-allowed" : "border-[#854f0b]/30 bg-white text-[#854f0b] hover:bg-[#fef0d6]"].join(" ")}>
+                        {IconDownload} {zipBusy === r.id ? "Opening…" : "Download Policy"}
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>

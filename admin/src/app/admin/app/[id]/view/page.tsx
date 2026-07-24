@@ -411,7 +411,7 @@ function Inner() {
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="text-[22px] font-semibold text-[#0f3d2e] truncate">{applicantName}</span>
-                <StatusBadge status={loan.status} />
+                <StatusBadge status={loan.status} lender={decidedByLabel} />
               </div>
               {/* Loan ID, with "Created …" where "via <EPC>" used to sit. */}
               <div className="text-[13px] flex items-center gap-2 mt-1 min-w-0">
@@ -769,10 +769,15 @@ function HAction({
   );
 }
 
-// ── Status badge — the lender outcome, coloured. ─────────────────────
-function StatusBadge({ status }: { status: string | null | undefined }) {
+// ── Status badge — the lender outcome, coloured. Names the deciding lender
+// when we know it ("Approved by Aerem"), else falls back to the generic label.
+function StatusBadge({ status, lender }: { status: string | null | undefined; lender?: string | null }) {
   const s = status ?? "draft";
-  const label = LOAN_STATUS_LABEL[s] ?? s;
+  const generic = LOAN_STATUS_LABEL[s] ?? s;
+  const label =
+    lender && s === "approved" ? `Approved by ${lender}` :
+    lender && s === "rejected" ? `Rejected by ${lender}` :
+    generic;
   const cls =
     s === "approved" ? "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd]" :
     s === "rejected" ? "bg-red-50 text-red-700 border-red-200" :
