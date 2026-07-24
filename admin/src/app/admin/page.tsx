@@ -21,7 +21,7 @@ import {
 } from "@/lib/disbursement";
 import { policyValidityParts, VALIDITY_TEXT } from "@/lib/insurance-validity";
 
-type Tab = "epcs" | "apps" | "insurance";
+type Tab = "epcs" | "apps" | "insurance" | "leads";
 
 export default function AdminHomePage() {
   return (
@@ -40,7 +40,7 @@ function Inner() {
   // came from). Consumed once, so a fresh visit still defaults to EPCs.
   useEffect(() => {
     const t = sessionStorage.getItem("adminList.tab");
-    if (t === "apps" || t === "insurance") setTab(t);
+    if (t === "apps" || t === "insurance" || t === "leads") setTab(t);
     sessionStorage.removeItem("adminList.tab");
   }, []);
 
@@ -65,6 +65,7 @@ function Inner() {
           <TabBtn active={tab === "epcs"} onClick={() => setTab("epcs")}>EPCs</TabBtn>
           <TabBtn active={tab === "apps"} onClick={() => setTab("apps")}>Loan applications</TabBtn>
           <TabBtn active={tab === "insurance"} onClick={() => setTab("insurance")}>Insurance</TabBtn>
+          <TabBtn active={tab === "leads"} onClick={() => setTab("leads")}>Leads (Non-EPC)</TabBtn>
           {/* Analytics is a dedicated full page — the tab acts as a
               navigation link, not an inline tab body. */}
           <TabBtn active={false} onClick={() => router.push("/admin/analytics" as any)}>
@@ -72,7 +73,7 @@ function Inner() {
           </TabBtn>
         </div>
 
-        {tab === "epcs" ? <EpcsTab /> : tab === "apps" ? <AppsTab /> : <InsuranceTab />}
+        {tab === "epcs" ? <EpcsTab /> : tab === "apps" ? <AppsTab /> : tab === "insurance" ? <InsuranceTab /> : <LeadsTab />}
       </section>
     </main>
   );
@@ -1375,6 +1376,123 @@ function InsuranceTab() {
       </Card>
 
       <AddNewInsuranceModal open={addOpen} onClose={() => setAddOpen(false)} />
+    </>
+  );
+}
+
+// ── Leads (Non-EPC) — customer_leads captured from the public /apply form ──
+type Lead = {
+  id: string; created_at: string; lead_type: "loan" | "insurance";
+  name: string | null; mobile: string; city: string | null; pincode: string | null;
+  pan: string | null; aadhaar: string | null;
+  project_cost: number | null; loan_amount: number | null;
+  plant_value: number | null; gstin: string | null; status: string;
+};
+const LEAD_STATUS_PILL: Record<string, string> = {
+  new:       "bg-[#dceffb] text-[#185fa5]",
+  contacted: "bg-[#fef0d6] text-[#854f0b]",
+  converted: "bg-[#e6f6ee] text-[#178a5c]",
+  closed:    "bg-[#eef1f0] text-[#5a8a76]",
+};
+function LeadsTab() {
+  const [rows, setRows] = useState<Lead[]>([]);
+  const [q, setQ] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase()
+        .from("customer_leads")
+        .select("id, created_at, lead_type, name, mobile, city, pincode, pan, aadhaar, project_cost, loan_amount, plant_value, gstin, status")
+        .order("created_at", { ascending: false });
+      setRows((data ?? []) as unknown as Lead[]);
+    })();
+  }, []);
+
+  async function setStatus(r: Lead, status: string) {
+    setBusy(r.id);
+    const { error } = await supabase().from("customer_leads").update({ status }).eq("id", r.id);
+    if (error) alert("Couldn't update status: " + error.message);
+    else setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, status } : x)));
+    setBusy(null);
+  }
+  const maskAadhaar = (a: string | null) => (a ? "XXXX XXXX " + a.slice(-4) : "—");
+
+  const filtered = rows.filter((r) => {
+    const needle = q.trim().toLowerCase();
+    if (needle && !((r.name ?? "").toLowerCase().includes(needle) || r.mobile.includes(needle) || (r.city ?? "").toLowerCase().includes(needle))) return false;
+    if (typeFilter && r.lead_type !== typeFilter) return false;
+    if (statusFilter && r.status !== statusFilter) return false;
+    return true;
+  });
+
+  return (
+    <>
+      <div className="grid gap-3 mb-5 sm:grid-cols-3">
+        <Input placeholder="Search by name, mobile, or city…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Select placeholder="Type" options={[{ value: "loan", label: "Loan" }, { value: "insurance", label: "Insurance" }]} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} />
+        <Select placeholder="Status" options={[{ value: "new", label: "New" }, { value: "contacted", label: "Contacted" }, { value: "converted", label: "Converted" }, { value: "closed", label: "Closed" }]} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} />
+      </div>
+      <Card className="overflow-x-auto">
+        <table className="w-full text-[14px]">
+          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">
+            <tr>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Customer</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Type</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Amounts</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">KYC</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Received</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr><td colSpan={6} className="px-5 py-10 text-center text-[#5a8a76]">No leads yet.</td></tr>
+            ) : filtered.map((r) => (
+              <tr key={r.id} className="border-b border-[#eaf3ee] hover:bg-[#f7fcfa] align-top">
+                <td className="px-3 py-3">
+                  <p className="text-[15px] font-semibold text-[#0f3d2e]">{r.name || "—"}</p>
+                  <p className="text-[12px] text-[#5a8a76] mt-0.5">+91 {r.mobile}</p>
+                  {(r.city || r.pincode) && <p className="text-[12px] text-[#5a8a76]">{[r.city, r.pincode].filter(Boolean).join(" · ")}</p>}
+                </td>
+                <td className="px-3 py-3 text-center">
+                  <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#dceffb] text-[#185fa5]">{r.lead_type}</span>
+                </td>
+                <td className="px-3 py-3 text-[13px] text-[#0f3d2e]">
+                  {r.lead_type === "loan" ? (
+                    <><div>Project: <b>{fmtRupees(r.project_cost)}</b></div><div>Loan: <b>{fmtRupees(r.loan_amount)}</b></div></>
+                  ) : (
+                    <><div>Plant: <b>{fmtRupees(r.plant_value)}</b></div>{r.gstin && <div className="text-[#5a8a76]">GST {r.gstin}</div>}</>
+                  )}
+                </td>
+                <td className="px-3 py-3 text-[13px] text-[#0f3d2e]">
+                  <div>PAN {r.pan || "—"}</div>
+                  <div className="text-[#5a8a76]">{maskAadhaar(r.aadhaar)}</div>
+                </td>
+                <td className="px-3 py-3 text-center">
+                  <p className="text-[13px] font-semibold text-[#0f3d2e]">{fmtAddedDate(r.created_at)}</p>
+                  <p className="text-[11px] text-[#5a8a76] mt-0.5">{fmtAddedTime(r.created_at)}</p>
+                </td>
+                <td className="px-3 py-3 text-center">
+                  <select
+                    disabled={busy === r.id}
+                    value={r.status}
+                    onChange={(e) => void setStatus(r, e.target.value)}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide border-none cursor-pointer outline-none ${LEAD_STATUS_PILL[r.status] ?? LEAD_STATUS_PILL.new}`}
+                  >
+                    <option value="new">New</option>
+                    <option value="contacted">Contacted</option>
+                    <option value="converted">Converted</option>
+                    <option value="closed">Closed</option>
+                  </select>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
     </>
   );
 }
