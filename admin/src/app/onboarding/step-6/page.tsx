@@ -86,10 +86,13 @@ export default function Step6Page() {
     const filledCust = customers.filter((r) => r.name.trim() || r.mobile.trim());
     const filledSupp = suppliers.filter((r) => r.name.trim() || r.mobile.trim());
 
-    for (const r of [...filledCust, ...filledSupp]) {
-      if (!r.name.trim() || !MOBILE_RE.test(r.mobile)) {
-        setError(`Each ${r.type} reference needs both a name and a valid 10-digit mobile.`);
-        return;
+    // Admin (impersonating) may proceed with partially-filled references.
+    if (!isImpersonating()) {
+      for (const r of [...filledCust, ...filledSupp]) {
+        if (!r.name.trim() || !MOBILE_RE.test(r.mobile)) {
+          setError(`Each ${r.type} reference needs both a name and a valid 10-digit mobile.`);
+          return;
+        }
       }
     }
 

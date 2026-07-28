@@ -2,22 +2,25 @@
 
 // Admin-only "EPC business info" section on the EPC detail page.
 //
-// Four fields the admin fills during review:
-//   1. Total Team Size (Technical and Non-Technical) — text (freeform).
-//   2. Total Installed Capacity (Residential)       — numeric + KW|MW.
-//   3. Total Installed Capacity (Commercial)        — numeric + KW|MW.
-//   4. Total Turnover (last FY)                     — text (freeform).
+// Fields the admin fills during review:
+//   1. No. of Members (Technical) + (Non-Technical) — two integers.
+//   2. Total Installed Capacity (Residential)       — numeric + kW|MW.
+//   3. Total Installed Capacity (Commercial)        — numeric + kW|MW.
+//   4. Total Turnover (last FY)                     — numeric, ₹ Lakhs.
+//   5. Business Expectation                         — numeric, ₹ Lakhs.
 //
-// Storage: `epc_admin_info` table (admin-only RLS; invisible to EPCs by
-// design). One row per EPC keyed by business_id. Row is LAZY — created
-// on first Save via upsert.
+// Storage:
+//   - team_technical / team_non_technical / capacity_* / turnover_lakhs
+//     live on the admin-only `epc_admin_info` table (invisible to EPCs).
+//   - business_expectation_value lives on `epc_business` (admin RLS write);
+//     unit is always 'lakhs' now (the Crores/Lakhs dropdown was removed).
 //
-// UX: single Save button for all 4 fields. Local draft state; commits
-// on Save. Neutral inline status ("Saving…", "Saved", "Save failed").
+// Legacy: the old free-text columns team_size and turnover_last_fy are kept
+// UNTOUCHED for history. When the corresponding new fields are empty and a
+// legacy value exists, it's shown as a read-only reference hint — never
+// parsed into the new fields.
 //
-// Placed BEFORE GstR3bSection on the EPC detail page. Modeled loosely
-// on GstR3bSection but simpler (no OCR, no file uploads, no legacy
-// migration path).
+// UX: single Save button for all fields. Local draft; commits on Save.
 
 import { useEffect, useState } from "react";
 import Card from "@/components/ui/Card";
@@ -26,21 +29,23 @@ import { supabase } from "@/lib/supabase";
 type Unit = "KW" | "MW";
 
 type Row = {
-  team_size: string;
-  capacity_residential: string;       // held as string; parsed to numeric on save
+  team_technical: string;             // integer as string
+  team_non_technical: string;         // integer as string
+  capacity_residential: string;       // numeric as string
   capacity_residential_unit: Unit;
   capacity_commercial: string;
   capacity_commercial_unit: Unit;
-  turnover_last_fy: string;
+  turnover_lakhs: string;             // numeric (₹ Lakhs) as string
 };
 
 const EMPTY: Row = {
-  team_size: "",
+  team_technical: "",
+  team_non_technical: "",
   capacity_residential: "",
   capacity_residential_unit: "KW",
   capacity_commercial: "",
   capacity_commercial_unit: "KW",
-  turnover_last_fy: "",
+  turnover_lakhs: "",
 };
 
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -50,23 +55,23 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
   const [loaded, setLoaded] = useState(false);
   const [state, setState] = useState<SaveState>("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  // Business Expectation lives on epc_business (not epc_admin_info) per
-  // spec — loaded/saved separately but presented in this same card and
-  // committed by the same Save button.
-  const [expectation, setExpectation] = useState<"" | "crores" | "lakhs">("");
-  // Numeric value paired with the unit above (e.g. 5 + "crores" = "5 Crores").
+
+  // Business Expectation now lives as a single value in ₹ Lakhs on
+  // epc_business (unit dropdown removed; unit is always 'lakhs').
   const [expectationValue, setExpectationValue] = useState<string>("");
+
+  // Legacy free-text values (team_size, turnover_last_fy) shown only as
+  // reference hints when the new structured fields are still empty.
+  const [legacyTeam, setLegacyTeam] = useState<string>("");
+  const [legacyTurnover, setLegacyTurnover] = useState<string>("");
 
   useEffect(() => {
     (async () => {
       const { data: bizRow } = await supabase()
         .from("epc_business")
-        .select("business_expectation, business_expectation_value")
+        .select("business_expectation_value")
         .eq("id", businessId)
         .maybeSingle();
-      if (bizRow?.business_expectation === "crores" || bizRow?.business_expectation === "lakhs") {
-        setExpectation(bizRow.business_expectation);
-      }
       if (bizRow?.business_expectation_value != null) {
         setExpectationValue(String(bizRow.business_expectation_value));
       }
@@ -77,13 +82,14 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
         .eq("business_id", businessId)
         .maybeSingle();
       if (error) {
-        // Table may not exist yet in a dev/staging environment — surface
-        // the raw error so it's obvious what's missing.
         console.warn("[epc_admin_info] load failed:", error.message);
       }
       if (data) {
         setDraft({
-          team_size: (data.team_size as string) ?? "",
+          team_technical:
+            data.team_technical != null ? String(data.team_technical) : "",
+          team_non_technical:
+            data.team_non_technical != null ? String(data.team_non_technical) : "",
           capacity_residential:
             data.capacity_residential != null ? String(data.capacity_residential) : "",
           capacity_residential_unit:
@@ -92,8 +98,11 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
             data.capacity_commercial != null ? String(data.capacity_commercial) : "",
           capacity_commercial_unit:
             (data.capacity_commercial_unit as Unit) ?? "KW",
-          turnover_last_fy: (data.turnover_last_fy as string) ?? "",
+          turnover_lakhs:
+            data.turnover_lakhs != null ? String(data.turnover_lakhs) : "",
         });
+        setLegacyTeam((data.team_size as string) ?? "");
+        setLegacyTurnover((data.turnover_last_fy as string) ?? "");
       }
       setLoaded(true);
     })();
@@ -111,14 +120,34 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
     return isNaN(n) ? null : n;
   }
 
+  // Whole-number count parser (team members). null = blank, undefined = invalid.
+  function parseCount(s: string): number | null | undefined {
+    const t = s.trim();
+    if (!t) return null;
+    if (!/^\d+$/.test(t)) return undefined;
+    return parseInt(t, 10);
+  }
+
   async function save() {
     setErrorMsg(null);
 
-    // Validate: if a capacity number is present, it must parse. Unit stays
-    // regardless — user can type a value first, choose unit next, or vice versa.
+    // Team member counts must be whole numbers if present.
+    for (const [rawKey, label] of [
+      ["team_technical", "No. of Members (Technical)"],
+      ["team_non_technical", "No. of Members (Non-Technical)"],
+    ] as const) {
+      if (parseCount(draft[rawKey]) === undefined) {
+        setErrorMsg(`${label} must be a whole number.`);
+        setState("error");
+        return;
+      }
+    }
+
+    // Capacities + turnover must parse as numbers if present.
     for (const [rawKey, label] of [
       ["capacity_residential", "Residential capacity"],
-      ["capacity_commercial",  "Commercial capacity"],
+      ["capacity_commercial", "Commercial capacity"],
+      ["turnover_lakhs", "Total turnover"],
     ] as const) {
       const raw = draft[rawKey];
       if (raw.trim() && parseNum(raw) === null) {
@@ -134,15 +163,17 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
     }
 
     setState("saving");
-    // upsert onto business_id (the PK). Lazy row creation on first save.
+    // upsert onto business_id (PK). Legacy team_size / turnover_last_fy are
+    // intentionally omitted so the upsert leaves them untouched.
     const row = {
       business_id: businessId,
-      team_size: draft.team_size.trim() || null,
+      team_technical: parseCount(draft.team_technical) ?? null,
+      team_non_technical: parseCount(draft.team_non_technical) ?? null,
       capacity_residential: parseNum(draft.capacity_residential),
       capacity_residential_unit: draft.capacity_residential_unit,
       capacity_commercial: parseNum(draft.capacity_commercial),
       capacity_commercial_unit: draft.capacity_commercial_unit,
-      turnover_last_fy: draft.turnover_last_fy.trim() || null,
+      turnover_lakhs: parseNum(draft.turnover_lakhs),
     };
     const { error } = await supabase()
       .from("epc_admin_info")
@@ -153,12 +184,14 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
       return;
     }
 
-    // Business Expectation (value + unit) → epc_business (admin RLS write).
+    // Business Expectation (₹ Lakhs) → epc_business. Unit is always 'lakhs'
+    // when a value is present, null when cleared.
+    const expVal = parseNum(expectationValue);
     const { error: bizErr } = await supabase()
       .from("epc_business")
       .update({
-        business_expectation: expectation || null,
-        business_expectation_value: parseNum(expectationValue),
+        business_expectation: expVal != null ? "lakhs" : null,
+        business_expectation_value: expVal,
       })
       .eq("id", businessId);
     if (bizErr) {
@@ -172,17 +205,22 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
 
   if (!loaded) return null;
 
-  // Base classes with NO width class — width is applied per-usage so
-  // capacity rows can use flex-1 (input) + fixed-width (select) without
-  // fighting a w-full on the base class.
   const inputBase =
     "border border-line rounded-input px-3.5 py-2.5 text-[14px] " +
     "focus:border-blue outline-none bg-white";
   const fullInputCls = inputBase + " w-full";
+  // Compact, identical width for the two capacity number inputs + a narrow
+  // unit select (kW / MW are short) so both rows line up exactly.
+  const capInputCls = inputBase + " w-[150px]";
+  const capSelectCls = inputBase + " w-[92px] shrink-0";
 
-  // Dropdown labels display full words per spec ("Kilowatt" / "Megawatt").
-  // DB values stay "KW" / "MW" so backfills, the ZIP Excel formatter, and
-  // the View page's fmtCapacity all keep working unchanged.
+  const showTeamHint =
+    legacyTeam.trim() !== "" &&
+    draft.team_technical.trim() === "" &&
+    draft.team_non_technical.trim() === "";
+  const showTurnoverHint =
+    legacyTurnover.trim() !== "" && draft.turnover_lakhs.trim() === "";
+
   return (
     <Card className="p-6">
       <h3 className="font-display font-semibold text-[16px] mb-1">EPC business info</h3>
@@ -190,110 +228,123 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
         Admin-only. These fields are never visible to the EPC.
       </p>
 
-      {/* Row 1 — Team size + Turnover side by side (both short freeform) */}
-      <div className="grid gap-4 sm:grid-cols-2 mb-4">
-        <Field label="Total team size (Technical + Non-Technical)">
-          <input
-            type="text"
-            className={fullInputCls}
-            placeholder='e.g. "50" or "50 (30T + 20NT)"'
-            value={draft.team_size}
-            onChange={(e) => set("team_size", e.target.value)}
-          />
-        </Field>
-
-        <Field label="Total turnover (last FY)">
-          <input
-            type="text"
-            className={fullInputCls}
-            placeholder='e.g. "₹5 Cr" or "50000000"'
-            value={draft.turnover_last_fy}
-            onChange={(e) => set("turnover_last_fy", e.target.value)}
-          />
-        </Field>
+      {/* Row 1 — Team members: Technical + Non-Technical (two integers). */}
+      <div className="mb-1">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="No. of Members (Technical)">
+            <input
+              type="text"
+              inputMode="numeric"
+              className={fullInputCls}
+              placeholder="e.g. 30"
+              value={draft.team_technical}
+              onChange={(e) => set("team_technical", e.target.value.replace(/[^\d]/g, ""))}
+            />
+          </Field>
+          <Field label="No. of Members (Non-Technical)">
+            <input
+              type="text"
+              inputMode="numeric"
+              className={fullInputCls}
+              placeholder="e.g. 20"
+              value={draft.team_non_technical}
+              onChange={(e) => set("team_non_technical", e.target.value.replace(/[^\d]/g, ""))}
+            />
+          </Field>
+        </div>
+        {showTeamHint && (
+          <p className="text-[11px] text-text-muted mt-1.5">
+            Previously recorded (combined): <span className="text-text-mid">{legacyTeam}</span>
+          </p>
+        )}
       </div>
 
-      {/* Row 2 — Residential capacity: WIDE number input + small unit select. */}
-      {/* Neither element uses `w-full` — that would collide with flex sizing. */}
-      <div className="mb-4">
+      {/* Row 2 — Residential capacity: compact number + narrow kW/MW select. */}
+      <div className="mt-4 mb-4">
         <Field label="Total installed capacity (Residential)">
           <div className="flex gap-3 items-stretch">
             <input
               type="text"
-              className={inputBase + " flex-1 min-w-0"}
+              className={capInputCls}
               inputMode="decimal"
               placeholder="e.g. 850"
               value={draft.capacity_residential}
               onChange={(e) => set("capacity_residential", e.target.value)}
             />
             <select
-              className={inputBase + " w-[130px] shrink-0"}
+              className={capSelectCls}
               value={draft.capacity_residential_unit}
               onChange={(e) => set("capacity_residential_unit", e.target.value as Unit)}
             >
-              <option value="KW">Kilowatt</option>
-              <option value="MW">Megawatt</option>
+              <option value="KW">kW</option>
+              <option value="MW">MW</option>
             </select>
           </div>
         </Field>
       </div>
 
-      {/* Row 3 — Commercial capacity: same shape. */}
+      {/* Row 3 — Commercial capacity: same compact shape. */}
       <div className="mb-4">
         <Field label="Total installed capacity (Commercial)">
           <div className="flex gap-3 items-stretch">
             <input
               type="text"
-              className={inputBase + " flex-1 min-w-0"}
+              className={capInputCls}
               inputMode="decimal"
               placeholder="e.g. 2"
               value={draft.capacity_commercial}
               onChange={(e) => set("capacity_commercial", e.target.value)}
             />
             <select
-              className={inputBase + " w-[130px] shrink-0"}
+              className={capSelectCls}
               value={draft.capacity_commercial_unit}
               onChange={(e) => set("capacity_commercial_unit", e.target.value as Unit)}
             >
-              <option value="KW">Kilowatt</option>
-              <option value="MW">Megawatt</option>
+              <option value="KW">kW</option>
+              <option value="MW">MW</option>
             </select>
           </div>
         </Field>
       </div>
 
-      {/* Row 4 — Business Expectation: number + scale (Crores / Lakhs).
-          e.g. "5 Crores". Number → business_expectation_value, unit →
-          business_expectation. Both on epc_business. */}
-      <div className="mb-4 max-w-[360px]">
-        <Field label="Business Expectation">
-          <div className="flex gap-3 items-stretch">
+      {/* Row 4 — Total turnover (₹ Lakhs, numeric). */}
+      <div className="mb-4">
+        <Field label="Total turnover (last FY)">
+          <div className="flex items-center gap-2">
             <input
               type="text"
               inputMode="decimal"
-              className={inputBase + " flex-1 min-w-0"}
-              placeholder="e.g. 5"
+              className={inputBase + " w-[200px]"}
+              placeholder="e.g. 500"
+              value={draft.turnover_lakhs}
+              onChange={(e) => set("turnover_lakhs", e.target.value)}
+            />
+            <span className="text-[12px] text-text-muted">in Lakhs only</span>
+          </div>
+        </Field>
+        {showTurnoverHint && (
+          <p className="text-[11px] text-text-muted mt-1.5">
+            Previously recorded: <span className="text-text-mid">{legacyTurnover}</span>
+          </p>
+        )}
+      </div>
+
+      {/* Row 5 — Business Expectation (₹ Lakhs, numeric; unit dropdown removed). */}
+      <div className="mb-4">
+        <Field label="Business Expectation">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              inputMode="decimal"
+              className={inputBase + " w-[200px]"}
+              placeholder="e.g. 500"
               value={expectationValue}
               onChange={(e) => {
                 setExpectationValue(e.target.value);
                 if (state !== "idle") setState("idle");
               }}
             />
-            <select
-              value={expectation}
-              onChange={(e) => {
-                setExpectation(e.target.value as "" | "crores" | "lakhs");
-                if (state !== "idle") setState("idle");
-              }}
-              className={
-                inputBase +
-                " w-[130px] shrink-0 pr-9 appearance-none bg-[url('data:image/svg+xml;utf8,<svg fill=%22%236B8294%22 viewBox=%220 0 20 20%22 xmlns=%22http://www.w3.org/2000/svg%22><path d=%22M5 8l5 5 5-5z%22/></svg>')] bg-no-repeat bg-[length:20px] bg-[right_10px_center]"
-              }
-            >
-              <option value="">Unit…</option>
-              <option value="crores">Crores</option>
-              <option value="lakhs">Lakhs</option>
-            </select>
+            <span className="text-[12px] text-text-muted">in Lakhs only</span>
           </div>
         </Field>
       </div>

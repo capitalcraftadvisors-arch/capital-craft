@@ -327,8 +327,7 @@ function Inner() {
           <div className="mt-5 pt-4 border-t border-line">
             <p className="text-[13px] font-semibold text-text mb-1">Additional documents</p>
             <p className="text-[12px] text-text-muted mb-3">
-              Admin-only. Attach any extra documents not covered above (agreements,
-              approvals, correspondence). Add as many as you need.
+              Add additional documents if any
             </p>
             <FileUpload
               businessId={params.id}
@@ -336,7 +335,7 @@ function Inner() {
               table="epc_documents"
               uploadedBy="admin"
               maxFiles={20}
-              hint="Any file — image, scan, or PDF."
+              uploadHint="PDF, JPEG, scan, photo"
             />
           </div>
         </Section>

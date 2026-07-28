@@ -39,6 +39,9 @@ type Props = {
   extraMetadata?: { gps?: { lat: number; lng: number; captured_at: string } | null };
   label?: string;
   hint?: string;
+  // Sub-line shown inside the upload box under "Click to upload".
+  // Defaults to "Photo, scan, or PDF" when not provided.
+  uploadHint?: string;
 };
 
 type DocRow = {
@@ -52,7 +55,7 @@ export default function FileUpload(props: Props) {
   const {
     businessId, stakeholderId, applicationId,
     category, table, maxFiles = 1, uploadedBy,
-    onUploaded, captureGps = false, extraMetadata, label, hint,
+    onUploaded, captureGps = false, extraMetadata, label, hint, uploadHint,
   } = props;
   const inputRef = useRef<HTMLInputElement>(null);
   const [docs, setDocs] = useState<DocRow[]>([]);
@@ -247,7 +250,7 @@ export default function FileUpload(props: Props) {
           <p className="text-[13px] text-text-mid">
             {uploading ? "Uploading…" : "Click to upload"}
           </p>
-          <p className="text-[11px] text-text-muted mt-1">Photo, scan, or PDF</p>
+          <p className="text-[11px] text-text-muted mt-1">{uploadHint ?? "Photo, scan, or PDF"}</p>
         </label>
       )}
 

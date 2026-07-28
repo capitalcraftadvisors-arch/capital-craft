@@ -339,7 +339,7 @@ export default function GstR3bSection({ businessId }: { businessId: string }) {
 
   return (
     <Card className="p-6">
-      <h3 className="font-display font-semibold text-[16px] mb-1">GST R3B</h3>
+      <h3 className="font-display font-semibold text-[16px] mb-1">Sales returns (GSTR-3B)</h3>
       <p className="text-[12px] text-text-muted mb-4">
         Admin-only. Files and parsed values are never visible to the EPC.
       </p>
@@ -423,7 +423,7 @@ export default function GstR3bSection({ businessId }: { businessId: string }) {
 
           <div className="bg-bg-tint border border-blue/15 rounded-input p-3 mt-4 flex justify-between items-center">
             <span className="text-[13px] text-text-mid">
-              Sum &mdash; Total taxable value across all rows
+              Sum &mdash; Total Sales across all rows
             </span>
             <span className="text-[16px] font-semibold text-text">
               ₹{sum.toLocaleString("en-IN", {
@@ -545,7 +545,7 @@ function Uploader({
         {disabled ? "Working…" : `Click to upload (${used}/${max} used)`}
       </p>
       <p className="text-[11px] text-text-muted mt-1">
-        JPG, PNG, WEBP, or PDF. Duplicates are auto-skipped.
+        JPG, PNG, WEBP, PDF only. Duplicates are auto-skipped.
       </p>
     </label>
   );
@@ -572,7 +572,7 @@ function DocTable({
             <th className="px-3 py-2 font-medium">
               {mode === "monthly" ? "Month-Year" : "Period-Year"}
             </th>
-            <th className="px-3 py-2 font-medium">Total taxable value</th>
+            <th className="px-3 py-2 font-medium">Total Sales</th>
             <th className="px-3 py-2"></th>
           </tr>
         </thead>

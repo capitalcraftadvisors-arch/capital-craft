@@ -458,7 +458,14 @@ async function buildAeremXlsx(data: {
 
   // ── Other Details ────────────────────────────────────────────────
   sectionHeader("Other Details");
-  kv("Total Team Size (Technical + Non-Technical)", adminInfo?.team_size);
+  // Team size: prefer the split Technical/Non-Technical counts; fall back to
+  // the legacy combined free-text value for historical rows.
+  if (adminInfo?.team_technical != null || adminInfo?.team_non_technical != null) {
+    kv("No. of Members (Technical)",     adminInfo?.team_technical != null ? String(adminInfo.team_technical) : "");
+    kv("No. of Members (Non-Technical)", adminInfo?.team_non_technical != null ? String(adminInfo.team_non_technical) : "");
+  } else {
+    kv("Total Team Size (Technical + Non-Technical)", adminInfo?.team_size);
+  }
   const capResi = adminInfo?.capacity_residential
     ? `${display(adminInfo.capacity_residential)} ${display(adminInfo?.capacity_residential_unit)}`.trim()
     : "";
@@ -467,7 +474,11 @@ async function buildAeremXlsx(data: {
     : "";
   kv("Installed Capacity (Resi.)",            capResi);
   kv("Installed Capacity (Comm.)",            capComm);
-  kv("Last FY Turnover",                      adminInfo?.turnover_last_fy);
+  // Turnover: prefer the numeric ₹ Lakhs value; fall back to legacy text.
+  const turnoverStr = adminInfo?.turnover_lakhs != null
+    ? `₹${display(adminInfo.turnover_lakhs)} Lakhs`
+    : (adminInfo?.turnover_last_fy ?? "");
+  kv("Last FY Turnover",                      turnoverStr);
   kv("GST Turnover (Latest 12 Months)",
      `₹${r3bTotal.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`);
   ws.addRow([]);

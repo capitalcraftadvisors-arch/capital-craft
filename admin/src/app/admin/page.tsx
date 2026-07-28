@@ -12,8 +12,9 @@ import AddNewEpcModal from "@/components/AddNewEpcModal";
 import AddNewLoanAppModal from "@/components/AddNewLoanAppModal";
 import AddNewInsuranceModal from "@/components/AddNewInsuranceModal";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
+import AdminSidebar, { ACCENTS } from "@/components/AdminSidebar";
 import { supabase } from "@/lib/supabase";
-import { logout, getToken } from "@/lib/auth";
+import { getToken } from "@/lib/auth";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL, OUTCOME_STATUSES, type LenderOutcome } from "@/lib/loan-status";
 import {
   deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort,
@@ -32,64 +33,35 @@ export default function AdminHomePage() {
 }
 
 function Inner() {
-  const router = useRouter();
   const [tab, setTab] = useState<Tab>("epcs");
 
-  // Coming back from a loan-application View should land on the Loan
-  // applications tab (the list then restores scroll + highlights the row you
-  // came from). Consumed once, so a fresh visit still defaults to EPCs.
+  // Coming back from a loan/insurance View should land on the right tab (the
+  // list then restores scroll + highlights the row you came from). Consumed
+  // once, so a fresh visit still defaults to EPCs. (Return from an EPC View
+  // doesn't set this key, so it correctly stays on the EPCs tab.)
   useEffect(() => {
     const t = sessionStorage.getItem("adminList.tab");
     if (t === "apps" || t === "insurance" || t === "leads") setTab(t);
     sessionStorage.removeItem("adminList.tab");
   }, []);
 
+  const section = ACCENTS[tab];
+
   return (
-    <main className="min-h-screen bg-bg-soft">
-      <header className="border-b border-line bg-white">
-        <div className="w-full px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="font-display font-bold text-[20px] grad-text">Capital Craft</span>
-            <span className="text-[12px] px-2 py-0.5 rounded-full bg-bg-tint text-blue-dark font-semibold uppercase tracking-wide">Admin</span>
+    <div className="min-h-screen bg-bg-soft md:flex">
+      <AdminSidebar active={tab} onSelectTab={setTab} />
+      <div className="flex-1 min-w-0">
+        <section className="w-full px-4 sm:px-6 py-8">
+          {/* Section header with the console's accent bar. */}
+          <div className="mb-6 flex items-center gap-2.5">
+            <span className="inline-block w-1.5 h-7 rounded-full" style={{ backgroundColor: section.color }} />
+            <h1 className="font-display text-[24px] sm:text-[28px] font-bold">{section.label}</h1>
           </div>
-          <button onClick={() => { logout(); router.replace("/login"); }} className="text-[13px] text-text-muted hover:text-text">
-            Log out
-          </button>
-        </div>
-      </header>
 
-      <section className="w-full px-4 sm:px-6 py-8">
-        <h1 className="font-display text-[26px] sm:text-[30px] font-bold mb-6">Priyank Console</h1>
-
-        <div className="flex gap-2 mb-6 border-b border-line">
-          <TabBtn active={tab === "epcs"} onClick={() => setTab("epcs")}>EPCs</TabBtn>
-          <TabBtn active={tab === "apps"} onClick={() => setTab("apps")}>Loan applications</TabBtn>
-          <TabBtn active={tab === "insurance"} onClick={() => setTab("insurance")}>Insurance</TabBtn>
-          <TabBtn active={tab === "leads"} onClick={() => setTab("leads")}>Leads (Non-EPC)</TabBtn>
-          {/* Analytics is a dedicated full page — the tab acts as a
-              navigation link, not an inline tab body. */}
-          <TabBtn active={false} onClick={() => router.push("/admin/analytics" as any)}>
-            Analytics
-          </TabBtn>
-        </div>
-
-        {tab === "epcs" ? <EpcsTab /> : tab === "apps" ? <AppsTab /> : tab === "insurance" ? <InsuranceTab /> : <LeadsTab />}
-      </section>
-    </main>
-  );
-}
-
-function TabBtn({ active, children, ...rest }: any) {
-  return (
-    <button
-      {...rest}
-      className={[
-        "px-4 py-2.5 text-[14px] font-semibold border-b-2 transition-colors",
-        active ? "border-blue text-blue" : "border-transparent text-text-muted hover:text-text",
-      ].join(" ")}
-    >
-      {children}
-    </button>
+          {tab === "epcs" ? <EpcsTab /> : tab === "apps" ? <AppsTab /> : tab === "insurance" ? <InsuranceTab /> : <LeadsTab />}
+        </section>
+      </div>
+    </div>
   );
 }
 
@@ -133,6 +105,12 @@ function fmtAddedTime(v: string | null | undefined): string {
 function insurerLabelShort(v: string | null | undefined): string {
   if (!v) return "—";
   return /^sbi\b/i.test(v.trim()) ? "SBI-GI" : v;
+}
+
+// Phone-search cap: when the query is ALL digits (searching a mobile number),
+// limit it to 10 digits; mixed text (names, emails, EPC-… ids) is unrestricted.
+function capPhone(v: string): string {
+  return /^\d+$/.test(v) ? v.slice(0, 10) : v;
 }
 
 const LENDERS: { key: Lender; label: string }[] = [
@@ -209,6 +187,11 @@ function EpcsTab() {
   const [rows, setRows] = useState<Row[]>([]);
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [sourceFilter, setSourceFilter] = useState("");
+  const [lenderFilter, setLenderFilter] = useState("");
+  const [lenderStateFilter, setLenderStateFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [lenderState, setLenderState] = useState<Record<string, LenderMap>>({});
@@ -278,19 +261,53 @@ function EpcsTab() {
   useEffect(() => { void load(); }, [statusFilter]);
 
   const filtered = useMemo(() => {
-    const base = q.trim()
-      ? rows.filter((r) => {
-          const ql = q.toLowerCase();
-          return (
-            (r.legal_name || "").toLowerCase().includes(ql) ||
-            (r.trade_name || "").toLowerCase().includes(ql) ||
-            (r.epc_display_id || "").toLowerCase().includes(ql) ||
-            (r.contact_name || "").toLowerCase().includes(ql) ||
-            (r.contact_mobile || "").includes(q) ||
-            (r.contact_email || "").toLowerCase().includes(ql)
+    const ql = q.trim().toLowerCase();
+    const base = rows.filter((r) => {
+      // Text search across name / id / POC / mobile / email.
+      if (ql) {
+        const hit =
+          (r.legal_name || "").toLowerCase().includes(ql) ||
+          (r.trade_name || "").toLowerCase().includes(ql) ||
+          (r.epc_display_id || "").toLowerCase().includes(ql) ||
+          (r.contact_name || "").toLowerCase().includes(ql) ||
+          (r.contact_mobile || "").includes(q.trim()) ||
+          (r.contact_email || "").toLowerCase().includes(ql);
+        if (!hit) return false;
+      }
+      // Source — Website (default/anything) vs Manual.
+      if (sourceFilter) {
+        const isManual = (r.source || "website").toLowerCase() === "manual";
+        if (sourceFilter === "manual" && !isManual) return false;
+        if (sourceFilter === "website" && isManual) return false;
+      }
+      // Lender + state — a lender that has the chosen state ticked. If only a
+      // lender is chosen, match any of its states; if only a state, match any
+      // lender in that state.
+      if (lenderFilter || lenderStateFilter) {
+        const m = lenderState[r.id] ?? {};
+        if (lenderFilter) {
+          const ls = m[lenderFilter as Lender];
+          if (!ls) return false;
+          if (lenderStateFilter) {
+            if (!ls[lenderStateFilter as keyof LenderState]) return false;
+          } else if (!(ls.docs_given || ls.approved || ls.rejected)) {
+            return false;
+          }
+        } else if (lenderStateFilter) {
+          const any = Object.values(m).some(
+            (v) => v && v[lenderStateFilter as keyof LenderState],
           );
-        })
-      : rows;
+          if (!any) return false;
+        }
+      }
+      // Created-date range (inclusive From / To).
+      if (dateFrom || dateTo) {
+        const t = new Date(r.created_at).getTime();
+        if (dateFrom && t < new Date(dateFrom + "T00:00:00").getTime()) return false;
+        if (dateTo && t > new Date(dateTo + "T23:59:59.999").getTime()) return false;
+      }
+      return true;
+    });
     const sorted = [...base].sort((a, b) => {
       let av: string | number = "";
       let bv: string | number = "";
@@ -305,7 +322,7 @@ function EpcsTab() {
       return sortDir === "asc" ? cmp : -cmp;
     });
     return sorted;
-  }, [rows, q, sortKey, sortDir]);
+  }, [rows, q, sourceFilter, lenderFilter, lenderStateFilter, dateFrom, dateTo, lenderState, sortKey, sortDir]);
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -406,14 +423,27 @@ function EpcsTab() {
 
   return (
     <>
-      <div className="grid sm:grid-cols-[1fr_220px_auto] gap-3 mb-5">
+      <div className="flex justify-end mb-3">
+        <Button
+          type="button"
+          variant="primary"
+          onClick={() => setAddOpen(true)}
+          className="whitespace-nowrap"
+        >
+          + Add New EPC
+        </Button>
+      </div>
+      {/* Search + filters. Internal status stays server-side; source, lender+state
+          and the created-date range filter the already-loaded list client-side. */}
+      <div className="grid gap-3 mb-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <Input
           placeholder="Search by name, ID, POC, mobile, or email…"
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => setQ(capPhone(e.target.value))}
+          className="sm:col-span-2 lg:col-span-1"
         />
         <Select
-          placeholder="Status filter"
+          placeholder="Internal status"
           options={[
             { value: "draft", label: "Draft" },
             { value: "under_review", label: "Under review" },
@@ -424,48 +454,79 @@ function EpcsTab() {
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         />
-        <Button
-          type="button"
-          variant="primary"
-          onClick={() => setAddOpen(true)}
-          className="whitespace-nowrap"
-        >
-          + Add New EPC
-        </Button>
+        <Select
+          placeholder="Source"
+          options={[
+            { value: "website", label: "Website" },
+            { value: "manual", label: "Manual" },
+          ]}
+          value={sourceFilter}
+          onChange={(e) => setSourceFilter(e.target.value)}
+        />
+        <Select
+          placeholder="Lender"
+          options={LENDERS.map((l) => ({ value: l.key, label: l.label }))}
+          value={lenderFilter}
+          onChange={(e) => setLenderFilter(e.target.value)}
+        />
+        <Select
+          placeholder="Lender state"
+          options={[
+            { value: "docs_given", label: "Has docs" },
+            { value: "approved", label: "Approved" },
+            { value: "rejected", label: "Rejected" },
+          ]}
+          value={lenderStateFilter}
+          onChange={(e) => setLenderStateFilter(e.target.value)}
+        />
+        <Input
+          type="date"
+          aria-label="Created from"
+          title="Created from"
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+        />
+        <Input
+          type="date"
+          aria-label="Created to"
+          title="Created to"
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+        />
       </div>
 
-      <Card className="overflow-x-auto">
+      <Card className="overflow-hidden">
         <table className="w-full text-[14px] table-fixed">
-          {/* Column widths tuned so every column shows fully at ~1366px+.
-              Internal Status needs room for the status pill AND the
-              UPDATED pill side-by-side without clipping. Lenders is
-              tightened to give that space back. EPC details flexes. */}
+          {/* Percentage widths — the table fills the page evenly and never
+              needs a horizontal scrollbar (matches the loan table). Internal
+              status keeps room for the status + UPDATED pills side by side. */}
           <colgroup>
-            <col style={{ width: "auto" }} />
-            <col style={{ width: "88px" }} />
-            <col style={{ width: "110px" }} />
-            <col style={{ width: "168px" }} />
-            <col style={{ width: "140px" }} />
-            <col style={{ width: "300px" }} />
+            <col style={{ width: "26%" }} />
+            <col style={{ width: "9%"  }} />
+            <col style={{ width: "13%" }} />
+            <col style={{ width: "16%" }} />
+            <col style={{ width: "14%" }} />
+            <col style={{ width: "22%" }} />
           </colgroup>
-          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">
+          {/* Everything centred except EPC details, which stays left. */}
+          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-[#5a8a76]">
             <tr>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">EPC details</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Source</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-left">EPC details</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Source</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">
                 <button type="button" onClick={() => toggleSort("created_at")} className="inline-flex items-center gap-1 uppercase tracking-wide">
                   Profile created
                   <SortMark active={sortKey === "created_at"} dir={sortDir} />
                 </button>
               </th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">
                 <button type="button" onClick={() => toggleSort("status")} className="inline-flex items-center gap-1 uppercase tracking-wide">
                   Internal status
                   <SortMark active={sortKey === "status"} dir={sortDir} />
                 </button>
               </th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Action</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Lenders</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Action</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Lenders</th>
             </tr>
           </thead>
           <tbody>
@@ -511,21 +572,21 @@ function EpcsTab() {
                     </div>
                   </div>
                 </td>
-                <td className="px-3 py-3">
+                <td className="px-3 py-3 text-center">
                   <SourcePill source={r.source} />
                 </td>
-                <td className="px-3 py-3">
-                  <p className="text-[13px] text-[#0f3d2e]">
+                <td className="px-3 py-3 text-center">
+                  <p className="text-[13px] font-semibold text-[#0f3d2e]">
                     {new Date(r.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
                   </p>
-                  <p className="text-[11px] text-[#5a8a76]">
+                  <p className="text-[11px] text-[#5a8a76] mt-0.5">
                     {new Date(r.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
                   </p>
                 </td>
-                <td className="px-3 py-3">
+                <td className="px-3 py-3 text-center">
                   <StatusBadge status={r.status} updated={r.epc_self_edited === true} />
                 </td>
-                <td className="px-3 py-3">
+                <td className="px-3 py-3 text-center">
                   <div className="flex flex-col gap-1.5">
                     <button
                       type="button"
@@ -549,7 +610,7 @@ function EpcsTab() {
                     </button>
                   </div>
                 </td>
-                <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <LenderCell
                     state={lenderState[r.id] ?? {}}
                     onToggle={(lender, field, v) => toggleLender(r.id, lender, field, v)}
@@ -844,14 +905,14 @@ function AppsTab() {
   return (
     <>
       <div className="flex justify-end mb-3">
-        <Button variant="primary" onClick={() => setAddOpen(true)}>
+        <Button variant="primary" onClick={() => setAddOpen(true)} style={{ backgroundColor: ACCENTS.apps.color }}>
           + Add New Loan Application
         </Button>
       </div>
       {/* Search + filters. Status stays server-side; EPC / lender / date range
           filter the already-loaded list client-side. */}
       <div className="grid gap-3 mb-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <Input placeholder="Search by borrower…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Input placeholder="Search by borrower…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
         <Select
           placeholder="Status filter"
           options={[
@@ -1228,9 +1289,9 @@ function InsuranceTab() {
     <>
       <div className="mb-3 flex items-center gap-3">
         <div className="flex-1">
-          <Input placeholder="Search by applicant, INS id, or EPC…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <Input placeholder="Search by applicant, INS id, or EPC…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
         </div>
-        <Button type="button" variant="primary" onClick={() => setAddOpen(true)} className="whitespace-nowrap">
+        <Button type="button" variant="primary" onClick={() => setAddOpen(true)} className="whitespace-nowrap" style={{ backgroundColor: ACCENTS.insurance.color }}>
           + Add New Insurance Application
         </Button>
       </div>
@@ -1440,7 +1501,7 @@ function LeadsTab() {
   return (
     <>
       <div className="grid gap-3 mb-5 sm:grid-cols-3">
-        <Input placeholder="Search by name, mobile, or city…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Input placeholder="Search by name, mobile, or city…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
         <Select placeholder="Type" options={[{ value: "loan", label: "Loan" }, { value: "insurance", label: "Insurance" }]} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} />
         <Select placeholder="Status" options={[{ value: "new", label: "New" }, { value: "contacted", label: "Contacted" }, { value: "converted", label: "Converted" }, { value: "closed", label: "Closed" }]} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} />
       </div>

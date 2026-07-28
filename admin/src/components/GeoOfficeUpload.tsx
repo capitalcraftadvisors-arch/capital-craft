@@ -498,7 +498,7 @@ export default function GeoOfficeUpload({
 
   return (
     <div>
-      <p className="text-[13px] font-medium text-text-mid mb-0.5">{label}</p>
+      <p className="text-[13px] font-medium text-text-mid mb-0.5 min-h-[2.4em] leading-snug">{label}</p>
       {hint && <p className="text-[11px] text-text-muted mb-2">{hint}</p>}
       {!hint && <div className="mb-2" />}
 
@@ -539,8 +539,8 @@ export default function GeoOfficeUpload({
             onClick={openCamera}
             disabled={uploading}
             className={[
-              "block border-2 border-dashed border-line rounded-input bg-white",
-              "px-3 py-4 text-center cursor-pointer hover:border-blue transition-colors disabled:opacity-60",
+              "flex flex-col items-center justify-center h-[104px] border-2 border-dashed border-line rounded-input bg-white",
+              "px-3 text-center cursor-pointer hover:border-blue transition-colors disabled:opacity-60",
             ].join(" ")}
           >
             <p className="text-[13px] text-text-mid font-medium">Take photo</p>
@@ -549,8 +549,8 @@ export default function GeoOfficeUpload({
           )}
           <label
             className={[
-              "block border-2 border-dashed border-line rounded-input bg-white",
-              "px-3 py-4 text-center cursor-pointer hover:border-blue transition-colors",
+              "flex flex-col items-center justify-center h-[104px] border-2 border-dashed border-line rounded-input bg-white",
+              "px-3 text-center cursor-pointer hover:border-blue transition-colors",
             ].join(" ")}
           >
             <input

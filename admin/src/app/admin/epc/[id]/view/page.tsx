@@ -54,11 +54,14 @@ type Doc = {
 type LenderRow = { lender: string; docs_given: boolean; approved: boolean; rejected?: boolean };
 type AdminInfo = {
   team_size: string | null;
+  team_technical: number | null;
+  team_non_technical: number | null;
   capacity_residential: number | null;
   capacity_residential_unit: "KW" | "MW" | null;
   capacity_commercial: number | null;
   capacity_commercial_unit: "KW" | "MW" | null;
   turnover_last_fy: string | null;
+  turnover_lakhs: number | null;
 };
 
 const BUSINESS_TYPE_LABEL: Record<string, string> = {
@@ -457,10 +460,10 @@ function Inner() {
             {/* Col 3 order: Business info → Lenders → GST R3B → Comments. */}
 
             <SectionCard title="Business info" tint icon={I.lock} adminOnly>
-              <KV k="Team size" v={adminInfo?.team_size} />
+              <KV k="Team size" v={fmtTeam(adminInfo)} />
               <KV k="Resi cap." v={fmtCapacity(adminInfo?.capacity_residential, adminInfo?.capacity_residential_unit)} />
               <KV k="Comm cap." v={fmtCapacity(adminInfo?.capacity_commercial, adminInfo?.capacity_commercial_unit)} />
-              <KV k="Turnover" v={adminInfo?.turnover_last_fy} />
+              <KV k="Turnover" v={fmtTurnover(adminInfo)} />
               <KV k="Expectation" v={
                 biz.business_expectation_value != null
                   ? `${biz.business_expectation_value}${biz.business_expectation ? " " + cap(biz.business_expectation) : ""}`
@@ -739,7 +742,28 @@ function LenderStatePill({ state }: { state: "approved" | "docs" | "none" | "rej
 
 function fmtCapacity(n: number | null | undefined, unit: string | null | undefined): string {
   if (n === null || n === undefined) return "—";
-  return `${n} ${unit ?? ""}`.trim();
+  const u = unit === "KW" ? "kW" : unit === "MW" ? "MW" : (unit ?? "");
+  return `${n} ${u}`.trim();
+}
+
+// Team size: prefer the split Technical/Non-Technical counts; fall back to
+// the legacy combined free-text value for historical rows.
+function fmtTeam(ai: AdminInfo | null): string | null {
+  if (!ai) return null;
+  if (ai.team_technical != null || ai.team_non_technical != null) {
+    const t = ai.team_technical != null ? String(ai.team_technical) : "—";
+    const nt = ai.team_non_technical != null ? String(ai.team_non_technical) : "—";
+    return `${t} tech · ${nt} non-tech`;
+  }
+  return ai.team_size ?? null;
+}
+
+// Turnover: prefer the numeric ₹ Lakhs value; fall back to the legacy
+// free-text value for historical rows.
+function fmtTurnover(ai: AdminInfo | null): string | null {
+  if (!ai) return null;
+  if (ai.turnover_lakhs != null) return `₹${ai.turnover_lakhs} Lakhs`;
+  return ai.turnover_last_fy ?? null;
 }
 
 function cap(s: string): string {

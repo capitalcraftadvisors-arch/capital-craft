@@ -24,12 +24,12 @@
 // naturally excluded — they never appear in any denominator.
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend,
 } from "recharts";
 import AuthGuard from "@/components/AuthGuard";
+import AdminSidebar, { ACCENTS } from "@/components/AdminSidebar";
 import Card from "@/components/ui/Card";
 import { supabase } from "@/lib/supabase";
 
@@ -114,7 +114,6 @@ export default function AnalyticsPage() {
 }
 
 function Inner() {
-  const router = useRouter();
   const [biz, setBiz]         = useState<Biz[]>([]);
   const [lender, setLender]   = useState<LenderRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -206,45 +205,35 @@ function Inner() {
   }, [lender]);
 
   return (
-    <main className="min-h-screen bg-bg-soft">
-      <header className="border-b border-line bg-white">
-        <div className="w-full px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="font-display font-bold text-[20px] grad-text">Capital Craft</span>
-            <span className="text-[12px] px-2 py-0.5 rounded-full bg-bg-tint text-blue-dark font-semibold uppercase tracking-wide">
-              Analytics
-            </span>
+    <div className="min-h-screen bg-bg-soft md:flex">
+      <AdminSidebar active="analytics" />
+      <div className="flex-1 min-w-0">
+        <section className="w-full px-4 sm:px-6 py-8">
+          {/* Section header with the Analytics accent bar. */}
+          <div className="mb-1 flex items-center gap-2.5">
+            <span className="inline-block w-1.5 h-7 rounded-full" style={{ backgroundColor: ACCENTS.analytics.color }} />
+            <h1 className="font-display text-[24px] sm:text-[28px] font-bold">Analytics</h1>
           </div>
-          <button
-            onClick={() => router.push("/admin")}
-            className="text-[13px] text-text-muted hover:text-text"
-          >
-            ← Back to console
-          </button>
-        </div>
-      </header>
+          <p className="text-[13px] text-text-muted mt-1 mb-6 max-w-2xl">
+            Metrics populate as new EPCs move through the pipeline.
+            The 37 EPCs onboarded before analytics tracking was added
+            do not have the timestamps and are excluded from every metric.
+          </p>
 
-      <section className="w-full px-4 sm:px-6 py-8">
-        <h1 className="font-display text-[26px] sm:text-[30px] font-bold">Analytics</h1>
-        <p className="text-[13px] text-text-muted mt-1 mb-6 max-w-2xl">
-          Metrics populate as new EPCs move through the pipeline.
-          The 37 EPCs onboarded before analytics tracking was added
-          do not have the timestamps and are excluded from every metric.
-        </p>
-
-        {loading ? (
-          <p className="text-[13px] text-text-muted">Loading…</p>
-        ) : (
-          <div className="grid gap-5 lg:grid-cols-2">
-            <FillTimeCard       samples={fillSamples} />
-            <OneGoCard          samples={oneGoSamples} />
-            <ReviewTimeCard     samples={reviewSamples} />
-            <DocsToLenderCard   byLender={docsByLender} />
-            <LenderApprovalCard byLender={approvalByLender} />
-          </div>
-        )}
-      </section>
-    </main>
+          {loading ? (
+            <p className="text-[13px] text-text-muted">Loading…</p>
+          ) : (
+            <div className="grid gap-5 lg:grid-cols-2">
+              <FillTimeCard       samples={fillSamples} />
+              <OneGoCard          samples={oneGoSamples} />
+              <ReviewTimeCard     samples={reviewSamples} />
+              <DocsToLenderCard   byLender={docsByLender} />
+              <LenderApprovalCard byLender={approvalByLender} />
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
   );
 }
 

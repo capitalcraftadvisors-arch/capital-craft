@@ -240,7 +240,7 @@ export default function Step3Page() {
     const biz = getBusiness();
     if (!biz || !businessId) return;
 
-    if (displayed.length < cfg.minRows) {
+    if (displayed.length < cfg.minRows && !isImpersonating()) {
       alert(
         businessType === "proprietorship"
           ? "Please add the proprietor's details."
@@ -251,7 +251,8 @@ export default function Step3Page() {
 
     const errs = validateRows(displayed);
     setErrors(errs);
-    if (Object.keys(errs).length > 0) {
+    // Admin (impersonating) may proceed with whatever is filled.
+    if (Object.keys(errs).length > 0 && !isImpersonating()) {
       alert("Please fix the highlighted fields.");
       return;
     }

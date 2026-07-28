@@ -173,7 +173,8 @@ export default function Step2Page() {
   async function onSubmit(values: Form) {
     const biz = getBusiness();
     if (!biz) return;
-    if (!values.business_type) return alert("Please pick a business type.");
+    // Admin (impersonating) may proceed with anything filled — even no type.
+    if (!isImpersonating() && !values.business_type) return alert("Please pick a business type.");
 
     // Admins run onboarding under impersonation — treat as non-draft so
     // every required check is relaxed (admin can skip anything). Real EPCs
