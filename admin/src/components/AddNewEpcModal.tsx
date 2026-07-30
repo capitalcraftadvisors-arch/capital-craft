@@ -111,7 +111,7 @@ export default function AddNewEpcModal({ open, onClose }: Props) {
           <div>
             <h3 className="font-display font-semibold text-[18px] text-text">Add new EPC</h3>
             <p className="text-[12px] text-text-mid mt-0.5">
-              Enter the EPC&rsquo;s mobile number and enter the required details on their behalf.
+              Enter the EPC&rsquo;s mobile number and complete the required details on their behalf.
             </p>
           </div>
           <button

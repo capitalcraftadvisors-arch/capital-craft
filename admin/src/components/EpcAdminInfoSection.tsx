@@ -48,6 +48,18 @@ const EMPTY: Row = {
   turnover_lakhs: "",
 };
 
+// Legacy turnover_last_fy is free text in RUPEES. If it's a plain number
+// (optionally with ₹/commas/spaces), convert ₹ → Lakhs (÷1,00,000) so the new
+// Lakhs box can be pre-filled — e.g. "40000000" → 400. Anything non-numeric
+// (e.g. "₹5 Cr approx") returns null and is left for the hint instead.
+function rupeesTextToLakhs(raw: string): number | null {
+  const cleaned = (raw || "").replace(/[₹,\s]/g, "");
+  if (!/^\d+(\.\d+)?$/.test(cleaned)) return null;
+  const n = parseFloat(cleaned);
+  if (!isFinite(n) || n < 0) return null;
+  return +(n / 100000).toFixed(2);
+}
+
 type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function EpcAdminInfoSection({ businessId }: { businessId: string }) {
@@ -85,6 +97,16 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
         console.warn("[epc_admin_info] load failed:", error.message);
       }
       if (data) {
+        // Pre-fill the Lakhs turnover box: prefer the saved numeric value; else
+        // convert the legacy rupee text to Lakhs when it's a plain number.
+        // Non-numeric legacy text leaves the box empty (a hint shows the raw
+        // value instead).
+        let turnoverPrefill =
+          data.turnover_lakhs != null ? String(data.turnover_lakhs) : "";
+        if (turnoverPrefill === "") {
+          const lakhs = rupeesTextToLakhs((data.turnover_last_fy as string) ?? "");
+          if (lakhs != null) turnoverPrefill = String(lakhs);
+        }
         setDraft({
           team_technical:
             data.team_technical != null ? String(data.team_technical) : "",
@@ -98,8 +120,7 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
             data.capacity_commercial != null ? String(data.capacity_commercial) : "",
           capacity_commercial_unit:
             (data.capacity_commercial_unit as Unit) ?? "KW",
-          turnover_lakhs:
-            data.turnover_lakhs != null ? String(data.turnover_lakhs) : "",
+          turnover_lakhs: turnoverPrefill,
         });
         setLegacyTeam((data.team_size as string) ?? "");
         setLegacyTurnover((data.turnover_last_fy as string) ?? "");
@@ -329,9 +350,9 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
         )}
       </div>
 
-      {/* Row 5 — Business Expectation (₹ Lakhs, numeric; unit dropdown removed). */}
+      {/* Row 5 — Monthly Expected Volume (₹ Lakhs, numeric; unit dropdown removed). */}
       <div className="mb-4">
-        <Field label="Business Expectation">
+        <Field label="Monthly Expected Volume">
           <div className="flex items-center gap-2">
             <input
               type="text"

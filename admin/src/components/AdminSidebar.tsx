@@ -81,11 +81,15 @@ export default function AdminSidebar({
   }
 
   function content(inDrawer: boolean) {
-    const labelCls = inDrawer ? "" : "hidden lg:inline";
+    // In the static rail, labels are hidden until the rail is hovered; the
+    // drawer always shows them. Icons center when collapsed, left-align on
+    // hover (or in the drawer).
+    const labelCls = inDrawer ? "" : "hidden group-hover:inline";
+    const rowJustify = inDrawer ? "" : "justify-center group-hover:justify-start";
     return (
       <>
         {/* Brand */}
-        <div className="flex items-center gap-2.5 px-2 h-12 mb-2 shrink-0">
+        <div className={"flex items-center gap-2.5 px-1 h-12 mb-2 shrink-0 " + rowJustify}>
           <div
             className="w-8 h-8 rounded-lg grid place-items-center text-white font-display font-extrabold text-[15px] shrink-0"
             style={{ background: "linear-gradient(135deg,#185fa5,#178a5c)" }}
@@ -107,10 +111,11 @@ export default function AdminSidebar({
                 key={key}
                 type="button"
                 onClick={() => go(key)}
-                title={a.label}
                 aria-current={on ? "page" : undefined}
+                aria-label={a.label}
                 className={[
                   "flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-semibold transition-colors",
+                  rowJustify,
                   on ? "" : "text-text-mid hover:bg-bg-tint hover:text-text",
                 ].join(" ")}
                 style={on ? { backgroundColor: a.tint, color: a.color } : undefined}
@@ -126,8 +131,8 @@ export default function AdminSidebar({
         <button
           type="button"
           onClick={() => { logout(); router.replace("/login"); }}
-          title="Log out"
-          className="mt-auto flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-semibold text-text-mid hover:bg-bg-tint hover:text-text transition-colors"
+          aria-label="Log out"
+          className={"mt-auto flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-semibold text-text-mid hover:bg-bg-tint hover:text-text transition-colors " + rowJustify}
         >
           <span className="shrink-0">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></svg>
@@ -162,10 +167,14 @@ export default function AdminSidebar({
         </div>
       )}
 
-      {/* Static sidebar (md+) */}
-      <aside className="hidden md:flex md:flex-col shrink-0 md:w-[68px] lg:w-[240px] border-r border-line bg-white sticky top-0 h-screen p-2 lg:p-3">
-        {content(false)}
-      </aside>
+      {/* Static rail (md+): a slim icons-only rail that reserves 68px of layout
+          width. On hover, the fixed panel expands to 248px as an OVERLAY, so
+          the content area never reflows. Collapses when the cursor leaves. */}
+      <div className="hidden md:block shrink-0 w-[68px]">
+        <div className="group fixed top-0 left-0 z-40 h-screen w-[68px] hover:w-[248px] transition-[width] duration-200 ease-out overflow-hidden flex flex-col border-r border-line bg-white p-3">
+          {content(false)}
+        </div>
+      </div>
     </>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
@@ -113,6 +113,85 @@ function capPhone(v: string): string {
   return /^\d+$/.test(v) ? v.slice(0, 10) : v;
 }
 
+// ── shared: clickable summary cards + collapsible filters ─────────────────
+type SummaryCard = { key: string; label: string; value: number };
+
+// Compact, clickable stat cards. Clicking sets the active category (key);
+// clicking the active one — or the "" (Total) card — clears it. Each card's
+// count is computed with the SAME predicate the table filters on, so a card's
+// number always equals the rows shown when it's active.
+function SummaryCards({ accent, cards, active, onPick }: {
+  accent: string; cards: SummaryCard[]; active: string; onPick: (key: string) => void;
+}) {
+  return (
+    <div className="grid gap-3 mb-5 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+      {cards.map((c) => {
+        const on = active === c.key;
+        return (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => onPick(c.key)}
+            aria-pressed={on}
+            className="flex items-center gap-3 rounded-xl border border-line bg-white px-4 py-3 text-left shadow-sm transition-colors"
+            style={on ? { borderColor: accent, boxShadow: `inset 0 0 0 1px ${accent}` } : undefined}
+          >
+            <span className="w-9 h-9 rounded-lg grid place-items-center shrink-0" style={{ backgroundColor: accent + "1a", color: accent }}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="5" /></svg>
+            </span>
+            <span className="min-w-0">
+              <span className="block text-[20px] font-display font-bold leading-none text-text">{c.value}</span>
+              <span className="block text-[11px] text-text-muted mt-1 truncate" title={c.label}>{c.label}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// "Filters" toggle with an active-count badge (panel filters + any active card).
+function FiltersButton({ count, open, accent, onClick }: {
+  count: number; open: boolean; accent: string; onClick: () => void;
+}) {
+  const active = count > 0;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-expanded={open}
+      className="inline-flex items-center gap-2 rounded-input border border-line bg-white px-3.5 py-2.5 text-[14px] font-medium text-text-mid hover:text-text transition-colors whitespace-nowrap"
+      style={active || open ? { borderColor: accent, color: accent } : undefined}
+    >
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M7 12h10M11 18h2" /></svg>
+      Filters
+      {active && (
+        <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-white text-[11px] font-bold" style={{ backgroundColor: accent }}>{count}</span>
+      )}
+    </button>
+  );
+}
+
+// Collapsible panel holding a tab's existing filter controls + Clear all.
+function FiltersPanel({ open, hasActive, onClear, children }: {
+  open: boolean; hasActive: boolean; onClear: () => void; children: ReactNode;
+}) {
+  if (!open) return null;
+  return (
+    <div className="mb-5 rounded-xl border border-line bg-white p-4">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-[12px] font-semibold text-text-mid uppercase tracking-wide">Filters</p>
+        {hasActive && (
+          <button type="button" onClick={onClear} className="text-[12px] text-blue hover:underline">Clear all</button>
+        )}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {children}
+      </div>
+    </div>
+  );
+}
+
 const LENDERS: { key: Lender; label: string }[] = [
   { key: "creditfair", label: "CreditFair" },
   { key: "aerem",      label: "Aerem" },
@@ -183,6 +262,7 @@ function EpcsTab() {
     created_at: string;
     submitted_at: string | null;
     epc_self_edited: boolean | null;
+    reviewed_at: string | null;
   };
   const [rows, setRows] = useState<Row[]>([]);
   const [q, setQ] = useState("");
@@ -192,6 +272,8 @@ function EpcsTab() {
   const [lenderStateFilter, setLenderStateFilter] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [lenderState, setLenderState] = useState<Record<string, LenderMap>>({});
@@ -234,7 +316,7 @@ function EpcsTab() {
 
   async function load() {
     let query = supabase().from("epc_business")
-      .select("id, epc_display_id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, source, created_at, submitted_at, epc_self_edited")
+      .select("id, epc_display_id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, source, created_at, submitted_at, epc_self_edited, reviewed_at")
       .neq("business_type", "admin");
     if (statusFilter) query = query.eq("status", statusFilter);
     const { data } = await query;
@@ -260,9 +342,22 @@ function EpcsTab() {
 
   useEffect(() => { void load(); }, [statusFilter]);
 
+  // Category predicate — shared by the summary-card counts AND the table
+  // filter so a card's count equals the rows it shows. "" = all.
+  function catMatch(r: Row, key: string): boolean {
+    switch (key) {
+      case "unseen":          return r.reviewed_at == null;
+      case "under_review":    return r.status === "under_review";
+      case "docs_sent":       return Object.values(lenderState[r.id] ?? {}).some((v) => v?.docs_given);
+      case "lender_approved": return Object.values(lenderState[r.id] ?? {}).some((v) => v?.approved);
+      default:                return true;
+    }
+  }
+
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
     const base = rows.filter((r) => {
+      if (categoryFilter && !catMatch(r, categoryFilter)) return false;
       // Text search across name / id / POC / mobile / email.
       if (ql) {
         const hit =
@@ -322,7 +417,8 @@ function EpcsTab() {
       return sortDir === "asc" ? cmp : -cmp;
     });
     return sorted;
-  }, [rows, q, sourceFilter, lenderFilter, lenderStateFilter, dateFrom, dateTo, lenderState, sortKey, sortDir]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, q, categoryFilter, sourceFilter, lenderFilter, lenderStateFilter, dateFrom, dateTo, lenderState, sortKey, sortDir]);
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -421,27 +517,40 @@ function EpcsTab() {
     }
   }
 
+  const cards: SummaryCard[] = [
+    { key: "",                label: "Total Applications",  value: rows.length },
+    { key: "under_review",    label: "Under Review",        value: rows.filter((r) => catMatch(r, "under_review")).length },
+    { key: "unseen",          label: "Application Unseen",  value: rows.filter((r) => catMatch(r, "unseen")).length },
+    { key: "docs_sent",       label: "Docs Sent to Lender", value: rows.filter((r) => catMatch(r, "docs_sent")).length },
+    { key: "lender_approved", label: "Lender Approved",     value: rows.filter((r) => catMatch(r, "lender_approved")).length },
+  ];
+  const panelActive = [statusFilter, sourceFilter, lenderFilter, lenderStateFilter, dateFrom, dateTo].filter(Boolean).length;
+  const activeCount = panelActive + (categoryFilter ? 1 : 0);
+  const pickCategory = (key: string) => setCategoryFilter(key === categoryFilter ? "" : key);
+  function clearAll() {
+    setStatusFilter(""); setSourceFilter(""); setLenderFilter(""); setLenderStateFilter("");
+    setDateFrom(""); setDateTo(""); setCategoryFilter("");
+  }
+
   return (
     <>
-      <div className="flex justify-end mb-3">
-        <Button
-          type="button"
-          variant="primary"
-          onClick={() => setAddOpen(true)}
-          className="whitespace-nowrap"
-        >
+      <SummaryCards accent={ACCENTS.epcs.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
+
+      <div className="flex items-center gap-3 mb-3">
+        <div className="flex-1">
+          <Input
+            placeholder="Search by name, ID, POC, mobile, or email…"
+            value={q}
+            onChange={(e) => setQ(capPhone(e.target.value))}
+          />
+        </div>
+        <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.epcs.color} onClick={() => setFiltersOpen((o) => !o)} />
+        <Button type="button" variant="primary" onClick={() => setAddOpen(true)} className="whitespace-nowrap">
           + Add New EPC
         </Button>
       </div>
-      {/* Search + filters. Internal status stays server-side; source, lender+state
-          and the created-date range filter the already-loaded list client-side. */}
-      <div className="grid gap-3 mb-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        <Input
-          placeholder="Search by name, ID, POC, mobile, or email…"
-          value={q}
-          onChange={(e) => setQ(capPhone(e.target.value))}
-          className="sm:col-span-2 lg:col-span-1"
-        />
+
+      <FiltersPanel open={filtersOpen} hasActive={activeCount > 0} onClear={clearAll}>
         <Select
           placeholder="Internal status"
           options={[
@@ -470,7 +579,7 @@ function EpcsTab() {
           onChange={(e) => setLenderFilter(e.target.value)}
         />
         <Select
-          placeholder="Lender state"
+          placeholder="Lender status"
           options={[
             { value: "docs_given", label: "Has docs" },
             { value: "approved", label: "Approved" },
@@ -479,21 +588,9 @@ function EpcsTab() {
           value={lenderStateFilter}
           onChange={(e) => setLenderStateFilter(e.target.value)}
         />
-        <Input
-          type="date"
-          aria-label="Created from"
-          title="Created from"
-          value={dateFrom}
-          onChange={(e) => setDateFrom(e.target.value)}
-        />
-        <Input
-          type="date"
-          aria-label="Created to"
-          title="Created to"
-          value={dateTo}
-          onChange={(e) => setDateTo(e.target.value)}
-        />
-      </div>
+        <Input type="date" label="Created from" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+        <Input type="date" label="Created to" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+      </FiltersPanel>
 
       <Card className="overflow-hidden">
         <table className="w-full text-[14px] table-fixed">
@@ -729,6 +826,22 @@ function AppsTab() {
     first_disbursement_amount: number | null;
     first_disbursement_date: string | null;
     status: string; created_at: string; created_by: string;
+    reviewed_at: string | null;
+    // Application-doc presence for the "Documents Pending" card. Applicant PAN
+    // is a user_application_docs row (see panDocIds); everything else is a
+    // *_path column. Co-applicant docs only required when has_coapp.
+    aadhaar_front_path: string | null;
+    aadhaar_back_path: string | null;
+    ebill_path: string | null;
+    proforma_invoice_path: string | null;
+    rooftop_photo_path: string | null;
+    bank_statement_path: string | null;
+    customer_photo_path: string | null;
+    // false = a co-applicant was added (its docs then become required).
+    bill_on_applicant_name: boolean | null;
+    coapp_pan_path: string | null;
+    coapp_aadhaar_front_path: string | null;
+    coapp_aadhaar_back_path: string | null;
     // Which lender decided — powers the Lender filter (display/filter only).
     approved_lender: string | null;
     rejected_lender: string | null;
@@ -743,6 +856,10 @@ function AppsTab() {
   // Single month+year picker ("YYYY-MM") — filters to applications created in
   // that calendar month.
   const [createdMonth, setCreatedMonth] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // Loan IDs that have an applicant-PAN doc row (batched in one request).
+  const [panDocIds, setPanDocIds] = useState<Set<string>>(new Set());
   const [addOpen, setAddOpen] = useState(false);
   const [zipBusy, setZipBusy] = useState<string | null>(null);
   // Row whose Download ZIP popup is open — the lender picker is the same
@@ -791,7 +908,10 @@ function AppsTab() {
           "id, borrower_name, aadhaar_name, aadhaar_number_masked, loan_display_id, " +
           "loan_amount, loan_amount_required, " +
           "sanctioned_amount, first_disbursement_amount, first_disbursement_date, " +
-          "status, created_at, created_by, approved_lender, rejected_lender, " +
+          "status, created_at, created_by, reviewed_at, approved_lender, rejected_lender, " +
+          "aadhaar_front_path, aadhaar_back_path, ebill_path, proforma_invoice_path, " +
+          "rooftop_photo_path, bank_statement_path, customer_photo_path, bill_on_applicant_name, " +
+          "coapp_pan_path, coapp_aadhaar_front_path, coapp_aadhaar_back_path, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .order("created_at", { ascending: false });
@@ -800,7 +920,21 @@ function AppsTab() {
         query = query.in("status", OUTCOME_STATUSES[statusFilter as LenderOutcome]);
       }
       const { data } = await query;
-      setRows((data ?? []) as unknown as Row[]);
+      const rs = (data ?? []) as unknown as Row[];
+      setRows(rs);
+      // ONE batched request: which loaded loans have an applicant-PAN doc row
+      // (the only application doc without a *_path column). Merged client-side.
+      const ids = rs.map((r) => r.id);
+      if (ids.length) {
+        const { data: panDocs } = await supabase()
+          .from("user_application_docs")
+          .select("application_id")
+          .eq("category", "borrower_pan")
+          .in("application_id", ids);
+        setPanDocIds(new Set((panDocs ?? []).map((d) => (d as { application_id: string }).application_id)));
+      } else {
+        setPanDocIds(new Set());
+      }
     })();
   }, [statusFilter]);
 
@@ -868,6 +1002,30 @@ function AppsTab() {
   // Client-side filter, then sort: rows with a RUNNING disbursement countdown
   // first (fewest days remaining on top — overdue is negative, so it floats to
   // the very top), everything else below, newest first. The query is untouched.
+  function loanDocsPending(r: Row): boolean {
+    if (!panDocIds.has(r.id)) return true;                          // applicant PAN
+    if (!r.aadhaar_front_path || !r.aadhaar_back_path) return true; // applicant Aadhaar
+    if (!r.proforma_invoice_path) return true;                      // quotation / proforma
+    if (!r.ebill_path) return true;                                 // electricity bill
+    if (!r.rooftop_photo_path) return true;                         // rooftop photo
+    if (!r.customer_photo_path) return true;                        // customer photo
+    if (!r.bank_statement_path) return true;                        // bank statement
+    if (r.bill_on_applicant_name === false && (!r.coapp_pan_path || !r.coapp_aadhaar_front_path || !r.coapp_aadhaar_back_path)) return true;
+    return false;
+  }
+  // Category predicate — shared by the card counts AND the table filter.
+  function catMatch(r: Row, key: string): boolean {
+    switch (key) {
+      case "unseen":       return r.reviewed_at == null;
+      case "docs_pending": return loanDocsPending(r);
+      case "under_review": return lenderOutcome(r.status) === "review";
+      case "approved":     return lenderOutcome(r.status) === "approved";
+      case "rejected":     return lenderOutcome(r.status) === "rejected";
+      case "disbursed":    return r.status === "approved" && r.first_disbursement_amount != null;
+      default:             return true;
+    }
+  }
+
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     // Local calendar month of a row's created_at, as "YYYY-MM".
@@ -879,6 +1037,7 @@ function AppsTab() {
     };
 
     const out = rows.filter((r) => {
+      if (categoryFilter && !catMatch(r, categoryFilter)) return false;
       if (needle &&
           !(displayBorrower(r).toLowerCase().includes(needle) ||
             (r.loan_display_id ?? "").toLowerCase().includes(needle) ||
@@ -900,19 +1059,39 @@ function AppsTab() {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, q, epcFilter, lenderFilter, createdMonth]);
+  }, [rows, q, categoryFilter, panDocIds, epcFilter, lenderFilter, createdMonth]);
+
+  const cards: SummaryCard[] = [
+    { key: "",             label: "Total Applications",    value: rows.length },
+    { key: "unseen",       label: "Application Unseen",    value: rows.filter((r) => catMatch(r, "unseen")).length },
+    { key: "docs_pending", label: "Documents Pending",     value: rows.filter((r) => catMatch(r, "docs_pending")).length },
+    { key: "under_review", label: "Under Review",          value: rows.filter((r) => catMatch(r, "under_review")).length },
+    { key: "approved",     label: "Sanctioned / Approved", value: rows.filter((r) => catMatch(r, "approved")).length },
+    { key: "rejected",     label: "Rejected",              value: rows.filter((r) => catMatch(r, "rejected")).length },
+    { key: "disbursed",    label: "Total Disbursed",       value: rows.filter((r) => catMatch(r, "disbursed")).length },
+  ];
+  const panelActive = [statusFilter, epcFilter, lenderFilter, createdMonth].filter(Boolean).length;
+  const activeCount = panelActive + (categoryFilter ? 1 : 0);
+  const pickCategory = (key: string) => setCategoryFilter(key === categoryFilter ? "" : key);
+  function clearAll() {
+    setStatusFilter(""); setEpcFilter(""); setLenderFilter(""); setCreatedMonth(""); setCategoryFilter("");
+  }
 
   return (
     <>
-      <div className="flex justify-end mb-3">
-        <Button variant="primary" onClick={() => setAddOpen(true)} style={{ backgroundColor: ACCENTS.apps.color }}>
+      <SummaryCards accent={ACCENTS.apps.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
+
+      <div className="flex items-center gap-3 mb-3">
+        <div className="flex-1">
+          <Input placeholder="Search by borrower…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
+        </div>
+        <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.apps.color} onClick={() => setFiltersOpen((o) => !o)} />
+        <Button variant="primary" onClick={() => setAddOpen(true)} style={{ backgroundColor: ACCENTS.apps.color }} className="whitespace-nowrap">
           + Add New Loan Application
         </Button>
       </div>
-      {/* Search + filters. Status stays server-side; EPC / lender / date range
-          filter the already-loaded list client-side. */}
-      <div className="grid gap-3 mb-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-        <Input placeholder="Search by borrower…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
+
+      <FiltersPanel open={filtersOpen} hasActive={activeCount > 0} onClear={clearAll}>
         <Select
           placeholder="Status filter"
           options={[
@@ -939,15 +1118,8 @@ function AppsTab() {
           value={lenderFilter}
           onChange={(e) => setLenderFilter(e.target.value)}
         />
-        {/* Single month+year bar — shows mm-yyyy, filters to that month. */}
-        <Input
-          type="month"
-          aria-label="Created month"
-          title="Created month"
-          value={createdMonth}
-          onChange={(e) => setCreatedMonth(e.target.value)}
-        />
-      </div>
+        <Input type="month" label="Created month" value={createdMonth} onChange={(e) => setCreatedMonth(e.target.value)} />
+      </FiltersPanel>
 
       <Card className="overflow-hidden">
         <table className="w-full text-[14px] table-fixed">
@@ -1137,6 +1309,13 @@ function InsuranceTab() {
     // Storage path of the uploaded policy document — drives the Download
     // Policy button (hidden when there's no policy).
     policy_path: string | null;
+    // Doc presence for the "Docs Pending" card (all *_path columns).
+    pan_path: string | null;
+    aadhaar_front_path: string | null;
+    aadhaar_back_path: string | null;
+    plant_photo_path: string | null;
+    ebill_path: string | null;
+    invoice_path: string | null;
     status: string;
     created_at: string;
     epc_business: { contact_name: string | null; trade_name: string | null; legal_name: string | null; epc_display_id: string | null } | null;
@@ -1150,6 +1329,8 @@ function InsuranceTab() {
   const [statusFilter, setStatusFilter] = useState("");
   const [epcFilter, setEpcFilter]       = useState("");
   const [expiryFilter, setExpiryFilter] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -1158,6 +1339,7 @@ function InsuranceTab() {
         .select(
           "id, insurance_display_id, aadhaar_name, pan_number, sum_insured, invoice_confirmed_amount, " +
           "invoice_amount, insurance_partner, policy_from_date, policy_to_date, policy_path, status, created_at, " +
+          "pan_path, aadhaar_front_path, aadhaar_back_path, plant_photo_path, ebill_path, invoice_path, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .order("created_at", { ascending: false });
@@ -1240,12 +1422,25 @@ function InsuranceTab() {
   // Client-side filter, then sort: rows WITH policy dates first, fewest days
   // left on top (expired is negative, so it floats to the very top); rows with
   // no policy below, newest first. The query is untouched.
+  // Category predicate — shared by the card counts AND the table filter.
+  function catMatch(r: Row, key: string): boolean {
+    switch (key) {
+      case "docs_pending":
+        return !r.pan_path || !r.aadhaar_front_path || !r.aadhaar_back_path ||
+               !r.plant_photo_path || !r.ebill_path || !r.invoice_path;
+      case "awaiting_policy": return r.status === "issued" && r.policy_path == null;
+      case "policy_issued":   return r.policy_path != null;
+      default:                return true;
+    }
+  }
+
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const daysOf = (r: Row) =>
       policyValidityParts(r.policy_from_date, r.policy_to_date)?.daysLeft ?? null;
 
     const out = rows.filter((r) => {
+      if (categoryFilter && !catMatch(r, categoryFilter)) return false;
       if (needle &&
           !(applicant(r).toLowerCase().includes(needle) ||
             (r.insurance_display_id ?? "").toLowerCase().includes(needle) ||
@@ -1271,7 +1466,7 @@ function InsuranceTab() {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, q, statusFilter, epcFilter, expiryFilter]);
+  }, [rows, q, categoryFilter, statusFilter, epcFilter, expiryFilter]);
 
   // Issued / Rejected / Hold / Draft / Under Review (migration 0047).
   const STATUS_LABEL: Record<string, string> = {
@@ -1285,18 +1480,34 @@ function InsuranceTab() {
     hold: "bg-[#dceffb] text-[#185fa5]",
   };
 
+  const cards: SummaryCard[] = [
+    { key: "",                label: "Total Applications", value: rows.length },
+    { key: "docs_pending",    label: "Docs Pending",       value: rows.filter((r) => catMatch(r, "docs_pending")).length },
+    { key: "awaiting_policy", label: "Awaiting Policy",    value: rows.filter((r) => catMatch(r, "awaiting_policy")).length },
+    { key: "policy_issued",   label: "Policy Issued",      value: rows.filter((r) => catMatch(r, "policy_issued")).length },
+  ];
+  const panelActive = [statusFilter, epcFilter, expiryFilter].filter(Boolean).length;
+  const activeCount = panelActive + (categoryFilter ? 1 : 0);
+  const pickCategory = (key: string) => setCategoryFilter(key === categoryFilter ? "" : key);
+  function clearAll() {
+    setStatusFilter(""); setEpcFilter(""); setExpiryFilter(""); setCategoryFilter("");
+  }
+
   return (
     <>
+      <SummaryCards accent={ACCENTS.insurance.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
+
       <div className="mb-3 flex items-center gap-3">
         <div className="flex-1">
           <Input placeholder="Search by applicant, INS id, or EPC…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
         </div>
+        <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.insurance.color} onClick={() => setFiltersOpen((o) => !o)} />
         <Button type="button" variant="primary" onClick={() => setAddOpen(true)} className="whitespace-nowrap" style={{ backgroundColor: ACCENTS.insurance.color }}>
           + Add New Insurance Application
         </Button>
       </div>
-      {/* Filters — all client-side over the loaded list. */}
-      <div className="grid gap-3 mb-5 sm:grid-cols-2 lg:grid-cols-3">
+
+      <FiltersPanel open={filtersOpen} hasActive={activeCount > 0} onClear={clearAll}>
         <Select
           placeholder="Status filter"
           options={[
@@ -1326,7 +1537,7 @@ function InsuranceTab() {
           value={expiryFilter}
           onChange={(e) => setExpiryFilter(e.target.value)}
         />
-      </div>
+      </FiltersPanel>
       <Card className="overflow-hidden">
         <table className="w-full text-[14px] table-fixed">
           {/* Percentage widths — fills the page evenly, never scrolls sideways. */}
@@ -1460,6 +1671,8 @@ function LeadsTab() {
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [viewLead, setViewLead] = useState<Lead | null>(null);
 
@@ -1490,7 +1703,10 @@ function LeadsTab() {
   }
   const maskAadhaar = (a: string | null) => (a ? "XXXX XXXX " + a.slice(-4) : "—");
 
+  // Category predicate — the summary cards are the lead statuses. "" = all.
+  const catMatch = (r: Lead, key: string) => (key ? r.status === key : true);
   const filtered = rows.filter((r) => {
+    if (categoryFilter && !catMatch(r, categoryFilter)) return false;
     const needle = q.trim().toLowerCase();
     if (needle && !((r.name ?? "").toLowerCase().includes(needle) || r.mobile.includes(needle) || (r.city ?? "").toLowerCase().includes(needle))) return false;
     if (typeFilter && r.lead_type !== typeFilter) return false;
@@ -1498,13 +1714,35 @@ function LeadsTab() {
     return true;
   });
 
+  const cards: SummaryCard[] = [
+    { key: "",          label: "Total Leads", value: rows.length },
+    { key: "new",       label: "New",         value: rows.filter((r) => r.status === "new").length },
+    { key: "contacted", label: "Contacted",   value: rows.filter((r) => r.status === "contacted").length },
+    { key: "converted", label: "Converted",   value: rows.filter((r) => r.status === "converted").length },
+    { key: "closed",    label: "Closed",      value: rows.filter((r) => r.status === "closed").length },
+  ];
+  const panelActive = [typeFilter, statusFilter].filter(Boolean).length;
+  const activeCount = panelActive + (categoryFilter ? 1 : 0);
+  const pickCategory = (key: string) => setCategoryFilter(key === categoryFilter ? "" : key);
+  function clearAll() {
+    setTypeFilter(""); setStatusFilter(""); setCategoryFilter("");
+  }
+
   return (
     <>
-      <div className="grid gap-3 mb-5 sm:grid-cols-3">
-        <Input placeholder="Search by name, mobile, or city…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
+      <SummaryCards accent={ACCENTS.leads.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
+
+      <div className="flex items-center gap-3 mb-3">
+        <div className="flex-1">
+          <Input placeholder="Search by name, mobile, or city…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
+        </div>
+        <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.leads.color} onClick={() => setFiltersOpen((o) => !o)} />
+      </div>
+
+      <FiltersPanel open={filtersOpen} hasActive={activeCount > 0} onClear={clearAll}>
         <Select placeholder="Type" options={[{ value: "loan", label: "Loan" }, { value: "insurance", label: "Insurance" }]} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} />
         <Select placeholder="Status" options={[{ value: "new", label: "New" }, { value: "contacted", label: "Contacted" }, { value: "converted", label: "Converted" }, { value: "closed", label: "Closed" }]} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} />
-      </div>
+      </FiltersPanel>
       <Card className="overflow-x-auto">
         <table className="w-full text-[14px]">
           <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">

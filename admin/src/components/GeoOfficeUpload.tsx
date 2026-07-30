@@ -562,7 +562,7 @@ export default function GeoOfficeUpload({
               disabled={uploading}
             />
             <p className="text-[13px] text-text-mid font-medium">Upload photo</p>
-            <p className="text-[11px] text-text-muted mt-0.5">Must be geo-tagged (location or GPS stamp)</p>
+            <p className="text-[11px] text-text-muted mt-0.5">Must be geo-tagged</p>
           </label>
         </div>
       )}

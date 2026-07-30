@@ -219,34 +219,38 @@ export default function GstR3bSection({ businessId }: { businessId: string }) {
         });
         await load();
 
-        // 3. OCR. ~1-3s window where the row stays locked.
-        const ocr = await extractGstR3b(file);
+        // 3. OCR. ~1-3s window where the row stays locked. Wrapped so the
+        //    lock is ALWAYS released — a thrown OCR/update previously left the
+        //    row's inputs disabled for the rest of the session.
+        try {
+          const ocr = await extractGstR3b(file);
 
-        const newMeta: Meta = {
-          period_type: mode,
-          content_hash: hash,
-          month: ocr.ok ? ocr.month : null,
-          quarter: ocr.ok ? ocr.quarter : null,
-          year: ocr.ok ? ocr.year : null,
-          total_taxable_value: ocr.ok ? ocr.total_taxable_value : null,
-          gstin: ocr.ok ? ocr.gstin : null,
-          legal_name: ocr.ok ? ocr.legal_name : null,
-          trade_name: ocr.ok ? ocr.trade_name : null,
-          ocr_raw_text: ocr.ok ? ocr.raw_text : undefined,
-        };
+          const newMeta: Meta = {
+            period_type: mode,
+            content_hash: hash,
+            month: ocr.ok ? ocr.month : null,
+            quarter: ocr.ok ? ocr.quarter : null,
+            year: ocr.ok ? ocr.year : null,
+            total_taxable_value: ocr.ok ? ocr.total_taxable_value : null,
+            gstin: ocr.ok ? ocr.gstin : null,
+            legal_name: ocr.ok ? ocr.legal_name : null,
+            trade_name: ocr.ok ? ocr.trade_name : null,
+            ocr_raw_text: ocr.ok ? ocr.raw_text : undefined,
+          };
 
-        await supabase()
-          .from("epc_documents")
-          .update({ metadata: newMeta })
-          .eq("id", r.id);
-
-        // 4. Release the lock and reload so the OCR-prefilled values land
-        //    in the row's editable inputs.
-        setOcrInProgress((s) => {
-          const next = new Set(s);
-          next.delete(r.id);
-          return next;
-        });
+          await supabase()
+            .from("epc_documents")
+            .update({ metadata: newMeta })
+            .eq("id", r.id);
+        } finally {
+          // 4. Always release the lock, then reload so any OCR-prefilled values
+          //    land in the row's editable inputs.
+          setOcrInProgress((s) => {
+            const next = new Set(s);
+            next.delete(r.id);
+            return next;
+          });
+        }
         await load();
 
         uploaded++;
@@ -287,15 +291,30 @@ export default function GstR3bSection({ businessId }: { businessId: string }) {
     await load();
   }
 
+  // Latest metadata per doc id, kept in sync so back-to-back field edits
+  // (e.g. quarter then year) merge onto the freshest values instead of a stale
+  // render closure — otherwise the second edit clobbers the first before its
+  // DB round-trip lands.
+  const latestMetaRef = useRef<Record<string, Meta>>({});
+  useEffect(() => {
+    const m: Record<string, Meta> = {};
+    for (const x of docs) m[x.id] = x.metadata;
+    latestMetaRef.current = m;
+  }, [docs]);
+
   async function updateRow(d: Doc, patch: Partial<Meta>) {
-    const merged: Meta = { ...d.metadata, ...patch };
-    await supabase()
-      .from("epc_documents")
-      .update({ metadata: merged })
-      .eq("id", d.id);
+    const base = latestMetaRef.current[d.id] ?? d.metadata;
+    const merged: Meta = { ...base, ...patch };
+    latestMetaRef.current[d.id] = merged; // chain rapid edits synchronously
+    // Optimistic local update FIRST so the row reflects the change immediately.
     setDocs((arr) =>
       arr.map((x) => (x.id === d.id ? { ...x, metadata: merged } : x)),
     );
+    const { error } = await supabase()
+      .from("epc_documents")
+      .update({ metadata: merged })
+      .eq("id", d.id);
+    if (error) console.warn("[gst_r3b] metadata save failed:", error.message);
   }
 
   // ── Derived ───────────────────────────────────────────────────────────
@@ -339,10 +358,7 @@ export default function GstR3bSection({ businessId }: { businessId: string }) {
 
   return (
     <Card className="p-6">
-      <h3 className="font-display font-semibold text-[16px] mb-1">Sales returns (GSTR-3B)</h3>
-      <p className="text-[12px] text-text-muted mb-4">
-        Admin-only. Files and parsed values are never visible to the EPC.
-      </p>
+      <h3 className="font-display font-semibold text-[16px] mb-4">Sales returns (GSTR-3B)</h3>
 
       {legacy.length > 0 && (
         <div className="mb-4 p-3 rounded-input bg-gold-50 border border-[#f5b800]/30 flex items-center justify-between gap-4">
@@ -423,7 +439,7 @@ export default function GstR3bSection({ businessId }: { businessId: string }) {
 
           <div className="bg-bg-tint border border-blue/15 rounded-input p-3 mt-4 flex justify-between items-center">
             <span className="text-[13px] text-text-mid">
-              Sum &mdash; Total Sales across all rows
+              Total Taxable Sales
             </span>
             <span className="text-[16px] font-semibold text-text">
               ₹{sum.toLocaleString("en-IN", {
@@ -661,7 +677,7 @@ function DocRow({
     <tr
       className={[
         "border-b border-line last:border-0",
-        isLatest ? "outline outline-2 outline-blue outline-offset-[-2px] bg-blue-50/30" : "",
+        isLatest ? "bg-blue-50" : "",
       ].join(" ")}
     >
       <td className="px-3 py-2 max-w-[220px]">
