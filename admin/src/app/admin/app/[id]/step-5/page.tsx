@@ -139,12 +139,8 @@ function Inner() {
     setSaveError(null);
     setSaving(true);
     try {
+      // Admin-only flow: a tenure may not be picked — save null-safe as a draft.
       const chosen = emiRows.find((r) => r.years === selectedTenure);
-      if (!chosen) {
-        setSaveError("Please pick a tenure.");
-        setSaving(false);
-        return;
-      }
       const res = await fetch(`/api/admin/loan-app/${loan.id}/complete-step-5`, {
         method: "POST",
         headers: {
@@ -155,9 +151,9 @@ function Inner() {
           roi_percent:           roiNum,
           central_subsidy:       centralSubsidy,
           state_subsidy:         stateSubsidyN,
-          selected_tenure_years: chosen.years,
-          selected_monthly_emi:  chosen.monthly,
-          selected_subsidy_emi:  chosen.subsidy,
+          selected_tenure_years: chosen?.years ?? null,
+          selected_monthly_emi:  chosen?.monthly ?? null,
+          selected_subsidy_emi:  chosen?.subsidy ?? null,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -196,7 +192,6 @@ function Inner() {
               Loan Application · Step 5
             </span>
           </div>
-          <a href="/admin" className="text-[13px] text-text-muted hover:text-text">← Back to console</a>
         </div>
       </header>
 

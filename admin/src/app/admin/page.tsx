@@ -1189,7 +1189,11 @@ function AppsTab() {
                     disbursement is entered, surface that instead — display-only,
                     the underlying status field is unchanged. */}
                 <td className="px-3 py-3 text-center">
-                  {r.status === "approved" && r.first_disbursement_amount != null ? (
+                  {r.status === "draft" ? (
+                    <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#eef1f0] text-[#5a8a76]">
+                      Draft
+                    </span>
+                  ) : r.status === "approved" && r.first_disbursement_amount != null ? (
                     <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#dceffb] text-[#185fa5]">
                       1st Disbursement Done
                     </span>

@@ -489,22 +489,16 @@ function Inner() {
     // persist their storage paths. If one was skipped or its upload/OCR call
     // failed silently, `proforma`/`ebill` are null — stop with a clear message
     // instead of crashing on `.path` ("Cannot read properties of null").
-    if (!proforma || !ebill) {
-      setSaveError(
-        !proforma && !ebill ? "Please upload the quotation/proforma invoice and the electricity bill before continuing."
-        : !proforma ? "Please upload the quotation/proforma invoice before continuing."
-        : "Please upload the electricity bill before continuing.",
-      );
-      return;
-    }
     setSaveError(null);
     setSaving(true);
     try {
+      // Admin-only flow: docs may be absent — save whatever is present as a
+      // draft (null-safe; never block, never crash on a missing upload).
       const body: Record<string, unknown> = {
-        proforma_invoice_path: proforma.path,
-        proforma_uploaded_at:  proforma.uploaded_at,
-        ebill_path:            ebill.path,
-        ebill_uploaded_at:     ebill.uploaded_at,
+        proforma_invoice_path: proforma?.path ?? null,
+        proforma_uploaded_at:  proforma?.uploaded_at ?? null,
+        ebill_path:            ebill?.path ?? null,
+        ebill_uploaded_at:     ebill?.uploaded_at ?? null,
         project_size:          sizeN,
         project_size_unit:     projectUnit,
         total_project_cost:    costN,
@@ -517,7 +511,7 @@ function Inner() {
         install_pincode:       pincode,
         install_state:         state,
         install_city:          city,
-        bill_on_applicant_name: ownership === "yes",
+        bill_on_applicant_name: ownership === "yes" ? true : ownership === "no" ? false : null,
       };
       if (ownership === "no") {
         body.coapp_pan         = coapp.pan.trim().toUpperCase();
@@ -595,7 +589,6 @@ function Inner() {
               Loan Application · Step 3
             </span>
           </div>
-          <a href="/admin" className="text-[13px] text-text-muted hover:text-text">← Back to console</a>
         </div>
       </header>
 
@@ -1044,7 +1037,8 @@ function Inner() {
               variant="primary"
               onClick={saveAndNext}
               loading={saving}
-              disabled={saving || !canNext}
+              disabled={saving}
+              title={canNext ? undefined : "Some fields are incomplete — you can still continue as admin."}
             >
               Next
             </Button>

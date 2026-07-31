@@ -163,19 +163,32 @@ export function parseAadhaar(text: string): AadhaarFields {
   const name = nameCandidates.length > 0 ? cleanValue(nameCandidates[0]) : null;
 
   // Address: heuristic — everything between an "Address" label and the
-  // next Aadhaar number or PIN code. Aadhaar cards typically print the
-  // address across 2-4 lines between these landmarks.
+  // address end. An Indian address ENDS at its 6-digit PIN code, so we cut
+  // right AFTER the first pincode (keeping it). This drops the card-footer
+  // artifacts that OCR otherwise appends past the address — the "Download
+  // Date", the UIDAI helpline "1947", "help@uidai", "www.uidai", "VID", etc.
+  // (see the Tonk / 304001 sample). A footer-token strip is applied as a
+  // belt-and-suspenders pass for cards where no pincode is detected.
   let address: string | null = null;
   const addrIdx = text.search(/Address\s*[:\-]/i);
   if (addrIdx >= 0) {
     const tail = text.slice(addrIdx).replace(/^Address\s*[:\-]\s*/i, "");
-    // Cut at the Aadhaar number, at a stray "VID :" label, or at 500 chars.
+    // First 6-digit PIN code → keep the pincode, drop everything after it.
+    const pinM = tail.match(/\b\d{6}\b/);
+    const pinCut = pinM ? (pinM.index as number) + pinM[0].length : tail.length;
+    // Cut at the earliest of: pincode-end, the Aadhaar number, a "VID:" label,
+    // or 500 chars.
     const cutAt = Math.min(
+      pinCut,
       indexOrEnd(tail, /\b\d{4}\s?\d{4}\s?\d{4}\b/),
       indexOrEnd(tail, /VID\s*[:\-]/i),
       500,
     );
-    address = cleanValue(tail.slice(0, cutAt).replace(/\s+/g, " "));
+    // Strip any residual footer tokens (only bites when no pincode was found).
+    const stripped = tail
+      .slice(0, cutAt)
+      .replace(/\b(?:Download\s*Da[lt]e|help@uidai|www\.uidai|\bVID\b|\b1947\b)\b.*/is, "");
+    address = cleanValue(stripped.replace(/\s+/g, " "));
     if (address.length < 8) address = null;
   }
 

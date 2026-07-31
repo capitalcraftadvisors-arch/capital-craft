@@ -221,7 +221,9 @@ function Inner() {
       // Prefill retrieved bank info — never blow away what admin
       // already typed manually.
       const f = data.fields as BankFields;
-      if (!accountHolder && f.account_holder) setAccountHolder(f.account_holder);
+      // Account-holder NAME is deliberately NOT auto-filled — OCR gets it wrong
+      // too often, so the admin types it manually. (The parser still extracts it
+      // into ocr_raw_text/debug; we just don't populate the form field.)
       if (!bankName      && f.bank_name)      setBankName(f.bank_name);
       if (f.account_no) setOcrAccountNo(f.account_no);
       if (!accountNo     && f.account_no)     setAccountNo(f.account_no);
@@ -268,22 +270,20 @@ function Inner() {
     // storage path. If it was skipped or its upload failed silently, `bankDoc`
     // is null — stop with a clear message instead of crashing on `.method`/
     // `.path` ("Cannot read properties of null").
-    if (!bankDoc) {
-      setSaveError("Please upload the bank statement before continuing.");
-      return;
-    }
     setSaveError(null);
     setSaving(true);
     try {
+      // Admin-only flow: the bank statement / fields may be absent — save
+      // whatever is present as a draft (null-safe; never block, never crash).
       const body = {
         employment_type:   employment,
         profession,
         profession_other:  profession === "Other" ? professionOther.trim() : null,
         organization_name: organization.trim() || null,
-        annual_income:     Number(annualIncome),
-        bank_statement_method:      bankDoc.method,
-        bank_statement_path:        bankDoc.path,
-        bank_statement_uploaded_at: bankDoc.uploaded_at,
+        annual_income:     Number(annualIncome) || null,
+        bank_statement_method:      bankDoc?.method ?? null,
+        bank_statement_path:        bankDoc?.path ?? null,
+        bank_statement_uploaded_at: bankDoc?.uploaded_at ?? null,
         bank_account_holder: accountHolder.trim(),
         bank_name:           bankName.trim(),
         bank_account_no:     accountNo.trim(),
@@ -337,7 +337,6 @@ function Inner() {
               Loan Application · Step 4
             </span>
           </div>
-          <a href="/admin" className="text-[13px] text-text-muted hover:text-text">← Back to console</a>
         </div>
       </header>
 
@@ -595,7 +594,8 @@ function Inner() {
               variant="primary"
               onClick={saveAndNext}
               loading={saving}
-              disabled={saving || !canNext}
+              disabled={saving}
+              title={canNext ? undefined : "Some fields are incomplete — you can still continue as admin."}
             >
               Next
             </Button>

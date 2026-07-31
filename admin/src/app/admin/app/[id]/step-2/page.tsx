@@ -271,7 +271,6 @@ function Inner() {
               Loan Application · Step 2
             </span>
           </div>
-          <a href="/admin" className="text-[13px] text-text-muted hover:text-text">← Back to console</a>
         </div>
       </header>
 
