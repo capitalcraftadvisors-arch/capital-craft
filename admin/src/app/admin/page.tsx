@@ -130,6 +130,7 @@ const SUMMARY_ICON: Record<string, ReactNode> = {
   docs_sent:        <svg {...IW}><path d="M22 2 11 13" /><path d="M22 2l-7 20-4-9-9-4 20-7z" /></svg>,
   approved:         <svg {...IW}><path d="M12 3l2 1.6 2.5-.3 1 2.3 2.3 1-.3 2.5L21 12l-1.6 2 .3 2.5-2.3 1-1 2.3-2.5-.3L12 21l-2-1.6-2.5.3-1-2.3-2.3-1 .3-2.5L3 12l1.6-2-.3-2.5 2.3-1 1-2.3 2.5.3z" /><path d="M9 12l2 2 4-4" /></svg>,
   lender_approved:  <svg {...IW}><path d="M12 3l2 1.6 2.5-.3 1 2.3 2.3 1-.3 2.5L21 12l-1.6 2 .3 2.5-2.3 1-1 2.3-2.5-.3L12 21l-2-1.6-2.5.3-1-2.3-2.3-1 .3-2.5L3 12l1.6-2-.3-2.5 2.3-1 1-2.3 2.5.3z" /><path d="M9 12l2 2 4-4" /></svg>,
+  rejected_by_lender: <svg {...IW}><path d="M7.9 2h8.2L22 7.9v8.2L16.1 22H7.9L2 16.1V7.9z" /><path d="M15 9l-6 6M9 9l6 6" /></svg>,
   hold:             <svg {...IW}><circle cx="12" cy="12" r="9" /><path d="M10 9v6M14 9v6" /></svg>,
   rejected:         <svg {...IW}><circle cx="12" cy="12" r="9" /><path d="M15 9l-6 6M9 9l6 6" /></svg>,
   disbursed:        <svg {...IW}><rect x="2" y="6" width="20" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /><path d="M6 12h.01M18 12h.01" /></svg>,
@@ -151,6 +152,7 @@ const EPC_STAGE_META: Record<string, { label: string; cls: string }> = {
   rejected:        { label: "Rejected",            cls: "bg-red-50 text-red-700" },
   docs_sent:       { label: "Docs Sent to Lender", cls: "bg-[#dceffb] text-[#185fa5]" },
   lender_approved: { label: "Lender Approved",     cls: "bg-[#d6efe3] text-[#0f7a52]" },
+  rejected_by_lender: { label: "Rejected by Lender", cls: "bg-[#ffe4e6] text-[#9f1239]" },
 };
 
 function SummaryCards({ accent, cards, active, onPick }: {
@@ -382,6 +384,7 @@ function EpcsTab() {
   function epcStage(r: Row): string {
     const ls = Object.values(lenderState[r.id] ?? {});
     if (ls.some((v) => v?.approved))   return "lender_approved";
+    if (ls.some((v) => v?.rejected))   return "rejected_by_lender";
     if (ls.some((v) => v?.docs_given)) return "docs_sent";
     if (r.status === "approved")       return "approved";
     if (r.status === "on_hold")        return "hold";
@@ -575,6 +578,7 @@ function EpcsTab() {
     { key: "rejected",        label: "Rejected",            value: rows.filter((r) => catMatch(r, "rejected")).length },
     { key: "docs_sent",       label: "Docs Sent to Lender", value: rows.filter((r) => catMatch(r, "docs_sent")).length },
     { key: "lender_approved", label: "Lender Approved",     value: rows.filter((r) => catMatch(r, "lender_approved")).length },
+    { key: "rejected_by_lender", label: "Rejected by Lender", value: rows.filter((r) => catMatch(r, "rejected_by_lender")).length },
     { key: "unseen",          label: "Application Unseen",  value: rows.filter((r) => catMatch(r, "unseen")).length },
   ];
   const panelActive = [sourceFilter, lenderFilter, lenderStateFilter, dateFrom, dateTo].filter(Boolean).length;
@@ -615,6 +619,7 @@ function EpcsTab() {
             { value: "rejected",        label: "Rejected" },
             { value: "docs_sent",       label: "Docs Sent to Lender" },
             { value: "lender_approved", label: "Lender Approved" },
+            { value: "rejected_by_lender", label: "Rejected by Lender" },
           ]}
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
