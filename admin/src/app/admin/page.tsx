@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
@@ -73,7 +73,10 @@ const BUSINESS_TYPE_LABEL: Record<string, string> = {
   llp:            "LLP",
 };
 
-type Lender = "creditfair" | "aerem" | "solfin";
+// Lender keys are now DYNAMIC (backed by the `lenders` registry table),
+// so this is a plain string. The static ZIP/approval flow keeps its own
+// fixed `LenderKey` union (LenderPickerModal) — that path is unchanged.
+type Lender = string;
 // "03 Jul 2026, 5:53 pm" — when the loan application was created.
 function fmtAddedOn(v: string | null | undefined): string {
   if (!v) return "—";
@@ -227,12 +230,15 @@ function FiltersPanel({ open, hasActive, onClear, children }: {
   );
 }
 
-const LENDERS: { key: Lender; label: string }[] = [
-  { key: "creditfair", label: "CreditFair" },
-  { key: "aerem",      label: "Aerem" },
-  { key: "solfin",     label: "Solfin" },
+// Fallback list used until the `lenders` registry loads (and if it ever
+// returns empty). The live list comes from the DB, ordered by sort_order.
+const LENDERS: LenderInfo[] = [
+  { key: "aerem",      label: "Aerem",       sort_order: 10 },
+  { key: "creditfair", label: "Credit Fair", sort_order: 20 },
+  { key: "solfin",     label: "Solfin",      sort_order: 30 },
 ];
 
+type LenderInfo = { key: string; label: string; sort_order?: number };
 type LenderState = { docs_given: boolean; approved: boolean; rejected: boolean };
 type LenderMap = Partial<Record<Lender, LenderState>>;
 
@@ -311,6 +317,8 @@ function EpcsTab() {
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [lenderState, setLenderState] = useState<Record<string, LenderMap>>({});
+  // Live lender registry (falls back to the static list until it loads).
+  const [lenderList, setLenderList] = useState<LenderInfo[]>(LENDERS);
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
   const [addOpen, setAddOpen] = useState(false);
   const [zipPickerRow, setZipPickerRow] = useState<Row | null>(null);
@@ -376,6 +384,33 @@ function EpcsTab() {
   // Load once; stage filtering (cards + panel dropdown) is entirely client-side.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void load(); }, []);
+
+  // Load the global lender registry (Aerem / Credit Fair / Solfin + any the
+  // admin has added). Ordered by sort_order; keeps the static fallback if the
+  // table is empty or unreachable.
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase()
+        .from("lenders")
+        .select("key,label,sort_order")
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true });
+      if (data && data.length) setLenderList(data as LenderInfo[]);
+    })();
+  }, []);
+
+  // Add a lender to the registry (GLOBAL — appears on every EPC's dropdown).
+  async function addLender(name: string) {
+    const label = name.trim();
+    if (!label) return;
+    const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!key) { alert("Please enter a valid lender name."); return; }
+    if (lenderList.some((l) => l.key === key)) { alert("That lender already exists."); return; }
+    const sort_order = Math.max(100, ...lenderList.map((l) => l.sort_order ?? 100)) + 10;
+    const { error } = await supabase().from("lenders").insert({ key, label, sort_order });
+    if (error) { alert("Couldn't add lender: " + error.message); return; }
+    setLenderList((cur) => [...cur, { key, label, sort_order }]);
+  }
 
   // Single mutually-exclusive stage per EPC — highest rule wins (top→bottom).
   // ADMIN-DISPLAY ONLY; EPC-facing views are unaffected. Derived purely from
@@ -635,7 +670,7 @@ function EpcsTab() {
         />
         <Select
           placeholder="Lender"
-          options={LENDERS.map((l) => ({ value: l.key, label: l.label }))}
+          options={lenderList.map((l) => ({ value: l.key, label: l.label }))}
           value={lenderFilter}
           onChange={(e) => setLenderFilter(e.target.value)}
         />
@@ -774,7 +809,9 @@ function EpcsTab() {
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <LenderCell
                     state={lenderState[r.id] ?? {}}
+                    lenders={lenderList}
                     onToggle={(lender, field, v) => toggleLender(r.id, lender, field, v)}
+                    onAddLender={addLender}
                   />
                 </td>
               </tr>
@@ -823,49 +860,153 @@ function SourcePill({ source }: { source: string | null }) {
 }
 
 function LenderCell({
-  state, onToggle,
+  state, lenders, onToggle, onAddLender,
 }: {
   state: LenderMap;
+  lenders: LenderInfo[];
   onToggle: (lender: Lender, field: "docs_given" | "approved" | "rejected", value: boolean) => void;
+  onAddLender: (name: string) => Promise<void> | void;
 }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [newName, setNewName] = useState("");
+  const [adding, setAdding] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // Compact trigger summary.
+  const vals = lenders.map((l) => state[l.key]).filter(Boolean) as LenderState[];
+  const nDocs = vals.filter((v) => v.docs_given).length;
+  const nApproved = vals.filter((v) => v.approved).length;
+  const nRejected = vals.filter((v) => v.rejected).length;
+  const none = nDocs === 0 && nApproved === 0 && nRejected === 0;
+
+  // Lenders that have docs sent OR approval float to the top of the list.
+  const ordered = [...lenders].sort((a, b) => {
+    const sa = state[a.key], sb = state[b.key];
+    const pa = sa?.docs_given || sa?.approved ? 0 : 1;
+    const pb = sb?.docs_given || sb?.approved ? 0 : 1;
+    if (pa !== pb) return pa - pb;
+    return (a.sort_order ?? 100) - (b.sort_order ?? 100);
+  });
+
+  function place() {
+    const r = btnRef.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.bottom + 6, left: Math.max(8, r.right - 340) });
+  }
+  function toggle() { if (!open) place(); setOpen((o) => !o); }
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (panelRef.current?.contains(e.target as Node)) return;
+      if (btnRef.current?.contains(e.target as Node)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const onScroll = () => setOpen(false);
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [open]);
+
+  async function submitAdd() {
+    const name = newName.trim();
+    if (!name) return;
+    setAdding(true);
+    try { await onAddLender(name); setNewName(""); }
+    finally { setAdding(false); }
+  }
+
+  const chip = "px-1.5 py-0.5 rounded-full text-[11px] font-semibold";
   return (
-    <div className="space-y-1.5">
-      {LENDERS.map((l) => {
-        const s = state[l.key] ?? { docs_given: false, approved: false, rejected: false };
-        return (
-          <div key={l.key} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
-            <span className="min-w-[58px] font-medium text-[#0f3d2e] whitespace-nowrap">{l.label}</span>
-            <label className="flex items-center gap-1 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={s.docs_given}
-                onChange={(e) => onToggle(l.key, "docs_given", e.target.checked)}
-                className="h-3.5 w-3.5 accent-[#185fa5]"
-              />
-              <span className="text-[#5a8a76]">Docs</span>
-            </label>
-            <label className="flex items-center gap-1 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={s.approved}
-                onChange={(e) => onToggle(l.key, "approved", e.target.checked)}
-                className="h-3.5 w-3.5 accent-[#178a5c]"
-              />
-              <span className="text-[#5a8a76]">Approved</span>
-            </label>
-            <label className="flex items-center gap-1 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={!!s.rejected}
-                onChange={(e) => onToggle(l.key, "rejected", e.target.checked)}
-                className="h-3.5 w-3.5 accent-[#dc2626]"
-              />
-              <span className="text-[#5a8a76]">Rejected</span>
-            </label>
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        className="inline-flex items-center gap-1.5 text-[12px] font-medium px-2.5 py-1.5 rounded-input border border-line bg-white hover:bg-bg-soft text-[#0f3d2e] max-w-full"
+      >
+        {none ? (
+          <span className="text-text-muted">Set lender status</span>
+        ) : (
+          <span className="inline-flex items-center gap-1 flex-wrap">
+            {nApproved > 0 && <span className={`${chip} bg-[#e6f6ee] text-[#178a5c]`}>{nApproved} appr</span>}
+            {nDocs > 0 && <span className={`${chip} bg-[#dceffb] text-[#185fa5]`}>{nDocs} docs</span>}
+            {nRejected > 0 && <span className={`${chip} bg-[#ffe4e6] text-[#9f1239]`}>{nRejected} rej</span>}
+          </span>
+        )}
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0"><path d="M6 9l6 6 6-6" /></svg>
+      </button>
+
+      {open && pos && (
+        <div
+          ref={panelRef}
+          style={{ position: "fixed", top: pos.top, left: pos.left, width: 340, zIndex: 60 }}
+          className="rounded-lg border border-line bg-white shadow-xl overflow-hidden text-left"
+        >
+          <div className="px-3 py-2 border-b border-line bg-[#f0faf5] text-[11px] font-semibold uppercase tracking-wide text-[#5a8a76]">
+            Lender status
           </div>
-        );
-      })}
-    </div>
+          <div style={{ maxHeight: 260, overflowY: "auto" }}>
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="text-[10px] uppercase tracking-wide text-[#5a8a76] border-b border-line">
+                  <th className="text-left font-medium px-3 py-1.5">Lender</th>
+                  <th className="font-medium px-1 py-1.5">Docs sent</th>
+                  <th className="font-medium px-1 py-1.5">Approved</th>
+                  <th className="font-medium px-1 py-1.5">Rejected</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ordered.map((l) => {
+                  const s = state[l.key] ?? { docs_given: false, approved: false, rejected: false };
+                  const active = s.docs_given || s.approved;
+                  return (
+                    <tr key={l.key} className={`border-b border-[#f0f4f2] ${active ? "bg-[#f7fcfa]" : ""}`}>
+                      <td className="text-left px-3 py-2 font-medium text-[#0f3d2e] whitespace-nowrap">{l.label}</td>
+                      <td className="text-center px-1 py-2">
+                        <input type="checkbox" checked={s.docs_given} onChange={(e) => onToggle(l.key, "docs_given", e.target.checked)} className="h-4 w-4 accent-[#185fa5] cursor-pointer" />
+                      </td>
+                      <td className="text-center px-1 py-2">
+                        <input type="checkbox" checked={s.approved} onChange={(e) => onToggle(l.key, "approved", e.target.checked)} className="h-4 w-4 accent-[#178a5c] cursor-pointer" />
+                      </td>
+                      <td className="text-center px-1 py-2">
+                        <input type="checkbox" checked={!!s.rejected} onChange={(e) => onToggle(l.key, "rejected", e.target.checked)} className="h-4 w-4 accent-[#dc2626] cursor-pointer" />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center gap-2 px-3 py-2 border-t border-line bg-[#fbfdfc]">
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submitAdd(); } }}
+              placeholder="Add lender…"
+              className="flex-1 min-w-0 text-[12px] px-2 py-1.5 rounded-input border border-line focus:outline-none focus:ring-2 focus:ring-[#185fa5]/30"
+            />
+            <button
+              type="button"
+              onClick={() => void submitAdd()}
+              disabled={adding || !newName.trim()}
+              className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input bg-[#185fa5] text-white disabled:opacity-50 shrink-0"
+            >
+              {adding ? "Adding…" : "Add"}
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
