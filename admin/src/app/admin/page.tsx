@@ -125,6 +125,7 @@ const SUMMARY_ICON: Record<string, ReactNode> = {
   "":               <svg {...IW}><path d="M12 2 2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5M2 12l10 5 10-5" /></svg>,
   unseen:           <svg {...IW}><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c7 0 10 8 10 8a13.2 13.2 0 0 1-1.67 2.68M6.6 6.6A13.5 13.5 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.4-1.6" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /><path d="M2 2l20 20" /></svg>,
   under_review:     <svg {...IW}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>,
+  updated:          <svg {...IW}><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" /></svg>,
   docs_pending:     <svg {...IW}><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6" /><path d="M12 12v3M12 18h.01" /></svg>,
   docs_sent:        <svg {...IW}><path d="M22 2 11 13" /><path d="M22 2l-7 20-4-9-9-4 20-7z" /></svg>,
   approved:         <svg {...IW}><path d="M12 3l2 1.6 2.5-.3 1 2.3 2.3 1-.3 2.5L21 12l-1.6 2 .3 2.5-2.3 1-1 2.3-2.5-.3L12 21l-2-1.6-2.5.3-1-2.3-2.3-1 .3-2.5L3 12l1.6-2-.3-2.5 2.3-1 1-2.3 2.5.3z" /><path d="M9 12l2 2 4-4" /></svg>,
@@ -144,6 +145,7 @@ const SUMMARY_ICON: Record<string, ReactNode> = {
 const EPC_STAGE_META: Record<string, { label: string; cls: string }> = {
   docs_pending:    { label: "Docs Pending",        cls: "bg-[#eef1f0] text-[#5a8a76]" },
   under_review:    { label: "Under Review",        cls: "bg-[#fef0d6] text-[#854f0b]" },
+  updated:         { label: "Updated",             cls: "bg-[#fff2cc] text-[#8a6500]" },
   approved:        { label: "Approved",            cls: "bg-[#e6f6ee] text-[#178a5c]" },
   hold:            { label: "Hold",                cls: "bg-[#e5edf5] text-[#3b5a76]" },
   rejected:        { label: "Rejected",            cls: "bg-red-50 text-red-700" },
@@ -384,8 +386,12 @@ function EpcsTab() {
     if (r.status === "approved")       return "approved";
     if (r.status === "on_hold")        return "hold";
     if (r.status === "rejected")       return "rejected";
+    if (r.status === "draft")          return "docs_pending"; // still onboarding
+    // No downstream action yet: a self-edit is its OWN single status "Updated"
+    // (never a second badge) until the next action above supersedes it.
+    if (r.epc_self_edited === true)    return "updated";
     if (r.status === "under_review")   return "under_review";
-    return "docs_pending"; // draft / not yet submitted
+    return "docs_pending";
   }
   // Card/badge/filter predicate. Stage keys are mutually exclusive (sum = Total);
   // "unseen" is an informational overlap (review activity, not a stage).
@@ -563,6 +569,7 @@ function EpcsTab() {
     { key: "",                label: "Total EPCs",          value: rows.length },
     { key: "docs_pending",    label: "Docs Pending",        value: rows.filter((r) => catMatch(r, "docs_pending")).length },
     { key: "under_review",    label: "Under Review",        value: rows.filter((r) => catMatch(r, "under_review")).length },
+    { key: "updated",         label: "Updated",             value: rows.filter((r) => catMatch(r, "updated")).length },
     { key: "approved",        label: "Approved",            value: rows.filter((r) => catMatch(r, "approved")).length },
     { key: "hold",            label: "Hold",                value: rows.filter((r) => catMatch(r, "hold")).length },
     { key: "rejected",        label: "Rejected",            value: rows.filter((r) => catMatch(r, "rejected")).length },
@@ -602,6 +609,7 @@ function EpcsTab() {
           options={[
             { value: "docs_pending",    label: "Docs Pending" },
             { value: "under_review",    label: "Under Review" },
+            { value: "updated",         label: "Updated" },
             { value: "approved",        label: "Approved" },
             { value: "hold",            label: "Hold" },
             { value: "rejected",        label: "Rejected" },
@@ -729,15 +737,10 @@ function EpcsTab() {
                   </p>
                 </td>
                 <td className="px-3 py-3 text-center">
-                  <div className="inline-flex flex-col items-center gap-1">
-                    {(() => {
-                      const m = EPC_STAGE_META[epcStage(r)];
-                      return <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${m.cls}`}>{m.label}</span>;
-                    })()}
-                    {r.epc_self_edited === true && (
-                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-[#fff2cc] text-[#8a6500]">Updated</span>
-                    )}
-                  </div>
+                  {(() => {
+                    const m = EPC_STAGE_META[epcStage(r)];
+                    return <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${m.cls}`}>{m.label}</span>;
+                  })()}
                 </td>
                 <td className="px-3 py-3 text-center">
                   <div className="flex flex-col gap-1.5">
