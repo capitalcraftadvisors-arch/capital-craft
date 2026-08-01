@@ -7,7 +7,6 @@ import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
 import Button from "@/components/ui/Button";
-import StatusBadge from "@/components/StatusBadge";
 import AddNewEpcModal from "@/components/AddNewEpcModal";
 import AddNewLoanAppModal from "@/components/AddNewLoanAppModal";
 import AddNewInsuranceModal from "@/components/AddNewInsuranceModal";
@@ -120,6 +119,38 @@ type SummaryCard = { key: string; label: string; value: number };
 // clicking the active one — or the "" (Total) card — clears it. Each card's
 // count is computed with the SAME predicate the table filters on, so a card's
 // number always equals the rows shown when it's active.
+// Per-card outline icons (accent-colored via currentColor), keyed by card key.
+const IW = { width: 16, height: 16, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" } as const;
+const SUMMARY_ICON: Record<string, ReactNode> = {
+  "":               <svg {...IW}><path d="M12 2 2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5M2 12l10 5 10-5" /></svg>,
+  unseen:           <svg {...IW}><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c7 0 10 8 10 8a13.2 13.2 0 0 1-1.67 2.68M6.6 6.6A13.5 13.5 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.4-1.6" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /><path d="M2 2l20 20" /></svg>,
+  under_review:     <svg {...IW}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>,
+  docs_pending:     <svg {...IW}><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6" /><path d="M12 12v3M12 18h.01" /></svg>,
+  docs_sent:        <svg {...IW}><path d="M22 2 11 13" /><path d="M22 2l-7 20-4-9-9-4 20-7z" /></svg>,
+  approved:         <svg {...IW}><path d="M12 3l2 1.6 2.5-.3 1 2.3 2.3 1-.3 2.5L21 12l-1.6 2 .3 2.5-2.3 1-1 2.3-2.5-.3L12 21l-2-1.6-2.5.3-1-2.3-2.3-1 .3-2.5L3 12l1.6-2-.3-2.5 2.3-1 1-2.3 2.5.3z" /><path d="M9 12l2 2 4-4" /></svg>,
+  lender_approved:  <svg {...IW}><path d="M12 3l2 1.6 2.5-.3 1 2.3 2.3 1-.3 2.5L21 12l-1.6 2 .3 2.5-2.3 1-1 2.3-2.5-.3L12 21l-2-1.6-2.5.3-1-2.3-2.3-1 .3-2.5L3 12l1.6-2-.3-2.5 2.3-1 1-2.3 2.5.3z" /><path d="M9 12l2 2 4-4" /></svg>,
+  hold:             <svg {...IW}><circle cx="12" cy="12" r="9" /><path d="M10 9v6M14 9v6" /></svg>,
+  rejected:         <svg {...IW}><circle cx="12" cy="12" r="9" /><path d="M15 9l-6 6M9 9l6 6" /></svg>,
+  disbursed:        <svg {...IW}><rect x="2" y="6" width="20" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /><path d="M6 12h.01M18 12h.01" /></svg>,
+  awaiting_policy:  <svg {...IW}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M12 8v4M12 16h.01" /></svg>,
+  policy_issued:    <svg {...IW}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M9 12l2 2 4-4" /></svg>,
+  new:              <svg {...IW}><circle cx="12" cy="12" r="9" /><path d="M12 8v8M8 12h8" /></svg>,
+  contacted:        <svg {...IW}><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2 4.2 2 2 0 0 1 4 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7A2 2 0 0 1 22 16.9z" /></svg>,
+  converted:        <svg {...IW}><circle cx="12" cy="12" r="9" /><path d="M8 12l2.5 2.5L16 9" /></svg>,
+  closed:           <svg {...IW}><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8" /><path d="M10 12h4" /></svg>,
+};
+
+// Distinct colours for the derived EPC single-stage badge (admin display only).
+const EPC_STAGE_META: Record<string, { label: string; cls: string }> = {
+  docs_pending:    { label: "Docs Pending",        cls: "bg-[#eef1f0] text-[#5a8a76]" },
+  under_review:    { label: "Under Review",        cls: "bg-[#fef0d6] text-[#854f0b]" },
+  approved:        { label: "Approved",            cls: "bg-[#e6f6ee] text-[#178a5c]" },
+  hold:            { label: "Hold",                cls: "bg-[#e5edf5] text-[#3b5a76]" },
+  rejected:        { label: "Rejected",            cls: "bg-red-50 text-red-700" },
+  docs_sent:       { label: "Docs Sent to Lender", cls: "bg-[#dceffb] text-[#185fa5]" },
+  lender_approved: { label: "Lender Approved",     cls: "bg-[#d6efe3] text-[#0f7a52]" },
+};
+
 function SummaryCards({ accent, cards, active, onPick }: {
   accent: string; cards: SummaryCard[]; active: string; onPick: (key: string) => void;
 }) {
@@ -137,7 +168,7 @@ function SummaryCards({ accent, cards, active, onPick }: {
             style={on ? { borderColor: accent, boxShadow: `inset 0 0 0 1px ${accent}` } : undefined}
           >
             <span className="w-9 h-9 rounded-lg grid place-items-center shrink-0" style={{ backgroundColor: accent + "1a", color: accent }}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="5" /></svg>
+              {SUMMARY_ICON[c.key] ?? SUMMARY_ICON[""]}
             </span>
             <span className="min-w-0">
               <span className="block text-[20px] font-display font-bold leading-none text-text">{c.value}</span>
@@ -266,7 +297,6 @@ function EpcsTab() {
   };
   const [rows, setRows] = useState<Row[]>([]);
   const [q, setQ] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
   const [lenderFilter, setLenderFilter] = useState("");
   const [lenderStateFilter, setLenderStateFilter] = useState("");
@@ -318,7 +348,6 @@ function EpcsTab() {
     let query = supabase().from("epc_business")
       .select("id, epc_display_id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, source, created_at, submitted_at, epc_self_edited, reviewed_at")
       .neq("business_type", "admin");
-    if (statusFilter) query = query.eq("status", statusFilter);
     const { data } = await query;
     const rs = (data ?? []) as Row[];
     setRows(rs);
@@ -340,18 +369,30 @@ function EpcsTab() {
     }
   }
 
-  useEffect(() => { void load(); }, [statusFilter]);
+  // Load once; stage filtering (cards + panel dropdown) is entirely client-side.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void load(); }, []);
 
-  // Category predicate — shared by the summary-card counts AND the table
-  // filter so a card's count equals the rows it shows. "" = all.
+  // Single mutually-exclusive stage per EPC — highest rule wins (top→bottom).
+  // ADMIN-DISPLAY ONLY; EPC-facing views are unaffected. Derived purely from
+  // already-loaded columns: lender ticks + internal status (draft = not yet
+  // submitted = docs pending; under_review+ = onboarding complete).
+  function epcStage(r: Row): string {
+    const ls = Object.values(lenderState[r.id] ?? {});
+    if (ls.some((v) => v?.approved))   return "lender_approved";
+    if (ls.some((v) => v?.docs_given)) return "docs_sent";
+    if (r.status === "approved")       return "approved";
+    if (r.status === "on_hold")        return "hold";
+    if (r.status === "rejected")       return "rejected";
+    if (r.status === "under_review")   return "under_review";
+    return "docs_pending"; // draft / not yet submitted
+  }
+  // Card/badge/filter predicate. Stage keys are mutually exclusive (sum = Total);
+  // "unseen" is an informational overlap (review activity, not a stage).
   function catMatch(r: Row, key: string): boolean {
-    switch (key) {
-      case "unseen":          return r.reviewed_at == null;
-      case "under_review":    return r.status === "under_review";
-      case "docs_sent":       return Object.values(lenderState[r.id] ?? {}).some((v) => v?.docs_given);
-      case "lender_approved": return Object.values(lenderState[r.id] ?? {}).some((v) => v?.approved);
-      default:                return true;
-    }
+    if (key === "") return true;
+    if (key === "unseen") return r.reviewed_at == null;
+    return epcStage(r) === key;
   }
 
   const filtered = useMemo(() => {
@@ -517,18 +558,23 @@ function EpcsTab() {
     }
   }
 
+  // Mutually-exclusive stage cards (sum = Total) + Application Unseen (overlap).
   const cards: SummaryCard[] = [
-    { key: "",                label: "Total Applications",  value: rows.length },
+    { key: "",                label: "Total EPCs",          value: rows.length },
+    { key: "docs_pending",    label: "Docs Pending",        value: rows.filter((r) => catMatch(r, "docs_pending")).length },
     { key: "under_review",    label: "Under Review",        value: rows.filter((r) => catMatch(r, "under_review")).length },
-    { key: "unseen",          label: "Application Unseen",  value: rows.filter((r) => catMatch(r, "unseen")).length },
+    { key: "approved",        label: "Approved",            value: rows.filter((r) => catMatch(r, "approved")).length },
+    { key: "hold",            label: "Hold",                value: rows.filter((r) => catMatch(r, "hold")).length },
+    { key: "rejected",        label: "Rejected",            value: rows.filter((r) => catMatch(r, "rejected")).length },
     { key: "docs_sent",       label: "Docs Sent to Lender", value: rows.filter((r) => catMatch(r, "docs_sent")).length },
     { key: "lender_approved", label: "Lender Approved",     value: rows.filter((r) => catMatch(r, "lender_approved")).length },
+    { key: "unseen",          label: "Application Unseen",  value: rows.filter((r) => catMatch(r, "unseen")).length },
   ];
-  const panelActive = [statusFilter, sourceFilter, lenderFilter, lenderStateFilter, dateFrom, dateTo].filter(Boolean).length;
+  const panelActive = [sourceFilter, lenderFilter, lenderStateFilter, dateFrom, dateTo].filter(Boolean).length;
   const activeCount = panelActive + (categoryFilter ? 1 : 0);
   const pickCategory = (key: string) => setCategoryFilter(key === categoryFilter ? "" : key);
   function clearAll() {
-    setStatusFilter(""); setSourceFilter(""); setLenderFilter(""); setLenderStateFilter("");
+    setSourceFilter(""); setLenderFilter(""); setLenderStateFilter("");
     setDateFrom(""); setDateTo(""); setCategoryFilter("");
   }
 
@@ -552,16 +598,18 @@ function EpcsTab() {
 
       <FiltersPanel open={filtersOpen} hasActive={activeCount > 0} onClear={clearAll}>
         <Select
-          placeholder="Internal status"
+          placeholder="Stage"
           options={[
-            { value: "draft", label: "Draft" },
-            { value: "under_review", label: "Under review" },
-            { value: "approved", label: "Approved" },
-            { value: "on_hold", label: "On hold" },
-            { value: "rejected", label: "Rejected" },
+            { value: "docs_pending",    label: "Docs Pending" },
+            { value: "under_review",    label: "Under Review" },
+            { value: "approved",        label: "Approved" },
+            { value: "hold",            label: "Hold" },
+            { value: "rejected",        label: "Rejected" },
+            { value: "docs_sent",       label: "Docs Sent to Lender" },
+            { value: "lender_approved", label: "Lender Approved" },
           ]}
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
         />
         <Select
           placeholder="Source"
@@ -681,7 +729,15 @@ function EpcsTab() {
                   </p>
                 </td>
                 <td className="px-3 py-3 text-center">
-                  <StatusBadge status={r.status} updated={r.epc_self_edited === true} />
+                  <div className="inline-flex flex-col items-center gap-1">
+                    {(() => {
+                      const m = EPC_STAGE_META[epcStage(r)];
+                      return <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${m.cls}`}>{m.label}</span>;
+                    })()}
+                    {r.epc_self_edited === true && (
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-[#fff2cc] text-[#8a6500]">Updated</span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-3 py-3 text-center">
                   <div className="flex flex-col gap-1.5">
