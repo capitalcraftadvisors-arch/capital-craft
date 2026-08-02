@@ -18,7 +18,9 @@ type LoanCategory =
   | "property_doc" | "quotation" | "other"
   // Post-first-disbursement completion docs (migration 0043). Shared slots —
   // uploaded by either the admin (on behalf) or the EPC.
-  | "completion_invoice" | "completion_plant_photo" | "completion_report";
+  | "completion_invoice" | "completion_plant_photo" | "completion_report"
+  // Tranche-1 admin docs (migration 0056).
+  | "feasibility_report" | "mmr_advance_receipt";
 
 type Props = {
   businessId?: string;

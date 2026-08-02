@@ -44,6 +44,8 @@ const LOAN_STATUS_LABEL: Record<string, string> = {
   draft:        "Draft",
   submitted:    "Submitted",
   under_review: "Under Review",
+  docs_sent:    "Docs Sent",
+  on_hold:      "Hold",
   approved:     "Approved by lender",
   rejected:     "Rejected by lender",
 };
@@ -65,6 +67,11 @@ const TRASH = (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
     <path d="M10 11v6M14 11v6" />
+  </svg>
+);
+const PAUSE = (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M10 5v14M14 5v14" />
   </svg>
 );
 
@@ -155,7 +162,15 @@ function buildLoanDocGroups(loan: Loan, docs: Doc[]): LoanDocGroup[] {
   });
 
   groups.push({
-    title: "Disbursement & completion",
+    title: "1st Tranche Docs",
+    slots: [
+      slot("feasibility_report",  "Feasibility Approval Report", ["feasibility_report"],  null),
+      slot("mmr_advance_receipt", "MMR / Advance Receipt",       ["mmr_advance_receipt"], null),
+    ],
+  });
+
+  groups.push({
+    title: "2nd Tranche Docs",
     slots: [
       slot("comp_invoice",  "Invoice / tax invoice",       ["completion_invoice"],        null),
       slot("comp_panel",    "Panel photo (geo-tagged)",    ["completion_panel_photo"],    null),
@@ -270,7 +285,7 @@ function Inner() {
     }));
   }
 
-  async function changeStatus(next: "under_review" | "approved" | "rejected", extra: Record<string, unknown> = {}, note = "") {
+  async function changeStatus(next: string, extra: Record<string, unknown> = {}, note = "") {
     if (!loan || statusBusy) return;
     setStatusBusy(true);
     setStatusMsg(null);
@@ -345,11 +360,9 @@ function Inner() {
     return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Loan application not found.</p></main>;
   }
 
-  const submitted   = !!loan.submitted_at;
   const approved    = loan.status === "approved";
   const rejected    = loan.status === "rejected";
   const underReview = loan.status === "under_review";
-  const decided     = approved || rejected;
   const statusVal   = loan.status ?? "draft";
   const hasCoapp    = loan.bill_on_applicant_name === false;
 
@@ -363,24 +376,85 @@ function Inner() {
   const reviewLabel = ["approved", "rejected"].includes(String(loan.completion_docs_status))
     ? "Reviewed" : "Pending";
 
-  // Header status/decision actions — same state machine, same handlers.
+  const docsSent = loan.status === "docs_sent";
+  const onHold   = loan.status === "on_hold";
+
+  // Node 1 "Submitted" completes only when every step 1–4 application doc is
+  // present (tranche/completion docs excluded) — mirrors the dashboard's
+  // loanDocsPending. The Docs Sent button stays gated on this.
+  const hasCat = (c: string) => docs.some((d) => d.category === c);
+  const appDocsComplete =
+    hasCat("borrower_pan") &&
+    !!loan.aadhaar_front_path && !!loan.aadhaar_back_path &&
+    (hasCat("quotation")        || !!loan.proforma_invoice_path) &&
+    (hasCat("electricity_bill") || !!loan.ebill_path) &&
+    (hasCat("borrower_photo")   || !!loan.rooftop_photo_path) &&
+    (hasCat("customer_photo")   || !!loan.customer_photo_path) &&
+    (hasCat("bank_statement")   || !!loan.bank_statement_path) &&
+    (!hasCoapp || (!!loan.coapp_pan_path && !!loan.coapp_aadhaar_front_path && !!loan.coapp_aadhaar_back_path));
+
+  // Tracker reads an "effective" status so a held case still shows where it
+  // was parked (Resume returns it there).
+  const effStatus = onHold ? (loan.status_before_hold ?? "under_review") : statusVal;
+  const tDocsSent = ["docs_sent", "approved", "rejected", "sent_to_nbfc", "disbursed"].includes(effStatus);
+  const tApproved = ["approved", "sent_to_nbfc", "disbursed"].includes(effStatus);
+  const tRejected = effStatus === "rejected";
+  const tDecided  = tApproved || tRejected;
+
+  const markDocsSent = () =>
+    void changeStatus("docs_sent", { docs_sent_at: new Date().toISOString() }, "Docs sent to lender");
+  const holdCase = () =>
+    void changeStatus("on_hold", { hold_at: new Date().toISOString(), status_before_hold: loan.status }, "Put on hold");
+  const resumeHold = () => {
+    const prior = (loan.status_before_hold as string) || "under_review";
+    void changeStatus(prior, { hold_at: null, status_before_hold: null }, `Resumed to ${LOAN_STATUS_LABEL[prior] ?? prior}`);
+  };
+
+  // Header status/decision actions — Submitted → Docs Sent → Approve/Reject,
+  // plus Hold/Resume. Approve/Reject handlers unchanged; the back-transitions
+  // retarget to Docs Sent, and Docs Sent → Under Review is the single undo.
   const statusActions =
-    statusVal === "approved" ? (
+    onHold ? (
+      <>
+        <span className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border bg-[#fff2cc] text-[#8a6500] border-[#f3d9a4] inline-flex items-center gap-1.5">
+          {PAUSE} On hold
+        </span>
+        <HAction variant="primary" disabled={statusBusy} onClick={resumeHold}>Resume</HAction>
+      </>
+    ) : approved ? (
       <>
         <span className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border bg-[#178a5c] text-white border-[#178a5c] inline-flex items-center gap-1.5">
           {I.check} Approved
         </span>
-        <HAction variant="ghost" disabled={statusBusy} onClick={() => void changeStatus("under_review")}>Move back to review</HAction>
+        <HAction variant="ghost" disabled={statusBusy} onClick={() => void changeStatus("docs_sent")}>Move back to Docs Sent</HAction>
       </>
-    ) : statusVal === "rejected" ? (
-      <HAction variant="ghost" disabled={statusBusy} onClick={() => void changeStatus("under_review")}>Re-open</HAction>
+    ) : rejected ? (
+      <HAction variant="ghost" disabled={statusBusy} onClick={() => void changeStatus("docs_sent")}>Re-open to Docs Sent</HAction>
     ) : (
       <>
-        {statusVal !== "under_review" && (
-          <HAction variant="ghost" disabled={statusBusy} onClick={() => void changeStatus("under_review")}>Mark under review</HAction>
+        {docsSent ? (
+          <>
+            <span className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border bg-[#dceffb] text-[#185fa5] border-[#bfe0f5] inline-flex items-center gap-1.5">
+              {I.send} Docs sent
+            </span>
+            <HAction variant="ghost" disabled={statusBusy} onClick={() => void changeStatus("under_review")}>Undo → Under Review</HAction>
+          </>
+        ) : (
+          <HAction
+            variant="primary"
+            icon={I.send}
+            disabled={statusBusy || !appDocsComplete}
+            title={appDocsComplete ? undefined : "Upload all application documents first"}
+            onClick={markDocsSent}
+          >
+            Docs Sent
+          </HAction>
         )}
         <HAction variant="approve" icon={I.check} disabled={statusBusy} onClick={() => setApproveOpen(true)}>Approve</HAction>
         <HAction variant="reject" disabled={statusBusy} onClick={() => setRejectOpen(true)}>Rejection</HAction>
+        {(underReview || docsSent) && (
+          <HAction variant="amber" icon={PAUSE} disabled={statusBusy} onClick={holdCase}>Hold</HAction>
+        )}
       </>
     );
 
@@ -460,35 +534,36 @@ function Inner() {
 
       <div className="w-full px-5 sm:px-8 py-4" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
 
-        {/* ── PROGRESS TRACKER — 5 stages, EPC View band styling ───────── */}
+        {/* ── PROGRESS TRACKER — Submitted → Docs Sent → Approved → 1st → 2nd ── */}
         <div className="rounded-[12px] border border-[#cdeadd] bg-white p-5 sm:p-6 mb-4">
           <div className="flex items-center gap-2 sm:gap-4">
             <BigProgressStep
               icon={I.send}
-              done={submitted}
+              done={appDocsComplete}
+              inProgress={!appDocsComplete}
               label="Submitted"
-              sub={submitted ? fmtDateShort(loan.submitted_at) : "Pending"}
+              sub={appDocsComplete ? (loan.submitted_at ? fmtDateShort(loan.submitted_at) : "Complete") : "Awaiting documents"}
               mutedIfPending
             />
-            <BigConnector active={submitted} />
+            <BigConnector active={appDocsComplete} />
             <BigProgressStep
-              icon={I.eye}
-              done={decided}
-              inProgress={underReview}
-              label="Under Review"
-              sub={decided ? "Decided" : underReview ? "With the lender" : "Pending"}
+              icon={I.files}
+              done={tDocsSent}
+              inProgress={!tDocsSent && appDocsComplete && !onHold}
+              label="Docs Sent"
+              sub={tDocsSent ? "Sent to lender" : onHold ? "On hold" : appDocsComplete ? "Ready to send" : "Pending"}
               mutedIfPending
             />
-            <BigConnector active={decided} />
+            <BigConnector active={tDocsSent} />
             <BigProgressStep
               icon={I.circleCheck}
-              done={approved}
-              failed={rejected}
-              label={rejected ? "Rejected" : "Approved"}
-              sub={decidedByLabel ?? (decided ? "—" : "Awaiting decision")}
+              done={tApproved}
+              failed={tRejected}
+              label={tRejected ? "Rejected" : "Approved"}
+              sub={decidedByLabel ?? (tDecided ? "—" : "Awaiting decision")}
               mutedIfPending
             />
-            <BigConnector active={approved} />
+            <BigConnector active={tApproved} />
             <BigProgressStep
               icon={I.money}
               done={firstDone}
@@ -522,18 +597,6 @@ function Inner() {
               <KV k="Email" v={loan.borrower_email} valueClass="text-[#185fa5]" />
               <KV k="Phone no" v={loan.borrower_mobile ? `+91 ${loan.borrower_mobile}` : null} />
               <KV k="Address" v={loan.aadhaar_address} />
-
-              <div className="mt-3">
-                <StepBlock title="Installation identity">
-                  <KV k="Name on bill" v={loan.ebill_name} />
-                  <KV
-                    k="Bill on applicant"
-                    v={loan.bill_on_applicant_name === null || loan.bill_on_applicant_name === undefined
-                      ? null
-                      : loan.bill_on_applicant_name ? "Yes" : "No — co-applicant"}
-                  />
-                </StepBlock>
-              </div>
             </SectionCard>
 
             {hasCoapp && (
@@ -555,6 +618,43 @@ function Inner() {
               </SectionCard>
             )}
 
+            <SectionCard title="Installation site details" accent="blue" icon={I.building}>
+              <KV k="Name on E-Bill" v={loan.ebill_name} />
+              <KV
+                k="Bill on applicant"
+                v={loan.bill_on_applicant_name === null || loan.bill_on_applicant_name === undefined
+                  ? null
+                  : loan.bill_on_applicant_name ? "Yes" : "No — co-applicant"}
+              />
+              <KV k="Address" v={loan.ebill_address_line} />
+              <KV k="Pincode" v={loan.install_pincode} />
+              <KV k="City" v={loan.install_city} />
+              <KV k="District" v={loan.install_district} />
+              <KV k="State" v={loan.install_state} />
+              {loan.rooftop_photo_gps && (
+                <KV
+                  k="Rooftop GPS"
+                  v={`${(loan.rooftop_photo_gps as any).lat?.toFixed?.(5) ?? "?"}, ${(loan.rooftop_photo_gps as any).lng?.toFixed?.(5) ?? "?"}`}
+                />
+              )}
+              <div className="mt-3">
+                <StepBlock title="Loan requirements">
+                  <KV k="Project size" v={loan.project_size ? `${loan.project_size} ${(loan.project_size_unit ?? "kw").toUpperCase()}` : null} />
+                  <KV k="Project cost" v={fmtRupees(loan.total_project_cost)} />
+                  <KV
+                    k="Down payment"
+                    v={loan.total_project_cost && loan.loan_amount_required
+                      ? fmtRupees(Math.max(0, Number(loan.total_project_cost) - Number(loan.loan_amount_required)))
+                      : null}
+                  />
+                  <KV k="System type" v={loan.system_type ? SYSTEM_LABEL[loan.system_type] ?? loan.system_type : null} />
+                  <KV k="Monthly bill" v={fmtRupees(loan.monthly_bill_amount)} />
+                  <KV k="DISCOM" v={loan.discom_name} />
+                  <KV k="K Number" v={loan.ca_number} />
+                </StepBlock>
+              </div>
+            </SectionCard>
+
             <SectionCard title="Employment & bank" tint icon={I.bank} adminOnly>
               <StepBlock title="Employment">
                 <KV k="Employment" v={loan.employment_type ? EMPLOYMENT_LABEL[loan.employment_type] ?? loan.employment_type : null} />
@@ -573,50 +673,20 @@ function Inner() {
             </SectionCard>
           </div>
 
-          {/* COL 2 — site & loan requirements, then Comments */}
+          {/* COL 2 — documents */}
           <div className="flex flex-col gap-3">
-            <SectionCard title="Installation site details" accent="blue" icon={I.building}>
-              <KV k="Address" v={loan.ebill_address_line} />
-              <KV k="Pincode" v={loan.install_pincode} />
-              <KV k="City" v={loan.install_city} />
-              <KV k="District" v={loan.install_district} />
-              <KV k="State" v={loan.install_state} />
-              {loan.rooftop_photo_gps && (
-                <KV
-                  k="Rooftop GPS"
-                  v={`${(loan.rooftop_photo_gps as any).lat?.toFixed?.(5) ?? "?"}, ${(loan.rooftop_photo_gps as any).lng?.toFixed?.(5) ?? "?"}`}
-                />
-              )}
-              <div className="mt-3">
-                <StepBlock title="Loan requirements">
-                  <KV k="Project size" v={loan.project_size ? `${loan.project_size} ${(loan.project_size_unit ?? "kw").toUpperCase()}` : null} />
-                  <KV k="Project cost" v={fmtRupees(loan.total_project_cost)} />
-                  <KV k="Loan required" v={fmtRupees(loan.loan_amount_required)} valueClass="text-[#178a5c]" />
-                  <KV
-                    k="Down payment"
-                    v={loan.total_project_cost && loan.loan_amount_required
-                      ? fmtRupees(Math.max(0, Number(loan.total_project_cost) - Number(loan.loan_amount_required)))
-                      : null}
-                  />
-                  <KV k="System type" v={loan.system_type ? SYSTEM_LABEL[loan.system_type] ?? loan.system_type : null} />
-                  <KV k="Monthly bill" v={fmtRupees(loan.monthly_bill_amount)} />
-                  <KV k="DISCOM" v={loan.discom_name} />
-                  <KV k="CA number" v={loan.ca_number} />
-                </StepBlock>
+            <SectionCard title="Documents" accent="green" icon={I.files}>
+              <div className="space-y-3">
+                {docGroups.map((g) => (
+                  <StepBlock key={g.title} title={g.title}>
+                    <DocGrid slots={toViewSlots(g)} eyeIcon={I.eye} />
+                  </StepBlock>
+                ))}
               </div>
-            </SectionCard>
-
-            {/* Comments — sits under Installation site details. */}
-            <SectionCard title="Comments" tint icon={I.lock} adminOnly>
-              <CommentsSection
-                applicationId={loan.id}
-                epcName={applicantName}
-                maxListHeight={200}
-              />
             </SectionCard>
           </div>
 
-          {/* COL 3 — decision, sanction, documents */}
+          {/* COL 3 — decision, sanction, comments */}
           <div className="flex flex-col gap-3">
             {approved && approvalDetails && (
               <SectionCard title="Approval details" accent="green" icon={I.circleCheck} adminOnly>
@@ -686,14 +756,12 @@ function Inner() {
               </SectionCard>
             )}
 
-            <SectionCard title="Documents" accent="green" icon={I.files}>
-              <div className="space-y-3">
-                {docGroups.map((g) => (
-                  <StepBlock key={g.title} title={g.title}>
-                    <DocGrid slots={toViewSlots(g)} eyeIcon={I.eye} />
-                  </StepBlock>
-                ))}
-              </div>
+            <SectionCard title="Comments" tint icon={I.lock} adminOnly>
+              <CommentsSection
+                applicationId={loan.id}
+                epcName={applicantName}
+                maxListHeight={200}
+              />
             </SectionCard>
           </div>
         </div>
@@ -740,13 +808,14 @@ function Inner() {
 
 // ── Header action button — green-primary theme, soft shades. ─────────
 function HAction({
-  children, onClick, variant = "ghost", icon, disabled,
+  children, onClick, variant = "ghost", icon, disabled, title,
 }: {
   children: ReactNode;
   onClick: () => void;
   variant?: "approve" | "reject" | "primary" | "blue" | "amber" | "outline" | "ghost";
   icon?: ReactNode;
   disabled?: boolean;
+  title?: string;
 }) {
   const cls =
     variant === "approve" ? "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd] hover:bg-[#d6efe3]" :
@@ -761,6 +830,7 @@ function HAction({
       type="button"
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={["text-[13px] font-semibold px-3 py-2 rounded-[8px] border transition-colors disabled:opacity-60 inline-flex items-center gap-1.5", cls].join(" ")}
     >
       {icon && <span className="shrink-0" style={{ display: "inline-flex" }}>{icon}</span>}
@@ -781,6 +851,8 @@ function StatusBadge({ status, lender }: { status: string | null | undefined; le
   const cls =
     s === "approved" ? "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd]" :
     s === "rejected" ? "bg-red-50 text-red-700 border-red-200" :
+    s === "docs_sent" ? "bg-[#dceffb] text-[#185fa5] border-[#bfe0f5]" :
+    s === "on_hold" ? "bg-[#fff2cc] text-[#8a6500] border-[#f3d9a4]" :
     s === "under_review" ? "bg-[#fef0d6] text-[#854f0b] border-[#f3d9a4]" :
                        "bg-slate-100 text-slate-600 border-slate-200";
   return (

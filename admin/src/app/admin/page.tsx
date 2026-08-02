@@ -14,7 +14,7 @@ import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import AdminSidebar, { ACCENTS } from "@/components/AdminSidebar";
 import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
-import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL, OUTCOME_STATUSES, type LenderOutcome } from "@/lib/loan-status";
+import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
 import {
   deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort,
   displayAmount as amountFor,
@@ -118,6 +118,28 @@ function capPhone(v: string): string {
 // ── shared: clickable summary cards + collapsible filters ─────────────────
 type SummaryCard = { key: string; label: string; value: number };
 
+// Current Indian financial year (1 Apr – 31 Mar, Asia/Kolkata). Summary-card
+// counts are scoped to this window; the tables below still show every record.
+function currentFYBounds(): { start: number; end: number; label: string } {
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kolkata", year: "numeric", month: "numeric" }).formatToParts(new Date());
+  const y = Number(p.find((x) => x.type === "year")?.value);
+  const m = Number(p.find((x) => x.type === "month")?.value); // 1–12
+  const startYear = m >= 4 ? y : y - 1;
+  return {
+    start: Date.parse(`${startYear}-04-01T00:00:00+05:30`),
+    end:   Date.parse(`${startYear + 1}-04-01T00:00:00+05:30`), // exclusive
+    label: `FY ${startYear}–${String(startYear + 1).slice(-2)}`,
+  };
+}
+const FY_CAPTION = `Summary counts — current financial year (${currentFYBounds().label}, Apr–Mar). The table below shows all records.`;
+function inCurrentFY(dateStr: string | null | undefined): boolean {
+  if (!dateStr) return false;
+  const t = Date.parse(dateStr);
+  if (isNaN(t)) return false;
+  const { start, end } = currentFYBounds();
+  return t >= start && t < end;
+}
+
 // Compact, clickable stat cards. Clicking sets the active category (key);
 // clicking the active one — or the "" (Total) card — clears it. Each card's
 // count is computed with the SAME predicate the table filters on, so a card's
@@ -158,32 +180,35 @@ const EPC_STAGE_META: Record<string, { label: string; cls: string }> = {
   rejected_by_lender: { label: "Rejected by Lender", cls: "bg-[#ffe4e6] text-[#9f1239]" },
 };
 
-function SummaryCards({ accent, cards, active, onPick }: {
-  accent: string; cards: SummaryCard[]; active: string; onPick: (key: string) => void;
+function SummaryCards({ accent, cards, active, onPick, caption }: {
+  accent: string; cards: SummaryCard[]; active: string; onPick: (key: string) => void; caption?: string;
 }) {
   return (
-    <div className="grid gap-3 mb-5 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
-      {cards.map((c) => {
-        const on = active === c.key;
-        return (
-          <button
-            key={c.key}
-            type="button"
-            onClick={() => onPick(c.key)}
-            aria-pressed={on}
-            className="flex items-center gap-3 rounded-xl border border-line bg-white px-4 py-3 text-left shadow-sm transition-colors"
-            style={on ? { borderColor: accent, boxShadow: `inset 0 0 0 1px ${accent}` } : undefined}
-          >
-            <span className="w-9 h-9 rounded-lg grid place-items-center shrink-0" style={{ backgroundColor: accent + "1a", color: accent }}>
-              {SUMMARY_ICON[c.key] ?? SUMMARY_ICON[""]}
-            </span>
-            <span className="min-w-0">
-              <span className="block text-[20px] font-display font-bold leading-none text-text">{c.value}</span>
-              <span className="block text-[11px] text-text-muted mt-1 truncate" title={c.label}>{c.label}</span>
-            </span>
-          </button>
-        );
-      })}
+    <div className="mb-5">
+      {caption && <p className="text-[11px] text-text-muted mb-2 font-medium">{caption}</p>}
+      <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+        {cards.map((c) => {
+          const on = active === c.key;
+          return (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => onPick(c.key)}
+              aria-pressed={on}
+              className="flex items-center gap-3 rounded-xl border border-line bg-white px-4 py-3 text-left shadow-sm transition-colors"
+              style={on ? { borderColor: accent, boxShadow: `inset 0 0 0 1px ${accent}` } : undefined}
+            >
+              <span className="w-9 h-9 rounded-lg grid place-items-center shrink-0" style={{ backgroundColor: accent + "1a", color: accent }}>
+                {SUMMARY_ICON[c.key] ?? SUMMARY_ICON[""]}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-[20px] font-display font-bold leading-none text-text">{c.value}</span>
+                <span className="block text-[11px] text-text-muted mt-1 truncate" title={c.label}>{c.label}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -230,6 +255,23 @@ function FiltersPanel({ open, hasActive, onClear, children }: {
   );
 }
 
+// Big, click-to-open calendar date picker (native, dependency-free). Clicking
+// anywhere on the box opens the calendar — no typing needed.
+function DateBox({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex flex-col gap-1">
+      {label && <span className="text-[11px] font-medium text-text-muted">{label}</span>}
+      <input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onClick={(e) => { const el = e.currentTarget as HTMLInputElement & { showPicker?: () => void }; try { el.showPicker?.(); } catch { /* native focus fallback */ } }}
+        className="w-full rounded-input border border-line bg-white px-3 py-2.5 text-[14px] text-text cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#185fa5]/30"
+      />
+    </div>
+  );
+}
+
 // Fallback list used until the `lenders` registry loads (and if it ever
 // returns empty). The live list comes from the DB, ordered by sort_order.
 const LENDERS: LenderInfo[] = [
@@ -264,11 +306,6 @@ const IconGlobe = (
 const IconUserPlus = (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <circle cx="9" cy="8" r="3.5" /><path d="M3 20a6 6 0 0 1 12 0M18 8v6M15 11h6" />
-  </svg>
-);
-const IconEye = (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M1.5 12s3.5-7 10.5-7 10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z" /><circle cx="12" cy="12" r="3" />
   </svg>
 );
 const IconDownload = (
@@ -603,18 +640,19 @@ function EpcsTab() {
   }
 
   // Mutually-exclusive stage cards (sum = Total) + Application Unseen (overlap).
+  const fyRows = useMemo(() => rows.filter((r) => inCurrentFY(r.created_at)), [rows]);
   const cards: SummaryCard[] = [
-    { key: "",                label: "Total EPCs",          value: rows.length },
-    { key: "docs_pending",    label: "Docs Pending",        value: rows.filter((r) => catMatch(r, "docs_pending")).length },
-    { key: "under_review",    label: "Under Review",        value: rows.filter((r) => catMatch(r, "under_review")).length },
-    { key: "updated",         label: "Updated",             value: rows.filter((r) => catMatch(r, "updated")).length },
-    { key: "approved",        label: "Approved",            value: rows.filter((r) => catMatch(r, "approved")).length },
-    { key: "hold",            label: "Hold",                value: rows.filter((r) => catMatch(r, "hold")).length },
-    { key: "rejected",        label: "Rejected",            value: rows.filter((r) => catMatch(r, "rejected")).length },
-    { key: "docs_sent",       label: "Docs Sent to Lender", value: rows.filter((r) => catMatch(r, "docs_sent")).length },
-    { key: "lender_approved", label: "Lender Approved",     value: rows.filter((r) => catMatch(r, "lender_approved")).length },
-    { key: "rejected_by_lender", label: "Rejected by Lender", value: rows.filter((r) => catMatch(r, "rejected_by_lender")).length },
-    { key: "unseen",          label: "Application Unseen",  value: rows.filter((r) => catMatch(r, "unseen")).length },
+    { key: "",                label: "Total EPCs",          value: fyRows.length },
+    { key: "docs_pending",    label: "Docs Pending",        value: fyRows.filter((r) => catMatch(r, "docs_pending")).length },
+    { key: "under_review",    label: "Under Review",        value: fyRows.filter((r) => catMatch(r, "under_review")).length },
+    { key: "updated",         label: "Updated",             value: fyRows.filter((r) => catMatch(r, "updated")).length },
+    { key: "approved",        label: "Approved",            value: fyRows.filter((r) => catMatch(r, "approved")).length },
+    { key: "hold",            label: "Hold",                value: fyRows.filter((r) => catMatch(r, "hold")).length },
+    { key: "rejected",        label: "Rejected",            value: fyRows.filter((r) => catMatch(r, "rejected")).length },
+    { key: "docs_sent",       label: "Docs Sent to Lender", value: fyRows.filter((r) => catMatch(r, "docs_sent")).length },
+    { key: "lender_approved", label: "Lender Approved",     value: fyRows.filter((r) => catMatch(r, "lender_approved")).length },
+    { key: "rejected_by_lender", label: "Rejected by Lender", value: fyRows.filter((r) => catMatch(r, "rejected_by_lender")).length },
+    { key: "unseen",          label: "Application Unseen",  value: fyRows.filter((r) => catMatch(r, "unseen")).length },
   ];
   const panelActive = [sourceFilter, lenderFilter, lenderStateFilter, dateFrom, dateTo].filter(Boolean).length;
   const activeCount = panelActive + (categoryFilter ? 1 : 0);
@@ -626,7 +664,7 @@ function EpcsTab() {
 
   return (
     <>
-      <SummaryCards accent={ACCENTS.epcs.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
+      <SummaryCards accent={ACCENTS.epcs.color} cards={cards} active={categoryFilter} onPick={pickCategory} caption={FY_CAPTION} />
 
       <div className="flex items-center gap-3 mb-3">
         <div className="flex-1">
@@ -684,8 +722,8 @@ function EpcsTab() {
           value={lenderStateFilter}
           onChange={(e) => setLenderStateFilter(e.target.value)}
         />
-        <Input type="date" label="Created from" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-        <Input type="date" label="Created to" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+        <DateBox label="Created from" value={dateFrom} onChange={setDateFrom} />
+        <DateBox label="Created to"   value={dateTo}   onChange={setDateTo} />
       </FiltersPanel>
 
       <Card className="overflow-hidden">
@@ -708,7 +746,7 @@ function EpcsTab() {
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Source</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">
                 <button type="button" onClick={() => toggleSort("created_at")} className="inline-flex items-center gap-1 uppercase tracking-wide">
-                  Profile created
+                  Created on
                   <SortMark active={sortKey === "created_at"} dir={sortDir} />
                 </button>
               </th>
@@ -735,20 +773,15 @@ function EpcsTab() {
                   transition: "background-color 2s ease-out",
                   backgroundColor: isHighlighted ? "#dceffb" : undefined,
                 }}
-                className="border-b border-[#eaf3ee] hover:bg-[#f7fcfa] align-top"
+                onClick={() => navigateToView(r)}
+                className="border-b border-[#eaf3ee] cursor-pointer hover:bg-[#f7fcfa] align-top"
               >
                 <td className="px-3 py-3">
                   <div className="flex items-start gap-3">
-                    <div
-                      className="w-9 h-9 rounded-md bg-[#d6efe3] text-[#178a5c] grid place-items-center shrink-0 cursor-pointer"
-                      onClick={() => navigateToView(r)}
-                    >
+                    <div className="w-9 h-9 rounded-md bg-[#d6efe3] text-[#178a5c] grid place-items-center shrink-0">
                       {IconBuilding}
                     </div>
-                    <div
-                      className="flex-1 min-w-0 cursor-pointer"
-                      onClick={() => navigateToView(r)}
-                    >
+                    <div className="flex-1 min-w-0">
                       <p className="text-[13px] font-semibold text-[#0f3d2e] truncate">
                         {r.trade_name || r.legal_name ||
                           <span className="text-[#5a8a76] font-normal">—</span>}
@@ -783,28 +816,19 @@ function EpcsTab() {
                   })()}
                 </td>
                 <td className="px-3 py-3 text-center">
-                  <div className="flex flex-col gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => navigateToView(r)}
-                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#185fa5]/30 bg-white text-[#185fa5] hover:bg-[#dceffb] inline-flex items-center justify-center gap-1.5"
-                    >
-                      {IconEye} View
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!!downloading[r.id]}
-                      onClick={() => setZipPickerRow(r)}
-                      className={[
-                        "text-[12px] font-semibold px-2.5 py-1.5 rounded-input border transition-colors inline-flex items-center justify-center gap-1.5",
-                        downloading[r.id]
-                          ? "border-line bg-bg-soft text-text-muted cursor-not-allowed"
-                          : "border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5]",
-                      ].join(" ")}
-                    >
-                      {IconDownload} {downloading[r.id] ? "Preparing…" : "Download ZIP"}
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    disabled={!!downloading[r.id]}
+                    onClick={() => setZipPickerRow(r)}
+                    className={[
+                      "text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 transition-colors",
+                      downloading[r.id]
+                        ? "bg-bg-soft text-text-muted cursor-not-allowed"
+                        : "bg-[#178a5c] text-white hover:bg-[#12734c]",
+                    ].join(" ")}
+                  >
+                    {IconDownload} {downloading[r.id] ? "Preparing…" : "Download ZIP"}
+                  </button>
                 </td>
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <LenderCell
@@ -1030,6 +1054,7 @@ function AppsTab() {
     sanctioned_amount: number | null;
     first_disbursement_amount: number | null;
     first_disbursement_date: string | null;
+    second_disbursement_amount: number | null;
     status: string; created_at: string; created_by: string;
     reviewed_at: string | null;
     // Application-doc presence for the "Documents Pending" card. Applicant PAN
@@ -1058,13 +1083,15 @@ function AppsTab() {
   // Client-side filters over the already-loaded list.
   const [epcFilter, setEpcFilter]       = useState("");
   const [lenderFilter, setLenderFilter] = useState("");
-  // Single month+year picker ("YYYY-MM") — filters to applications created in
-  // that calendar month.
-  const [createdMonth, setCreatedMonth] = useState("");
+  const [createdByFilter, setCreatedByFilter] = useState("");
+  // Created-date range (inclusive) via calendar pickers.
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo]     = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
-  // Loan IDs that have an applicant-PAN doc row (batched in one request).
-  const [panDocIds, setPanDocIds] = useState<Set<string>>(new Set());
+  // Table sort: newest-created first by default; the Days-remaining header
+  // toggles to fewest-days-first.
+  const [sortKey, setSortKey] = useState<"created" | "days">("created");
   const [addOpen, setAddOpen] = useState(false);
   const [zipBusy, setZipBusy] = useState<string | null>(null);
   // Row whose Download ZIP popup is open — the lender picker is the same
@@ -1107,12 +1134,12 @@ function AppsTab() {
 
   useEffect(() => {
     (async () => {
-      let query = supabase()
+      const { data } = await supabase()
         .from("epc_applications")
         .select(
           "id, borrower_name, aadhaar_name, aadhaar_number_masked, loan_display_id, " +
           "loan_amount, loan_amount_required, " +
-          "sanctioned_amount, first_disbursement_amount, first_disbursement_date, " +
+          "sanctioned_amount, first_disbursement_amount, first_disbursement_date, second_disbursement_amount, " +
           "status, created_at, created_by, reviewed_at, approved_lender, rejected_lender, " +
           "aadhaar_front_path, aadhaar_back_path, ebill_path, proforma_invoice_path, " +
           "rooftop_photo_path, bank_statement_path, customer_photo_path, bill_on_applicant_name, " +
@@ -1120,28 +1147,9 @@ function AppsTab() {
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .order("created_at", { ascending: false });
-      // Filter maps a lender-outcome bucket to its underlying statuses.
-      if (statusFilter && statusFilter in OUTCOME_STATUSES) {
-        query = query.in("status", OUTCOME_STATUSES[statusFilter as LenderOutcome]);
-      }
-      const { data } = await query;
-      const rs = (data ?? []) as unknown as Row[];
-      setRows(rs);
-      // ONE batched request: which loaded loans have an applicant-PAN doc row
-      // (the only application doc without a *_path column). Merged client-side.
-      const ids = rs.map((r) => r.id);
-      if (ids.length) {
-        const { data: panDocs } = await supabase()
-          .from("user_application_docs")
-          .select("application_id")
-          .eq("category", "borrower_pan")
-          .in("application_id", ids);
-        setPanDocIds(new Set((panDocs ?? []).map((d) => (d as { application_id: string }).application_id)));
-      } else {
-        setPanDocIds(new Set());
-      }
+      setRows((data ?? []) as unknown as Row[]);
     })();
-  }, [statusFilter]);
+  }, []);
 
   // Display helpers — encapsulated so the render below stays clean.
   function displayBorrower(r: Row): string {
@@ -1207,84 +1215,110 @@ function AppsTab() {
   // Client-side filter, then sort: rows with a RUNNING disbursement countdown
   // first (fewest days remaining on top — overdue is negative, so it floats to
   // the very top), everything else below, newest first. The query is untouched.
-  function loanDocsPending(r: Row): boolean {
-    if (!panDocIds.has(r.id)) return true;                          // applicant PAN
-    if (!r.aadhaar_front_path || !r.aadhaar_back_path) return true; // applicant Aadhaar
-    if (!r.proforma_invoice_path) return true;                      // quotation / proforma
-    if (!r.ebill_path) return true;                                 // electricity bill
-    if (!r.rooftop_photo_path) return true;                         // rooftop photo
-    if (!r.customer_photo_path) return true;                        // customer photo
-    if (!r.bank_statement_path) return true;                        // bank statement
-    if (r.bill_on_applicant_name === false && (!r.coapp_pan_path || !r.coapp_aadhaar_front_path || !r.coapp_aadhaar_back_path)) return true;
-    return false;
+  // One mutually-exclusive admin stage per application (drives the FY summary
+  // cards + click-to-filter). EPC-facing surfaces still use lenderOutcome(), so
+  // docs_sent / on_hold never leak to EPCs (both read as "Under Review" there).
+  function loanStage(r: Row): string {
+    const s = r.status;
+    if (s === "draft") return "draft";
+    if (s === "on_hold") return "hold";
+    if (s === "docs_sent") return "docs_sent";
+    if (s === "rejected") return "rejected";
+    if (s === "approved" || s === "sent_to_nbfc" || s === "disbursed") {
+      return r.first_disbursement_amount != null ? "disbursed" : "approved";
+    }
+    return "under_review"; // submitted / under_review / anything pre-decision
   }
-  // Category predicate — shared by the card counts AND the table filter.
+  // Card category predicate — shared by the FY counts AND click-to-filter.
   function catMatch(r: Row, key: string): boolean {
     switch (key) {
-      case "unseen":       return r.reviewed_at == null;
-      case "docs_pending": return loanDocsPending(r);
-      case "under_review": return lenderOutcome(r.status) === "review";
-      case "approved":     return lenderOutcome(r.status) === "approved";
-      case "rejected":     return lenderOutcome(r.status) === "rejected";
-      case "disbursed":    return r.status === "approved" && r.first_disbursement_amount != null;
+      case "unseen":       return loanStage(r) === "draft"; // Application Unseen = Draft
+      case "under_review": return loanStage(r) === "under_review";
+      case "docs_sent":    return loanStage(r) === "docs_sent";
+      case "hold":         return loanStage(r) === "hold";
+      case "approved":     return loanStage(r) === "approved";
+      case "disbursed":    return loanStage(r) === "disbursed";
+      case "rejected":     return loanStage(r) === "rejected";
+      default:             return true;
+    }
+  }
+  // Filters-panel "Status" predicate (Draft / Under Review / Docs Sent / Hold /
+  // Approved / Rejected by lender / 1st & 2nd Tranche Done).
+  function statusMatch(r: Row, key: string): boolean {
+    switch (key) {
+      case "draft":        return r.status === "draft";
+      case "under_review": return loanStage(r) === "under_review";
+      case "docs_sent":    return r.status === "docs_sent";
+      case "hold":         return r.status === "on_hold";
+      case "approved":     return ["approved", "sent_to_nbfc", "disbursed"].includes(r.status);
+      case "rejected":     return r.status === "rejected";
+      case "tranche1":     return r.first_disbursement_amount != null;
+      case "tranche2":     return r.second_disbursement_amount != null;
       default:             return true;
     }
   }
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    // Local calendar month of a row's created_at, as "YYYY-MM".
-    const monthOf = (v: string) => {
-      const d = new Date(v);
-      return isNaN(d.getTime())
-        ? ""
-        : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    };
+    const fromT = dateFrom ? Date.parse(dateFrom + "T00:00:00") : null;
+    const toT   = dateTo ? Date.parse(dateTo + "T23:59:59.999") : null;
 
     const out = rows.filter((r) => {
       if (categoryFilter && !catMatch(r, categoryFilter)) return false;
+      if (statusFilter && !statusMatch(r, statusFilter)) return false;
       if (needle &&
           !(displayBorrower(r).toLowerCase().includes(needle) ||
             (r.loan_display_id ?? "").toLowerCase().includes(needle) ||
             displayEpc(r).toLowerCase().includes(needle))) return false;
       if (epcFilter && displayEpc(r) !== epcFilter) return false;
       if (lenderFilter && String(r.approved_lender ?? r.rejected_lender ?? "") !== lenderFilter) return false;
-      if (createdMonth && monthOf(r.created_at) !== createdMonth) return false;
+      if (createdByFilter && (r.created_by === "admin" ? "admin" : "epc") !== createdByFilter) return false;
+      const t = Date.parse(r.created_at);
+      if (fromT != null && !(t >= fromT)) return false;
+      if (toT != null && !(t <= toT)) return false;
       return true;
     });
 
-    const running = (r: Row) => r.status === "approved" && !!r.first_disbursement_date;
-    return out.sort((a, b) => {
-      const ra = running(a), rb = running(b);
-      if (ra !== rb) return ra ? -1 : 1;
-      if (ra && rb) {
-        return deadlineState(a.first_disbursement_date).daysRemaining
-             - deadlineState(b.first_disbursement_date).daysRemaining;
-      }
-      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-    });
+    // Default: newest created first. Days-remaining header → fewest days first
+    // (running disbursement countdowns; non-approved rows sink to the bottom).
+    if (sortKey === "days") {
+      return out.sort((a, b) => {
+        const ra = a.status === "approved" && !!a.first_disbursement_date;
+        const rb = b.status === "approved" && !!b.first_disbursement_date;
+        if (ra !== rb) return ra ? -1 : 1;
+        if (ra && rb) {
+          return deadlineState(a.first_disbursement_date).daysRemaining
+               - deadlineState(b.first_disbursement_date).daysRemaining;
+        }
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+    }
+    return out.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, q, categoryFilter, panDocIds, epcFilter, lenderFilter, createdMonth]);
+  }, [rows, q, categoryFilter, statusFilter, epcFilter, lenderFilter, createdByFilter, dateFrom, dateTo, sortKey]);
 
+  const fyRows = useMemo(() => rows.filter((r) => inCurrentFY(r.created_at)), [rows]);
   const cards: SummaryCard[] = [
-    { key: "",             label: "Total Applications",    value: rows.length },
-    { key: "unseen",       label: "Application Unseen",    value: rows.filter((r) => catMatch(r, "unseen")).length },
-    { key: "docs_pending", label: "Documents Pending",     value: rows.filter((r) => catMatch(r, "docs_pending")).length },
-    { key: "under_review", label: "Under Review",          value: rows.filter((r) => catMatch(r, "under_review")).length },
-    { key: "approved",     label: "Sanctioned / Approved", value: rows.filter((r) => catMatch(r, "approved")).length },
-    { key: "rejected",     label: "Rejected",              value: rows.filter((r) => catMatch(r, "rejected")).length },
-    { key: "disbursed",    label: "Total Disbursed",       value: rows.filter((r) => catMatch(r, "disbursed")).length },
+    { key: "",             label: "Total Applications", value: fyRows.length },
+    { key: "unseen",       label: "Application Unseen", value: fyRows.filter((r) => catMatch(r, "unseen")).length },
+    { key: "under_review", label: "Under Review",       value: fyRows.filter((r) => catMatch(r, "under_review")).length },
+    { key: "docs_sent",    label: "Docs Sent",          value: fyRows.filter((r) => catMatch(r, "docs_sent")).length },
+    { key: "hold",         label: "Hold",               value: fyRows.filter((r) => catMatch(r, "hold")).length },
+    { key: "approved",     label: "Approved",           value: fyRows.filter((r) => catMatch(r, "approved")).length },
+    { key: "disbursed",    label: "Disbursed",          value: fyRows.filter((r) => catMatch(r, "disbursed")).length },
+    { key: "rejected",     label: "Rejected",           value: fyRows.filter((r) => catMatch(r, "rejected")).length },
   ];
-  const panelActive = [statusFilter, epcFilter, lenderFilter, createdMonth].filter(Boolean).length;
+  const panelActive = [statusFilter, epcFilter, lenderFilter, createdByFilter, dateFrom, dateTo].filter(Boolean).length;
   const activeCount = panelActive + (categoryFilter ? 1 : 0);
   const pickCategory = (key: string) => setCategoryFilter(key === categoryFilter ? "" : key);
   function clearAll() {
-    setStatusFilter(""); setEpcFilter(""); setLenderFilter(""); setCreatedMonth(""); setCategoryFilter("");
+    setStatusFilter(""); setEpcFilter(""); setLenderFilter(""); setCreatedByFilter("");
+    setDateFrom(""); setDateTo(""); setCategoryFilter("");
   }
 
   return (
     <>
-      <SummaryCards accent={ACCENTS.apps.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
+      <SummaryCards accent={ACCENTS.apps.color} cards={cards} active={categoryFilter} onPick={pickCategory} caption={FY_CAPTION} />
 
       <div className="flex items-center gap-3 mb-3">
         <div className="flex-1">
@@ -1298,11 +1332,16 @@ function AppsTab() {
 
       <FiltersPanel open={filtersOpen} hasActive={activeCount > 0} onClear={clearAll}>
         <Select
-          placeholder="Status filter"
+          placeholder="Status"
           options={[
-            { value: "review",   label: "Under Review" },
-            { value: "approved", label: "Approved by lender" },
-            { value: "rejected", label: "Rejected by lender" },
+            { value: "draft",        label: "Draft" },
+            { value: "under_review", label: "Under Review" },
+            { value: "docs_sent",    label: "Docs Sent" },
+            { value: "hold",         label: "Hold" },
+            { value: "approved",     label: "Approved by lender" },
+            { value: "rejected",     label: "Rejected by lender" },
+            { value: "tranche1",     label: "1st Tranche Done" },
+            { value: "tranche2",     label: "2nd Tranche Done" },
           ]}
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
@@ -1323,7 +1362,17 @@ function AppsTab() {
           value={lenderFilter}
           onChange={(e) => setLenderFilter(e.target.value)}
         />
-        <Input type="month" label="Created month" value={createdMonth} onChange={(e) => setCreatedMonth(e.target.value)} />
+        <Select
+          placeholder="Created by"
+          options={[
+            { value: "admin", label: "Admin" },
+            { value: "epc",   label: "EPC" },
+          ]}
+          value={createdByFilter}
+          onChange={(e) => setCreatedByFilter(e.target.value)}
+        />
+        <DateBox label="Created from" value={dateFrom} onChange={setDateFrom} />
+        <DateBox label="Created to"   value={dateTo}   onChange={setDateTo} />
       </FiltersPanel>
 
       <Card className="overflow-hidden">
@@ -1349,8 +1398,13 @@ function AppsTab() {
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Amount</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Status</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Disbursement</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Days remaining</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Added on</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">
+                <button type="button" onClick={() => setSortKey((k) => (k === "days" ? "created" : "days"))} className="inline-flex items-center gap-1 uppercase tracking-wide" title="Sort by fewest days remaining">
+                  Days remaining
+                  <span className={sortKey === "days" ? "opacity-100" : "opacity-30"}>↑</span>
+                </button>
+              </th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Created on</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Created by</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Action</th>
             </tr>
@@ -1371,15 +1425,22 @@ function AppsTab() {
                 onClick={() => navigateToView(r)}
                 className="border-b border-[#eaf3ee] cursor-pointer hover:bg-[#f7fcfa] align-top"
               >
-                {/* Borrower detail box: name + CC id + masked Aadhaar */}
+                {/* Borrower detail box: applicant icon + name + CC id + masked Aadhaar */}
                 <td className="px-3 py-3">
-                  <p className="text-[13px] font-semibold text-[#0f3d2e] truncate">{displayBorrower(r)}</p>
-                  {r.loan_display_id && (
-                    <p className="text-[11px] font-mono text-[#185fa5] mt-0.5">{r.loan_display_id}</p>
-                  )}
-                  {displayMaskedAadhaar(r) && (
-                    <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{displayMaskedAadhaar(r)}</p>
-                  )}
+                  <div className="flex items-start gap-3">
+                    <span className="w-9 h-9 rounded-md bg-[#dceffb] text-[#185fa5] grid place-items-center shrink-0">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-semibold text-[#0f3d2e] truncate">{displayBorrower(r)}</p>
+                      {r.loan_display_id && (
+                        <p className="text-[11px] font-mono text-[#185fa5] mt-0.5">{r.loan_display_id}</p>
+                      )}
+                      {displayMaskedAadhaar(r) && (
+                        <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{displayMaskedAadhaar(r)}</p>
+                      )}
+                    </div>
+                  </div>
                 </td>
                 {/* EPC partner — name + EPC ID text only. */}
                 <td className="px-3 py-3 text-center">
@@ -1445,31 +1506,20 @@ function AppsTab() {
                     buttons don't also trigger the row's navigate. */}
                 {/* Action buttons — same shape/icons as the EPC list. */}
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                  <div className="flex flex-col gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => navigateToView(r)}
-                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#185fa5]/30 bg-white text-[#185fa5] hover:bg-[#dceffb] inline-flex items-center justify-center gap-1.5"
-                    >
-                      {IconEye} View
-                    </button>
-                    <button
-                      type="button"
-                      disabled={zipBusy === r.id}
-                      onClick={() => setZipPickerRow(r)}
-                      title="Download all documents + summary as ZIP"
-                      className={[
-                        "text-[12px] font-semibold px-2.5 py-1.5 rounded-input border transition-colors inline-flex items-center justify-center gap-1.5",
-                        zipBusy === r.id
-                          ? "border-line bg-bg-soft text-text-muted cursor-not-allowed"
-                          : "border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5]",
-                      ].join(" ")}
-                    >
-                      {IconDownload} {zipBusy === r.id ? "Preparing…" : "Download ZIP"}
-                    </button>
-                    {/* Disbursement moved to the View profile (under the status
-                        band) — approved rows reach it via View. */}
-                  </div>
+                  <button
+                    type="button"
+                    disabled={zipBusy === r.id}
+                    onClick={() => setZipPickerRow(r)}
+                    title="Download all documents + summary as ZIP"
+                    className={[
+                      "text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 transition-colors",
+                      zipBusy === r.id
+                        ? "bg-bg-soft text-text-muted cursor-not-allowed"
+                        : "bg-[#178a5c] text-white hover:bg-[#12734c]",
+                    ].join(" ")}
+                  >
+                    {IconDownload} {zipBusy === r.id ? "Preparing…" : "Download ZIP"}
+                  </button>
                 </td>
               </tr>
               );
@@ -1538,6 +1588,8 @@ function InsuranceTab() {
   const [statusFilter, setStatusFilter] = useState("");
   const [epcFilter, setEpcFilter]       = useState("");
   const [expiryFilter, setExpiryFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo]     = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -1645,6 +1697,8 @@ function InsuranceTab() {
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
+    const fromT = dateFrom ? Date.parse(dateFrom + "T00:00:00") : null;
+    const toT   = dateTo ? Date.parse(dateTo + "T23:59:59.999") : null;
     const daysOf = (r: Row) =>
       policyValidityParts(r.policy_from_date, r.policy_to_date)?.daysLeft ?? null;
 
@@ -1664,6 +1718,9 @@ function InsuranceTab() {
         else if (expiryFilter === "30")      { if (d < 0 || d > 30) return false; }
         else if (expiryFilter === "90")      { if (d < 0 || d > 90) return false; }
       }
+      const t = Date.parse(r.created_at);
+      if (fromT != null && !(t >= fromT)) return false;
+      if (toT != null && !(t <= toT)) return false;
       return true;
     });
 
@@ -1675,7 +1732,7 @@ function InsuranceTab() {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, q, categoryFilter, statusFilter, epcFilter, expiryFilter]);
+  }, [rows, q, categoryFilter, statusFilter, epcFilter, expiryFilter, dateFrom, dateTo]);
 
   // Issued / Rejected / Hold / Draft / Under Review (migration 0047).
   const STATUS_LABEL: Record<string, string> = {
@@ -1689,22 +1746,24 @@ function InsuranceTab() {
     hold: "bg-[#dceffb] text-[#185fa5]",
   };
 
+  const fyRows = useMemo(() => rows.filter((r) => inCurrentFY(r.created_at)), [rows]);
   const cards: SummaryCard[] = [
-    { key: "",                label: "Total Applications", value: rows.length },
-    { key: "docs_pending",    label: "Docs Pending",       value: rows.filter((r) => catMatch(r, "docs_pending")).length },
-    { key: "awaiting_policy", label: "Awaiting Policy",    value: rows.filter((r) => catMatch(r, "awaiting_policy")).length },
-    { key: "policy_issued",   label: "Policy Issued",      value: rows.filter((r) => catMatch(r, "policy_issued")).length },
+    { key: "",                label: "Total Applications", value: fyRows.length },
+    { key: "docs_pending",    label: "Docs Pending",       value: fyRows.filter((r) => catMatch(r, "docs_pending")).length },
+    { key: "awaiting_policy", label: "Awaiting Policy",    value: fyRows.filter((r) => catMatch(r, "awaiting_policy")).length },
+    { key: "policy_issued",   label: "Policy Issued",      value: fyRows.filter((r) => catMatch(r, "policy_issued")).length },
   ];
-  const panelActive = [statusFilter, epcFilter, expiryFilter].filter(Boolean).length;
+  const panelActive = [statusFilter, epcFilter, expiryFilter, dateFrom, dateTo].filter(Boolean).length;
   const activeCount = panelActive + (categoryFilter ? 1 : 0);
   const pickCategory = (key: string) => setCategoryFilter(key === categoryFilter ? "" : key);
   function clearAll() {
     setStatusFilter(""); setEpcFilter(""); setExpiryFilter(""); setCategoryFilter("");
+    setDateFrom(""); setDateTo("");
   }
 
   return (
     <>
-      <SummaryCards accent={ACCENTS.insurance.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
+      <SummaryCards accent={ACCENTS.insurance.color} cards={cards} active={categoryFilter} onPick={pickCategory} caption={FY_CAPTION} />
 
       <div className="mb-3 flex items-center gap-3">
         <div className="flex-1">
@@ -1746,6 +1805,8 @@ function InsuranceTab() {
           value={expiryFilter}
           onChange={(e) => setExpiryFilter(e.target.value)}
         />
+        <DateBox label="Created from" value={dateFrom} onChange={setDateFrom} />
+        <DateBox label="Created to"   value={dateTo}   onChange={setDateTo} />
       </FiltersPanel>
       <Card className="overflow-hidden">
         <table className="w-full text-[14px] table-fixed">
@@ -1781,12 +1842,20 @@ function InsuranceTab() {
               return (
               <tr key={r.id}
                   style={{ transition: "background-color 2s ease-out", backgroundColor: hl ? "#dceffb" : undefined }}
-                  className="border-b border-[#eaf3ee] hover:bg-[#f7fcfa] align-top">
+                  onClick={() => navigateToView(r)}
+                  className="border-b border-[#eaf3ee] cursor-pointer hover:bg-[#f7fcfa] align-top">
                 {/* Insured name with the INS id beneath — same shape as the
                     EPC name/ID cell on the EPCs tab. */}
-                <td className="px-3 py-3 cursor-pointer" onClick={() => navigateToView(r)}>
-                  <p className="text-[15px] font-semibold text-[#0f3d2e] truncate">{applicant(r)}</p>
-                  {r.insurance_display_id && <p className="text-[12px] font-mono text-[#185fa5] mt-0.5">{r.insurance_display_id}</p>}
+                <td className="px-3 py-3">
+                  <div className="flex items-start gap-3">
+                    <span className="w-9 h-9 rounded-md bg-[#e0f2f4] text-[#0e7490] grid place-items-center shrink-0">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h6" /></svg>
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[15px] font-semibold text-[#0f3d2e] truncate">{applicant(r)}</p>
+                      {r.insurance_display_id && <p className="text-[12px] font-mono text-[#185fa5] mt-0.5">{r.insurance_display_id}</p>}
+                    </div>
+                  </div>
                 </td>
                 {/* EPC partner — name + EPC ID text only. */}
                 <td className="px-3 py-3 text-center">
@@ -1831,10 +1900,6 @@ function InsuranceTab() {
                 </td>
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <div className="flex flex-col gap-1.5">
-                    <button type="button" onClick={() => navigateToView(r)}
-                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#185fa5]/30 bg-white text-[#185fa5] hover:bg-[#dceffb] inline-flex items-center justify-center gap-1.5">
-                      {IconEye} View
-                    </button>
                     <button type="button" onClick={() => editRow(r)}
                       className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5] inline-flex items-center justify-center gap-1.5">
                       Edit
@@ -1842,8 +1907,8 @@ function InsuranceTab() {
                     {/* Download Policy — only when a policy document exists. */}
                     {r.policy_path && (
                       <button type="button" disabled={zipBusy === r.id} onClick={() => void downloadPolicy(r)}
-                        className={["text-[12px] font-semibold px-2.5 py-1.5 rounded-input border transition-colors inline-flex items-center justify-center gap-1.5",
-                          zipBusy === r.id ? "border-line bg-bg-soft text-text-muted cursor-not-allowed" : "border-[#854f0b]/30 bg-white text-[#854f0b] hover:bg-[#fef0d6]"].join(" ")}>
+                        className={["text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 transition-colors",
+                          zipBusy === r.id ? "bg-bg-soft text-text-muted cursor-not-allowed" : "bg-[#178a5c] text-white hover:bg-[#12734c]"].join(" ")}>
                         {IconDownload} {zipBusy === r.id ? "Opening…" : "Download Policy"}
                       </button>
                     )}
@@ -1881,6 +1946,8 @@ function LeadsTab() {
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo]     = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [viewLead, setViewLead] = useState<Lead | null>(null);
@@ -1914,32 +1981,39 @@ function LeadsTab() {
 
   // Category predicate — the summary cards are the lead statuses. "" = all.
   const catMatch = (r: Lead, key: string) => (key ? r.status === key : true);
+  const fromT = dateFrom ? Date.parse(dateFrom + "T00:00:00") : null;
+  const toT   = dateTo ? Date.parse(dateTo + "T23:59:59.999") : null;
   const filtered = rows.filter((r) => {
     if (categoryFilter && !catMatch(r, categoryFilter)) return false;
     const needle = q.trim().toLowerCase();
     if (needle && !((r.name ?? "").toLowerCase().includes(needle) || r.mobile.includes(needle) || (r.city ?? "").toLowerCase().includes(needle))) return false;
     if (typeFilter && r.lead_type !== typeFilter) return false;
     if (statusFilter && r.status !== statusFilter) return false;
+    const t = Date.parse(r.created_at);
+    if (fromT != null && !(t >= fromT)) return false;
+    if (toT != null && !(t <= toT)) return false;
     return true;
   });
 
+  const fyRows = rows.filter((r) => inCurrentFY(r.created_at));
   const cards: SummaryCard[] = [
-    { key: "",          label: "Total Leads", value: rows.length },
-    { key: "new",       label: "New",         value: rows.filter((r) => r.status === "new").length },
-    { key: "contacted", label: "Contacted",   value: rows.filter((r) => r.status === "contacted").length },
-    { key: "converted", label: "Converted",   value: rows.filter((r) => r.status === "converted").length },
-    { key: "closed",    label: "Closed",      value: rows.filter((r) => r.status === "closed").length },
+    { key: "",          label: "Total Leads", value: fyRows.length },
+    { key: "new",       label: "New",         value: fyRows.filter((r) => r.status === "new").length },
+    { key: "contacted", label: "Contacted",   value: fyRows.filter((r) => r.status === "contacted").length },
+    { key: "converted", label: "Converted",   value: fyRows.filter((r) => r.status === "converted").length },
+    { key: "closed",    label: "Closed",      value: fyRows.filter((r) => r.status === "closed").length },
   ];
-  const panelActive = [typeFilter, statusFilter].filter(Boolean).length;
+  const panelActive = [typeFilter, statusFilter, dateFrom, dateTo].filter(Boolean).length;
   const activeCount = panelActive + (categoryFilter ? 1 : 0);
   const pickCategory = (key: string) => setCategoryFilter(key === categoryFilter ? "" : key);
   function clearAll() {
     setTypeFilter(""); setStatusFilter(""); setCategoryFilter("");
+    setDateFrom(""); setDateTo("");
   }
 
   return (
     <>
-      <SummaryCards accent={ACCENTS.leads.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
+      <SummaryCards accent={ACCENTS.leads.color} cards={cards} active={categoryFilter} onPick={pickCategory} caption={FY_CAPTION} />
 
       <div className="flex items-center gap-3 mb-3">
         <div className="flex-1">
@@ -1951,6 +2025,8 @@ function LeadsTab() {
       <FiltersPanel open={filtersOpen} hasActive={activeCount > 0} onClear={clearAll}>
         <Select placeholder="Type" options={[{ value: "loan", label: "Loan" }, { value: "insurance", label: "Insurance" }]} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} />
         <Select placeholder="Status" options={[{ value: "new", label: "New" }, { value: "contacted", label: "Contacted" }, { value: "converted", label: "Converted" }, { value: "closed", label: "Closed" }]} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} />
+        <DateBox label="Created from" value={dateFrom} onChange={setDateFrom} />
+        <DateBox label="Created to"   value={dateTo}   onChange={setDateTo} />
       </FiltersPanel>
       <Card className="overflow-x-auto">
         <table className="w-full text-[14px]">
@@ -1960,7 +2036,7 @@ function LeadsTab() {
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Type</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Amounts</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">KYC</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Received</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Created on</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Status</th>
             </tr>
           </thead>

@@ -36,6 +36,13 @@ export const COMPLETION_CATEGORIES = [
 
 export type CompletionCategory = typeof COMPLETION_CATEGORIES[number];
 
+// Tranche-1 admin documents — uploaded here alongside the completion set but
+// NOT part of the 2nd-tranche review gate (they belong to the 1st tranche).
+const TRANCHE1_DOCS: { category: "feasibility_report" | "mmr_advance_receipt"; title: string }[] = [
+  { category: "feasibility_report",  title: "Feasibility Approval Report" },
+  { category: "mmr_advance_receipt", title: "MMR / Advance Receipt" },
+];
+
 // The three geo photos, in order.
 const GEO_PHOTOS: { category: CompletionCategory; title: string }[] = [
   { category: "completion_panel_photo",    title: "Customer with panel" },
@@ -71,8 +78,8 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
         .from("user_application_docs")
         .select("id, category, file_name, mime_type")
         .eq("application_id", applicationId)
-        // Also pull the legacy plant photo so it can be shown read-only.
-        .in("category", [...COMPLETION_CATEGORIES, "completion_plant_photo"] as unknown as string[]);
+        // Also pull the legacy plant photo (read-only) + the Tranche-1 docs.
+        .in("category", [...COMPLETION_CATEGORIES, "completion_plant_photo", ...TRANCHE1_DOCS.map((d) => d.category)] as unknown as string[]);
       if (cancelled) return;
       const rows = (data ?? []) as DocRow[];
       setDocs(rows);
@@ -94,6 +101,28 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
 
   return (
     <div className="space-y-5">
+      {/* 1st Tranche Docs — admin-only (feasibility report, MMR/receipt). Kept
+          out of the EPC mirror so EPC-facing flows are unchanged. */}
+      {uploadedBy === "admin" && (
+        <>
+          <p className="text-[12px] font-bold uppercase tracking-wide text-[#5a8a76]">1st Tranche Docs</p>
+          {TRANCHE1_DOCS.map((d) => (
+            <DocSlot key={d.category} title={d.title} hint="Image or PDF." doc={byCat(d.category)} onOpen={open}>
+              <FileUpload
+                applicationId={applicationId}
+                table="user_application_docs"
+                category={d.category}
+                uploadedBy={uploadedBy}
+                maxFiles={1}
+                label=""
+                hint="JPG, PNG, WEBP or PDF."
+                onUploaded={() => setTick((n) => n + 1)}
+              />
+            </DocSlot>
+          ))}
+          <p className="text-[12px] font-bold uppercase tracking-wide text-[#5a8a76] pt-2 border-t border-[#eaf3ee]">2nd Tranche Docs</p>
+        </>
+      )}
       {/* 1 — Invoice / tax invoice */}
       <DocSlot
         title="Invoice / tax invoice"
