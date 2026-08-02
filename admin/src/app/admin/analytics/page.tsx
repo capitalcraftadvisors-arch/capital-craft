@@ -33,7 +33,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis,
-  Tooltip, Cell, PieChart, Pie, CartesianGrid,
+  Tooltip, Cell, PieChart, Pie, CartesianGrid, LabelList,
 } from "recharts";
 import AuthGuard from "@/components/AuthGuard";
 import AdminSidebar, { ACCENTS } from "@/components/AdminSidebar";
@@ -50,6 +50,11 @@ const STABLE_PCT = 5;  // arrow reads "stable" below this
 const MIN_PREV = 5;    // suppress deltas/insight when previous window < 5 points
 const MIN_CHART = 3;   // charts show the empty state below this many points
 
+// Geography (sections A–D). Display-layer normalization only; teal accent.
+const GEO = "#0d9488";        // Geography accent (distinct from the analytics purple)
+const GEO_MIN_INSIGHT = 10;   // suppress geo insights when the period cohort < 10
+const GEO_MIN_PLACE = 5;      // a place needs ≥5 rows before it's named in an insight
+
 // ── data shapes ─────────────────────────────────────────────────────────────
 type Loan = {
   id: string;
@@ -58,6 +63,10 @@ type Loan = {
   plant_use_type: "residential" | "commercial" | null;
   first_disbursement_amount: number | null;
   first_disbursement_date: string | null;
+  install_city: string | null;
+  install_district: string | null;
+  install_state: string | null;
+  install_pincode: string | null;
 };
 type Insurance = { id: string; created_at: string; status: string; policy_path: string | null };
 type Biz = {
@@ -242,6 +251,100 @@ function computeLoanSection(all: Loan[], w: Windows): LoanSection {
     sanctionedCur: san(curC), approvalRateCur: rate(curC),
     avgTatCur: tat(curD), disbursedCur: curD.length,
   };
+}
+
+// ── geography (loans): normalization + grouping + deterministic insights ──────
+// Display-layer only — NOTHING is written back to the DB.
+type GeoMetric = "apps" | "sanctioned" | "disbursed";
+type GeoFieldKey = "install_city" | "install_district" | "install_state";
+type GeoBar = { label: string; value: number; share: number; valueLabel: string };
+const GEO_UNKNOWN = " unknown";
+
+// Trim + collapse whitespace + case-fold for grouping; Title Case for display.
+// Null/blank → null (grouped as "Unknown" by callers, excluded from insights).
+function normPlace(raw: string | null | undefined): { key: string; label: string } | null {
+  if (raw == null) return null;
+  const cleaned = String(raw).trim().replace(/\s+/g, " ");
+  if (!cleaned) return null;
+  const lower = cleaned.toLowerCase();
+  return { key: lower, label: lower.replace(/\b\w/g, (c) => c.toUpperCase()) };
+}
+
+function groupPlaces(arr: Loan[], f: GeoFieldKey): Map<string, { label: string; count: number }> {
+  const m = new Map<string, { label: string; count: number }>();
+  for (const r of arr) {
+    const np = normPlace(r[f]);
+    const key = np ? np.key : GEO_UNKNOWN;
+    const label = np ? np.label : "Unknown";
+    const e = m.get(key);
+    if (e) e.count++; else m.set(key, { label, count: 1 });
+  }
+  return m;
+}
+
+// Top-N (incl. Unknown) + an "Others" roll-up; each bar carries its % share.
+function topBars(m: Map<string, { label: string; count: number }>, n = 5): GeoBar[] {
+  const entries = [...m.values()];
+  const total = entries.reduce((s, x) => s + x.count, 0) || 1;
+  const sorted = [...entries].sort((a, b) => b.count - a.count);
+  const mk = (label: string, count: number): GeoBar =>
+    ({ label, value: count, share: (count / total) * 100, valueLabel: `${count} · ${Math.round((count / total) * 100)}%` });
+  const out = sorted.slice(0, n).map((x) => mk(x.label, x.count));
+  const restSum = sorted.slice(n).reduce((s, x) => s + x.count, 0);
+  if (restSum > 0) out.push(mk("Others", restSum));
+  return out;
+}
+
+function leaderPlace(m: Map<string, { label: string; count: number }>): { key: string; label: string; count: number } | null {
+  let best: { key: string; label: string; count: number } | null = null;
+  for (const [key, v] of m) {
+    if (key === GEO_UNKNOWN) continue; // never name "Unknown" in an insight
+    if (!best || v.count > best.count) best = { key, label: v.label, count: v.count };
+  }
+  return best;
+}
+function shareIn(m: Map<string, { label: string; count: number }>, key: string): number | null {
+  const total = [...m.values()].reduce((s, x) => s + x.count, 0);
+  if (!total) return null;
+  const e = m.get(key);
+  return e ? (e.count / total) * 100 : 0;
+}
+
+// Insights composed purely from computed shares/deltas. A place is named only
+// if it clears GEO_MIN_PLACE; the "Unknown" bucket is skipped throughout.
+function geoInsights(cur: Loan[], prev: Loan[], noun: string): string[] {
+  const out: string[] = [];
+  const cityCur = groupPlaces(cur, "install_city");
+  const cityPrev = groupPlaces(prev, "install_city");
+  const leader = leaderPlace(cityCur);
+  if (leader && leader.count >= GEO_MIN_PLACE) {
+    const curShare = shareIn(cityCur, leader.key) ?? 0;
+    const prevShare = prev.length >= MIN_PREV ? shareIn(cityPrev, leader.key) : null;
+    let line = `${leader.label} leads with ${Math.round(curShare)}% of ${noun}`;
+    if (prevShare != null && Math.abs(curShare - prevShare) >= STABLE_PCT) {
+      line += ` (${curShare >= prevShare ? "up" : "down"} from ${Math.round(prevShare)}% last period)`;
+    }
+    out.push(line + ".");
+    if (curShare > 50) out.push(`Volume is concentrated in one market — ${leader.label} alone accounts for ${Math.round(curShare)}%.`);
+  }
+  if (prev.length >= MIN_PREV) {
+    const dCur = groupPlaces(cur, "install_district");
+    const dPrev = groupPlaces(prev, "install_district");
+    let n = 0;
+    for (const [key] of dCur) { if (key === GEO_UNKNOWN) continue; if (!dPrev.has(key)) n++; }
+    if (n >= 2) out.push(`${n} new districts appeared this period.`);
+  }
+  return out;
+}
+
+// At most ONE geography line for a loan section's What-Changed — only on a
+// meaningful shift (a period delta, a concentration flag, or new districts).
+function geoWhatChangedLine(loans: Loan[], w: Windows): string | null {
+  const cur = loans.filter((r) => inWin(t(r.created_at), w.cur));
+  if (cur.length < GEO_MIN_INSIGHT) return null;
+  const prev = loans.filter((r) => inWin(t(r.created_at), w.prev));
+  const lines = geoInsights(cur, prev, "applications");
+  return lines.find((l) => l.includes("last period") || l.includes("concentrated") || l.includes("new districts")) ?? null;
 }
 
 // ── section computation: INSURANCE ───────────────────────────────────────────
@@ -490,10 +593,11 @@ export default function AnalyticsPage() {
   );
 }
 
-type SectionKey = "res" | "com" | "ins" | "epc";
+type SectionKey = "res" | "com" | "ins" | "epc" | "geo";
 const SECTION_TABS: { key: SectionKey; label: string }[] = [
   { key: "res", label: "Residential" }, { key: "com", label: "C&I" },
   { key: "ins", label: "Insurance" }, { key: "epc", label: "EPC" },
+  { key: "geo", label: "Geography" },
 ];
 
 function Inner() {
@@ -512,7 +616,7 @@ function Inner() {
     void (async () => {
       const [{ data: l }, { data: i }, { data: b }, { data: ls }] = await Promise.all([
         supabase().from("epc_applications")
-          .select("id, created_at, status, plant_use_type, first_disbursement_amount, first_disbursement_date"),
+          .select("id, created_at, status, plant_use_type, first_disbursement_amount, first_disbursement_date, install_city, install_district, install_state, install_pincode"),
         supabase().from("insurance_applications").select("id, created_at, status, policy_path"),
         supabase().from("epc_business")
           .select("id, source, status, created_at, submitted_at, reviewed_at, step_timestamps")
@@ -588,13 +692,14 @@ function Inner() {
             <p className="text-[13px] text-text-muted">Loading…</p>
           ) : (
             <div className="space-y-6">
-              {section === "res" && <LoanSectionView title="Residential" s={res} w={w} note={null} />}
-              {section === "com" && <LoanSectionView title="C&I" s={com} w={w} note={uncategorized ? `${uncategorized} loan${uncategorized === 1 ? "" : "s"} have no Residential/C&I category and are excluded from both sections.` : null} />}
+              {section === "res" && <LoanSectionView title="Residential" s={res} w={w} note={null} loans={resLoans} />}
+              {section === "com" && <LoanSectionView title="C&I" s={com} w={w} note={uncategorized ? `${uncategorized} loan${uncategorized === 1 ? "" : "s"} have no Residential/C&I category and are excluded from both sections.` : null} loans={comLoans} />}
               {section === "ins" && <InsSectionView s={insM} w={w} />}
               {section === "epc" && <EpcSectionView s={epc} w={w} />}
+              {section === "geo" && <GeographySectionView resLoans={resLoans} comLoans={comLoans} allLoans={loans} w={w} />}
 
-              {/* Cross-business comparison — identical across sections */}
-              <CrossTable res={res} com={com} ins={insM} epc={epc} />
+              {/* Cross-business comparison — identical across sections (not on Geography) */}
+              {section !== "geo" && <CrossTable res={res} com={com} ins={insM} epc={epc} />}
             </div>
           )}
         </section>
@@ -772,19 +877,29 @@ function HealthCard({ h }: { h: Health }) {
   );
 }
 
-function WhatChangedCard({ wc }: { wc: WhatChanged }) {
+function WhatChangedCard({ wc, geoNote }: { wc: WhatChanged; geoNote?: string | null }) {
   const empty = !wc.positives.length && !wc.concerns.length && !wc.attention.length;
   return (
     <Card className="p-5">
       <p className="text-[13px] font-semibold text-text mb-3">What Changed</p>
-      {empty ? (
+      {empty && !geoNote ? (
         <p className="text-[12.5px] text-text-muted">No significant period-over-period changes above the reporting threshold.</p>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-3">
-          <ChangeList title="Positive" color="#178a5c" items={wc.positives} />
-          <ChangeList title="Areas of concern" color="#b42318" items={wc.concerns} />
-          <ChangeList title="Needs attention" color="#b45309" items={wc.attention} />
-        </div>
+        <>
+          {!empty && (
+            <div className="grid gap-4 sm:grid-cols-3">
+              <ChangeList title="Positive" color="#178a5c" items={wc.positives} />
+              <ChangeList title="Areas of concern" color="#b42318" items={wc.concerns} />
+              <ChangeList title="Needs attention" color="#b45309" items={wc.attention} />
+            </div>
+          )}
+          {geoNote && (
+            <div className={(empty ? "" : "mt-3 border-t border-line pt-3 ") + "flex items-start gap-2"}>
+              <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: GEO + "1a", color: GEO }}>Geography</span>
+              <span className="text-[12.5px] text-text-mid leading-snug">{geoNote}</span>
+            </div>
+          )}
+        </>
       )}
     </Card>
   );
@@ -850,8 +965,9 @@ function RecommendationsCard({ items }: { items: string[] }) {
 }
 
 // ── section views (identical order/layout across sections) ────────────────────
-function LoanSectionView({ title, s, w, note }: { title: string; s: LoanSection; w: Windows; note: string | null }) {
+function LoanSectionView({ title, s, w, note, loans }: { title: string; s: LoanSection; w: Windows; note: string | null; loans: Loan[] }) {
   const deltas = toDeltas(s.kpis);
+  const geoNote = geoWhatChangedLine(loans, w);
   const bottleneck = s.convDrop ? `${s.convDrop.stage} conversion fell ${s.convDrop.drop.toFixed(0)} points vs the previous ${w.label.toLowerCase()} — the biggest drop in the pipeline.` : null;
   const recs: string[] = [];
   if (s.pendingOverdue > 0) recs.push(`${s.pendingOverdue} application${s.pendingOverdue === 1 ? "" : "s"} pending beyond 7 days — review the post-sanction queue.`);
@@ -865,7 +981,7 @@ function LoanSectionView({ title, s, w, note }: { title: string; s: LoanSection;
       <SummaryBar text={buildSummary(title, deltas, w)} />
       <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">{s.kpis.map((k) => <KpiCard key={k.label} k={k} />)}</div>
       <div className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2"><WhatChangedCard wc={buildWhatChanged(deltas, s.pendingOverdue)} /></div>
+        <div className="lg:col-span-2"><WhatChangedCard wc={buildWhatChanged(deltas, s.pendingOverdue)} geoNote={geoNote} /></div>
         <HealthCard h={loanHealth(s)} />
       </div>
       <div className="grid gap-4 lg:grid-cols-3">
@@ -875,6 +991,7 @@ function LoanSectionView({ title, s, w, note }: { title: string; s: LoanSection;
         <ChartCard title="TAT trend (disbursed loans)"><TatTrendChart data={s.tatTrend} /></ChartCard>
         <ChartCard title="Disbursements — current vs previous"><SimpleBar data={s.disbBar} /></ChartCard>
       </div>
+      <GeoBlock loans={loans} w={w} />
       <div className="grid gap-4 lg:grid-cols-3">
         <AlertsCard alerts={buildAlerts(deltas, s.pendingOverdue > 0 ? [{ sev: "medium", text: `${s.pendingOverdue} application${s.pendingOverdue === 1 ? "" : "s"} pending beyond 7 days.` }] : [])} />
         <BottleneckCard text={bottleneck} />
@@ -944,6 +1061,175 @@ function EpcSectionView({ s, w }: { s: EpcSection; w: Windows }) {
         <BottleneckCard text={null} />
         <RecommendationsCard items={recs.slice(0, 3)} />
       </div>
+    </div>
+  );
+}
+
+// ── geography views ──────────────────────────────────────────────────────────
+function HBars({ data, accent }: { data: GeoBar[]; accent: string }) {
+  if (data.reduce((s, d) => s + d.value, 0) < MIN_CHART) return <EmptyState />;
+  const height = Math.max(130, data.length * 34);
+  return (
+    <div style={{ width: "100%", height }}>
+      <ResponsiveContainer>
+        <BarChart data={data} layout="vertical" margin={{ top: 4, right: 60, left: 6, bottom: 0 }}>
+          <XAxis type="number" hide />
+          <YAxis type="category" dataKey="label" width={96} tick={{ fontSize: 11, fill: "#6b7280" }} axisLine={false} tickLine={false} />
+          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e5e7eb" }} formatter={(v: number) => [v, "Count"]} />
+          <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={16}>
+            {data.map((d, i) => (
+              <Cell key={d.label} fill={d.label === "Others" || d.label === "Unknown" ? "#cbd5e1" : accent} fillOpacity={d.label === "Others" || d.label === "Unknown" ? 1 : 1 - i * 0.08} />
+            ))}
+            <LabelList dataKey="valueLabel" position="right" style={{ fontSize: 10, fill: "#6b7280", fontWeight: 600 }} />
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+const GEO_METRICS: { key: GeoMetric; label: string; noun: string }[] = [
+  { key: "apps", label: "Applications", noun: "applications" },
+  { key: "sanctioned", label: "Sanctioned", noun: "sanctioned" },
+  { key: "disbursed", label: "Disbursed", noun: "disbursed" },
+];
+
+// Reused inside Residential / C&I sections and the combined Geography tab.
+function GeoBlock({ loans, w, accent = GEO }: { loans: Loan[]; w: Windows; accent?: string }) {
+  const [metric, setMetric] = useState<GeoMetric>("apps");
+  const { cur, prev, noun, appsCurLen } = useMemo(() => {
+    const isSan = (r: Loan) => lenderOutcome(r.status) === "approved";
+    const isDisb = (r: Loan) => r.status === "approved" && r.first_disbursement_amount != null && !!r.first_disbursement_date;
+    const pass = (r: Loan) => metric === "apps" ? true : metric === "sanctioned" ? isSan(r) : isDisb(r);
+    const coh = (win: Win, f: (r: Loan) => boolean) => loans.filter((r) => inWin(t(r.created_at), win) && f(r));
+    return {
+      cur: coh(w.cur, pass), prev: coh(w.prev, pass),
+      noun: GEO_METRICS.find((x) => x.key === metric)!.noun,
+      appsCurLen: loans.filter((r) => inWin(t(r.created_at), w.cur)).length,
+    };
+  }, [loans, w, metric]);
+
+  const insights = appsCurLen >= GEO_MIN_INSIGHT ? geoInsights(cur, prev, noun) : [];
+
+  return (
+    <Card className="p-5">
+      <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
+        <p className="text-[13px] font-semibold text-text inline-flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full" style={{ backgroundColor: accent }} /> Geography
+        </p>
+        <div className="inline-flex rounded-input border border-line bg-white p-0.5">
+          {GEO_METRICS.map((m) => {
+            const on = metric === m.key;
+            return (
+              <button key={m.key} type="button" onClick={() => setMetric(m.key)}
+                className="px-2.5 py-1 rounded-[7px] text-[12px] font-semibold transition-colors"
+                style={on ? { backgroundColor: accent + "1a", color: accent } : { color: "var(--muted)" }}>
+                {m.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      <div className="grid gap-5 md:grid-cols-3">
+        <div><p className="text-[12px] font-semibold text-text-mid mb-2">Top cities</p><HBars data={topBars(groupPlaces(cur, "install_city"))} accent={accent} /></div>
+        <div><p className="text-[12px] font-semibold text-text-mid mb-2">Top districts</p><HBars data={topBars(groupPlaces(cur, "install_district"))} accent={accent} /></div>
+        <div><p className="text-[12px] font-semibold text-text-mid mb-2">Top states</p><HBars data={topBars(groupPlaces(cur, "install_state"))} accent={accent} /></div>
+      </div>
+      {insights.length > 0 && (
+        <div className="mt-4 border-t border-line pt-3 space-y-1.5">
+          {insights.map((x, i) => (
+            <p key={i} className="text-[12.5px] text-text-mid leading-snug flex gap-1.5"><span style={{ color: accent }}>•</span><span>{x}</span></p>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function GeoStateTable({ loans, w }: { loans: Loan[]; w: Windows }) {
+  const [sortDesc, setSortDesc] = useState(true);
+  const rows = useMemo(() => {
+    const isSan = (r: Loan) => lenderOutcome(r.status) === "approved";
+    const isDisb = (r: Loan) => r.status === "approved" && r.first_disbursement_amount != null && !!r.first_disbursement_date;
+    const cur = loans.filter((r) => inWin(t(r.created_at), w.cur));
+    const m = new Map<string, { label: string; apps: number; san: number; disb: number }>();
+    for (const r of cur) {
+      const np = normPlace(r.install_state);
+      const key = np ? np.key : GEO_UNKNOWN;
+      const e = m.get(key) ?? { label: np ? np.label : "Unknown", apps: 0, san: 0, disb: 0 };
+      e.apps++; if (isSan(r)) e.san++; if (isDisb(r)) e.disb++;
+      m.set(key, e);
+    }
+    const arr = [...m.values()].map((e) => ({ ...e, rate: e.apps ? (e.san / e.apps) * 100 : null }));
+    arr.sort((a, b) => (sortDesc ? b.apps - a.apps : a.apps - b.apps));
+    return arr;
+  }, [loans, w, sortDesc]);
+
+  return (
+    <Card className="p-5">
+      <p className="text-[13px] font-semibold text-text mb-3">State summary (current period)</p>
+      {rows.length === 0 ? <EmptyState /> : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[13px]">
+            <thead className="text-[11px] uppercase tracking-wide text-text-muted border-b border-line">
+              <tr>
+                <th className="text-left py-2 pr-3 font-medium">State</th>
+                <th className="text-center py-2 px-3 font-medium">
+                  <button type="button" onClick={() => setSortDesc((v) => !v)} className="inline-flex items-center gap-1 uppercase tracking-wide">
+                    Applications <span className="opacity-60">{sortDesc ? "↓" : "↑"}</span>
+                  </button>
+                </th>
+                <th className="text-center py-2 px-3 font-medium">Sanctioned</th>
+                <th className="text-center py-2 px-3 font-medium">Disbursed</th>
+                <th className="text-center py-2 pl-3 font-medium">Approval rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.label} className="border-b border-[#eef1f4] last:border-0">
+                  <td className="py-2.5 pr-3 font-semibold text-text">{r.label}</td>
+                  <td className="py-2.5 px-3 text-center">{fmtInt(r.apps)}</td>
+                  <td className="py-2.5 px-3 text-center">{fmtInt(r.san)}</td>
+                  <td className="py-2.5 px-3 text-center">{fmtInt(r.disb)}</td>
+                  <td className="py-2.5 pl-3 text-center">{r.rate == null ? "—" : fmtPct1(r.rate)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+type GeoScope = "res" | "com" | "both";
+function GeographySectionView({ resLoans, comLoans, allLoans, w }: { resLoans: Loan[]; comLoans: Loan[]; allLoans: Loan[]; w: Windows }) {
+  const [scope, setScope] = useState<GeoScope>("both");
+  const loans = scope === "res" ? resLoans : scope === "com" ? comLoans : allLoans;
+  const scopeTabs: { key: GeoScope; label: string }[] = [
+    { key: "res", label: "Residential" }, { key: "com", label: "C&I" }, { key: "both", label: "Both" },
+  ];
+  const curLen = loans.filter((r) => inWin(t(r.created_at), w.cur)).length;
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className="text-[13px] font-semibold text-text">Loan geography</span>
+        <div className="inline-flex rounded-input border border-line bg-white p-0.5">
+          {scopeTabs.map((s) => {
+            const on = scope === s.key;
+            return (
+              <button key={s.key} type="button" onClick={() => setScope(s.key)}
+                className="px-3 py-1.5 rounded-[7px] text-[12.5px] font-semibold transition-colors"
+                style={on ? { backgroundColor: GEO + "1a", color: GEO } : { color: "var(--muted)" }}>
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
+        <span className="text-[12px] text-text-muted ml-auto">{curLen} application{curLen === 1 ? "" : "s"} in {w.label.toLowerCase()}</span>
+      </div>
+      <GeoBlock loans={loans} w={w} />
+      <GeoStateTable loans={loans} w={w} />
     </div>
   );
 }
