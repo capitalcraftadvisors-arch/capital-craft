@@ -46,6 +46,7 @@ const LOAN_STATUS_LABEL: Record<string, string> = {
   under_review: "Under Review",
   docs_sent:    "Docs Sent",
   on_hold:      "Hold",
+  aborted:      "Aborted",
   approved:     "Approved by lender",
   rejected:     "Rejected by lender",
 };
@@ -219,6 +220,8 @@ function Inner() {
   const [approveOpen, setApproveOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [zipPickerOpen, setZipPickerOpen] = useState(false);
+  const [abortOpen, setAbortOpen] = useState(false);
+  const [abortReason, setAbortReason] = useState("");
 
   useEffect(() => {
     void (async () => {
@@ -314,12 +317,13 @@ function Inner() {
     router.push(`/admin/app/${loan.id}/approval?lender=${lender}` as any);
   }
 
-  async function onRejectConfirm(lender: LenderKey) {
+  async function onRejectConfirm(lender: LenderKey, reason?: string) {
     if (!loan) return;
+    const why = (reason ?? "").trim();
     await changeStatus(
       "rejected",
-      { rejected_lender: lender, rejected_at: new Date().toISOString(), approved_lender: null, approved_at: null },
-      `Rejected by ${LENDER_LABEL[lender] ?? lender}`,
+      { rejected_lender: lender, rejected_at: new Date().toISOString(), approved_lender: null, approved_at: null, rejection_reason: why || null },
+      `Rejected by ${LENDER_LABEL[lender] ?? lender}${why ? ` — ${why}` : ""}`,
     );
   }
 
@@ -365,6 +369,9 @@ function Inner() {
   const underReview = loan.status === "under_review";
   const statusVal   = loan.status ?? "draft";
   const hasCoapp    = loan.bill_on_applicant_name === false;
+  const aborted     = loan.aborted_at != null;
+  // "Committed" = approved in the system (and beyond). Locks down edits.
+  const committed   = ["approved", "sent_to_nbfc", "disbursed"].includes(statusVal);
 
   const decidedLender = approved ? loan.approved_lender : rejected ? loan.rejected_lender : null;
   const decidedByLabel = decidedLender ? (LENDER_LABEL[String(decidedLender)] ?? String(decidedLender)) : null;
@@ -409,6 +416,23 @@ function Inner() {
     const prior = (loan.status_before_hold as string) || "under_review";
     void changeStatus(prior, { hold_at: null, status_before_hold: null }, `Resumed to ${LOAN_STATUS_LABEL[prior] ?? prior}`);
   };
+  // Abort — a recorded soft-cancel (not a delete, not a status change). Keeps
+  // the underlying status; the aborted_at flag makes it read as "Aborted".
+  async function doAbort(reason: string) {
+    if (!loan || statusBusy) return;
+    setStatusBusy(true);
+    setStatusMsg(null);
+    const me = getBusiness();
+    const by = me?.contact_name || "admin";
+    const now = new Date().toISOString();
+    const patch = { aborted_at: now, abort_reason: reason, reviewed_by: by, reviewed_at: now };
+    const { error } = await supabase().from("epc_applications").update(patch).eq("id", loan.id);
+    if (error) { setStatusMsg("Couldn't abort — " + error.message); setStatusBusy(false); return; }
+    setLoan({ ...loan, ...patch });
+    setStatusMsg("Application aborted.");
+    await logLoanActivity(loan.id, "status_change", { detail: `Aborted — ${reason}` });
+    setStatusBusy(false);
+  }
 
   // Header status/decision actions — Submitted → Docs Sent → Approve/Reject,
   // plus Hold/Resume. Approve/Reject handlers unchanged; the back-transitions
@@ -426,7 +450,7 @@ function Inner() {
         <span className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border bg-[#178a5c] text-white border-[#178a5c] inline-flex items-center gap-1.5">
           {I.check} Approved
         </span>
-        <HAction variant="ghost" disabled={statusBusy} onClick={() => void changeStatus("docs_sent")}>Move back to Docs Sent</HAction>
+        <HAction variant="reject" disabled={statusBusy} onClick={() => setAbortOpen(true)}>Abort</HAction>
       </>
     ) : rejected ? (
       <HAction variant="ghost" disabled={statusBusy} onClick={() => void changeStatus("docs_sent")}>Re-open to Docs Sent</HAction>
@@ -485,7 +509,7 @@ function Inner() {
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
                 <span className="text-[22px] font-semibold text-[#0f3d2e] truncate">{applicantName}</span>
-                <StatusBadge status={loan.status} lender={decidedByLabel} />
+                <StatusBadge status={aborted ? "aborted" : loan.status} lender={decidedByLabel} />
               </div>
               {/* Loan ID, with "Created …" where "via <EPC>" used to sit. */}
               <div className="text-[13px] flex items-center gap-2 mt-1 min-w-0">
@@ -503,33 +527,55 @@ function Inner() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap justify-end">
-            {statusActions}
-            {approved && (
-              <HAction variant="amber" icon={I.money} onClick={() => router.push(`/admin/app/${loan.id}/disbursement` as any)}>
-                Disbursement
+            {aborted ? (
+              <HAction variant="ghost" icon={I.eye} onClick={() => setActivityOpen(true)}>
+                Activity log
               </HAction>
+            ) : (
+              <>
+                {statusActions}
+                {approved && (
+                  <HAction variant="amber" icon={I.money} onClick={() => router.push(`/admin/app/${loan.id}/disbursement` as any)}>
+                    Disbursement
+                  </HAction>
+                )}
+                {/* Once committed (approved+): no Edit / Download ZIP / delete —
+                    the case is locked; it can only be aborted or disbursed. */}
+                {!committed && (
+                  <HAction variant="outline" icon={I.edit} onClick={() => router.push(`/admin/app/${loan.id}/step-1` as any)}>
+                    Edit
+                  </HAction>
+                )}
+                {!committed && (
+                  <HAction variant="blue" icon={I.download} disabled={downloading} onClick={() => setZipPickerOpen(true)}>
+                    {downloading ? "Preparing…" : "Download ZIP"}
+                  </HAction>
+                )}
+                <HAction variant="ghost" icon={I.eye} onClick={() => setActivityOpen(true)}>
+                  Activity log
+                </HAction>
+                {!committed && (
+                  <button
+                    type="button"
+                    onClick={() => setDelOpen(true)}
+                    title="Delete"
+                    aria-label="Delete"
+                    className="inline-flex items-center justify-center w-9 h-9 rounded-[8px] border border-red-300 bg-white text-red-700 hover:bg-red-50 hover:border-red-500 transition-colors shrink-0"
+                  >
+                    {TRASH}
+                  </button>
+                )}
+              </>
             )}
-            <HAction variant="outline" icon={I.edit} onClick={() => router.push(`/admin/app/${loan.id}/step-1` as any)}>
-              Edit
-            </HAction>
-            <HAction variant="blue" icon={I.download} disabled={downloading} onClick={() => setZipPickerOpen(true)}>
-              {downloading ? "Preparing…" : "Download ZIP"}
-            </HAction>
-            <HAction variant="ghost" icon={I.eye} onClick={() => setActivityOpen(true)}>
-              Activity log
-            </HAction>
-            <button
-              type="button"
-              onClick={() => setDelOpen(true)}
-              title="Delete"
-              aria-label="Delete"
-              className="inline-flex items-center justify-center w-9 h-9 rounded-[8px] border border-red-300 bg-white text-red-700 hover:bg-red-50 hover:border-red-500 transition-colors shrink-0"
-            >
-              {TRASH}
-            </button>
           </div>
         </div>
         {statusMsg && <div className="px-5 sm:px-8 pb-2 text-[12px] text-[#5a8a76]">{statusMsg}</div>}
+        {aborted && loan.abort_reason && (
+          <div className="px-5 sm:px-8 pb-2 text-[12px] font-medium text-red-700">Aborted — {loan.abort_reason}</div>
+        )}
+        {rejected && loan.rejection_reason && (
+          <div className="px-5 sm:px-8 pb-2 text-[12px] font-medium text-red-700">Rejection reason: {loan.rejection_reason}</div>
+        )}
       </header>
 
       <div className="w-full px-5 sm:px-8 py-4" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
@@ -787,6 +833,33 @@ function Inner() {
         onClose={() => setRejectOpen(false)}
         onConfirm={onRejectConfirm}
       />
+      {abortOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => { if (!statusBusy) setAbortOpen(false); }}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
+            <h3 className="font-semibold text-[18px] text-[#0f3d2e]">Abort application</h3>
+            <p className="text-[12px] text-[#5a8a76] mt-0.5">Cancels this application. It stays on record (not deleted) and can&apos;t be edited afterwards. Record the reason.</p>
+            <label className="block text-[13px] font-medium text-[#0f3d2e] mt-4 mb-1">Reason for abort <span className="text-red-600">*</span></label>
+            <textarea
+              value={abortReason}
+              onChange={(e) => setAbortReason(e.target.value)}
+              rows={3}
+              placeholder="Why is this being aborted?"
+              className="w-full rounded-input border border-red-200 bg-white px-3 py-2 text-[14px] text-[#0f3d2e] focus:outline-none focus:ring-2 focus:ring-red-200 resize-y"
+            />
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setAbortOpen(false)} disabled={statusBusy}
+                className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border border-[#cdeadd] bg-white text-[#0f3d2e] hover:bg-[#f0faf5] disabled:opacity-60">
+                Cancel
+              </button>
+              <button type="button" disabled={statusBusy || !abortReason.trim()}
+                onClick={() => { const r = abortReason.trim(); if (!r) return; void doAbort(r).then(() => { setAbortOpen(false); setAbortReason(""); }); }}
+                className="text-[13px] font-semibold px-3 py-2 rounded-[8px] bg-red-600 text-white hover:bg-red-700 disabled:opacity-60">
+                Abort application
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <LoanActivityLogModal
         open={activityOpen}
         onClose={() => setActivityOpen(false)}
@@ -853,6 +926,7 @@ function StatusBadge({ status, lender }: { status: string | null | undefined; le
     s === "rejected" ? "bg-red-50 text-red-700 border-red-200" :
     s === "docs_sent" ? "bg-[#dceffb] text-[#185fa5] border-[#bfe0f5]" :
     s === "on_hold" ? "bg-[#fff2cc] text-[#8a6500] border-[#f3d9a4]" :
+    s === "aborted" ? "bg-red-50 text-red-700 border-red-200" :
     s === "under_review" ? "bg-[#fef0d6] text-[#854f0b] border-[#f3d9a4]" :
                        "bg-slate-100 text-slate-600 border-slate-200";
   return (

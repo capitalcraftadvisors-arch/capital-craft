@@ -158,6 +158,7 @@ const SUMMARY_ICON: Record<string, ReactNode> = {
   rejected_by_lender: <svg {...IW}><path d="M7.9 2h8.2L22 7.9v8.2L16.1 22H7.9L2 16.1V7.9z" /><path d="M15 9l-6 6M9 9l6 6" /></svg>,
   hold:             <svg {...IW}><circle cx="12" cy="12" r="9" /><path d="M10 9v6M14 9v6" /></svg>,
   rejected:         <svg {...IW}><circle cx="12" cy="12" r="9" /><path d="M15 9l-6 6M9 9l6 6" /></svg>,
+  aborted:          <svg {...IW}><circle cx="12" cy="12" r="9" /><path d="M5.6 5.6l12.8 12.8" /></svg>,
   disbursed:        <svg {...IW}><rect x="2" y="6" width="20" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /><path d="M6 12h.01M18 12h.01" /></svg>,
   awaiting_policy:  <svg {...IW}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M12 8v4M12 16h.01" /></svg>,
   policy_issued:    <svg {...IW}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><path d="M9 12l2 2 4-4" /></svg>,
@@ -1057,6 +1058,7 @@ function AppsTab() {
     second_disbursement_amount: number | null;
     status: string; created_at: string; created_by: string;
     reviewed_at: string | null;
+    aborted_at: string | null;
     // Application-doc presence for the "Documents Pending" card. Applicant PAN
     // is a user_application_docs row (see panDocIds); everything else is a
     // *_path column. Co-applicant docs only required when has_coapp.
@@ -1140,7 +1142,7 @@ function AppsTab() {
           "id, borrower_name, aadhaar_name, aadhaar_number_masked, loan_display_id, " +
           "loan_amount, loan_amount_required, " +
           "sanctioned_amount, first_disbursement_amount, first_disbursement_date, second_disbursement_amount, " +
-          "status, created_at, created_by, reviewed_at, approved_lender, rejected_lender, " +
+          "status, created_at, created_by, reviewed_at, aborted_at, approved_lender, rejected_lender, " +
           "aadhaar_front_path, aadhaar_back_path, ebill_path, proforma_invoice_path, " +
           "rooftop_photo_path, bank_statement_path, customer_photo_path, bill_on_applicant_name, " +
           "coapp_pan_path, coapp_aadhaar_front_path, coapp_aadhaar_back_path, " +
@@ -1219,6 +1221,7 @@ function AppsTab() {
   // cards + click-to-filter). EPC-facing surfaces still use lenderOutcome(), so
   // docs_sent / on_hold never leak to EPCs (both read as "Under Review" there).
   function loanStage(r: Row): string {
+    if (r.aborted_at != null) return "aborted";
     const s = r.status;
     if (s === "draft") return "draft";
     if (s === "on_hold") return "hold";
@@ -1239,6 +1242,7 @@ function AppsTab() {
       case "approved":     return loanStage(r) === "approved";
       case "disbursed":    return loanStage(r) === "disbursed";
       case "rejected":     return loanStage(r) === "rejected";
+      case "aborted":      return loanStage(r) === "aborted";
       default:             return true;
     }
   }
@@ -1254,6 +1258,7 @@ function AppsTab() {
       case "rejected":     return r.status === "rejected";
       case "tranche1":     return r.first_disbursement_amount != null;
       case "tranche2":     return r.second_disbursement_amount != null;
+      case "aborted":      return r.aborted_at != null;
       default:             return true;
     }
   }
@@ -1307,6 +1312,7 @@ function AppsTab() {
     { key: "approved",     label: "Approved",           value: fyRows.filter((r) => catMatch(r, "approved")).length },
     { key: "disbursed",    label: "Disbursed",          value: fyRows.filter((r) => catMatch(r, "disbursed")).length },
     { key: "rejected",     label: "Rejected",           value: fyRows.filter((r) => catMatch(r, "rejected")).length },
+    { key: "aborted",      label: "Aborted",            value: fyRows.filter((r) => catMatch(r, "aborted")).length },
   ];
   const panelActive = [statusFilter, epcFilter, lenderFilter, createdByFilter, dateFrom, dateTo].filter(Boolean).length;
   const activeCount = panelActive + (categoryFilter ? 1 : 0);
@@ -1314,6 +1320,40 @@ function AppsTab() {
   function clearAll() {
     setStatusFilter(""); setEpcFilter(""); setLenderFilter(""); setCreatedByFilter("");
     setDateFrom(""); setDateTo(""); setCategoryFilter("");
+  }
+
+  // "Report" — client-side CSV export of the CURRENTLY-FILTERED list.
+  function exportReport() {
+    const STAGE: Record<string, string> = {
+      draft: "Draft", under_review: "Under Review", docs_sent: "Docs Sent", hold: "Hold",
+      approved: "Approved", disbursed: "Disbursed", rejected: "Rejected", aborted: "Aborted",
+    };
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const header = ["Loan ID", "Borrower", "EPC partner", "Amount", "Stage", "Created on", "Created by", "1st disbursement", "2nd disbursement"];
+    const lines = [header.map(esc).join(",")];
+    for (const r of filtered) {
+      lines.push([
+        r.loan_display_id || r.id,
+        displayBorrower(r),
+        displayEpc(r),
+        amountFor(r),
+        STAGE[loanStage(r)] ?? loanStage(r),
+        r.created_at,
+        r.created_by === "admin" ? "Admin" : "EPC",
+        r.first_disbursement_amount ?? "",
+        r.second_disbursement_amount ?? "",
+      ].map(esc).join(","));
+    }
+    const csv = "﻿" + lines.join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `loan-applications-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -1325,14 +1365,18 @@ function AppsTab() {
           <Input placeholder="Search by borrower…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
         </div>
         <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.apps.color} onClick={() => setFiltersOpen((o) => !o)} />
-        <Button variant="primary" onClick={() => setAddOpen(true)} style={{ backgroundColor: ACCENTS.apps.color }} className="whitespace-nowrap">
-          + Add New Loan Application
+        <Button variant="primary" onClick={exportReport} style={{ backgroundColor: "#178a5c" }} className="whitespace-nowrap inline-flex items-center gap-1.5">
+          {IconDownload} Report
+        </Button>
+        <Button variant="primary" onClick={() => setAddOpen(true)} style={{ backgroundColor: "#185fa5" }} className="whitespace-nowrap">
+          + New Applicant
         </Button>
       </div>
 
       <FiltersPanel open={filtersOpen} hasActive={activeCount > 0} onClear={clearAll}>
         <Select
-          placeholder="Status"
+          label="Status"
+          placeholder="Select Status"
           options={[
             { value: "draft",        label: "Draft" },
             { value: "under_review", label: "Under Review" },
@@ -1340,6 +1384,7 @@ function AppsTab() {
             { value: "hold",         label: "Hold" },
             { value: "approved",     label: "Approved by lender" },
             { value: "rejected",     label: "Rejected by lender" },
+            { value: "aborted",      label: "Aborted" },
             { value: "tranche1",     label: "1st Tranche Done" },
             { value: "tranche2",     label: "2nd Tranche Done" },
           ]}
@@ -1347,12 +1392,14 @@ function AppsTab() {
           onChange={(e) => setStatusFilter(e.target.value)}
         />
         <Select
-          placeholder="EPC partner"
+          label="EPC Name"
+          placeholder="Search & Select EPC"
           options={epcOptions}
           value={epcFilter}
           onChange={(e) => setEpcFilter(e.target.value)}
         />
         <Select
+          label="Lender"
           placeholder="Lender"
           options={[
             { value: "creditfair", label: "CreditFair" },
@@ -1363,6 +1410,7 @@ function AppsTab() {
           onChange={(e) => setLenderFilter(e.target.value)}
         />
         <Select
+          label="Created by"
           placeholder="Created by"
           options={[
             { value: "admin", label: "Admin" },
@@ -1455,9 +1503,21 @@ function AppsTab() {
                     disbursement is entered, surface that instead — display-only,
                     the underlying status field is unchanged. */}
                 <td className="px-3 py-3 text-center">
-                  {r.status === "draft" ? (
+                  {r.aborted_at != null ? (
+                    <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-red-50 text-red-700">
+                      Aborted
+                    </span>
+                  ) : r.status === "draft" ? (
                     <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#eef1f0] text-[#5a8a76]">
                       Draft
+                    </span>
+                  ) : r.status === "docs_sent" ? (
+                    <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#dceffb] text-[#185fa5]">
+                      Docs Sent
+                    </span>
+                  ) : r.status === "on_hold" ? (
+                    <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#e5edf5] text-[#3b5a76]">
+                      Hold
                     </span>
                   ) : r.status === "approved" && r.first_disbursement_amount != null ? (
                     <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#dceffb] text-[#185fa5]">

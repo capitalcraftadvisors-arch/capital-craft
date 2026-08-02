@@ -28,31 +28,35 @@ type Props = {
   kind: "approve" | "reject";
   applicantName?: string | null;
   onClose: () => void;
-  onConfirm: (lender: LenderKey) => void | Promise<void>;
+  onConfirm: (lender: LenderKey, reason?: string) => void | Promise<void>;
 };
 
 export default function LenderDecisionModal({ open, kind, applicantName, onClose, onConfirm }: Props) {
   const [lender, setLender] = useState<LenderKey | "">("");
+  const [reason, setReason] = useState("");
   const [sure, setSure] = useState(false);
   const [busy, setBusy] = useState(false);
 
   if (!open) return null;
 
   const approve = kind === "approve";
+  const needsReason = !approve && !reason.trim();
 
   function close() {
     if (busy) return;
     setLender("");
+    setReason("");
     setSure(false);
     onClose();
   }
 
   async function submit() {
-    if (!lender || !sure) return;
+    if (!lender || !sure || needsReason) return;
     setBusy(true);
     try {
-      await onConfirm(lender as LenderKey);
+      await onConfirm(lender as LenderKey, approve ? undefined : reason.trim());
       setLender("");
+      setReason("");
       setSure(false);
       onClose();
     } finally {
@@ -100,6 +104,22 @@ export default function LenderDecisionModal({ open, kind, applicantName, onClose
           onChange={(e) => { setLender(e.target.value as LenderKey | ""); setSure(false); }}
         />
 
+        {/* Rejection reason — required, recorded on the application + log. */}
+        {!approve && (
+          <div className="mt-4">
+            <label className="block text-[13px] font-medium text-text mb-1">
+              Reason for rejection <span className="text-red-600">*</span>
+            </label>
+            <textarea
+              value={reason}
+              onChange={(e) => { setReason(e.target.value); setSure(false); }}
+              rows={3}
+              placeholder="Record why the lender rejected this application…"
+              className="w-full rounded-input border border-line bg-white px-3 py-2 text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-red-200 resize-y"
+            />
+          </div>
+        )}
+
         {/* Explicit confirmation — the second half of the popup. */}
         <label
           className={[
@@ -110,7 +130,7 @@ export default function LenderDecisionModal({ open, kind, applicantName, onClose
           <input
             type="checkbox"
             checked={sure}
-            disabled={!lender}
+            disabled={!lender || needsReason}
             onChange={(e) => setSure(e.target.checked)}
             className={["mt-0.5 h-4 w-4 shrink-0", approve ? "accent-[#178a5c]" : "accent-[#dc2626]"].join(" ")}
           />
@@ -127,7 +147,7 @@ export default function LenderDecisionModal({ open, kind, applicantName, onClose
             type="button"
             variant="primary"
             onClick={submit}
-            disabled={!lender || !sure}
+            disabled={!lender || !sure || needsReason}
             loading={busy}
           >
             {approve ? "Yes, continue" : "Yes, reject"}
