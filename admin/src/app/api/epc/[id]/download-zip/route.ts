@@ -190,7 +190,7 @@ export async function GET(
           stakeholders,
           lender,
         });
-        archive.append(xlsx, { name: "summary.xlsx" });
+        archive.append(xlsx, { name: "4. Summary/summary.xlsx" });
 
         await archive.finalize();
         console.log(`[download-zip] finalized: ${included}/${included + missing} docs included, lender=${lender}`);
@@ -240,14 +240,16 @@ function fallbackFileName(doc: Doc): string {
   return `${doc.id.slice(0, 8)}${extFromMime(doc.mime_type)}` || "file";
 }
 
+// Four top-level folders (order-prefixed so they sort correctly):
+//   1. KYC of business owner — stakeholder PAN / Aadhaar (per member)
+//   2. Business documents     — business PAN, GST cert, cheque, office photos,
+//                               onboarding + admin extra docs
+//   3. GSTR-3B                — sales-return docs
+//   4. Summary                — the Excel workbook (appended separately)
 function pathInZip(doc: Doc, memberLabelById: Map<string, string>): string {
   const fname = sanitizeSegment(doc.file_name || fallbackFileName(doc));
 
-  // Admin-added extra docs go into their own top-level folder.
-  if (doc.category === "admin_extra") {
-    return `Extra Docs/${fname}`;
-  }
-
+  // 3. GSTR-3B
   if (doc.category === "gst_r3b") {
     const m = (doc.metadata ?? {}) as Record<string, unknown>;
     const pt = m.period_type as string | undefined;
@@ -256,9 +258,10 @@ function pathInZip(doc: Doc, memberLabelById: Map<string, string>): string {
       : (m.quarter as string | undefined);
     const year = m.year as number | undefined;
     const prefix = label && year ? `${label}-${year}_` : "";
-    return `gst_r3b/${sanitizeSegment(prefix + fname)}`;
+    return `3. GSTR-3B/${sanitizeSegment(prefix + fname)}`;
   }
 
+  // 1. KYC of business owner — per-stakeholder folder, subdivided by kind.
   if (
     doc.category === "stakeholder_pan" ||
     doc.category === "stakeholder_aadhaar" ||
@@ -274,10 +277,12 @@ function pathInZip(doc: Doc, memberLabelById: Map<string, string>): string {
       doc.category === "stakeholder_aadhaar_front"  ? "aadhaar_front" :
       doc.category === "stakeholder_aadhaar_back"   ? "aadhaar_back" :
       /* stakeholder_aadhaar (legacy) */              "aadhaar_legacy";
-    return `documents/members/${sanitizeSegment(label)}/${kind}/${fname}`;
+    return `1. KYC of business owner/${sanitizeSegment(label)}/${kind}/${fname}`;
   }
 
-  return `documents/${sanitizeSegment(doc.category)}/${fname}`;
+  // 2. Business documents — everything else (business PAN, GSTIN, cheque,
+  // office photos, onboarding extra_doc, and admin_extra).
+  return `2. Business documents/${sanitizeSegment(doc.category)}/${fname}`;
 }
 
 // ── AEREM Excel template ──────────────────────────────────────────────

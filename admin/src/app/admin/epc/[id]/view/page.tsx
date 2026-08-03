@@ -105,7 +105,7 @@ function DOC_LABEL(cat: string): string {
     office_exterior: "Office ext",
     office_interior: "Office int",
     office_selfie: "Selfie",
-    gst_r3b: "GST R3B",
+    gst_r3b: "GSTR-3B",
   };
   return M[cat] ?? cat;
 }
@@ -125,6 +125,7 @@ function Inner() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const [biz, setBiz] = useState<Biz | null>(null);
+  const [loans, setLoans] = useState<{ status: string; plant_use_type: string | null; loan_display_id: string | null; sanctioned_amount: number | null; first_disbursement_amount: number | null; second_disbursement_amount: number | null }[]>([]);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [lender, setLender] = useState<LenderRow[]>([]);
   const [adminInfo, setAdminInfo] = useState<AdminInfo | null>(null);
@@ -139,16 +140,18 @@ function Inner() {
 
   useEffect(() => {
     void (async () => {
-      const [{ data: b }, { data: d }, { data: l }, { data: ai }] = await Promise.all([
+      const [{ data: b }, { data: d }, { data: l }, { data: ai }, { data: la }] = await Promise.all([
         supabase().from("epc_business").select("*").eq("id", params.id).maybeSingle(),
         supabase().from("epc_documents").select("id, category, file_name, mime_type, stakeholder_id, metadata").eq("business_id", params.id),
         supabase().from("epc_lender_status").select("lender, docs_given, approved, rejected").eq("business_id", params.id),
         supabase().from("epc_admin_info").select("*").eq("business_id", params.id).maybeSingle(),
+        supabase().from("epc_applications").select("status, plant_use_type, loan_display_id, sanctioned_amount, first_disbursement_amount, second_disbursement_amount").eq("epc_business_id", params.id),
       ]);
       setBiz(b);
       setDocs((d ?? []) as Doc[]);
       setLender((l ?? []) as LenderRow[]);
       setAdminInfo((ai as AdminInfo | null) ?? null);
+      setLoans((la ?? []) as typeof loans);
     })();
   }, [params.id, activityRefresh]);
 
@@ -160,6 +163,22 @@ function Inner() {
   }
 
   const r3bDocs = useMemo(() => docs.filter((d) => d.category === "gst_r3b"), [docs]);
+
+  // EPC Health — all-time aggregate of THIS EPC's own loan applications,
+  // split Residential / C&I via the CC-RES / CC-COM display-id prefix.
+  const loanAgg = useMemo(() => {
+    type LR = (typeof loans)[number];
+    const isRes = (r: LR) => (r.loan_display_id || "").toUpperCase().startsWith("CC-RES") || r.plant_use_type === "residential";
+    const isCom = (r: LR) => (r.loan_display_id || "").toUpperCase().startsWith("CC-COM") || r.plant_use_type === "commercial";
+    const bucket = (rows: LR[]) => {
+      const submitted  = rows.filter((r) => r.status !== "draft").length;
+      const rejected   = rows.filter((r) => r.status === "rejected").length;
+      const sanctioned = rows.reduce((s, r) => s + (Number(r.sanctioned_amount) || 0), 0);
+      const disbursed  = rows.reduce((s, r) => s + (Number(r.first_disbursement_amount) || 0) + (Number(r.second_disbursement_amount) || 0), 0);
+      return { submitted, rejected, sanctioned, disbursed, pending: Math.max(0, sanctioned - disbursed) };
+    };
+    return { res: bucket(loans.filter(isRes)), com: bucket(loans.filter(isCom)), total: bucket(loans) };
+  }, [loans]);
   const r3bTotal = useMemo(
     () => r3bDocs.reduce((s, d) => {
       const v = (d.metadata as { total_taxable_value?: number } | null)?.total_taxable_value;
@@ -319,21 +338,24 @@ function Inner() {
         {/* the lender "Approved" tick, which is what actually unlocks the   */}
         {/* EPC's loan application. This field is purely internal admin      */}
         {/* tracking; the EPC never sees it and it never gates their access. */}
-        <InternalStatusBand
-          current={biz.status}
-          busy={statusBusy}
-          onChange={changeStatus}
-        />
-
-        {/* ── SERVICE — only when internally Approved. Governs which portal
-            buttons the EPC sees (insurance needs no lender approval). ── */}
-        {biz.status === "approved" && (
-          <ServiceBand
-            current={biz.service_type ?? null}
-            busy={serviceBusy}
-            onChange={setService}
+        {/* Internal status + Service side by side (stacks on narrow). */}
+        <div className={biz.status === "approved" ? "grid gap-4 lg:grid-cols-2" : ""}>
+          <InternalStatusBand
+            current={biz.status}
+            busy={statusBusy}
+            onChange={changeStatus}
           />
-        )}
+
+          {/* ── SERVICE — only when internally Approved. Governs which portal
+              buttons the EPC sees (insurance needs no lender approval). ── */}
+          {biz.status === "approved" && (
+            <ServiceBand
+              current={biz.service_type ?? null}
+              busy={serviceBusy}
+              onChange={setService}
+            />
+          )}
+        </div>
 
         {/* ── PROGRESS TRACKER — prominent standalone band ─────────── */}
         <div className="rounded-[12px] border border-[#cdeadd] bg-white p-6 sm:p-8 mb-4">
@@ -362,6 +384,48 @@ function Inner() {
             />
           </div>
         </div>
+
+        {/* ── EPC HEALTH — all-time aggregate; only once internally approved ─ */}
+        {biz.status === "approved" && (
+        <div className="rounded-[12px] border border-[#cdeadd] bg-white p-5 sm:p-6 mb-4">
+          <div className="text-[11px] font-semibold text-[#5a8a76] uppercase tracking-wider mb-3">
+            EPC Health <span className="normal-case font-normal text-slate-400">· admin only · all-time · amounts in ₹ Lacs</span>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead className="text-[11px] uppercase tracking-wide text-[#5a8a76] border-b border-[#cdeadd]">
+                <tr>
+                  <th className="text-left py-2 pr-3 font-medium">Metric</th>
+                  <th className="text-right py-2 px-3 font-medium">Residential</th>
+                  <th className="text-right py-2 px-3 font-medium">C&amp;I</th>
+                  <th className="text-right py-2 pl-3 font-medium text-[#0f3d2e]">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {([
+                  { label: "Applications Submitted", k: "submitted" as const, money: false },
+                  { label: "Rejected",               k: "rejected" as const,  money: false },
+                  { label: "Sanctioned Amount",      k: "sanctioned" as const, money: true },
+                  { label: "Disbursed",              k: "disbursed" as const,  money: true },
+                  { label: "Pending Disbursal",      k: "pending" as const,    money: true },
+                ]).map((row) => {
+                  const cell = (v: number) => row.money
+                    ? `₹${(v / 100000).toLocaleString("en-IN", { maximumFractionDigits: 2 })} L`
+                    : v.toLocaleString("en-IN");
+                  return (
+                    <tr key={row.k} className="border-b border-[#eef1f4] last:border-0">
+                      <td className="py-2 pr-3 text-[#5a8a76]">{row.label}</td>
+                      <td className="py-2 px-3 text-right text-[#0f3d2e]">{cell(loanAgg.res[row.k])}</td>
+                      <td className="py-2 px-3 text-right text-[#0f3d2e]">{cell(loanAgg.com[row.k])}</td>
+                      <td className="py-2 pl-3 text-right font-semibold text-[#0f3d2e]">{cell(loanAgg.total[row.k])}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        )}
 
         {/* ── 3-COLUMN GRID ──────────────────────────────────────────── */}
         <div className="grid gap-4 lg:grid-cols-3">
@@ -487,7 +551,7 @@ function Inner() {
               })}
             </SectionCard>
 
-            <SectionCard title="GST R3B" tint icon={I.invoice} adminOnly>
+            <SectionCard title="GSTR-3B" tint icon={I.invoice} adminOnly>
               <div className="text-[12px] text-[#5a8a76]">
                 {r3bDocs.length} file{r3bDocs.length === 1 ? "" : "s"} · Grand total taxable
               </div>
@@ -497,9 +561,11 @@ function Inner() {
               <button
                 type="button"
                 onClick={() => router.push(`/admin/epc/${biz.id}` as any)}
-                className="w-full mt-3 text-[13px] font-medium py-2 px-3 bg-white border border-[#cdeadd] rounded-[8px] text-[#178a5c] hover:bg-[#f0faf5] inline-flex items-center justify-center gap-1.5"
+                title="View GSTR-3B"
+                aria-label="View GSTR-3B"
+                className="mt-3 w-8 h-8 grid place-items-center rounded-md border border-[#cdeadd] bg-white text-[#178a5c] hover:bg-[#f0faf5]"
               >
-                {I.eye} View R3B
+                {I.eye}
               </button>
             </SectionCard>
 
@@ -633,9 +699,6 @@ function ServiceBand({
           </div>
           <div className="flex items-baseline gap-2 flex-wrap">
             <span className="text-[18px] font-semibold text-[#0f3d2e]">{badge ?? "Not set"}</span>
-            <span className="text-[12px] text-[#5a8a76]">
-              Insurance unlocks with this choice alone; loan still needs a lender &ldquo;Approved&rdquo; tick.
-            </span>
           </div>
         </div>
         <div className="flex gap-2 flex-wrap items-center">
@@ -651,7 +714,7 @@ function ServiceBand({
 const INTERNAL_STATUS_LABEL: Record<string, string> = {
   draft:        "Draft",
   under_review: "Under review",
-  approved:     "Approved",
+  approved:     "Approved by Capital Craft",
   on_hold:      "On hold",
   rejected:     "Rejected",
 };
@@ -674,10 +737,6 @@ function InternalStatusBand({
           </div>
           <div className="flex items-baseline gap-2 flex-wrap">
             <span className="text-[18px] font-semibold text-slate-800">{label}</span>
-            <span className="text-[12px] text-slate-500">
-              Private to admin — does not unlock the EPC&rsquo;s loan application.
-              Only a lender &ldquo;Approved&rdquo; tick does.
-            </span>
           </div>
         </div>
         <div className="flex gap-2 flex-wrap items-center">

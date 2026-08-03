@@ -185,10 +185,11 @@ function Inner() {
               error={loanExceeds ? "Cannot exceed project cost." : undefined}
             />
           </div>
-          {centralSubsidy > 0 && (
+          {validSize && validCost && (
             <p className="text-[12px] text-[#5a8a76]">
-              Estimated PM Surya Ghar central subsidy for {sizeKw} kW:{" "}
-              <span className="font-semibold text-[#0f3d2e]">{formatRupees(centralSubsidy)}</span>
+              Per kW price:{" "}
+              <span className="font-semibold text-[#0f3d2e]">{formatRupees(Math.round(costN / sizeN))}/kW</span>
+              <span className="text-text-muted"> (total project cost ÷ project size)</span>
             </p>
           )}
         </Card>
@@ -227,20 +228,6 @@ function Inner() {
                   <p className="font-display font-bold text-[16px] text-[#0f3d2e]">
                     {row.years} {row.years === 1 ? "Year" : "Years"}
                   </p>
-                  <div className="mt-2 space-y-1">
-                    <div>
-                      <p className="text-[10px] uppercase tracking-wide text-text-muted font-semibold">Monthly EMI</p>
-                      <p className="font-display font-bold text-[14px] text-[#185fa5]">
-                        {row.monthly !== null ? formatRupees(row.monthly) : "—"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] uppercase tracking-wide text-text-muted font-semibold">Subsidy EMI</p>
-                      <p className="text-[12px] font-semibold text-[#0f3d2e]">
-                        {row.subsidy !== null ? formatRupees(row.subsidy) : "—"}
-                      </p>
-                    </div>
-                  </div>
                 </button>
               );
             })}

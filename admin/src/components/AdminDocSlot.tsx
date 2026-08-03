@@ -135,40 +135,37 @@ export default function AdminDocSlot({
             <p className="text-[13px] truncate">{doc.file_name || "Document"}</p>
             <p className="text-[11px] text-text-muted">Uploaded</p>
           </div>
-          <div className="flex flex-col gap-1 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* View (eye) + Remove (trash, immediate). Replace is gone — to
+                change a file, trash it and the "+" upload button reappears. */}
             <button
               type="button"
               disabled={!!busy}
-              onClick={async () => {
-                const u = await getDocumentUrl(doc.id);
-                if (u) window.open(u, "_blank");
-              }}
-              className="text-[12px] text-blue hover:underline disabled:opacity-50"
+              onClick={async () => { const u = await getDocumentUrl(doc.id); if (u) window.open(u, "_blank"); }}
+              title="View"
+              aria-label="View"
+              className="w-8 h-8 grid place-items-center rounded-md border border-line bg-white text-blue hover:bg-bg-soft disabled:opacity-50"
             >
-              View
-            </button>
-            <button
-              type="button"
-              disabled={!!busy}
-              onClick={() => inputRef.current?.click()}
-              className="text-[12px] text-text-mid hover:text-blue disabled:opacity-50"
-            >
-              {busy === "replace" ? "Replacing…" : "Replace"}
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 12s3.5-7 10.5-7 10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z" /><circle cx="12" cy="12" r="3" /></svg>
             </button>
             <button
               type="button"
               disabled={!!busy}
               onClick={remove}
-              className="text-[12px] text-text-muted hover:text-red-500 disabled:opacity-50"
+              title="Remove"
+              aria-label="Remove"
+              className="w-8 h-8 grid place-items-center rounded-md border border-red-200 bg-white text-red-600 hover:bg-red-50 disabled:opacity-50"
             >
-              {busy === "remove" ? "Removing…" : "Remove"}
+              {busy === "remove"
+                ? <span className="text-[10px] font-semibold">…</span>
+                : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>}
             </button>
           </div>
         </div>
       ) : (
         <label className={[
-          "block border-2 border-dashed border-line rounded-input bg-white",
-          "px-3 py-4 text-center cursor-pointer hover:border-blue transition-colors",
+          "flex items-center justify-center gap-1.5 border border-dashed border-line rounded-input bg-white",
+          "px-3 py-2.5 cursor-pointer hover:border-blue transition-colors text-[13px] font-medium text-blue",
           busy ? "opacity-60 pointer-events-none" : "",
         ].join(" ")}>
           <input
@@ -178,22 +175,9 @@ export default function AdminDocSlot({
             className="hidden"
             onChange={(e) => handleFiles(e.target.files, false)}
           />
-          <p className="text-[12px] text-text-mid">
-            {busy === "upload" ? "Uploading…" : "Click to upload"}
-          </p>
-          <p className="text-[10px] text-text-muted mt-0.5">JPG, PNG, WEBP, or PDF</p>
+          <span className="text-[16px] leading-none">+</span>
+          {busy === "upload" ? "Uploading…" : "Upload"}
         </label>
-      )}
-
-      {/* Hidden input reused for Replace when doc exists. */}
-      {doc && (
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp,application/pdf"
-          className="hidden"
-          onChange={(e) => handleFiles(e.target.files, true)}
-        />
       )}
 
       {error && <p className="mt-2 text-[12px] text-red-500">{error}</p>}

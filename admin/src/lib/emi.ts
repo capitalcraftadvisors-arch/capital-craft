@@ -13,7 +13,7 @@ export const TENURES = [1, 2, 3, 4, 5] as const;
 // Indicative ROI used by the EPC self-serve flow, where no RM has set
 // a rate yet. Mid-band, always displayed with the indicative-terms
 // disclaimer; the RM can adjust it later from admin Step 5.
-export const DEFAULT_INDICATIVE_ROI = 8.5;
+export const DEFAULT_INDICATIVE_ROI = 9.5;
 
 // PM Surya Ghar central subsidy tiers on installed capacity (kW):
 //   1 kW  → ₹30,000

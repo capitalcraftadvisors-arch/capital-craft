@@ -221,9 +221,11 @@ export default function FileUpload(props: Props) {
               <button
                 type="button"
                 onClick={() => removeDoc(d)}
-                className="text-[12px] text-text-muted hover:text-red-500 transition-colors"
+                title="Remove"
+                aria-label="Remove"
+                className="p-1.5 rounded hover:bg-red-50 text-red-600 transition-colors"
               >
-                Remove
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
               </button>
             </li>
           ))}
@@ -249,8 +251,9 @@ export default function FileUpload(props: Props) {
             multiple={maxFiles > 1}
             onChange={(e) => handleFiles(e.target.files)}
           />
-          <p className="text-[13px] text-text-mid">
-            {uploading ? "Uploading…" : "Click to upload"}
+          <p className="text-[13px] font-medium text-blue inline-flex items-center justify-center gap-1.5">
+            <span className="text-[17px] leading-none">+</span>
+            {uploading ? "Uploading…" : "Upload"}
           </p>
           <p className="text-[11px] text-text-muted mt-1">{uploadHint ?? "Photo, scan, or PDF"}</p>
         </label>

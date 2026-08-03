@@ -131,7 +131,6 @@ function currentFYBounds(): { start: number; end: number; label: string } {
     label: `FY ${startYear}–${String(startYear + 1).slice(-2)}`,
   };
 }
-const FY_CAPTION = `Summary counts — current financial year (${currentFYBounds().label}, Apr–Mar). The table below shows all records.`;
 function inCurrentFY(dateStr: string | null | undefined): boolean {
   if (!dateStr) return false;
   const t = Date.parse(dateStr);
@@ -170,14 +169,14 @@ const SUMMARY_ICON: Record<string, ReactNode> = {
 
 // Distinct colours for the derived EPC single-stage badge (admin display only).
 const EPC_STAGE_META: Record<string, { label: string; cls: string }> = {
-  docs_pending:    { label: "Docs Pending",        cls: "bg-[#eef1f0] text-[#5a8a76]" },
+  unseen:          { label: "Application Unseen",  cls: "bg-[#eef1f0] text-[#5a8a76]" },
   under_review:    { label: "Under Review",        cls: "bg-[#fef0d6] text-[#854f0b]" },
   updated:         { label: "Updated",             cls: "bg-[#fff2cc] text-[#8a6500]" },
-  approved:        { label: "Approved",            cls: "bg-[#e6f6ee] text-[#178a5c]" },
+  approved:        { label: "Approved by CC",      cls: "bg-[#e6f6ee] text-[#178a5c]" },
   hold:            { label: "Hold",                cls: "bg-[#e5edf5] text-[#3b5a76]" },
-  rejected:        { label: "Rejected",            cls: "bg-red-50 text-red-700" },
+  rejected:        { label: "Rejected by CC",      cls: "bg-red-50 text-red-700" },
   docs_sent:       { label: "Docs Sent to Lender", cls: "bg-[#dceffb] text-[#185fa5]" },
-  lender_approved: { label: "Lender Approved",     cls: "bg-[#d6efe3] text-[#0f7a52]" },
+  lender_approved: { label: "Approved by Lender",  cls: "bg-[#d6efe3] text-[#0f7a52]" },
   rejected_by_lender: { label: "Rejected by Lender", cls: "bg-[#ffe4e6] text-[#9f1239]" },
 };
 
@@ -249,26 +248,51 @@ function FiltersPanel({ open, hasActive, onClear, children }: {
           <button type="button" onClick={onClear} className="text-[12px] text-blue hover:underline">Clear all</button>
         )}
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-2.5 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
         {children}
       </div>
     </div>
   );
 }
 
-// Big, click-to-open calendar date picker (native, dependency-free). Clicking
-// anywhere on the box opens the calendar — no typing needed.
-function DateBox({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+// "Created Date" range control: a calendar-icon box showing the formatted date
+// (or a From/To placeholder) that opens the NATIVE calendar popover on click —
+// no visible dd-mm-yyyy field.
+function CalField({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const display = value
+    ? new Date(value + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
+    : placeholder;
   return (
-    <div className="flex flex-col gap-1">
-      {label && <span className="text-[11px] font-medium text-text-muted">{label}</span>}
+    <button
+      type="button"
+      onClick={() => { const el = ref.current as (HTMLInputElement & { showPicker?: () => void }) | null; try { el?.showPicker?.(); } catch { el?.focus(); } }}
+      className="relative inline-flex items-center gap-2 w-full rounded-input border border-line bg-white px-3 py-2.5 text-[13px] text-left hover:border-blue transition-colors"
+    >
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="text-text-muted shrink-0"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M8 2v4M16 2v4M3 10h18" /></svg>
+      <span className={value ? "text-text" : "text-text-muted"}>{display}</span>
       <input
+        ref={ref}
         type="date"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        onClick={(e) => { const el = e.currentTarget as HTMLInputElement & { showPicker?: () => void }; try { el.showPicker?.(); } catch { /* native focus fallback */ } }}
-        className="w-full rounded-input border border-line bg-white px-3 py-2.5 text-[14px] text-text cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#185fa5]/30"
+        aria-hidden
+        tabIndex={-1}
+        className="absolute inset-0 w-full h-full opacity-0 pointer-events-none"
       />
+    </button>
+  );
+}
+
+// One labelled "Created Date" group (From + To), spanning two filter columns.
+function DateRange({ from, to, onFrom, onTo }: { from: string; to: string; onFrom: (v: string) => void; onTo: (v: string) => void }) {
+  return (
+    <div className="flex flex-col gap-1 col-span-2">
+      <span className="text-[11px] font-medium text-text-muted">Created Date</span>
+      <div className="grid grid-cols-2 gap-2">
+        <CalField value={from} onChange={onFrom} placeholder="From" />
+        <CalField value={to} onChange={onTo} placeholder="To" />
+      </div>
     </div>
   );
 }
@@ -297,16 +321,6 @@ function maskMobile(m: string | null): string {
 const IconBuilding = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     <rect x="4" y="3" width="16" height="18" rx="1" /><path d="M9 21V9M15 21V9M4 9h16M9 6h.01M15 6h.01M9 13h.01M15 13h.01M9 17h.01M15 17h.01" />
-  </svg>
-);
-const IconGlobe = (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18" />
-  </svg>
-);
-const IconUserPlus = (
-  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="9" cy="8" r="3.5" /><path d="M3 20a6 6 0 0 1 12 0M18 8v6M15 11h6" />
   </svg>
 );
 const IconDownload = (
@@ -457,24 +471,38 @@ function EpcsTab() {
   function epcStage(r: Row): string {
     const ls = Object.values(lenderState[r.id] ?? {});
     if (ls.some((v) => v?.approved))   return "lender_approved";
+    // A lender rejection still means docs were sent — folded into "Docs Sent"
+    // (the standalone "Rejected by Lender" card was removed).
+    if (ls.some((v) => v?.docs_given || v?.rejected)) return "docs_sent";
+    if (r.status === "approved")       return "approved";
+    if (r.status === "on_hold")        return "hold";
+    if (r.status === "rejected")       return "rejected";
+    if (r.status === "draft")          return "unseen"; // Application Unseen = Draft
+    // No downstream action yet: a self-edit is its OWN single status "Updated"
+    // (never a second badge) until the next action above supersedes it.
+    if (r.epc_self_edited === true)    return "updated";
+    return "under_review"; // submitted / under_review
+  }
+  // Card/badge/filter predicate. Stage keys are mutually exclusive (sum = Total).
+  function catMatch(r: Row, key: string): boolean {
+    if (key === "") return true;
+    return epcStage(r) === key;
+  }
+  // Row STATUS-column badge (A2) — distinguishes lender vs internal outcomes.
+  // Decoupled from epcStage: a lender-rejected EPC shows "Rejected by Lender"
+  // here but is folded into "Docs Sent" for the summary cards. EPC-facing views
+  // are unchanged (EPCs still read lenderOutcome → "Under Review").
+  function epcBadge(r: Row): string {
+    const ls = Object.values(lenderState[r.id] ?? {});
+    if (ls.some((v) => v?.approved))   return "lender_approved";
     if (ls.some((v) => v?.rejected))   return "rejected_by_lender";
     if (ls.some((v) => v?.docs_given)) return "docs_sent";
     if (r.status === "approved")       return "approved";
     if (r.status === "on_hold")        return "hold";
     if (r.status === "rejected")       return "rejected";
-    if (r.status === "draft")          return "docs_pending"; // still onboarding
-    // No downstream action yet: a self-edit is its OWN single status "Updated"
-    // (never a second badge) until the next action above supersedes it.
+    if (r.status === "draft")          return "unseen";
     if (r.epc_self_edited === true)    return "updated";
-    if (r.status === "under_review")   return "under_review";
-    return "docs_pending";
-  }
-  // Card/badge/filter predicate. Stage keys are mutually exclusive (sum = Total);
-  // "unseen" is an informational overlap (review activity, not a stage).
-  function catMatch(r: Row, key: string): boolean {
-    if (key === "") return true;
-    if (key === "unseen") return r.reviewed_at == null;
-    return epcStage(r) === key;
+    return "under_review";
   }
 
   const filtered = useMemo(() => {
@@ -548,40 +576,25 @@ function EpcsTab() {
     else { setSortKey(k); setSortDir("desc"); }
   }
 
-  async function toggleLender(epcId: string, lender: Lender, field: "docs_given" | "approved" | "rejected", value: boolean) {
-    if (field === "approved") {
-      const msg = value === true
-        ? "Are you sure for this approval?"
-        : "Are you sure you want to un-approve this?";
-      if (!window.confirm(msg)) return;
-    }
-    if (field === "rejected") {
-      const msg = value === true
-        ? "Mark this lender as Rejected?"
-        : "Clear the Rejected mark for this lender?";
-      if (!window.confirm(msg)) return;
-    }
-
-    // Approved and Rejected are mutually exclusive — ticking one clears
-    // the other. Docs is independent. Build the boolean patch + the DB
-    // patch (incl. rejected_at) together so both fields move atomically.
-    const boolPatch: Partial<LenderState> = { [field]: value } as Partial<LenderState>;
-    const dbPatch: Record<string, unknown> = { [field]: value };
-    if (field === "approved" && value) {
-      boolPatch.rejected = false;
-      dbPatch.rejected = false;
-      dbPatch.rejected_at = null;
-    } else if (field === "rejected") {
-      dbPatch.rejected_at = value ? new Date().toISOString() : null;
-      if (value) { boolPatch.approved = false; dbPatch.approved = false; }
-    }
+  // Set ONE exclusive lender state (none / docs / approved / rejected),
+  // clearing the other two flags — Docs Sent, Approved and Rejected can never
+  // combine (B1). Approved/Rejected are gated behind Docs Sent in the UI, and
+  // this reuses the same epc_lender_status upsert as before.
+  async function setLenderExclusive(epcId: string, lender: Lender, target: "none" | "docs" | "approved" | "rejected") {
+    if (target === "approved" && !window.confirm("Mark this lender as Approved?")) return;
+    if (target === "rejected" && !window.confirm("Mark this lender as Rejected?")) return;
+    const flags: LenderState = {
+      docs_given: target === "docs",
+      approved:   target === "approved",
+      rejected:   target === "rejected",
+    };
+    const dbPatch: Record<string, unknown> = { ...flags, rejected_at: target === "rejected" ? new Date().toISOString() : null };
 
     const prevState = lenderState;
     setLenderState((s) => {
       const next = { ...s };
       const cur = (next[epcId] ?? {}) as LenderMap;
-      const lenderCur = (cur[lender] ?? { docs_given: false, approved: false, rejected: false }) as LenderState;
-      next[epcId] = { ...cur, [lender]: { ...lenderCur, ...boolPatch } };
+      next[epcId] = { ...cur, [lender]: { ...flags } };
       return next;
     });
     try {
@@ -592,16 +605,9 @@ function EpcsTab() {
         .eq("lender", lender)
         .maybeSingle();
       if (existing) {
-        await supabase()
-          .from("epc_lender_status")
-          .update(dbPatch)
-          .eq("id", (existing as { id: string }).id);
+        await supabase().from("epc_lender_status").update(dbPatch).eq("id", (existing as { id: string }).id);
       } else {
-        const row: Record<string, unknown> = {
-          business_id: epcId, lender, docs_given: false, approved: false, rejected: false,
-          ...dbPatch,
-        };
-        await supabase().from("epc_lender_status").insert(row);
+        await supabase().from("epc_lender_status").insert({ business_id: epcId, lender, ...dbPatch });
       }
     } catch (e) {
       setLenderState(prevState);
@@ -644,7 +650,7 @@ function EpcsTab() {
   const fyRows = useMemo(() => rows.filter((r) => inCurrentFY(r.created_at)), [rows]);
   const cards: SummaryCard[] = [
     { key: "",                label: "Total EPCs",          value: fyRows.length },
-    { key: "docs_pending",    label: "Docs Pending",        value: fyRows.filter((r) => catMatch(r, "docs_pending")).length },
+    { key: "unseen",          label: "Application Unseen",  value: fyRows.filter((r) => catMatch(r, "unseen")).length },
     { key: "under_review",    label: "Under Review",        value: fyRows.filter((r) => catMatch(r, "under_review")).length },
     { key: "updated",         label: "Updated",             value: fyRows.filter((r) => catMatch(r, "updated")).length },
     { key: "approved",        label: "Approved",            value: fyRows.filter((r) => catMatch(r, "approved")).length },
@@ -652,8 +658,6 @@ function EpcsTab() {
     { key: "rejected",        label: "Rejected",            value: fyRows.filter((r) => catMatch(r, "rejected")).length },
     { key: "docs_sent",       label: "Docs Sent to Lender", value: fyRows.filter((r) => catMatch(r, "docs_sent")).length },
     { key: "lender_approved", label: "Lender Approved",     value: fyRows.filter((r) => catMatch(r, "lender_approved")).length },
-    { key: "rejected_by_lender", label: "Rejected by Lender", value: fyRows.filter((r) => catMatch(r, "rejected_by_lender")).length },
-    { key: "unseen",          label: "Application Unseen",  value: fyRows.filter((r) => catMatch(r, "unseen")).length },
   ];
   const panelActive = [sourceFilter, lenderFilter, lenderStateFilter, dateFrom, dateTo].filter(Boolean).length;
   const activeCount = panelActive + (categoryFilter ? 1 : 0);
@@ -663,9 +667,39 @@ function EpcsTab() {
     setDateFrom(""); setDateTo(""); setCategoryFilter("");
   }
 
+  // "Report" — client-side CSV of the CURRENTLY-FILTERED EPC list.
+  function exportEpcReport() {
+    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const header = ["EPC ID", "Trade name", "Legal name", "Contact", "Mobile", "Email", "Status", "Created by", "Created on"];
+    const lines = [header.map(esc).join(",")];
+    for (const r of filtered) {
+      lines.push([
+        r.epc_display_id || r.id,
+        r.trade_name || "",
+        r.legal_name || "",
+        r.contact_name || "",
+        r.contact_mobile || "",
+        r.contact_email || "",
+        EPC_STAGE_META[epcBadge(r)]?.label ?? "",
+        (r.source || "website").toLowerCase() === "manual" ? "Admin" : "EPC",
+        r.created_at,
+      ].map(esc).join(","));
+    }
+    const csv = "﻿" + lines.join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `epcs-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <>
-      <SummaryCards accent={ACCENTS.epcs.color} cards={cards} active={categoryFilter} onPick={pickCategory} caption={FY_CAPTION} />
+      <SummaryCards accent={ACCENTS.epcs.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
       <div className="flex items-center gap-3 mb-3">
         <div className="flex-1">
@@ -676,6 +710,9 @@ function EpcsTab() {
           />
         </div>
         <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.epcs.color} onClick={() => setFiltersOpen((o) => !o)} />
+        <Button type="button" variant="primary" onClick={exportEpcReport} style={{ backgroundColor: "#178a5c" }} className="whitespace-nowrap inline-flex items-center gap-1.5">
+          {IconDownload} Report
+        </Button>
         <Button type="button" variant="primary" onClick={() => setAddOpen(true)} className="whitespace-nowrap">
           + Add New EPC
         </Button>
@@ -723,8 +760,7 @@ function EpcsTab() {
           value={lenderStateFilter}
           onChange={(e) => setLenderStateFilter(e.target.value)}
         />
-        <DateBox label="Created from" value={dateFrom} onChange={setDateFrom} />
-        <DateBox label="Created to"   value={dateTo}   onChange={setDateTo} />
+        <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
       </FiltersPanel>
 
       <Card className="overflow-hidden">
@@ -734,31 +770,31 @@ function EpcsTab() {
               status keeps room for the status + UPDATED pills side by side. */}
           <colgroup>
             <col style={{ width: "26%" }} />
-            <col style={{ width: "9%"  }} />
-            <col style={{ width: "13%" }} />
             <col style={{ width: "16%" }} />
-            <col style={{ width: "14%" }} />
             <col style={{ width: "22%" }} />
+            <col style={{ width: "13%" }} />
+            <col style={{ width: "9%"  }} />
+            <col style={{ width: "14%" }} />
           </colgroup>
           {/* Everything centred except EPC details, which stays left. */}
           <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-[#5a8a76]">
             <tr>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-left">EPC details</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Source</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">
+                <button type="button" onClick={() => toggleSort("status")} className="inline-flex items-center gap-1 uppercase tracking-wide">
+                  Status
+                  <SortMark active={sortKey === "status"} dir={sortDir} />
+                </button>
+              </th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Lender</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">
                 <button type="button" onClick={() => toggleSort("created_at")} className="inline-flex items-center gap-1 uppercase tracking-wide">
                   Created on
                   <SortMark active={sortKey === "created_at"} dir={sortDir} />
                 </button>
               </th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">
-                <button type="button" onClick={() => toggleSort("status")} className="inline-flex items-center gap-1 uppercase tracking-wide">
-                  Internal status
-                  <SortMark active={sortKey === "status"} dir={sortDir} />
-                </button>
-              </th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Created by</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Action</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Lenders</th>
             </tr>
           </thead>
           <tbody>
@@ -800,7 +836,18 @@ function EpcsTab() {
                   </div>
                 </td>
                 <td className="px-3 py-3 text-center">
-                  <SourcePill source={r.source} />
+                  {(() => {
+                    const m = EPC_STAGE_META[epcBadge(r)];
+                    return <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${m.cls}`}>{m.label}</span>;
+                  })()}
+                </td>
+                <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                  <LenderCell
+                    state={lenderState[r.id] ?? {}}
+                    lenders={lenderList}
+                    onSet={(lender, target) => setLenderExclusive(r.id, lender, target)}
+                    onAddLender={addLender}
+                  />
                 </td>
                 <td className="px-3 py-3 text-center">
                   <p className="text-[13px] font-semibold text-[#0f3d2e]">
@@ -810,11 +857,10 @@ function EpcsTab() {
                     {new Date(r.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
                   </p>
                 </td>
-                <td className="px-3 py-3 text-center">
-                  {(() => {
-                    const m = EPC_STAGE_META[epcStage(r)];
-                    return <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${m.cls}`}>{m.label}</span>;
-                  })()}
+                {/* Created by — plain text; website (self-onboarded) → EPC,
+                    manual (admin-added) → Admin. Source FILTER keeps website/manual. */}
+                <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">
+                  {(r.source || "website").toLowerCase() === "manual" ? "Admin" : "EPC"}
                 </td>
                 <td className="px-3 py-3 text-center">
                   <button
@@ -830,14 +876,6 @@ function EpcsTab() {
                   >
                     {IconDownload} {downloading[r.id] ? "Preparing…" : "Download ZIP"}
                   </button>
-                </td>
-                <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                  <LenderCell
-                    state={lenderState[r.id] ?? {}}
-                    lenders={lenderList}
-                    onToggle={(lender, field, v) => toggleLender(r.id, lender, field, v)}
-                    onAddLender={addLender}
-                  />
                 </td>
               </tr>
               );
@@ -866,30 +904,13 @@ function SortMark({ active, dir }: { active: boolean; dir: SortDir }) {
   return dir === "asc" ? IconArrowUp : IconArrowDown;
 }
 
-function SourcePill({ source }: { source: string | null }) {
-  const s = (source || "website").toLowerCase();
-  const isManual = s === "manual";
-  return (
-    <span
-      className={[
-        "inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full",
-        isManual
-          ? "bg-[#fef0d6] text-[#854f0b]"
-          : "bg-[#dceffb] text-[#185fa5]",
-      ].join(" ")}
-    >
-      {isManual ? IconUserPlus : IconGlobe}
-      {isManual ? "Manual" : "Website"}
-    </span>
-  );
-}
 
 function LenderCell({
-  state, lenders, onToggle, onAddLender,
+  state, lenders, onSet, onAddLender,
 }: {
   state: LenderMap;
   lenders: LenderInfo[];
-  onToggle: (lender: Lender, field: "docs_given" | "approved" | "rejected", value: boolean) => void;
+  onSet: (lender: Lender, target: "none" | "docs" | "approved" | "rejected") => void;
   onAddLender: (name: string) => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
@@ -899,21 +920,20 @@ function LenderCell({
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Compact trigger summary.
-  const vals = lenders.map((l) => state[l.key]).filter(Boolean) as LenderState[];
-  const nDocs = vals.filter((v) => v.docs_given).length;
-  const nApproved = vals.filter((v) => v.approved).length;
-  const nRejected = vals.filter((v) => v.rejected).length;
-  const none = nDocs === 0 && nApproved === 0 && nRejected === 0;
-
-  // Lenders that have docs sent OR approval float to the top of the list.
-  const ordered = [...lenders].sort((a, b) => {
-    const sa = state[a.key], sb = state[b.key];
-    const pa = sa?.docs_given || sa?.approved ? 0 : 1;
-    const pb = sb?.docs_given || sb?.approved ? 0 : 1;
-    if (pa !== pb) return pa - pb;
-    return (a.sort_order ?? 100) - (b.sort_order ?? 100);
-  });
+  // One exclusive state per lender.
+  const stateOf = (key: string): "none" | "docs" | "approved" | "rejected" => {
+    const s = state[key];
+    if (!s) return "none";
+    if (s.approved) return "approved";
+    if (s.rejected) return "rejected";
+    if (s.docs_given) return "docs";
+    return "none";
+  };
+  const sorted = [...lenders].sort((a, b) => (a.sort_order ?? 100) - (b.sort_order ?? 100));
+  const approvedL = sorted.filter((l) => stateOf(l.key) === "approved"); // TOP
+  const rejectedL = sorted.filter((l) => stateOf(l.key) === "rejected"); // BOTTOM
+  const middleL   = sorted.filter((l) => stateOf(l.key) === "none" || stateOf(l.key) === "docs");
+  const anySet = approvedL.length > 0 || rejectedL.length > 0 || middleL.some((l) => stateOf(l.key) === "docs");
 
   function place() {
     const r = btnRef.current?.getBoundingClientRect();
@@ -950,7 +970,6 @@ function LenderCell({
     finally { setAdding(false); }
   }
 
-  const chip = "px-1.5 py-0.5 rounded-full text-[11px] font-semibold";
   return (
     <>
       <button
@@ -959,15 +978,7 @@ function LenderCell({
         onClick={toggle}
         className="inline-flex items-center gap-1.5 text-[12px] font-medium px-2.5 py-1.5 rounded-input border border-line bg-white hover:bg-bg-soft text-[#0f3d2e] max-w-full"
       >
-        {none ? (
-          <span className="text-text-muted">Set lender status</span>
-        ) : (
-          <span className="inline-flex items-center gap-1 flex-wrap">
-            {nApproved > 0 && <span className={`${chip} bg-[#e6f6ee] text-[#178a5c]`}>{nApproved} appr</span>}
-            {nDocs > 0 && <span className={`${chip} bg-[#dceffb] text-[#185fa5]`}>{nDocs} docs</span>}
-            {nRejected > 0 && <span className={`${chip} bg-[#ffe4e6] text-[#9f1239]`}>{nRejected} rej</span>}
-          </span>
-        )}
+        <span className={anySet ? "text-[#0f3d2e]" : "text-text-muted"}>{anySet ? "Lender status" : "Set lender status"}</span>
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0"><path d="M6 9l6 6 6-6" /></svg>
       </button>
 
@@ -980,54 +991,88 @@ function LenderCell({
           <div className="px-3 py-2 border-b border-line bg-[#f0faf5] text-[11px] font-semibold uppercase tracking-wide text-[#5a8a76]">
             Lender status
           </div>
-          <div style={{ maxHeight: 260, overflowY: "auto" }}>
-            <table className="w-full text-[12px]">
-              <thead>
-                <tr className="text-[10px] uppercase tracking-wide text-[#5a8a76] border-b border-line">
-                  <th className="text-left font-medium px-3 py-1.5">Lender</th>
-                  <th className="font-medium px-1 py-1.5">Docs sent</th>
-                  <th className="font-medium px-1 py-1.5">Approved</th>
-                  <th className="font-medium px-1 py-1.5">Rejected</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ordered.map((l) => {
-                  const s = state[l.key] ?? { docs_given: false, approved: false, rejected: false };
-                  const active = s.docs_given || s.approved;
-                  return (
-                    <tr key={l.key} className={`border-b border-[#f0f4f2] ${active ? "bg-[#f7fcfa]" : ""}`}>
-                      <td className="text-left px-3 py-2 font-medium text-[#0f3d2e] whitespace-nowrap">{l.label}</td>
-                      <td className="text-center px-1 py-2">
-                        <input type="checkbox" checked={s.docs_given} onChange={(e) => onToggle(l.key, "docs_given", e.target.checked)} className="h-4 w-4 accent-[#185fa5] cursor-pointer" />
-                      </td>
-                      <td className="text-center px-1 py-2">
-                        <input type="checkbox" checked={s.approved} onChange={(e) => onToggle(l.key, "approved", e.target.checked)} className="h-4 w-4 accent-[#178a5c] cursor-pointer" />
-                      </td>
-                      <td className="text-center px-1 py-2">
-                        <input type="checkbox" checked={!!s.rejected} onChange={(e) => onToggle(l.key, "rejected", e.target.checked)} className="h-4 w-4 accent-[#dc2626] cursor-pointer" />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="flex items-center gap-2 px-3 py-2 border-t border-line bg-[#fbfdfc]">
-            <input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submitAdd(); } }}
-              placeholder="Add lender…"
-              className="flex-1 min-w-0 text-[12px] px-2 py-1.5 rounded-input border border-line focus:outline-none focus:ring-2 focus:ring-[#185fa5]/30"
-            />
-            <button
-              type="button"
-              onClick={() => void submitAdd()}
-              disabled={adding || !newName.trim()}
-              className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input bg-[#185fa5] text-white disabled:opacity-50 shrink-0"
-            >
-              {adding ? "Adding…" : "Add"}
-            </button>
+          <div style={{ maxHeight: 320, overflowY: "auto" }}>
+
+            {/* APPROVED — top, green. Click to un-approve → back to Docs Sent. */}
+            {approvedL.map((l) => (
+              <button key={l.key} type="button" onClick={() => onSet(l.key, "docs")} title="Click to un-approve"
+                className="w-full flex items-center justify-between gap-2 px-3 py-2.5 border-b border-[#d6efe3] bg-[#e6f6ee] hover:bg-[#d6efe3] text-left">
+                <span className="font-medium text-[#0f7a52] truncate">{l.label}</span>
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0f7a52] shrink-0">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                  Approved
+                </span>
+              </button>
+            ))}
+
+            {/* MIDDLE — three-state control; Approved/Rejected gated on Docs Sent. */}
+            {middleL.length > 0 && (
+              <table className="w-full text-[12px]">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wide text-[#5a8a76] border-b border-line">
+                    <th className="text-left font-medium px-3 py-1.5">Lender</th>
+                    <th className="font-medium px-1 py-1.5">Docs sent</th>
+                    <th className="font-medium px-1 py-1.5">Approved</th>
+                    <th className="font-medium px-1 py-1.5">Rejected</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {middleL.map((l) => {
+                    const docs = stateOf(l.key) === "docs";
+                    return (
+                      <tr key={l.key} className={`border-b border-[#f0f4f2] ${docs ? "bg-[#f7fcfa]" : ""}`}>
+                        <td className="text-left px-3 py-2 font-medium text-[#0f3d2e] whitespace-nowrap">{l.label}</td>
+                        <td className="text-center px-1 py-2">
+                          <input type="checkbox" checked={docs} onChange={(e) => onSet(l.key, e.target.checked ? "docs" : "none")} className="h-4 w-4 accent-[#185fa5] cursor-pointer" />
+                        </td>
+                        <td className="text-center px-1 py-2">
+                          <input type="checkbox" checked={false} disabled={!docs} onChange={() => onSet(l.key, "approved")}
+                            title={docs ? "Mark approved" : "Send docs first"}
+                            className="h-4 w-4 accent-[#178a5c] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed" />
+                        </td>
+                        <td className="text-center px-1 py-2">
+                          <input type="checkbox" checked={false} disabled={!docs} onChange={() => onSet(l.key, "rejected")}
+                            title={docs ? "Mark rejected" : "Send docs first"}
+                            className="h-4 w-4 accent-[#dc2626] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed" />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+
+            {/* Add lender — part of the MIDDLE section (new lenders start undecided). */}
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-line bg-[#fbfdfc]">
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submitAdd(); } }}
+                placeholder="Add lender…"
+                className="flex-1 min-w-0 text-[12px] px-2 py-1.5 rounded-input border border-line focus:outline-none focus:ring-2 focus:ring-[#185fa5]/30"
+              />
+              <button
+                type="button"
+                onClick={() => void submitAdd()}
+                disabled={adding || !newName.trim()}
+                className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input bg-[#185fa5] text-white disabled:opacity-50 shrink-0"
+              >
+                {adding ? "Adding…" : "Add"}
+              </button>
+            </div>
+
+            {/* REJECTED — bottom, red. Click to un-reject → back to Docs Sent. */}
+            {rejectedL.map((l) => (
+              <button key={l.key} type="button" onClick={() => onSet(l.key, "docs")} title="Click to un-reject"
+                className="w-full flex items-center justify-between gap-2 px-3 py-2.5 border-b border-[#ffd0d4] bg-[#ffe4e6] hover:bg-[#ffd0d4] text-left">
+                <span className="font-medium text-[#9f1239] truncate">{l.label}</span>
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#9f1239] shrink-0">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                  Rejected
+                </span>
+              </button>
+            ))}
+
           </div>
         </div>
       )}
@@ -1085,7 +1130,6 @@ function AppsTab() {
   // Client-side filters over the already-loaded list.
   const [epcFilter, setEpcFilter]       = useState("");
   const [lenderFilter, setLenderFilter] = useState("");
-  const [createdByFilter, setCreatedByFilter] = useState("");
   // Created-date range (inclusive) via calendar pickers.
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo]     = useState("");
@@ -1277,7 +1321,6 @@ function AppsTab() {
             displayEpc(r).toLowerCase().includes(needle))) return false;
       if (epcFilter && displayEpc(r) !== epcFilter) return false;
       if (lenderFilter && String(r.approved_lender ?? r.rejected_lender ?? "") !== lenderFilter) return false;
-      if (createdByFilter && (r.created_by === "admin" ? "admin" : "epc") !== createdByFilter) return false;
       const t = Date.parse(r.created_at);
       if (fromT != null && !(t >= fromT)) return false;
       if (toT != null && !(t <= toT)) return false;
@@ -1300,7 +1343,7 @@ function AppsTab() {
     }
     return out.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, q, categoryFilter, statusFilter, epcFilter, lenderFilter, createdByFilter, dateFrom, dateTo, sortKey]);
+  }, [rows, q, categoryFilter, statusFilter, epcFilter, lenderFilter, dateFrom, dateTo, sortKey]);
 
   const fyRows = useMemo(() => rows.filter((r) => inCurrentFY(r.created_at)), [rows]);
   const cards: SummaryCard[] = [
@@ -1314,11 +1357,11 @@ function AppsTab() {
     { key: "rejected",     label: "Rejected",           value: fyRows.filter((r) => catMatch(r, "rejected")).length },
     { key: "aborted",      label: "Aborted",            value: fyRows.filter((r) => catMatch(r, "aborted")).length },
   ];
-  const panelActive = [statusFilter, epcFilter, lenderFilter, createdByFilter, dateFrom, dateTo].filter(Boolean).length;
+  const panelActive = [statusFilter, epcFilter, lenderFilter, dateFrom, dateTo].filter(Boolean).length;
   const activeCount = panelActive + (categoryFilter ? 1 : 0);
   const pickCategory = (key: string) => setCategoryFilter(key === categoryFilter ? "" : key);
   function clearAll() {
-    setStatusFilter(""); setEpcFilter(""); setLenderFilter(""); setCreatedByFilter("");
+    setStatusFilter(""); setEpcFilter(""); setLenderFilter("");
     setDateFrom(""); setDateTo(""); setCategoryFilter("");
   }
 
@@ -1358,7 +1401,7 @@ function AppsTab() {
 
   return (
     <>
-      <SummaryCards accent={ACCENTS.apps.color} cards={cards} active={categoryFilter} onPick={pickCategory} caption={FY_CAPTION} />
+      <SummaryCards accent={ACCENTS.apps.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
       <div className="flex items-center gap-3 mb-3">
         <div className="flex-1">
@@ -1409,18 +1452,7 @@ function AppsTab() {
           value={lenderFilter}
           onChange={(e) => setLenderFilter(e.target.value)}
         />
-        <Select
-          label="Created by"
-          placeholder="Created by"
-          options={[
-            { value: "admin", label: "Admin" },
-            { value: "epc",   label: "EPC" },
-          ]}
-          value={createdByFilter}
-          onChange={(e) => setCreatedByFilter(e.target.value)}
-        />
-        <DateBox label="Created from" value={dateFrom} onChange={setDateFrom} />
-        <DateBox label="Created to"   value={dateTo}   onChange={setDateTo} />
+        <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
       </FiltersPanel>
 
       <Card className="overflow-hidden">
@@ -1560,7 +1592,7 @@ function AppsTab() {
                   <p className="text-[11px] text-[#5a8a76] mt-0.5">{fmtAddedTime(r.created_at)}</p>
                 </td>
                 <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">
-                  {r.created_by === "admin" ? "Admin" : "Customer"}
+                  {r.created_by === "admin" ? "Admin" : "EPC"}
                 </td>
                 {/* Action: View + Download ZIP. stopPropagation so the
                     buttons don't also trigger the row's navigate. */}
@@ -1823,7 +1855,7 @@ function InsuranceTab() {
 
   return (
     <>
-      <SummaryCards accent={ACCENTS.insurance.color} cards={cards} active={categoryFilter} onPick={pickCategory} caption={FY_CAPTION} />
+      <SummaryCards accent={ACCENTS.insurance.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
       <div className="mb-3 flex items-center gap-3">
         <div className="flex-1">
@@ -1865,8 +1897,7 @@ function InsuranceTab() {
           value={expiryFilter}
           onChange={(e) => setExpiryFilter(e.target.value)}
         />
-        <DateBox label="Created from" value={dateFrom} onChange={setDateFrom} />
-        <DateBox label="Created to"   value={dateTo}   onChange={setDateTo} />
+        <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
       </FiltersPanel>
       <Card className="overflow-hidden">
         <table className="w-full text-[14px] table-fixed">
@@ -2073,7 +2104,7 @@ function LeadsTab() {
 
   return (
     <>
-      <SummaryCards accent={ACCENTS.leads.color} cards={cards} active={categoryFilter} onPick={pickCategory} caption={FY_CAPTION} />
+      <SummaryCards accent={ACCENTS.leads.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
       <div className="flex items-center gap-3 mb-3">
         <div className="flex-1">
@@ -2085,8 +2116,7 @@ function LeadsTab() {
       <FiltersPanel open={filtersOpen} hasActive={activeCount > 0} onClear={clearAll}>
         <Select placeholder="Type" options={[{ value: "loan", label: "Loan" }, { value: "insurance", label: "Insurance" }]} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} />
         <Select placeholder="Status" options={[{ value: "new", label: "New" }, { value: "contacted", label: "Contacted" }, { value: "converted", label: "Converted" }, { value: "closed", label: "Closed" }]} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} />
-        <DateBox label="Created from" value={dateFrom} onChange={setDateFrom} />
-        <DateBox label="Created to"   value={dateTo}   onChange={setDateTo} />
+        <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
       </FiltersPanel>
       <Card className="overflow-x-auto">
         <table className="w-full text-[14px]">

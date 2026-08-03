@@ -22,7 +22,6 @@ import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import StatusBadge from "@/components/StatusBadge";
 import GstR3bSection from "@/components/GstR3bSection";
 import EpcAdminInfoSection from "@/components/EpcAdminInfoSection";
 import CommentsSection from "@/components/CommentsSection";
@@ -141,19 +140,23 @@ function Inner() {
   return (
     <main className="min-h-screen bg-bg-soft">
       <header className="border-b border-line bg-white">
-        <div className="max-w-container mx-auto px-7 h-16 flex items-center justify-between">
-          <span className="font-display font-bold text-[20px] grad-text">Capital Craft / Admin</span>
-          <a href="/admin" className="text-[13px] text-text-muted hover:text-text">← Back</a>
+        <div className="max-w-container mx-auto px-7 h-16 flex items-center">
+          <button type="button" onClick={() => router.push(`/admin/epc/${params.id}/view` as any)} className="text-[13px] text-text-muted hover:text-text inline-flex items-center gap-1">← Back to profile</button>
         </div>
       </header>
 
       <section className="max-w-[1000px] mx-auto px-5 sm:px-7 py-10 space-y-5">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="font-display text-[26px] sm:text-[30px] font-bold">{biz.contact_name || "EPC"}</h1>
+            <h1 className="font-display text-[26px] sm:text-[30px] font-bold">{biz.trade_name || biz.contact_name || "EPC"}</h1>
             <p className="text-text-mid mt-1">+91 {biz.contact_mobile} · {biz.business_type || "—"}</p>
           </div>
-          <StatusBadge status={biz.status} updated={biz.epc_self_edited === true} />
+          {(() => {
+            const s = biz.status;
+            const label = s === "approved" ? "Approved by CC" : s === "under_review" ? "Under review" : s === "on_hold" ? "On hold" : s === "rejected" ? "Rejected" : "Draft";
+            const cls = s === "approved" ? "bg-green-50 text-green-dark" : s === "rejected" ? "bg-red-50 text-red-700" : s === "under_review" ? "bg-[#fef0d6] text-[#854f0b]" : s === "on_hold" ? "bg-[#e5edf5] text-[#3b5a76]" : "bg-[#eef1f0] text-[#5a8a76]";
+            return <span className={`inline-block px-3 py-1 rounded-full text-[12px] font-semibold ${cls}`}>{label}</span>;
+          })()}
         </div>
 
         <Section title="Identity">

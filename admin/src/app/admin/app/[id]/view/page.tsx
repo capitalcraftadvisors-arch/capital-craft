@@ -217,6 +217,7 @@ function Inner() {
   const [delOpen, setDelOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [trancheBusy, setTrancheBusy] = useState<null | "1" | "2">(null);
   const [approveOpen, setApproveOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [zipPickerOpen, setZipPickerOpen] = useState(false);
@@ -354,6 +355,37 @@ function Inner() {
       alert("Download failed: " + (e as Error).message);
     } finally {
       setDownloading(false);
+    }
+  }
+
+  // Per-tranche ZIP (docs for that tranche only + a small summary sheet).
+  async function downloadTranche(tranche: "1" | "2") {
+    if (!loan || trancheBusy) return;
+    setTrancheBusy(tranche);
+    try {
+      const res = await fetch(`/api/admin/loan-app/${loan.id}/tranche-zip?tranche=${tranche}`, {
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        alert("Download failed: " + (d?.error || `HTTP ${res.status}`));
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const cd = res.headers.get("content-disposition") || "";
+      const m = /filename="?([^"]+)"?/.exec(cd);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = m?.[1] || `${displayId(loan)}_Tranche${tranche}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Download failed: " + (e as Error).message);
+    } finally {
+      setTrancheBusy(null);
     }
   }
 
@@ -666,12 +698,6 @@ function Inner() {
 
             <SectionCard title="Installation site details" accent="blue" icon={I.building}>
               <KV k="Name on E-Bill" v={loan.ebill_name} />
-              <KV
-                k="Bill on applicant"
-                v={loan.bill_on_applicant_name === null || loan.bill_on_applicant_name === undefined
-                  ? null
-                  : loan.bill_on_applicant_name ? "Yes" : "No — co-applicant"}
-              />
               <KV k="Address" v={loan.ebill_address_line} />
               <KV k="Pincode" v={loan.install_pincode} />
               <KV k="City" v={loan.install_city} />
@@ -723,11 +749,28 @@ function Inner() {
           <div className="flex flex-col gap-3">
             <SectionCard title="Documents" accent="green" icon={I.files}>
               <div className="space-y-3">
-                {docGroups.map((g) => (
-                  <StepBlock key={g.title} title={g.title}>
-                    <DocGrid slots={toViewSlots(g)} eyeIcon={I.eye} />
-                  </StepBlock>
-                ))}
+                {docGroups.map((g) => {
+                  // A tranche's Download button sits at the bottom of ITS group
+                  // and shows only once every slot in that tranche is uploaded.
+                  const complete = g.slots.length > 0 && g.slots.every((s) => !!s.docId || !!s.path);
+                  const tranche: "1" | "2" | null =
+                    g.title === "1st Tranche Docs" ? "1" : g.title === "2nd Tranche Docs" ? "2" : null;
+                  return (
+                    <StepBlock key={g.title} title={g.title}>
+                      <DocGrid slots={toViewSlots(g)} eyeIcon={I.eye} />
+                      {tranche && complete && (
+                        <button
+                          type="button"
+                          disabled={trancheBusy !== null}
+                          onClick={() => void downloadTranche(tranche)}
+                          className="mt-3 text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center gap-1.5 border border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5] disabled:opacity-50"
+                        >
+                          {I.download} {trancheBusy === tranche ? "Preparing…" : `Download Tranche ${tranche}`}
+                        </button>
+                      )}
+                    </StepBlock>
+                  );
+                })}
               </div>
             </SectionCard>
           </div>
