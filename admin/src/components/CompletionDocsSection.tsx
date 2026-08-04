@@ -24,7 +24,7 @@ import { useEffect, useState } from "react";
 import FileUpload from "@/components/FileUpload";
 import GeoOfficeUpload from "@/components/GeoOfficeUpload";
 import { supabase } from "@/lib/supabase";
-import { getDocumentUrl } from "@/lib/storage";
+import { getDocumentUrl, deleteDocument } from "@/lib/storage";
 
 export const COMPLETION_CATEGORIES = [
   "completion_invoice",
@@ -94,6 +94,15 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
   const byCat = (c: string) => docs.find((d) => d.category === c) ?? null;
   const legacyPlant = byCat("completion_plant_photo");
 
+  // Remove a tranche/completion doc immediately (row + GCS object), then
+  // refresh so the slot falls back to its uploader. The docsUploaded/docsTotal
+  // gate recomputes from the new set, so a removed required doc re-blocks review.
+  async function removeDoc(id: string) {
+    const ok = await deleteDocument(id);
+    if (!ok) { alert("Couldn't remove the document."); return; }
+    setTick((n) => n + 1);
+  }
+
   async function open(id: string) {
     const u = await getDocumentUrl(id);
     if (u) window.open(u, "_blank", "noopener");
@@ -107,7 +116,7 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
         <>
           <p className="text-[12px] font-bold uppercase tracking-wide text-[#5a8a76]">1st Tranche Docs</p>
           {TRANCHE1_DOCS.map((d) => (
-            <DocSlot key={d.category} title={d.title} hint="Image or PDF." doc={byCat(d.category)} onOpen={open}>
+            <DocSlot key={d.category} title={d.title} hint="Image or PDF." doc={byCat(d.category)} onOpen={open} onRemove={removeDoc}>
               <FileUpload
                 applicationId={applicationId}
                 table="user_application_docs"
@@ -129,6 +138,7 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
         hint="Image or PDF."
         doc={byCat("completion_invoice")}
         onOpen={open}
+        onRemove={removeDoc}
       >
         <FileUpload
           applicationId={applicationId}
@@ -163,6 +173,7 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
         hint="Image or PDF."
         doc={byCat("completion_report")}
         onOpen={open}
+        onRemove={removeDoc}
       >
         <FileUpload
           applicationId={applicationId}
@@ -189,12 +200,13 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
 // Shows the existing upload (with an eye-View) when present, otherwise the
 // uploader. Keeps the two file slots visually level with the geo slot.
 function DocSlot({
-  title, hint, doc, onOpen, children,
+  title, hint, doc, onOpen, onRemove, children,
 }: {
   title: string;
   hint?: string;
   doc: DocRow | null;
   onOpen: (id: string) => void;
+  onRemove?: (id: string) => void;
   children: React.ReactNode;
 }) {
   return (
@@ -203,14 +215,26 @@ function DocSlot({
       {doc ? (
         <div className="flex items-center justify-between gap-3 px-3 py-2.5 bg-[#f7fcfa] border border-[#e0f0e8] rounded-input">
           <span className="text-[13px] text-[#0f3d2e] truncate">{doc.file_name || "Uploaded"}</span>
-          <button
-            type="button"
-            onClick={() => onOpen(doc.id)}
-            title="View document"
-            className="shrink-0 text-[#185fa5] hover:text-[#144d84]"
-          >
-            {EYE}
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => onOpen(doc.id)}
+              title="View document" aria-label="View document"
+              className="text-[#185fa5] hover:text-[#144d84]"
+            >
+              {EYE}
+            </button>
+            {onRemove && (
+              <button
+                type="button"
+                onClick={() => onRemove(doc.id)}
+                title="Remove document" aria-label="Remove document"
+                className="text-red-600 hover:text-red-700"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <>

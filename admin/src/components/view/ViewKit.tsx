@@ -194,6 +194,7 @@ export type ViewDocSlot = {
   label: string;
   title?: string;          // tooltip — usually the file name
   onView?: () => void;     // undefined = not uploaded
+  onDelete?: () => void;   // set → show a trash button beside the eye (admin)
 };
 
 export function DocGrid({
@@ -206,16 +207,40 @@ export function DocGrid({
     <div className="grid grid-cols-2 gap-2">
       {slots.map((s) => (
         s.onView ? (
-          <button
+          <div
             key={s.key}
-            type="button"
-            onClick={s.onView}
-            className="border border-[#e0f0e8] bg-[#f7fcfa] hover:bg-[#f0faf5] rounded-[8px] px-3 py-2.5 text-[13px] flex items-center justify-between gap-2 min-w-0"
+            className="border border-[#e0f0e8] bg-[#f7fcfa] rounded-[8px] px-3 py-2.5 text-[13px] flex items-center justify-between gap-2 min-w-0"
             title={s.title}
           >
-            <span className="text-[#0f3d2e] font-medium truncate">{s.label}</span>
-            <span className="text-[#185fa5] shrink-0" style={{ transform: "scale(1.2)" }}>{eyeIcon}</span>
-          </button>
+            <button
+              type="button"
+              onClick={s.onView}
+              className="flex-1 min-w-0 text-left text-[#0f3d2e] font-medium truncate hover:text-[#185fa5]"
+            >
+              {s.label}
+            </button>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={s.onView}
+                title="View" aria-label="View"
+                className="text-[#185fa5] hover:text-[#0f3d2e]"
+                style={{ transform: "scale(1.15)" }}
+              >
+                {eyeIcon}
+              </button>
+              {s.onDelete && (
+                <button
+                  type="button"
+                  onClick={s.onDelete}
+                  title="Remove document" aria-label="Remove document"
+                  className="text-red-600 hover:text-red-700"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
+                </button>
+              )}
+            </div>
+          </div>
         ) : (
           <div
             key={s.key}

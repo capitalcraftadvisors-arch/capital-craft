@@ -21,12 +21,13 @@ import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
-import { getDocumentUrl } from "@/lib/storage";
+import { getDocumentUrl, deleteDocument } from "@/lib/storage";
 import { logAudit } from "@/lib/auditLog";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import CommentsSection from "@/components/CommentsSection";
 import ActivityLogModal from "@/components/ActivityLogModal";
 import DeleteEpcModal from "@/components/DeleteEpcModal";
+import ProfileTabBar, { TabButton } from "@/components/ProfileTabBar";
 // Shared view chrome — the SAME kit the Loan Application View imports, so the
 // two dashboards can't drift apart. EPC-specific pieces stay in this file.
 import {
@@ -200,6 +201,13 @@ function Inner() {
     if (u) window.open(u, "_blank");
   }
 
+  // Remove an EPC document (epc_documents row + its GCS object) — immediate.
+  async function removeDoc(id: string) {
+    const ok = await deleteDocument(id);
+    if (!ok) { alert("Couldn't remove the document."); return; }
+    setDocs((arr) => arr.filter((d) => d.id !== id));
+  }
+
   // Internal status transitions — writes to epc_business.status (admin's
   // internal tracking field) and logs to admin_edit_log. This mirrors the
   // detail page's changeStatus. IMPORTANT: this DOES NOT unlock the EPC's
@@ -294,7 +302,6 @@ function Inner() {
           >
             ← Back
           </button>
-          <span className="font-display font-bold text-[18px] text-[#0f3d2e]">Capital Craft</span>
         </div>
       </header>
 
@@ -333,28 +340,53 @@ function Inner() {
           </div>
         </div>
 
+        {/* ── TAB / ACTION ROW — tabs (left) + Delete (right). Sits between the
+            heading bar and the internal-status/service band (A3). The internal
+            Approve/Hold/Reject controls stay in the internal-status band. ── */}
+        <ProfileTabBar
+          left={
+            <>
+              <TabButton label="Application" icon={I.building} active />
+              <TabButton label="Edit" icon={I.edit} onClick={() => router.push(`/admin/epc/${biz.id}` as any)} />
+              <TabButton label="Activity Log" icon={I.eye} onClick={() => setActivityOpen(true)} />
+              <TabButton label="Download ZIP" icon={I.download} disabled={downloading} onClick={() => setZipPickerOpen(true)} />
+            </>
+          }
+          right={
+            biz.business_type !== "admin" ? (
+              <button
+                type="button"
+                onClick={() => setDeleteOpen(true)}
+                title="Delete profile" aria-label="Delete profile"
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-[13px] font-semibold border border-red-300 text-red-700 rounded-[8px] hover:bg-red-50 hover:border-red-500 transition-colors"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
+                Delete
+              </button>
+            ) : undefined
+          }
+        />
+
         {/* ── INTERNAL STATUS BAND — admin-only, visually distinct ──── */}
         {/* Slate palette (not brand green) so it can't be confused with     */}
         {/* the lender "Approved" tick, which is what actually unlocks the   */}
         {/* EPC's loan application. This field is purely internal admin      */}
         {/* tracking; the EPC never sees it and it never gates their access. */}
         {/* Internal status + Service side by side (stacks on narrow). */}
-        <div className={biz.status === "approved" ? "grid gap-4 lg:grid-cols-2" : ""}>
+        <div className="grid gap-4 lg:grid-cols-2">
           <InternalStatusBand
             current={biz.status}
             busy={statusBusy}
             onChange={changeStatus}
           />
 
-          {/* ── SERVICE — only when internally Approved. Governs which portal
-              buttons the EPC sees (insurance needs no lender approval). ── */}
-          {biz.status === "approved" && (
-            <ServiceBand
-              current={biz.service_type ?? null}
-              busy={serviceBusy}
-              onChange={setService}
-            />
-          )}
+          {/* ── SERVICE — now shown on EVERY EPC profile, side by side with the
+              internal-status band (was previously approved-only). ── */}
+          <ServiceBand
+            current={biz.service_type ?? null}
+            busy={serviceBusy}
+            onChange={setService}
+          />
         </div>
 
         {/* ── PROGRESS TRACKER — prominent standalone band ─────────── */}
@@ -488,6 +520,7 @@ function Inner() {
                   stakeholders={stakeholders}
                   businessType={biz.business_type as string | null}
                   openDoc={openDoc}
+                  removeDoc={removeDoc}
                   eyeIcon={I.eye}
                 />
               )}
@@ -580,47 +613,6 @@ function Inner() {
             </SectionCard>
           </div>
         </div>
-
-        {/* ── Actions strip — Activity log · Edit profile · Download ZIP */}
-        <div className="flex gap-3 mt-4">
-          <button
-            type="button"
-            onClick={() => setActivityOpen(true)}
-            className="flex-1 py-3.5 text-[15px] font-semibold bg-white border-2 border-[#178a5c] text-[#178a5c] rounded-[10px] hover:bg-[#f0faf5] inline-flex items-center justify-center gap-2"
-          >
-            {I.eye} Activity log
-          </button>
-          <button
-            type="button"
-            onClick={() => router.push(`/admin/epc/${biz.id}` as any)}
-            className="flex-1 py-3.5 text-[15px] font-semibold bg-[#178a5c] text-white rounded-[10px] hover:bg-[#12734c] inline-flex items-center justify-center gap-2"
-          >
-            {I.edit} Edit profile
-          </button>
-          <button
-            type="button"
-            onClick={() => setZipPickerOpen(true)}
-            disabled={downloading}
-            className="flex-1 py-3.5 text-[15px] font-semibold bg-[#185fa5] text-white rounded-[10px] hover:bg-[#144d84] disabled:opacity-70 inline-flex items-center justify-center gap-2"
-          >
-            {I.download} {downloading ? "Preparing…" : "Download ZIP"}
-          </button>
-        </div>
-
-        {/* Danger zone — Delete profile. Hidden entirely for admin
-            rows (defense layer 1: the button never renders). Backend
-            still enforces the ban even if this check is bypassed. */}
-        {biz.business_type !== "admin" && (
-          <div className="mt-4 flex justify-end">
-            <button
-              type="button"
-              onClick={() => setDeleteOpen(true)}
-              className="px-4 py-2 text-[13px] font-semibold border border-red-300 text-red-700 rounded-[8px] hover:bg-red-50 hover:border-red-500 transition-colors"
-            >
-              Delete profile
-            </button>
-          </div>
-        )}
 
       </div>
 
@@ -874,12 +866,13 @@ function buildSlots(
 }
 
 function DocumentsBySteps({
-  docs, stakeholders, businessType, openDoc, eyeIcon,
+  docs, stakeholders, businessType, openDoc, removeDoc, eyeIcon,
 }: {
   docs: Doc[];
   stakeholders: Array<{ id: string; name?: string; designation?: string; mobile?: string; email?: string }>;
   businessType: string | null;
   openDoc: (id: string) => void;
+  removeDoc: (id: string) => void;
   eyeIcon: React.ReactNode;
 }) {
   // Bucket docs by category family.
@@ -925,7 +918,7 @@ function DocumentsBySteps({
   return (
     <div className="space-y-4">
       <StepBlock title="Business (Step 2)">
-        <DocGrid slots={toViewSlots(bizSlots, openDoc)} eyeIcon={eyeIcon} />
+        <DocGrid slots={toViewSlots(bizSlots, openDoc, removeDoc)} eyeIcon={eyeIcon} />
       </StepBlock>
 
       {(stakeholderGroups.length > 0 || orphanStakeholderDocs.length > 0) && (
@@ -939,6 +932,7 @@ function DocumentsBySteps({
                 slots={buildSlots(g.docs, STK_EXPECTED,
                   (c) => stakeholderDocLabel(businessType, i, stakeholders.length, c))}
                 openDoc={openDoc}
+                removeDoc={removeDoc}
                 eyeIcon={eyeIcon}
               />
             ))}
@@ -947,6 +941,7 @@ function DocumentsBySteps({
                 header="Legacy stakeholder documents"
                 slots={buildSlots(orphanStakeholderDocs, [], (c) => plainStakeholderCatLabel(c))}
                 openDoc={openDoc}
+                removeDoc={removeDoc}
                 eyeIcon={eyeIcon}
               />
             )}
@@ -955,16 +950,16 @@ function DocumentsBySteps({
       )}
 
       <StepBlock title="Bank (Step 4)">
-        <DocGrid slots={toViewSlots(bankSlots, openDoc)} eyeIcon={eyeIcon} />
+        <DocGrid slots={toViewSlots(bankSlots, openDoc, removeDoc)} eyeIcon={eyeIcon} />
       </StepBlock>
 
       <StepBlock title="Office (Step 5)">
-        <DocGrid slots={toViewSlots(officeSlots, openDoc)} eyeIcon={eyeIcon} />
+        <DocGrid slots={toViewSlots(officeSlots, openDoc, removeDoc)} eyeIcon={eyeIcon} />
       </StepBlock>
 
       {otherDocs.length > 0 && (
         <StepBlock title="Other">
-          <DocGrid slots={toViewSlots(buildSlots(otherDocs, [], (c) => DOC_LABEL(c)), openDoc)} eyeIcon={eyeIcon} />
+          <DocGrid slots={toViewSlots(buildSlots(otherDocs, [], (c) => DOC_LABEL(c)), openDoc, removeDoc)} eyeIcon={eyeIcon} />
         </StepBlock>
       )}
     </div>
@@ -973,27 +968,31 @@ function DocumentsBySteps({
 
 // Maps this page's doc-row slots onto the shared ViewKit DocGrid slots.
 // `doc` present → eye-View button; absent → greyed "Not uploaded".
-function toViewSlots(slots: DocSlot[], openDoc: (id: string) => void): ViewDocSlot[] {
+function toViewSlots(
+  slots: DocSlot[], openDoc: (id: string) => void, removeDoc?: (id: string) => void,
+): ViewDocSlot[] {
   return slots.map((s) => ({
     key: s.key,
     label: s.label,
     title: s.doc?.file_name ?? undefined,
     onView: s.doc ? () => openDoc(s.doc!.id) : undefined,
+    onDelete: s.doc && removeDoc ? () => removeDoc(s.doc!.id) : undefined,
   }));
 }
 
 function StakeholderDocs({
-  header, slots, openDoc, eyeIcon,
+  header, slots, openDoc, removeDoc, eyeIcon,
 }: {
   header: string;
   slots: DocSlot[];
   openDoc: (id: string) => void;
+  removeDoc?: (id: string) => void;
   eyeIcon: React.ReactNode;
 }) {
   return (
     <div>
       <p className="text-[12px] font-semibold text-[#0f3d2e] mb-1.5">{header}</p>
-      <DocGrid slots={toViewSlots(slots, openDoc)} eyeIcon={eyeIcon} />
+      <DocGrid slots={toViewSlots(slots, openDoc, removeDoc)} eyeIcon={eyeIcon} />
     </div>
   );
 }

@@ -153,7 +153,7 @@ export async function POST(req: NextRequest) {
       // can reject a co-applicant that reuses it.
       const { data: app, error: loadErr } = await supabase
         .from("epc_applications")
-        .select("id, epc_business_id, current_step, borrower_mobile, borrower_email")
+        .select("id, epc_business_id, current_step, borrower_mobile, borrower_email, plant_use_type")
         .eq("id", appId)
         .maybeSingle();
       if (loadErr) return err(loadErr.message, 500);
@@ -272,7 +272,8 @@ export async function POST(req: NextRequest) {
           total_project_cost,
           loan_amount_required,
           roi_percent:      DEFAULT_INDICATIVE_ROI,
-          central_subsidy:  central_subsidy ?? 0,
+          // Subsidy is residential-only — commercial (C&I) is forced to 0.
+          central_subsidy:  (app as any).plant_use_type === "commercial" ? 0 : (central_subsidy ?? 0),
           state_subsidy:    0,
           selected_tenure_years,
           selected_monthly_emi,

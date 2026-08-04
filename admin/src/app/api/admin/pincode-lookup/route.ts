@@ -23,6 +23,7 @@ type PostOffice = {
   Name?: string;
   District?: string;
   State?: string;
+  BranchType?: string;
 };
 type UpstreamItem = {
   Status?: string;
@@ -45,24 +46,36 @@ export async function GET(req: NextRequest) {
     const pin = (req.nextUrl.searchParams.get("pin") ?? "").trim();
     if (!PIN_RE.test(pin)) return err("Enter a valid 6-digit Indian pincode.", 400);
 
-    const upstream = await fetch(`${UPSTREAM}${pin}`, {
-      // The upstream is a public endpoint but sometimes slow; give it
-      // 8s and bail rather than blocking the admin form.
-      signal: AbortSignal.timeout(8000),
-    }).catch(() => null);
-
-    if (!upstream || !upstream.ok) {
+    // The India Post upstream has the data (verified for 303801 / 413581) but
+    // is flaky/slow from cloud egress and intermittently returns Status:"Error"
+    // or times out. The old single-attempt fetch surfaced those transient
+    // misses as "not available". Retry a few times with a browser-like UA.
+    let first: UpstreamItem | null = null;
+    for (let attempt = 0; attempt < 3 && !first; attempt++) {
+      const upstream = await fetch(`${UPSTREAM}${pin}`, {
+        signal: AbortSignal.timeout(9000),
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; CapitalCraft/1.0)",
+          Accept: "application/json",
+        },
+      }).catch(() => null);
+      if (!upstream || !upstream.ok) continue;
+      const data: unknown = await upstream.json().catch(() => null);
+      const arr = Array.isArray(data) ? (data as UpstreamItem[]) : null;
+      const cand = arr?.[0] ?? null;
+      if (cand?.Status === "Success" && cand.PostOffice?.length) { first = cand; break; }
+      // Otherwise a transient upstream hiccup — try again.
+    }
+    if (!first || !first.PostOffice?.length) {
       return err("Pincode lookup unavailable — enter state manually.", 502);
     }
 
-    const data: unknown = await upstream.json().catch(() => null);
-    const arr = Array.isArray(data) ? (data as UpstreamItem[]) : null;
-    const first = arr?.[0] ?? null;
-    if (!first || first.Status !== "Success" || !first.PostOffice?.length) {
-      return err("No records for this pincode.", 404);
-    }
-
-    const po = first.PostOffice[0];
+    // Prefer a Head/Sub Office name for the town; else the first branch office.
+    const offices = first.PostOffice;
+    const po =
+      offices.find((o) => o.BranchType === "Head Post Office") ??
+      offices.find((o) => o.BranchType === "Sub Post Office") ??
+      offices[0];
     const state    = (po.State    ?? "").trim();
     const district = (po.District ?? "").trim();
     const city     = (po.Name     ?? "").trim();

@@ -15,13 +15,14 @@ import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness } from "@/lib/auth";
-import { getDocumentUrl } from "@/lib/storage";
+import { getDocumentUrl, deleteDocument } from "@/lib/storage";
 import DeleteLoanAppModal from "@/components/DeleteLoanAppModal";
 import CommentsSection from "@/components/CommentsSection";
 import LoanActivityLogModal from "@/components/LoanActivityLogModal";
 import LenderDecisionModal from "@/components/LenderDecisionModal";
 import { LENDER_LABEL, type ApprovalDetails } from "@/components/ApprovalDetailsTable";
 import LenderPickerModal, { type LenderKey } from "@/components/LenderPickerModal";
+import ProfileTabBar, { TabButton, DownloadMenu } from "@/components/ProfileTabBar";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { deadlineState, DEADLINE_PILL, remainingAmount, fmtDateShort } from "@/lib/disbursement";
 import {
@@ -30,6 +31,21 @@ import {
 
 type Loan = Record<string, any>;
 type Doc  = { id: string; category: string; storage_path: string; file_name: string | null; mime_type: string | null };
+
+// Slot key → epc_applications *_path column, for admin doc-removal (trash) on
+// path-backed slots. Keys NOT listed here are doc-row backed (deleted by id).
+const PATH_COLUMN: Record<string, string> = {
+  applicant_photo:     "customer_photo_path",
+  aadhaar_front:       "aadhaar_front_path",
+  aadhaar_back:        "aadhaar_back_path",
+  quotation:           "proforma_invoice_path",
+  ebill:               "ebill_path",
+  rooftop:             "rooftop_photo_path",
+  coapp_pan:           "coapp_pan_path",
+  coapp_aadhaar_front: "coapp_aadhaar_front_path",
+  coapp_aadhaar_back:  "coapp_aadhaar_back_path",
+  bank_statement:      "bank_statement_path",
+};
 
 const SYSTEM_LABEL: Record<string, string> = {
   on_grid:  "On-Grid",
@@ -155,12 +171,27 @@ function buildLoanDocGroups(loan: Loan, docs: Doc[]): LoanDocGroup[] {
     });
   }
 
-  groups.push({
-    title: "Financial (Step 4)",
-    slots: [
-      slot("bank_statement", "Bank statement", ["bank_statement"], loan.bank_statement_path),
-    ],
+  // Bank statements dual-read from BOTH stores: the legacy single column
+  // (the OCR'd primary uploaded via Step-4's BankDocSlot) AND every
+  // user_application_docs row in category "bank_statement" (the extra
+  // statements added by the Step-4 multi-file uploader). Show them all —
+  // taking only the first row (as slot() does) would hide the rest.
+  const bankRows = docs.filter((d) => d.category === "bank_statement" && !usedRowIds.has(d.id));
+  bankRows.forEach((d) => usedRowIds.add(d.id));
+  const bankSlots: LoanSlot[] = [];
+  if (loan.bank_statement_path) {
+    bankSlots.push({ key: "bank_statement", label: "Bank statement", docId: null, path: loan.bank_statement_path });
+  }
+  bankRows.forEach((d) => {
+    bankSlots.push({ key: `bank_statement_${d.id}`, label: "Bank statement", docId: d.id, path: null });
   });
+  if (bankSlots.length === 0) {
+    bankSlots.push({ key: "bank_statement", label: "Bank statement", docId: null, path: null });
+  }
+  if (bankSlots.length > 1) {
+    bankSlots.forEach((s, i) => { s.label = `Bank statement ${i + 1}`; });
+  }
+  groups.push({ title: "Financial (Step 4)", slots: bankSlots });
 
   groups.push({
     title: "1st Tranche Docs",
@@ -277,6 +308,30 @@ function Inner() {
     }
   }
 
+  // Remove a doc-row-backed document (user_application_docs) — immediate.
+  async function removeDocRow(docId: string) {
+    const ok = await deleteDocument(docId);
+    if (!ok) { alert("Couldn't remove the document."); return; }
+    setDocs((arr) => arr.filter((d) => d.id !== docId));
+  }
+
+  // Remove a *_path-backed document via the admin-only route (nulls the column
+  // + deletes exactly that GCS object + writes activity log) — immediate.
+  async function removePathDoc(column: string) {
+    try {
+      const res = await fetch("/api/admin/delete-doc-path", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({ table: "epc_applications", id: params.id, column }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) { alert("Couldn't remove: " + (data?.error || res.status)); return; }
+      setLoan((prev: Loan | null) => (prev ? { ...prev, [column]: null } : prev));
+    } catch (e) {
+      alert("Couldn't remove: " + (e as Error).message);
+    }
+  }
+
   function toViewSlots(g: LoanDocGroup): ViewDocSlot[] {
     return g.slots.map((s) => ({
       key: s.key,
@@ -285,6 +340,11 @@ function Inner() {
         ? () => void openDoc(s.docId!)
         : s.path
         ? () => void openPath(s.path!)
+        : undefined,
+      onDelete: s.docId
+        ? () => void removeDocRow(s.docId!)
+        : s.path && PATH_COLUMN[s.key]
+        ? () => void removePathDoc(PATH_COLUMN[s.key])
         : undefined,
     }));
   }
@@ -440,6 +500,13 @@ function Inner() {
   const tRejected = effStatus === "rejected";
   const tDecided  = tApproved || tRejected;
 
+  // Tranche ZIPs are offered in the Download menu only when that tranche's
+  // documents actually exist (no empty-tranche ZIP).
+  const tranche1Exists = docs.some((d) => ["feasibility_report", "mmr_advance_receipt"].includes(d.category));
+  const tranche2Exists = docs.some((d) =>
+    ["completion_invoice", "completion_panel_photo", "completion_inverter_photo", "completion_meter_photo", "completion_report"].includes(d.category),
+  );
+
   const markDocsSent = () =>
     void changeStatus("docs_sent", { docs_sent_at: new Date().toISOString() }, "Docs sent to lender");
   const holdCase = () =>
@@ -558,48 +625,6 @@ function Inner() {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap justify-end">
-            {aborted ? (
-              <HAction variant="ghost" icon={I.eye} onClick={() => setActivityOpen(true)}>
-                Activity log
-              </HAction>
-            ) : (
-              <>
-                {statusActions}
-                {approved && (
-                  <HAction variant="amber" icon={I.money} onClick={() => router.push(`/admin/app/${loan.id}/disbursement` as any)}>
-                    Disbursement
-                  </HAction>
-                )}
-                {/* Once committed (approved+): no Edit / Download ZIP / delete —
-                    the case is locked; it can only be aborted or disbursed. */}
-                {!committed && (
-                  <HAction variant="outline" icon={I.edit} onClick={() => router.push(`/admin/app/${loan.id}/step-1` as any)}>
-                    Edit
-                  </HAction>
-                )}
-                {!committed && (
-                  <HAction variant="blue" icon={I.download} disabled={downloading} onClick={() => setZipPickerOpen(true)}>
-                    {downloading ? "Preparing…" : "Download ZIP"}
-                  </HAction>
-                )}
-                <HAction variant="ghost" icon={I.eye} onClick={() => setActivityOpen(true)}>
-                  Activity log
-                </HAction>
-                {!committed && (
-                  <button
-                    type="button"
-                    onClick={() => setDelOpen(true)}
-                    title="Delete"
-                    aria-label="Delete"
-                    className="inline-flex items-center justify-center w-9 h-9 rounded-[8px] border border-red-300 bg-white text-red-700 hover:bg-red-50 hover:border-red-500 transition-colors shrink-0"
-                  >
-                    {TRASH}
-                  </button>
-                )}
-              </>
-            )}
-          </div>
         </div>
         {statusMsg && <div className="px-5 sm:px-8 pb-2 text-[12px] text-[#5a8a76]">{statusMsg}</div>}
         {aborted && loan.abort_reason && (
@@ -611,6 +636,64 @@ function Inner() {
       </header>
 
       <div className="w-full px-5 sm:px-8 py-4" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
+
+        {/* ── TAB / ACTION ROW — tabs (left) + stage actions (right) ────── */}
+        <ProfileTabBar
+          left={
+            <>
+              <TabButton label="Application" icon={I.user} active />
+              <TabButton
+                label="Edit"
+                icon={I.edit}
+                disabled={committed || aborted}
+                title={committed ? "Locked after approval" : aborted ? "Aborted — cannot edit" : undefined}
+                onClick={() => router.push(`/admin/app/${loan.id}/step-1` as any)}
+              />
+              <TabButton label="Activity Log" icon={I.eye} onClick={() => setActivityOpen(true)} />
+              <DownloadMenu
+                icon={I.download}
+                disabled={downloading}
+                busyLabel={downloading ? "Preparing…" : null}
+                items={[
+                  { label: "Download ZIP", onClick: () => setZipPickerOpen(true) },
+                  ...(tranche1Exists ? [{ label: "Download Tranche 1", onClick: () => void downloadTranche("1"), disabled: trancheBusy === "1" }] : []),
+                  ...(tranche2Exists ? [{ label: "Download Tranche 2", onClick: () => void downloadTranche("2"), disabled: trancheBusy === "2" }] : []),
+                ]}
+              />
+            </>
+          }
+          right={
+            aborted ? (
+              <button
+                type="button"
+                onClick={() => setDelOpen(true)}
+                title="Delete" aria-label="Delete"
+                className="inline-flex items-center justify-center w-9 h-9 rounded-[8px] border border-red-300 bg-white text-red-700 hover:bg-red-50 hover:border-red-500 transition-colors shrink-0"
+              >
+                {TRASH}
+              </button>
+            ) : (
+              <>
+                {statusActions}
+                {approved && (
+                  <HAction variant="amber" icon={I.money} onClick={() => router.push(`/admin/app/${loan.id}/disbursement` as any)}>
+                    Disbursement
+                  </HAction>
+                )}
+                {/* Delete is now available at EVERY stage (incl. after approval) —
+                    A2. The type-DELETE modal + protections are unchanged. */}
+                <button
+                  type="button"
+                  onClick={() => setDelOpen(true)}
+                  title="Delete" aria-label="Delete"
+                  className="inline-flex items-center justify-center w-9 h-9 rounded-[8px] border border-red-300 bg-white text-red-700 hover:bg-red-50 hover:border-red-500 transition-colors shrink-0"
+                >
+                  {TRASH}
+                </button>
+              </>
+            )
+          }
+        />
 
         {/* ── PROGRESS TRACKER — Submitted → Docs Sent → Approved → 1st → 2nd ── */}
         <div className="rounded-[12px] border border-[#cdeadd] bg-white p-5 sm:p-6 mb-4">

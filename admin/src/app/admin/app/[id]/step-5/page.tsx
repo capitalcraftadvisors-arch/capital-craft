@@ -34,6 +34,7 @@ type Loan = {
   annual_income:         number | null;
   project_size:          number | null;
   project_size_unit:     "kw" | "mw" | null;
+  plant_use_type:        "residential" | "commercial" | null;
   // Prior Step 5 selections (to prefill on re-visit)
   roi_percent:            number | null;
   central_subsidy:        number | null;
@@ -84,7 +85,7 @@ function Inner() {
         .select(
           "id, current_step, created_at, " +
           "loan_amount_required, monthly_bill_amount, annual_income, " +
-          "project_size, project_size_unit, " +
+          "project_size, project_size_unit, plant_use_type, " +
           "roi_percent, central_subsidy, state_subsidy, selected_tenure_years, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
@@ -111,7 +112,9 @@ function Inner() {
       : loan.project_size;
   }, [loan]);
 
-  const centralSubsidy = useMemo(() => computeCentralSubsidy(sizeKw), [sizeKw]);
+  // Subsidy is RESIDENTIAL-ONLY — commercial (C&I) never gets a subsidy.
+  const isCommercial = loan?.plant_use_type === "commercial";
+  const centralSubsidy = useMemo(() => (isCommercial ? 0 : computeCentralSubsidy(sizeKw)), [sizeKw, isCommercial]);
 
   // Numeric parsing
   const roiNum         = Number(roi);
@@ -187,7 +190,15 @@ function Inner() {
       <header className="border-b border-line bg-white">
         <div className="w-full px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <span className="font-display font-bold text-[20px] grad-text">Capital Craft</span>
+            <button
+              type="button"
+              onClick={() => router.back()}
+              aria-label="Back to previous page"
+              className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#185fa5] hover:text-[#0f3d2e] transition-colors"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
+              Back
+            </button>
             <span className="text-[12px] px-2 py-0.5 rounded-full bg-bg-tint text-blue-dark font-semibold uppercase tracking-wide">
               Loan Application · Step 5
             </span>
@@ -289,27 +300,33 @@ function Inner() {
               </p>
             </div>
 
-            <div>
-              <label className="block mb-1.5 text-[13px] font-medium text-text-mid">
-                Central Subsidy (₹)
-              </label>
-              <div className="w-full rounded-input border-2 border-line bg-bg-tint px-3.5 py-2.5 text-[15px] text-[#0f3d2e] font-semibold">
-                {formatRupees(centralSubsidy)}
-              </div>
-              <p className="mt-1.5 text-[11px] text-text-muted">
-                Auto-computed from PM Surya Ghar tiers ({sizeKw ? `${sizeKw} kW` : "—"}).
-              </p>
-            </div>
+            {isCommercial ? (
+              <p className="text-[12px] text-text-muted italic">Subsidy is residential-only — not applicable to C&amp;I (commercial) cases.</p>
+            ) : (
+              <>
+                <div>
+                  <label className="block mb-1.5 text-[13px] font-medium text-text-mid">
+                    Central Subsidy (₹)
+                  </label>
+                  <div className="w-full rounded-input border-2 border-line bg-bg-tint px-3.5 py-2.5 text-[15px] text-[#0f3d2e] font-semibold">
+                    {formatRupees(centralSubsidy)}
+                  </div>
+                  <p className="mt-1.5 text-[11px] text-text-muted">
+                    Auto-computed from PM Surya Ghar tiers ({sizeKw ? `${sizeKw} kW` : "—"}).
+                  </p>
+                </div>
 
-            <Input
-              label="State Subsidy (₹)"
-              type="text"
-              inputMode="numeric"
-              value={stateSubsidy}
-              onChange={(e) => setStateSub(e.target.value.replace(/[^\d.]/g, ""))}
-              placeholder="0"
-              hint="Enter applicable state subsidy if any; conditional per state/eligibility."
-            />
+                <Input
+                  label="State Subsidy (₹)"
+                  type="text"
+                  inputMode="numeric"
+                  value={stateSubsidy}
+                  onChange={(e) => setStateSub(e.target.value.replace(/[^\d.]/g, ""))}
+                  placeholder="0"
+                  hint="Enter applicable state subsidy if any; conditional per state/eligibility."
+                />
+              </>
+            )}
           </div>
         </Card>
 

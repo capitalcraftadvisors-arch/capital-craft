@@ -10,6 +10,7 @@ import Button from "@/components/ui/Button";
 import AddNewEpcModal from "@/components/AddNewEpcModal";
 import AddNewLoanAppModal from "@/components/AddNewLoanAppModal";
 import AddNewInsuranceModal from "@/components/AddNewInsuranceModal";
+import DeleteLeadModal from "@/components/DeleteLeadModal";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import AdminSidebar, { ACCENTS } from "@/components/AdminSidebar";
 import { supabase } from "@/lib/supabase";
@@ -401,10 +402,38 @@ function EpcsTab() {
     sessionStorage.removeItem("adminList.scroll");
   }, [rows.length]);
 
-  // Save scroll + row id, then navigate to View.
+  // Restore the filter/search/sort state saved by navigateToView, so
+  // returning from a View lands on the same filtered list (not a reset
+  // one). Mount-only + consumed immediately so a fresh visit is clean.
+  useEffect(() => {
+    const raw = sessionStorage.getItem("epcsList.filters");
+    if (!raw) return;
+    sessionStorage.removeItem("epcsList.filters");
+    try {
+      const f = JSON.parse(raw) as Record<string, unknown>;
+      if (typeof f.q === "string") setQ(f.q);
+      if (typeof f.sourceFilter === "string") setSourceFilter(f.sourceFilter);
+      if (typeof f.lenderFilter === "string") setLenderFilter(f.lenderFilter);
+      if (typeof f.lenderStateFilter === "string") setLenderStateFilter(f.lenderStateFilter);
+      if (typeof f.dateFrom === "string") setDateFrom(f.dateFrom);
+      if (typeof f.dateTo === "string") setDateTo(f.dateTo);
+      if (typeof f.categoryFilter === "string") setCategoryFilter(f.categoryFilter);
+      if (f.sortKey) setSortKey(f.sortKey as SortKey);
+      if (f.sortDir) setSortDir(f.sortDir as SortDir);
+      if (f.sourceFilter || f.lenderFilter || f.lenderStateFilter || f.dateFrom || f.dateTo || f.categoryFilter) {
+        setFiltersOpen(true);
+      }
+    } catch { /* ignore malformed */ }
+  }, []);
+
+  // Save scroll + row id + the active filter state, then navigate to View.
   function navigateToView(row: Row) {
     sessionStorage.setItem("adminList.scroll", String(window.scrollY));
     sessionStorage.setItem("adminList.lastRowId", row.id);
+    sessionStorage.setItem("epcsList.filters", JSON.stringify({
+      q, sourceFilter, lenderFilter, lenderStateFilter,
+      dateFrom, dateTo, categoryFilter, sortKey, sortDir,
+    }));
     router.push(`/admin/epc/${row.id}/view` as any);
   }
 
@@ -471,9 +500,8 @@ function EpcsTab() {
   function epcStage(r: Row): string {
     const ls = Object.values(lenderState[r.id] ?? {});
     if (ls.some((v) => v?.approved))   return "lender_approved";
-    // A lender rejection still means docs were sent — folded into "Docs Sent"
-    // (the standalone "Rejected by Lender" card was removed).
-    if (ls.some((v) => v?.docs_given || v?.rejected)) return "docs_sent";
+    if (ls.some((v) => v?.rejected))   return "rejected_by_lender"; // its own stage/card
+    if (ls.some((v) => v?.docs_given)) return "docs_sent";
     if (r.status === "approved")       return "approved";
     if (r.status === "on_hold")        return "hold";
     if (r.status === "rejected")       return "rejected";
@@ -653,11 +681,12 @@ function EpcsTab() {
     { key: "unseen",          label: "Application Unseen",  value: fyRows.filter((r) => catMatch(r, "unseen")).length },
     { key: "under_review",    label: "Under Review",        value: fyRows.filter((r) => catMatch(r, "under_review")).length },
     { key: "updated",         label: "Updated",             value: fyRows.filter((r) => catMatch(r, "updated")).length },
-    { key: "approved",        label: "Approved",            value: fyRows.filter((r) => catMatch(r, "approved")).length },
+    { key: "approved",        label: "Approved by CC",      value: fyRows.filter((r) => catMatch(r, "approved")).length },
     { key: "hold",            label: "Hold",                value: fyRows.filter((r) => catMatch(r, "hold")).length },
-    { key: "rejected",        label: "Rejected",            value: fyRows.filter((r) => catMatch(r, "rejected")).length },
+    { key: "rejected",        label: "Rejected by CC",      value: fyRows.filter((r) => catMatch(r, "rejected")).length },
     { key: "docs_sent",       label: "Docs Sent to Lender", value: fyRows.filter((r) => catMatch(r, "docs_sent")).length },
-    { key: "lender_approved", label: "Lender Approved",     value: fyRows.filter((r) => catMatch(r, "lender_approved")).length },
+    { key: "lender_approved", label: "Approved by Lender",  value: fyRows.filter((r) => catMatch(r, "lender_approved")).length },
+    { key: "rejected_by_lender", label: "Rejected by Lender", value: fyRows.filter((r) => catMatch(r, "rejected_by_lender")).length },
   ];
   const panelActive = [sourceFilter, lenderFilter, lenderStateFilter, dateFrom, dateTo].filter(Boolean).length;
   const activeCount = panelActive + (categoryFilter ? 1 : 0);
@@ -1169,12 +1198,39 @@ function AppsTab() {
     sessionStorage.removeItem("appsList.scroll");
   }, [rows.length]);
 
-  // Save scroll + row id + the active tab, then navigate to View. The tab key
-  // is what brings Back to the Loan applications tab rather than EPCs.
+  // Restore the filter/search/sort state saved by navigateToView, so
+  // returning from a View lands on the same filtered list. Mount-only +
+  // consumed immediately so a fresh visit is clean.
+  useEffect(() => {
+    const raw = sessionStorage.getItem("appsList.filters");
+    if (!raw) return;
+    sessionStorage.removeItem("appsList.filters");
+    try {
+      const f = JSON.parse(raw) as Record<string, unknown>;
+      if (typeof f.q === "string") setQ(f.q);
+      if (typeof f.statusFilter === "string") setStatusFilter(f.statusFilter);
+      if (typeof f.epcFilter === "string") setEpcFilter(f.epcFilter);
+      if (typeof f.lenderFilter === "string") setLenderFilter(f.lenderFilter);
+      if (typeof f.dateFrom === "string") setDateFrom(f.dateFrom);
+      if (typeof f.dateTo === "string") setDateTo(f.dateTo);
+      if (typeof f.categoryFilter === "string") setCategoryFilter(f.categoryFilter);
+      if (f.sortKey === "created" || f.sortKey === "days") setSortKey(f.sortKey);
+      if (f.statusFilter || f.epcFilter || f.lenderFilter || f.dateFrom || f.dateTo || f.categoryFilter) {
+        setFiltersOpen(true);
+      }
+    } catch { /* ignore malformed */ }
+  }, []);
+
+  // Save scroll + row id + the active tab + filters, then navigate to View.
+  // The tab key is what brings Back to the Loan applications tab rather than EPCs.
   function navigateToView(row: Row) {
     sessionStorage.setItem("appsList.scroll", String(window.scrollY));
     sessionStorage.setItem("appsList.lastRowId", row.id);
     sessionStorage.setItem("adminList.tab", "apps");
+    sessionStorage.setItem("appsList.filters", JSON.stringify({
+      q, statusFilter, epcFilter, lenderFilter,
+      dateFrom, dateTo, categoryFilter, sortKey,
+    }));
     router.push(`/admin/app/${row.id}/view` as any);
   }
 
@@ -1714,10 +1770,37 @@ function InsuranceTab() {
     }
   }, [rows.length]);
 
+  // Restore the filter/search state saved by navigateToView, so returning
+  // from a View lands on the same filtered list. Mount-only + consumed
+  // immediately so a fresh visit is clean. (Own key — the scroll/row keys
+  // are shared with the Loan tab, but filters are per-tab.)
+  useEffect(() => {
+    const raw = sessionStorage.getItem("insList.filters");
+    if (!raw) return;
+    sessionStorage.removeItem("insList.filters");
+    try {
+      const f = JSON.parse(raw) as Record<string, unknown>;
+      if (typeof f.q === "string") setQ(f.q);
+      if (typeof f.statusFilter === "string") setStatusFilter(f.statusFilter);
+      if (typeof f.epcFilter === "string") setEpcFilter(f.epcFilter);
+      if (typeof f.expiryFilter === "string") setExpiryFilter(f.expiryFilter);
+      if (typeof f.dateFrom === "string") setDateFrom(f.dateFrom);
+      if (typeof f.dateTo === "string") setDateTo(f.dateTo);
+      if (typeof f.categoryFilter === "string") setCategoryFilter(f.categoryFilter);
+      if (f.statusFilter || f.epcFilter || f.expiryFilter || f.dateFrom || f.dateTo || f.categoryFilter) {
+        setFiltersOpen(true);
+      }
+    } catch { /* ignore malformed */ }
+  }, []);
+
   function navigateToView(row: Row) {
     sessionStorage.setItem("appsList.scroll", String(window.scrollY));
     sessionStorage.setItem("appsList.lastRowId", row.id);
     sessionStorage.setItem("adminList.tab", "insurance");
+    sessionStorage.setItem("insList.filters", JSON.stringify({
+      q, statusFilter, epcFilter, expiryFilter,
+      dateFrom, dateTo, categoryFilter,
+    }));
     router.push(`/admin/insurance/${row.id}/view` as any);
   }
   function editRow(row: Row) {
@@ -2042,6 +2125,7 @@ function LeadsTab() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [viewLead, setViewLead] = useState<Lead | null>(null);
+  const [delLead, setDelLead] = useState<Lead | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -2058,14 +2142,6 @@ function LeadsTab() {
     const { error } = await supabase().from("customer_leads").update({ status }).eq("id", r.id);
     if (error) alert("Couldn't update status: " + error.message);
     else setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, status } : x)));
-    setBusy(null);
-  }
-  async function deleteLead(r: Lead) {
-    if (!window.confirm(`Delete this lead${r.name ? ` — ${r.name}` : ""} (+91 ${r.mobile})?\n\nThis permanently removes it and cannot be undone.`)) return;
-    setBusy(r.id);
-    const { error } = await supabase().from("customer_leads").delete().eq("id", r.id);
-    if (error) alert("Couldn't delete: " + error.message);
-    else { setRows((rs) => rs.filter((x) => x.id !== r.id)); setViewLead(null); }
     setBusy(null);
   }
   const maskAadhaar = (a: string | null) => (a ? "XXXX XXXX " + a.slice(-4) : "—");
@@ -2211,8 +2287,7 @@ function LeadsTab() {
               <p className="text-[12px] text-[#5a8a76] max-w-xs">Basic lead details — not under any EPC. Use these to reach out and build the full profile.</p>
               <button
                 type="button"
-                disabled={busy === viewLead.id}
-                onClick={() => void deleteLead(viewLead)}
+                onClick={() => setDelLead(viewLead)}
                 className="text-[13px] font-semibold px-3.5 py-2 rounded-[8px] border border-red-300 text-red-700 hover:bg-red-50 hover:border-red-500 disabled:opacity-60 shrink-0 inline-flex items-center gap-1.5"
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
@@ -2222,6 +2297,22 @@ function LeadsTab() {
           </div>
         </div>
       )}
+
+      {/* Type-DELETE confirm — replaces the old window.confirm. Deletes via the
+          admin-only route (writes an activity-log entry). */}
+      <DeleteLeadModal
+        open={!!delLead}
+        onClose={() => setDelLead(null)}
+        onDeleted={(p) => {
+          setRows((rs) => rs.filter((x) => x.id !== p.id));
+          setDelLead(null);
+          setViewLead(null);
+        }}
+        leadId={delLead?.id ?? ""}
+        name={delLead?.name ?? null}
+        mobile={delLead?.mobile ?? null}
+        leadType={delLead?.lead_type ?? null}
+      />
     </>
   );
 }

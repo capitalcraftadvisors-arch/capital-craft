@@ -12,6 +12,8 @@ import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
 import { I, SectionCard, KV, Pill, DocGrid, StatusBtn, type ViewDocSlot } from "@/components/view/ViewKit";
 import InsuranceUpload from "@/components/InsuranceUpload";
+import ProfileTabBar, { TabButton } from "@/components/ProfileTabBar";
+import DeleteInsuranceModal from "@/components/DeleteInsuranceModal";
 import { policyValidity } from "@/lib/insurance-validity";
 
 type App = Record<string, any>;
@@ -46,6 +48,7 @@ function Inner() {
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   // Policy document — OCR'd coverage dates, editable.
   const [policyFrom, setPolicyFrom] = useState("");
   const [policyTo, setPolicyTo] = useState("");
@@ -115,6 +118,23 @@ function Inner() {
     } catch { /* ignore */ }
   }
 
+  // Remove one *_path document via the admin-only route (nulls the column +
+  // deletes exactly that GCS object + writes activity log) — immediate.
+  async function removePathDoc(column: string) {
+    try {
+      const res = await fetch("/api/admin/delete-doc-path", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({ table: "insurance_applications", id: params.id, column }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || !d?.ok) { alert("Couldn't remove: " + (d?.error || res.status)); return; }
+      setApp((prev: App | null) => (prev ? { ...prev, [column]: null } : prev));
+    } catch (e) {
+      alert("Couldn't remove: " + (e as Error).message);
+    }
+  }
+
   async function downloadZip() {
     if (!app || downloading) return;
     setDownloading(true);
@@ -139,19 +159,24 @@ function Inner() {
   if (!app) return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Insurance application not found.</p></main>;
 
   const docSlots: ViewDocSlot[] = [
-    { key: "pan", label: "PAN card", path: app.pan_path },
-    { key: "aad_f", label: "Aadhaar (front)", path: app.aadhaar_front_path },
-    { key: "aad_b", label: "Aadhaar (back)", path: app.aadhaar_back_path },
-    { key: "gst", label: "GST certificate", path: app.gst_path },
-    { key: "ebill", label: "Electricity bill", path: app.ebill_path },
-    { key: "plant", label: "Plant photo (geo-tagged)", path: app.plant_photo_path },
-    { key: "invoice", label: "Final invoice", path: app.invoice_path },
-    { key: "policy", label: "Insurance policy", path: app.policy_path },
+    { key: "pan", label: "PAN card", path: app.pan_path, col: "pan_path" },
+    { key: "aad_f", label: "Aadhaar (front)", path: app.aadhaar_front_path, col: "aadhaar_front_path" },
+    { key: "aad_b", label: "Aadhaar (back)", path: app.aadhaar_back_path, col: "aadhaar_back_path" },
+    { key: "gst", label: "GST certificate", path: app.gst_path, col: "gst_path" },
+    { key: "ebill", label: "Electricity bill", path: app.ebill_path, col: "ebill_path" },
+    { key: "plant", label: "Plant photo (geo-tagged)", path: app.plant_photo_path, col: "plant_photo_path" },
+    { key: "invoice", label: "Final invoice", path: app.invoice_path, col: "invoice_path" },
+    { key: "policy", label: "Insurance policy", path: app.policy_path, col: "policy_path" },
     // Legacy 3-photo set from the earlier build — shown only if present.
-    ...(app.photo_panel_path ? [{ key: "panel", label: "Customer with panel (legacy)", path: app.photo_panel_path }] : []),
-    ...(app.photo_inverter_path ? [{ key: "inverter", label: "Customer with inverter (legacy)", path: app.photo_inverter_path }] : []),
-    ...(app.photo_meter_path ? [{ key: "meter", label: "Customer with meter (legacy)", path: app.photo_meter_path }] : []),
-  ].map((s) => ({ key: s.key, label: s.label, onView: s.path ? () => void openPath(s.path as string) : undefined }));
+    ...(app.photo_panel_path ? [{ key: "panel", label: "Customer with panel (legacy)", path: app.photo_panel_path, col: "photo_panel_path" }] : []),
+    ...(app.photo_inverter_path ? [{ key: "inverter", label: "Customer with inverter (legacy)", path: app.photo_inverter_path, col: "photo_inverter_path" }] : []),
+    ...(app.photo_meter_path ? [{ key: "meter", label: "Customer with meter (legacy)", path: app.photo_meter_path, col: "photo_meter_path" }] : []),
+  ].map((s) => ({
+    key: s.key,
+    label: s.label,
+    onView: s.path ? () => void openPath(s.path as string) : undefined,
+    onDelete: s.path ? () => void removePathDoc(s.col) : undefined,
+  }));
 
   // Coordinates — the single plant photo, plus any legacy site photos.
   const GEO: { label: string; g: { lat?: number; lng?: number } | null }[] = [
@@ -187,6 +212,28 @@ function Inner() {
             </div>
           </div>
         </div>
+
+        {/* ── TAB / ACTION ROW — tabs (left) + Delete (right). ── */}
+        <ProfileTabBar
+          left={
+            <>
+              <TabButton label="Application" icon={I.user} active />
+              <TabButton label="Edit" icon={I.edit} onClick={() => router.push(`/dashboard/insurance/${app.id}/step-1` as any)} />
+              <TabButton label="Download ZIP" icon={I.download} disabled={downloading} onClick={() => void downloadZip()} />
+            </>
+          }
+          right={
+            <button
+              type="button"
+              onClick={() => setDeleteOpen(true)}
+              title="Delete application" aria-label="Delete application"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-[13px] font-semibold border border-red-300 text-red-700 rounded-[8px] hover:bg-red-50 hover:border-red-500 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
+              Delete
+            </button>
+          }
+        />
 
         {/* Status band — slate, like the other admin status controls. */}
         <div className="rounded-[12px] border border-slate-300 bg-slate-50 p-4 sm:p-5 mb-4">
@@ -293,17 +340,20 @@ function Inner() {
           </div>
         </div>
 
-        <div className="flex gap-3 mt-4">
-          <button type="button" onClick={() => router.push(`/dashboard/insurance/${app.id}/step-1` as any)}
-            className="flex-1 py-3.5 text-[15px] font-semibold bg-[#178a5c] text-white rounded-[10px] hover:bg-[#12734c] inline-flex items-center justify-center gap-2">
-            {I.edit} Edit application
-          </button>
-          <button type="button" onClick={() => void downloadZip()} disabled={downloading}
-            className="flex-1 py-3.5 text-[15px] font-semibold bg-[#185fa5] text-white rounded-[10px] hover:bg-[#144d84] disabled:opacity-70 inline-flex items-center justify-center gap-2">
-            {I.download} {downloading ? "Preparing…" : "Download ZIP"}
-          </button>
-        </div>
       </div>
+
+      <DeleteInsuranceModal
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        onDeleted={(payload) => {
+          setDeleteOpen(false);
+          alert(`Deleted ${payload.display_id ?? "insurance application"}${payload.applicant ? ` — ${payload.applicant}` : ""}.`);
+          router.push("/admin");
+        }}
+        applicationId={app.id}
+        displayId={app.insurance_display_id ?? null}
+        applicant={app.aadhaar_name ?? null}
+      />
     </main>
   );
 }
