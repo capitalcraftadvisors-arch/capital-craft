@@ -59,6 +59,10 @@ type Props = {
   refreshKey?: number;
   /** Fired when the uploaded-count changes, so parents can gate the review. */
   onCountChange?: (uploaded: number, total: number) => void;
+  /** Which slots to render. "tranche1" = Feasibility + MMR only (shown before
+   *  the 1st disbursement, to satisfy the RFD gate); "tranche2" = the
+   *  completion set only; "all" (default) = both. */
+  mode?: "all" | "tranche1" | "tranche2";
 };
 
 const EYE = (
@@ -67,7 +71,7 @@ const EYE = (
   </svg>
 );
 
-export default function CompletionDocsSection({ applicationId, uploadedBy, refreshKey, onCountChange }: Props) {
+export default function CompletionDocsSection({ applicationId, uploadedBy, refreshKey, onCountChange, mode = "all" }: Props) {
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [tick, setTick] = useState(0);
 
@@ -112,7 +116,7 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
     <div className="space-y-5">
       {/* 1st Tranche Docs — admin-only (feasibility report, MMR/receipt). Kept
           out of the EPC mirror so EPC-facing flows are unchanged. */}
-      {uploadedBy === "admin" && (
+      {mode !== "tranche2" && uploadedBy === "admin" && (
         <>
           <p className="text-[12px] font-bold uppercase tracking-wide text-[#5a8a76]">1st Tranche Docs</p>
           {TRANCHE1_DOCS.map((d) => (
@@ -124,13 +128,16 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
                 uploadedBy={uploadedBy}
                 maxFiles={1}
                 label=""
-                hint="JPG, PNG, WEBP or PDF."
                 onUploaded={() => setTick((n) => n + 1)}
               />
             </DocSlot>
           ))}
-          <p className="text-[12px] font-bold uppercase tracking-wide text-[#5a8a76] pt-2 border-t border-[#eaf3ee]">2nd Tranche Docs</p>
         </>
+      )}
+      {mode === "tranche1" ? null : (
+      <>
+      {uploadedBy === "admin" && (
+        <p className="text-[12px] font-bold uppercase tracking-wide text-[#5a8a76] pt-2 border-t border-[#eaf3ee]">2nd Tranche Docs</p>
       )}
       {/* 1 — Invoice / tax invoice */}
       <DocSlot
@@ -192,6 +199,8 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
         <DocSlot title="Plant photo (legacy)" doc={legacyPlant} onOpen={open}>
           <span />
         </DocSlot>
+      )}
+      </>
       )}
     </div>
   );

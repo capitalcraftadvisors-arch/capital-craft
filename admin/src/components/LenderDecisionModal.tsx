@@ -20,7 +20,7 @@ import type { LenderKey } from "@/components/LenderPickerModal";
 const LENDER_OPTIONS: { value: LenderKey; label: string }[] = [
   { value: "aerem",      label: "Aerem" },
   { value: "solfin",     label: "Solfin" },
-  { value: "creditfair", label: "CreditFair" },
+  { value: "creditfair", label: "Credit Fair" },
 ];
 
 type Props = {

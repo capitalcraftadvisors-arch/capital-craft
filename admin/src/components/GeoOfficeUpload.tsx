@@ -539,18 +539,22 @@ export default function GeoOfficeUpload({
             onClick={openCamera}
             disabled={uploading}
             className={[
-              "flex flex-col items-center justify-center h-[104px] border-2 border-dashed border-line rounded-input bg-white",
-              "px-3 text-center cursor-pointer hover:border-blue transition-colors disabled:opacity-60",
+              "flex flex-col items-center justify-center min-h-[120px] border-2 border-dashed border-[#185fa5] rounded-input bg-white text-[#185fa5]",
+              "px-3 text-center cursor-pointer hover:bg-[#f2f7fc] transition-colors disabled:opacity-60",
             ].join(" ")}
           >
-            <p className="text-[13px] text-text-mid font-medium">Take photo</p>
-            <p className="text-[11px] text-text-muted mt-0.5">Live camera + GPS</p>
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="mb-1.5">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+              <circle cx="12" cy="13" r="4" />
+            </svg>
+            <p className="text-[14px] font-semibold">Take photo</p>
+            <p className="text-[12px] text-[#5a86b3] mt-0.5">Live camera + GPS</p>
           </button>
           )}
           <label
             className={[
-              "flex flex-col items-center justify-center h-[104px] border-2 border-dashed border-line rounded-input bg-white",
-              "px-3 text-center cursor-pointer hover:border-blue transition-colors",
+              "flex flex-col items-center justify-center min-h-[120px] border-2 border-dashed border-[#185fa5] rounded-input bg-white text-[#185fa5]",
+              "px-3 text-center cursor-pointer hover:bg-[#f2f7fc] transition-colors",
             ].join(" ")}
           >
             <input
@@ -561,8 +565,13 @@ export default function GeoOfficeUpload({
               onChange={(e) => handleUploadFile(e.target.files)}
               disabled={uploading}
             />
-            <p className="text-[13px] text-text-mid font-medium">Upload photo</p>
-            <p className="text-[11px] text-text-muted mt-0.5">Must be geo-tagged</p>
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="mb-1.5">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <p className="text-[14px] font-semibold">Upload photo</p>
+            <p className="text-[12px] text-[#5a86b3] mt-0.5">Must be geo-tagged</p>
           </label>
         </div>
       )}

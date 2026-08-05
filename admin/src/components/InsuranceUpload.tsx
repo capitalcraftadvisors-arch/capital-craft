@@ -61,8 +61,8 @@ export default function InsuranceUpload({
       <p className="text-[13px] font-medium text-text-mid mb-1.5">{label}</p>
       <label
         className={[
-          "block border-2 border-dashed rounded-input bg-white px-4 py-5 text-center cursor-pointer transition-colors",
-          done ? "border-[#cdeadd] bg-[#f7fcfa]" : "border-line hover:border-blue",
+          "flex flex-col items-center justify-center min-h-[132px] border-2 border-dashed rounded-input bg-white px-4 py-5 text-center cursor-pointer transition-colors",
+          done ? "border-[#cdeadd] bg-[#f7fcfa]" : "border-[#185fa5] hover:bg-[#f2f7fc]",
         ].join(" ")}
       >
         <input
@@ -76,9 +76,17 @@ export default function InsuranceUpload({
         {busy ? (
           <p className="text-[13px] text-text-muted">Uploading…</p>
         ) : done ? (
-          <p className="text-[13px] text-[#178a5c] font-medium">✓ Uploaded{name ? ` — ${name}` : ""} · tap to replace</p>
+          <p className="text-[13px] text-[#178a5c] font-medium">✓ Uploaded{name ? ` — ${name}` : ""} · click to replace</p>
         ) : (
-          <p className="text-[13px] text-text-mid font-medium">Tap to upload</p>
+          <>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="mb-2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            <p className="text-[14px] font-semibold text-[#185fa5]">Click to upload</p>
+            <p className="text-[12px] text-[#5a86b3] mt-0.5">Photo, scan, or PDF</p>
+          </>
         )}
       </label>
       {hint && !err && <p className="text-[11px] text-text-muted mt-1">{hint}</p>}

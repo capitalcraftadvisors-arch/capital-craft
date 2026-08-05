@@ -39,7 +39,7 @@ const LENDER_KEYS = ["creditfair", "aerem", "solfin"] as const;
 type LenderKey = typeof LENDER_KEYS[number];
 
 const LENDER_LABEL: Record<LenderKey, string> = {
-  creditfair: "CreditFair",
+  creditfair: "Credit Fair",
   aerem:      "Aerem",
   solfin:     "Solfin",
 };

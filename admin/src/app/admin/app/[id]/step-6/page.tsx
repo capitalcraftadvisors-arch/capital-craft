@@ -313,7 +313,8 @@ function Inner() {
           badge="Step 5"
           onEdit={() => router.push(`/admin/app/${loan.id}/step-5?from=review` as any)}
         >
-          <ReviewRow label="ROI" value={loan.roi_percent != null ? `${loan.roi_percent}%` : "—"} />
+          {/* ROI rate is intentionally NOT shown — the 9.5% is a fixed backend
+              value used only in the EMI math, never surfaced as a label. */}
           {loan.plant_use_type !== "commercial" && (
             <>
               <ReviewRow label="Central subsidy" value={fmtRupees(loan.central_subsidy)} />

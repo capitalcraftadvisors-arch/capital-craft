@@ -538,8 +538,8 @@ function Uploader({
   return (
     <label
       className={[
-        "block border-2 border-dashed border-line rounded-input bg-white",
-        "px-4 py-5 text-center cursor-pointer hover:border-blue transition-colors mb-3",
+        "flex flex-col items-center justify-center min-h-[120px] border-2 border-dashed border-[#185fa5] rounded-input bg-white text-[#185fa5]",
+        "px-4 py-5 text-center cursor-pointer hover:bg-[#f2f7fc] transition-colors mb-3",
         disabled ? "opacity-60 pointer-events-none" : "",
       ].join(" ")}
     >
@@ -557,11 +557,16 @@ function Uploader({
           }
         }}
       />
-      <p className="text-[13px] text-text-mid">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="mb-2">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+        <polyline points="17 8 12 3 7 8" />
+        <line x1="12" y1="3" x2="12" y2="15" />
+      </svg>
+      <p className="text-[14px] font-semibold">
         {disabled ? "Working…" : `Click to upload (${used}/${max} used)`}
       </p>
-      <p className="text-[11px] text-text-muted mt-1">
-        JPG, PNG, WEBP, PDF only. Duplicates are auto-skipped.
+      <p className="text-[12px] text-[#5a86b3] mt-0.5">
+        Photo, scan, or PDF · duplicates auto-skipped
       </p>
     </label>
   );

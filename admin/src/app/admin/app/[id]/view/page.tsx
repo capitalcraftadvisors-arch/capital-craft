@@ -64,6 +64,7 @@ const LOAN_STATUS_LABEL: Record<string, string> = {
   on_hold:      "Hold",
   aborted:      "Aborted",
   approved:     "Approved by lender",
+  rfd:          "Ready for Disbursement",
   rejected:     "Rejected by lender",
 };
 const DOC_LABEL: Record<string, string> = {
@@ -192,6 +193,13 @@ function buildLoanDocGroups(loan: Loan, docs: Doc[]): LoanDocGroup[] {
     bankSlots.forEach((s, i) => { s.label = `Bank statement ${i + 1}`; });
   }
   groups.push({ title: "Financial (Step 4)", slots: bankSlots });
+
+  groups.push({
+    title: "Step 5 — Sanction Letter",
+    slots: [
+      slot("sanction_letter", "Sanction letter", ["sanction_letter"], null),
+    ],
+  });
 
   groups.push({
     title: "1st Tranche Docs",
@@ -459,13 +467,19 @@ function Inner() {
   const approved    = loan.status === "approved";
   const rejected    = loan.status === "rejected";
   const underReview = loan.status === "under_review";
+  const rfd         = loan.status === "rfd";
   const statusVal   = loan.status ?? "draft";
   const hasCoapp    = loan.bill_on_applicant_name === false;
   const aborted     = loan.aborted_at != null;
-  // "Committed" = approved in the system (and beyond). Locks down edits.
-  const committed   = ["approved", "sent_to_nbfc", "disbursed"].includes(statusVal);
+  // Approval-and-beyond (includes RFD). "RFD reached" = the 'rfd' status OR a
+  // stamped rfd_at (backfilled/legacy rows).
+  const approvedPlus   = ["approved", "rfd", "sent_to_nbfc", "disbursed"].includes(statusVal);
+  const rfdReached     = rfd || loan.rfd_at != null;
+  const approvalFilled = loan.approval_details_filled === true;
+  // "Committed" = approved in the system (and beyond). Locks down step edits.
+  const committed   = approvedPlus;
 
-  const decidedLender = approved ? loan.approved_lender : rejected ? loan.rejected_lender : null;
+  const decidedLender = approvedPlus ? loan.approved_lender : rejected ? loan.rejected_lender : null;
   const decidedByLabel = decidedLender ? (LENDER_LABEL[String(decidedLender)] ?? String(decidedLender)) : null;
   const approvalDetails = (loan.approval_details ?? null) as ApprovalDetails | null;
 
@@ -495,8 +509,8 @@ function Inner() {
   // Tracker reads an "effective" status so a held case still shows where it
   // was parked (Resume returns it there).
   const effStatus = onHold ? (loan.status_before_hold ?? "under_review") : statusVal;
-  const tDocsSent = ["docs_sent", "approved", "rejected", "sent_to_nbfc", "disbursed"].includes(effStatus);
-  const tApproved = ["approved", "sent_to_nbfc", "disbursed"].includes(effStatus);
+  const tDocsSent = ["docs_sent", "approved", "rfd", "rejected", "sent_to_nbfc", "disbursed"].includes(effStatus);
+  const tApproved = ["approved", "rfd", "sent_to_nbfc", "disbursed"].includes(effStatus);
   const tRejected = effStatus === "rejected";
   const tDecided  = tApproved || tRejected;
 
@@ -506,6 +520,14 @@ function Inner() {
   const tranche2Exists = docs.some((d) =>
     ["completion_invoice", "completion_panel_photo", "completion_inverter_photo", "completion_meter_photo", "completion_report"].includes(d.category),
   );
+
+  // RFD gate — Ready for Disbursement becomes clickable only once approval
+  // details are filled AND both Tranche-1 docs (Feasibility + MMR/Advance
+  // receipt) are present. Clicking writes status='rfd' + rfd_at + activity log.
+  const tranche1Complete = hasCat("feasibility_report") && hasCat("mmr_advance_receipt");
+  const canRfd = approved && approvalFilled && tranche1Complete && !rfdReached;
+  const markRfd = () =>
+    void changeStatus("rfd", { rfd_at: new Date().toISOString() }, "Ready for disbursement");
 
   const markDocsSent = () =>
     void changeStatus("docs_sent", { docs_sent_at: new Date().toISOString() }, "Docs sent to lender");
@@ -545,10 +567,23 @@ function Inner() {
         <HAction variant="primary" disabled={statusBusy} onClick={resumeHold}>Resume</HAction>
       </>
     ) : approved ? (
+      // No "Approved" pill here — the tracker already shows the Approved stage.
+      // The bar carries the next actions: Mark RFD + Disbursement (+ Abort).
       <>
-        <span className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border bg-[#178a5c] text-white border-[#178a5c] inline-flex items-center gap-1.5">
-          {I.check} Approved
-        </span>
+        <HAction
+          variant="primary"
+          disabled={statusBusy || !canRfd}
+          title={canRfd ? undefined : (!approvalFilled ? "Fill approval details first" : !tranche1Complete ? "Upload both Tranche-1 documents first" : undefined)}
+          onClick={markRfd}
+        >
+          Mark RFD
+        </HAction>
+        <HAction variant="reject" disabled={statusBusy} onClick={() => setAbortOpen(true)}>Abort</HAction>
+      </>
+    ) : rfd ? (
+      // No "RFD" pill either — the tracker shows the RFD stage; the bar just
+      // carries Disbursement (rendered next to statusActions) + Abort.
+      <>
         <HAction variant="reject" disabled={statusBusy} onClick={() => setAbortOpen(true)}>Abort</HAction>
       </>
     ) : rejected ? (
@@ -642,13 +677,39 @@ function Inner() {
           left={
             <>
               <TabButton label="Application" icon={I.user} active />
-              <TabButton
-                label="Edit"
-                icon={I.edit}
-                disabled={committed || aborted}
-                title={committed ? "Locked after approval" : aborted ? "Aborted — cannot edit" : undefined}
-                onClick={() => router.push(`/admin/app/${loan.id}/step-1` as any)}
-              />
+              {/* After approval, Edit becomes a dropdown of the three editable
+                  sections (each editable once, then locked). Before approval it's
+                  the normal jump to the step flow. */}
+              {approvedPlus && !aborted ? (
+                <DownloadMenu
+                  label="Edit"
+                  icon={I.edit}
+                  items={[
+                    {
+                      // Approval details INCLUDE the sanction letter (it's collected
+                      // in the approval step), so there's no separate sanction item.
+                      label: loan.approval_details_locked ? "Approval details (locked)" : "Approval details",
+                      disabled: loan.approval_details_locked === true,
+                      onClick: () => router.push(`/admin/app/${loan.id}/approval?lender=${loan.approved_lender ?? ""}&edit=approval` as any),
+                    },
+                    {
+                      // "Sanction details" = the disbursement values (matches the
+                      // profile's Sanction-details card).
+                      label: loan.disbursement_details_locked ? "Sanction details (locked)" : "Sanction details",
+                      disabled: loan.disbursement_details_locked === true,
+                      onClick: () => router.push(`/admin/app/${loan.id}/disbursement` as any),
+                    },
+                  ]}
+                />
+              ) : (
+                <TabButton
+                  label="Edit"
+                  icon={I.edit}
+                  disabled={aborted}
+                  title={aborted ? "Aborted — cannot edit" : undefined}
+                  onClick={() => router.push(`/admin/app/${loan.id}/step-1` as any)}
+                />
+              )}
               <TabButton label="Activity Log" icon={I.eye} onClick={() => setActivityOpen(true)} />
               <DownloadMenu
                 icon={I.download}
@@ -675,7 +736,10 @@ function Inner() {
             ) : (
               <>
                 {statusActions}
-                {approved && (
+                {/* Disbursement page opens once approval details are filled — it
+                    hosts the Tranche-1 upload; the 1st-amount field there stays
+                    locked until RFD is marked. */}
+                {approvedPlus && approvalFilled && (
                   <HAction variant="amber" icon={I.money} onClick={() => router.push(`/admin/app/${loan.id}/disbursement` as any)}>
                     Disbursement
                   </HAction>
@@ -725,6 +789,15 @@ function Inner() {
               mutedIfPending
             />
             <BigConnector active={tApproved} />
+            <BigProgressStep
+              icon={I.circleCheck}
+              done={rfdReached}
+              inProgress={tApproved && !rfdReached && !onHold}
+              label="RFD"
+              sub={rfdReached ? "Ready for disbursement" : tApproved ? "Awaiting tranche-1 docs" : "Pending"}
+              mutedIfPending
+            />
+            <BigConnector active={rfdReached} />
             <BigProgressStep
               icon={I.money}
               done={firstDone}
@@ -860,7 +933,7 @@ function Inner() {
 
           {/* COL 3 — decision, sanction, comments */}
           <div className="flex flex-col gap-3">
-            {approved && approvalDetails && (
+            {approvedPlus && approvalDetails && (
               <SectionCard title="Approval details" accent="green" icon={I.circleCheck} adminOnly>
                 <div className="text-[14px] mb-2">
                   <span className="text-[#5a8a76] font-medium">Approved By: </span>
@@ -899,8 +972,13 @@ function Inner() {
               </SectionCard>
             )}
 
-            {approved && (
+            {approvedPlus && (
               <SectionCard title="Sanction details" accent="green" icon={I.money} adminOnly>
+                {loan.sanction_letter_unavailable && (
+                  <p className="text-[12px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2 mb-2">
+                    Sanction letter was not available at the time of filling.
+                  </p>
+                )}
                 <StepBlock title="1st Disbursement">
                   <KV k="Amount" v={fmtRupees(loan.first_disbursement_amount)} valueClass="text-[#178a5c]" />
                   <KV k="Date" v={fmtDateShort(loan.first_disbursement_date)} />
@@ -1051,6 +1129,7 @@ function StatusBadge({ status, lender }: { status: string | null | undefined; le
     s === "approved" ? "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd]" :
     s === "rejected" ? "bg-red-50 text-red-700 border-red-200" :
     s === "docs_sent" ? "bg-[#dceffb] text-[#185fa5] border-[#bfe0f5]" :
+    s === "rfd" ? "bg-[#d6efe3] text-[#0f7a52] border-[#bfe0d3]" :
     s === "on_hold" ? "bg-[#fff2cc] text-[#8a6500] border-[#f3d9a4]" :
     s === "aborted" ? "bg-red-50 text-red-700 border-red-200" :
     s === "under_review" ? "bg-[#fef0d6] text-[#854f0b] border-[#f3d9a4]" :

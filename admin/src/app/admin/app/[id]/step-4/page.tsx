@@ -191,6 +191,24 @@ function Inner() {
 
   // ── Bank statement upload ──────────────────────────────────────────
 
+  // View a stored bank statement — signs the *_path on demand via the admin
+  // sign-doc route, so it works on edit/resume load (where no signed_url was
+  // fetched), not only right after a fresh upload.
+  async function signAndOpen(path: string) {
+    try {
+      const res = await fetch(`/api/admin/loan-app/${params.id}/sign-doc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({ path }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.ok && data.url) window.open(data.url, "_blank", "noopener");
+      else alert("Couldn't open the document.");
+    } catch (e) {
+      alert("Couldn't open the document: " + (e as Error).message);
+    }
+  }
+
   async function uploadBankStatement(file: File) {
     if (!loan || !method) return;
     setUploadError(null);
@@ -492,6 +510,7 @@ function Inner() {
                 doc={bankDoc}
                 uploading={uploading}
                 onFile={(f) => void uploadBankStatement(f)}
+                onView={bankDoc ? () => void signAndOpen(bankDoc.path) : undefined}
               />
             </div>
           )}
@@ -690,11 +709,12 @@ function MethodTile({
 }
 
 function BankDocSlot({
-  doc, uploading, onFile,
+  doc, uploading, onFile, onView,
 }: {
   doc: BankDoc;
   uploading: boolean;
   onFile: (f: File) => void;
+  onView?: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const has = !!doc;
@@ -710,11 +730,10 @@ function BankDocSlot({
             </p>
           )}
           <div className="flex items-center gap-2 pt-1">
-            {doc!.signed_url && (
-              <a
-                href={doc!.signed_url}
-                target="_blank"
-                rel="noopener"
+            {onView && (
+              <button
+                type="button"
+                onClick={onView}
                 title="View uploaded document"
                 aria-label="View uploaded document"
                 className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#185fa5] hover:underline"
@@ -724,7 +743,7 @@ function BankDocSlot({
                   <circle cx="12" cy="12" r="3" />
                 </svg>
                 View
-              </a>
+              </button>
             )}
             <button
               type="button"
@@ -742,17 +761,20 @@ function BankDocSlot({
           onClick={() => inputRef.current?.click()}
           disabled={uploading}
           className={[
-            "w-full h-[140px] rounded-input border-2 border-dashed transition-colors flex items-center justify-center text-center px-4",
-            "border-line bg-white text-text-muted hover:border-[#185fa5] hover:text-[#185fa5]",
+            "w-full min-h-[140px] rounded-input border-2 border-dashed border-[#185fa5] bg-white text-[#185fa5] transition-colors flex flex-col items-center justify-center text-center px-4",
+            "hover:bg-[#f2f7fc]",
             uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
           ].join(" ")}
         >
-          <div>
-            <p className="text-[13px] font-semibold">
-              {uploading ? "Uploading & extracting…" : "Click to upload"}
-            </p>
-            <p className="text-[11px] mt-1">PDF or image</p>
-          </div>
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="mb-2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          <p className="text-[14px] font-semibold">
+            {uploading ? "Uploading & extracting…" : "Click to upload"}
+          </p>
+          <p className="text-[12px] text-[#5a86b3] mt-0.5">Photo, scan, or PDF</p>
         </button>
       )}
       <input

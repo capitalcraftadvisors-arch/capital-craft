@@ -164,8 +164,8 @@ export default function AdminDocSlot({
         </div>
       ) : (
         <label className={[
-          "flex items-center justify-center gap-1.5 border border-dashed border-line rounded-input bg-white",
-          "px-3 py-2.5 cursor-pointer hover:border-blue transition-colors text-[13px] font-medium text-blue",
+          "flex flex-col items-center justify-center min-h-[120px] gap-0.5 border-2 border-dashed border-[#185fa5] rounded-input bg-white text-[#185fa5]",
+          "px-3 py-4 text-center cursor-pointer hover:bg-[#f2f7fc] transition-colors",
           busy ? "opacity-60 pointer-events-none" : "",
         ].join(" ")}>
           <input
@@ -175,8 +175,13 @@ export default function AdminDocSlot({
             className="hidden"
             onChange={(e) => handleFiles(e.target.files, false)}
           />
-          <span className="text-[16px] leading-none">+</span>
-          {busy === "upload" ? "Uploading…" : "Upload"}
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="mb-1">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          <p className="text-[14px] font-semibold">{busy === "upload" ? "Uploading…" : "Click to upload"}</p>
+          <p className="text-[12px] text-[#5a86b3]">Photo, scan, or PDF</p>
         </label>
       )}
 

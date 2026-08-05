@@ -1131,6 +1131,7 @@ function AppsTab() {
     first_disbursement_date: string | null;
     second_disbursement_amount: number | null;
     status: string; created_at: string; created_by: string;
+    rfd_at: string | null;
     reviewed_at: string | null;
     aborted_at: string | null;
     // Application-doc presence for the "Documents Pending" card. Applicant PAN
@@ -1242,6 +1243,9 @@ function AppsTab() {
           "id, borrower_name, aadhaar_name, aadhaar_number_masked, loan_display_id, " +
           "loan_amount, loan_amount_required, " +
           "sanctioned_amount, first_disbursement_amount, first_disbursement_date, second_disbursement_amount, " +
+          // NOTE: rfd_at is intentionally NOT selected — it doesn't exist until
+          // migration 0059 is applied, and the dashboard doesn't need it (new
+          // RFD rows carry status='rfd'; disbursed rows are detected by amount).
           "status, created_at, created_by, reviewed_at, aborted_at, approved_lender, rejected_lender, " +
           "aadhaar_front_path, aadhaar_back_path, ebill_path, proforma_invoice_path, " +
           "rooftop_photo_path, bank_statement_path, customer_photo_path, bill_on_applicant_name, " +
@@ -1327,8 +1331,10 @@ function AppsTab() {
     if (s === "on_hold") return "hold";
     if (s === "docs_sent") return "docs_sent";
     if (s === "rejected") return "rejected";
-    if (s === "approved" || s === "sent_to_nbfc" || s === "disbursed") {
-      return r.first_disbursement_amount != null ? "disbursed" : "approved";
+    if (s === "rfd" || s === "approved" || s === "sent_to_nbfc" || s === "disbursed") {
+      if (r.first_disbursement_amount != null) return "disbursed";
+      if (s === "rfd" || r.rfd_at != null) return "rfd";   // Ready for Disbursement
+      return "approved";
     }
     return "under_review"; // submitted / under_review / anything pre-decision
   }
@@ -1340,6 +1346,7 @@ function AppsTab() {
       case "docs_sent":    return loanStage(r) === "docs_sent";
       case "hold":         return loanStage(r) === "hold";
       case "approved":     return loanStage(r) === "approved";
+      case "rfd":          return loanStage(r) === "rfd";
       case "disbursed":    return loanStage(r) === "disbursed";
       case "rejected":     return loanStage(r) === "rejected";
       case "aborted":      return loanStage(r) === "aborted";
@@ -1355,6 +1362,7 @@ function AppsTab() {
       case "docs_sent":    return r.status === "docs_sent";
       case "hold":         return r.status === "on_hold";
       case "approved":     return ["approved", "sent_to_nbfc", "disbursed"].includes(r.status);
+      case "rfd":          return loanStage(r) === "rfd";
       case "rejected":     return r.status === "rejected";
       case "tranche1":     return r.first_disbursement_amount != null;
       case "tranche2":     return r.second_disbursement_amount != null;
@@ -1407,11 +1415,11 @@ function AppsTab() {
     { key: "unseen",       label: "Application Unseen", value: fyRows.filter((r) => catMatch(r, "unseen")).length },
     { key: "under_review", label: "Under Review",       value: fyRows.filter((r) => catMatch(r, "under_review")).length },
     { key: "docs_sent",    label: "Docs Sent",          value: fyRows.filter((r) => catMatch(r, "docs_sent")).length },
-    { key: "hold",         label: "Hold",               value: fyRows.filter((r) => catMatch(r, "hold")).length },
     { key: "approved",     label: "Approved",           value: fyRows.filter((r) => catMatch(r, "approved")).length },
+    { key: "rfd",          label: "RFD",                value: fyRows.filter((r) => catMatch(r, "rfd")).length },
     { key: "disbursed",    label: "Disbursed",          value: fyRows.filter((r) => catMatch(r, "disbursed")).length },
     { key: "rejected",     label: "Rejected",           value: fyRows.filter((r) => catMatch(r, "rejected")).length },
-    { key: "aborted",      label: "Aborted",            value: fyRows.filter((r) => catMatch(r, "aborted")).length },
+    // Hold and Aborted are no longer cards — they live in the Status filter.
   ];
   const panelActive = [statusFilter, epcFilter, lenderFilter, dateFrom, dateTo].filter(Boolean).length;
   const activeCount = panelActive + (categoryFilter ? 1 : 0);
@@ -1482,6 +1490,7 @@ function AppsTab() {
             { value: "docs_sent",    label: "Docs Sent" },
             { value: "hold",         label: "Hold" },
             { value: "approved",     label: "Approved by lender" },
+            { value: "rfd",          label: "RFD (Ready for Disbursement)" },
             { value: "rejected",     label: "Rejected by lender" },
             { value: "aborted",      label: "Aborted" },
             { value: "tranche1",     label: "1st Tranche Done" },
@@ -1501,7 +1510,7 @@ function AppsTab() {
           label="Lender"
           placeholder="Lender"
           options={[
-            { value: "creditfair", label: "CreditFair" },
+            { value: "creditfair", label: "Credit Fair" },
             { value: "aerem",      label: "Aerem" },
             { value: "solfin",     label: "Solfin" },
           ]}

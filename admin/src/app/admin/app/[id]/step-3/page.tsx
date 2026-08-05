@@ -1117,7 +1117,7 @@ function DocSlot({
           disabled={uploading}
           className={[
             "w-full h-[140px] rounded-input border-2 border-dashed transition-colors flex items-center justify-center text-center px-4",
-            "border-line bg-white text-text-muted hover:border-[#185fa5] hover:text-[#185fa5]",
+            "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
             uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
           ].join(" ")}
         >
@@ -1202,7 +1202,7 @@ function CoappAadhaarPicker({
             "h-[100px] rounded-input border-2 border-dashed text-center flex items-center justify-center px-3 transition-colors",
             hasFront || front
               ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
-              : "border-line bg-white text-text-muted hover:border-[#185fa5]",
+              : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
             uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
           ].join(" ")}
         >
@@ -1219,7 +1219,7 @@ function CoappAadhaarPicker({
             "h-[100px] rounded-input border-2 border-dashed text-center flex items-center justify-center px-3 transition-colors",
             hasBack || back
               ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
-              : "border-line bg-white text-text-muted hover:border-[#185fa5]",
+              : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
             uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
           ].join(" ")}
         >

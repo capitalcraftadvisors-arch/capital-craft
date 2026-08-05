@@ -418,46 +418,76 @@ function Inner() {
         </div>
 
         {/* ── EPC HEALTH — all-time aggregate; only once internally approved ─ */}
-        {biz.status === "approved" && (
-        <div className="rounded-[12px] border border-[#cdeadd] bg-white p-5 sm:p-6 mb-4">
-          <div className="text-[11px] font-semibold text-[#5a8a76] uppercase tracking-wider mb-3">
-            EPC Health <span className="normal-case font-normal text-slate-400">· admin only · all-time · amounts in ₹ Lacs</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
-              <thead className="text-[11px] uppercase tracking-wide text-[#5a8a76] border-b border-[#cdeadd]">
-                <tr>
-                  <th className="text-left py-2 pr-3 font-medium">Metric</th>
-                  <th className="text-right py-2 px-3 font-medium">Residential</th>
-                  <th className="text-right py-2 px-3 font-medium">C&amp;I</th>
-                  <th className="text-right py-2 pl-3 font-medium text-[#0f3d2e]">Total</th>
-                </tr>
-              </thead>
-              <tbody>
+        {biz.status === "approved" && (() => {
+          const lacs = (v: number) => `₹${(v / 100000).toLocaleString("en-IN", { maximumFractionDigits: 2 })} Lacs`;
+          const num  = (v: number) => v.toLocaleString("en-IN");
+          const segments = [
+            { key: "res" as const, label: "RESI" },
+            { key: "com" as const, label: "C&I" },
+          ];
+          const metrics = [
+            { label: "Applications Submitted", k: "submitted"  as const, money: false, green: false },
+            { label: "Rejected",               k: "rejected"   as const, money: false, green: false },
+            { label: "Sanctioned Amount",      k: "sanctioned" as const, money: true,  green: true  },
+            { label: "Disbursed",              k: "disbursed"  as const, money: true,  green: false },
+            { label: "Pending Disbursal",      k: "pending"    as const, money: true,  green: false },
+          ];
+          return (
+          <div className="rounded-[14px] border border-[#cdeadd] bg-[#eefaf3] p-5 sm:p-6 mb-4">
+            {/* Header — title + Overall Sanctioned */}
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <div className="text-[24px] font-bold text-[#0f3d2e] leading-tight">EPC Health</div>
+                <div className="text-[12px] text-[#5a8a76] mt-0.5">admin only · all-time</div>
+              </div>
+              <div className="text-right">
+                <div className="text-[13px] text-[#5a8a76]">Overall Sanctioned</div>
+                <div className="text-[22px] font-bold text-[#178a5c]">{lacs(loanAgg.total.sanctioned)}</div>
+              </div>
+            </div>
+
+            {/* Per-segment white cards */}
+            <div className="grid gap-3 sm:grid-cols-2">
+              {segments.map((seg) => (
+                <div key={seg.key} className="rounded-[12px] border border-[#e0f0e8] bg-white p-4 sm:p-5">
+                  <div className="text-[16px] font-bold text-[#178a5c] mb-2.5">{seg.label}</div>
+                  <div>
+                    {metrics.map((m) => {
+                      const v = loanAgg[seg.key][m.k];
+                      return (
+                        <div key={m.k} className="flex items-center justify-between gap-3 py-2 border-b border-[#eef1f4] last:border-0">
+                          <span className="text-[15px] text-[#334155]">{m.label}</span>
+                          <span className={"text-[15px] font-semibold " + (m.green ? "text-[#178a5c]" : "text-[#0f3d2e]")}>
+                            {m.money ? lacs(v) : num(v)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* TOTAL band */}
+            <div className="rounded-[12px] bg-[#178a5c] text-white mt-3 px-5 py-4">
+              <div className="text-[15px] font-bold tracking-wide mb-2.5 border-b border-white/20 pb-2">TOTAL</div>
+              <div className="grid grid-cols-4 gap-3 text-center">
                 {([
-                  { label: "Applications Submitted", k: "submitted" as const, money: false },
-                  { label: "Rejected",               k: "rejected" as const,  money: false },
-                  { label: "Sanctioned Amount",      k: "sanctioned" as const, money: true },
-                  { label: "Disbursed",              k: "disbursed" as const,  money: true },
-                  { label: "Pending Disbursal",      k: "pending" as const,    money: true },
-                ]).map((row) => {
-                  const cell = (v: number) => row.money
-                    ? `₹${(v / 100000).toLocaleString("en-IN", { maximumFractionDigits: 2 })} L`
-                    : v.toLocaleString("en-IN");
-                  return (
-                    <tr key={row.k} className="border-b border-[#eef1f4] last:border-0">
-                      <td className="py-2 pr-3 text-[#5a8a76]">{row.label}</td>
-                      <td className="py-2 px-3 text-right text-[#0f3d2e]">{cell(loanAgg.res[row.k])}</td>
-                      <td className="py-2 px-3 text-right text-[#0f3d2e]">{cell(loanAgg.com[row.k])}</td>
-                      <td className="py-2 pl-3 text-right font-semibold text-[#0f3d2e]">{cell(loanAgg.total[row.k])}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  { label: "Submitted",  text: num(loanAgg.total.submitted) },
+                  { label: "Sanctioned", text: lacs(loanAgg.total.sanctioned) },
+                  { label: "Disbursed",  text: lacs(loanAgg.total.disbursed) },
+                  { label: "Pending",    text: lacs(loanAgg.total.pending) },
+                ]).map((c) => (
+                  <div key={c.label}>
+                    <div className="text-[12px] text-[#bfe6d5]">{c.label}</div>
+                    <div className="text-[18px] font-bold mt-0.5">{c.text}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
-        )}
+          );
+        })()}
 
         {/* ── 3-COLUMN GRID ──────────────────────────────────────────── */}
         <div className="grid gap-4 lg:grid-cols-3">
@@ -571,7 +601,7 @@ function Inner() {
             <SectionCard title="Lenders" tint icon={I.money} adminOnly>
               {(["creditfair", "aerem", "solfin"] as const).map((key) => {
                 const l = lender.find((x) => x.lender === key);
-                const label = key === "creditfair" ? "CreditFair" : key === "aerem" ? "Aerem" : "Solfin";
+                const label = key === "creditfair" ? "Credit Fair" : key === "aerem" ? "Aerem" : "Solfin";
                 const state = l
                   ? ((l as any).rejected ? "rejected" : l.approved ? "approved" : l.docs_given ? "docs" : "none")
                   : "none";
@@ -588,18 +618,22 @@ function Inner() {
               <div className="text-[12px] text-[#5a8a76]">
                 {r3bDocs.length} file{r3bDocs.length === 1 ? "" : "s"} · Grand total taxable
               </div>
-              <div className="text-[20px] font-semibold text-[#0f3d2e] mt-1">
-                ₹{r3bTotal.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+              <div className="mt-1 flex items-center justify-between gap-3">
+                <div className="text-[20px] font-semibold text-[#0f3d2e]">
+                  ₹{r3bTotal.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                </div>
+                {r3bDocs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => void openDoc(r3bDocs[0].id)}
+                    title="View GSTR-3B"
+                    aria-label="View GSTR-3B"
+                    className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#cdeadd] bg-white text-[#178a5c] text-[14px] font-semibold hover:bg-[#f0faf5]"
+                  >
+                    {I.eye} View
+                  </button>
+                )}
               </div>
-              <button
-                type="button"
-                onClick={() => router.push(`/admin/epc/${biz.id}` as any)}
-                title="View GSTR-3B"
-                aria-label="View GSTR-3B"
-                className="mt-3 w-8 h-8 grid place-items-center rounded-md border border-[#cdeadd] bg-white text-[#178a5c] hover:bg-[#f0faf5]"
-              >
-                {I.eye}
-              </button>
             </SectionCard>
 
             {/* Inline chat-box comments — LAST in Col 3 per spec. */}

@@ -195,7 +195,7 @@ function prettyField(f: string): string {
 }
 
 function prettyLender(f: string): string {
-  if (f === "creditfair") return "CreditFair";
+  if (f === "creditfair") return "Credit Fair";
   if (f === "aerem")      return "Aerem";
   if (f === "solfin")     return "Solfin";
   return f || "lender";

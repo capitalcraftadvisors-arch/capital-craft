@@ -48,12 +48,13 @@ export function TabButton({
 // downloadable. When there's a single item it still renders as a menu for a
 // consistent look across profiles.
 export function DownloadMenu({
-  items, icon, disabled, busyLabel,
+  items, icon, disabled, busyLabel, label = "Download",
 }: {
   items: Array<{ label: string; onClick: () => void; disabled?: boolean }>;
   icon?: ReactNode;
   disabled?: boolean;
   busyLabel?: string | null;
+  label?: string;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -74,7 +75,7 @@ export function DownloadMenu({
         className="inline-flex items-center gap-1.5 px-3 py-2 rounded-[8px] text-[13px] font-semibold text-[#0f3d2e] hover:bg-[#eef6f1] transition-colors whitespace-nowrap disabled:opacity-50"
       >
         {icon && <span className="shrink-0 inline-flex">{icon}</span>}
-        {busyLabel ?? "Download"}
+        {busyLabel ?? label}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
       </button>
       {open && (

@@ -123,7 +123,7 @@ export default function DeleteEpcModal({
               <li>The EPC business row</li>
               <li>All uploaded documents (business, stakeholders, cheque, GST R3B, office photos)</li>
               <li>All loan applications and their attached documents</li>
-              <li>All lender status ticks (CreditFair / Aerem / Solfin)</li>
+              <li>All lender status ticks (Credit Fair / Aerem / Solfin)</li>
               <li>All admin comments and activity-log entries</li>
               <li>Storage folder in Google Cloud Storage</li>
             </ul>

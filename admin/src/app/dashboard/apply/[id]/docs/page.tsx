@@ -613,7 +613,7 @@ function PickTile({
         disabled={busy}
         className={[
           "w-full h-[110px] rounded-input border-2 border-dashed flex items-center justify-center text-center px-3 transition-colors",
-          has ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]" : "border-line bg-white text-text-muted hover:border-[#185fa5]",
+          has ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]" : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
           busy ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
         ].join(" ")}
       >
@@ -642,7 +642,7 @@ function EbillTile({
         disabled={busy}
         className={[
           "w-full h-[110px] rounded-input border-2 border-dashed flex items-center justify-center text-center px-3 transition-colors",
-          ebill ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]" : "border-line bg-white text-text-muted hover:border-[#185fa5]",
+          ebill ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]" : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
           busy ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
         ].join(" ")}
       >
@@ -673,7 +673,7 @@ function PanTile({
         disabled={busy}
         className={[
           "w-full h-[90px] rounded-input border-2 border-dashed flex items-center justify-center text-center px-3 transition-colors",
-          path ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]" : "border-line bg-white text-text-muted hover:border-[#185fa5]",
+          path ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]" : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
           busy ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
         ].join(" ")}
       >

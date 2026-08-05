@@ -24,6 +24,7 @@ import ApprovalDetailsTable, { LENDER_LABEL, type ApprovalDetails } from "@/comp
 import type { LenderKey } from "@/components/LenderPickerModal";
 import { rupeesInWords } from "@/lib/numberToWords";
 import { I, SectionCard } from "@/components/view/ViewKit";
+import FileUpload from "@/components/FileUpload";
 
 function fmtRs(n: number): string {
   return "₹" + Math.round(n).toLocaleString("en-IN");
@@ -42,9 +43,13 @@ function Inner() {
   const router = useRouter();
   const search = useSearchParams();
   const lender = (search.get("lender") ?? "") as LenderKey | "";
+  // ?edit=approval / ?edit=sanction → editing one section once (from the
+  // profile's Edit dropdown). Absent → the initial approval flow.
+  const editMode = search.get("edit"); // null | "approval" | "sanction"
 
   const [loan, setLoan] = useState<Record<string, any> | null>(null);
   const [details, setDetails] = useState<ApprovalDetails>({});
+  const [sanctionChoice, setSanctionChoice] = useState<"upload" | "unavailable" | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,15 +67,21 @@ function Inner() {
         // from what the applicant asked for. The APPROVED columns start at
         // ZERO — the admin must type what the lender actually sanctioned, so
         // a pre-filled value can never be saved by accident.
+        // When editing (from the profile's Edit dropdown), seed the approved
+        // columns from what was saved; on a fresh approval they start at ZERO
+        // so a pre-filled value can never be saved by accident.
+        const existing = (data.approval_details ?? null) as ApprovalDetails | null;
+        const editing = editMode != null;
         setDetails({
           approved_by: lender || data.approved_lender || null,
           applied_loan_amount:   data.loan_amount_required ?? null,
-          approved_loan_amount:  0,
+          approved_loan_amount:  editing ? (existing?.approved_loan_amount ?? 0) : 0,
           applied_tenure_years:  data.selected_tenure_years ?? null,
-          approved_tenure_years: 0,
+          approved_tenure_years: editing ? (existing?.approved_tenure_years ?? 0) : 0,
           tentative_emi:         data.selected_monthly_emi ?? null,
-          approved_emi:          0,
+          approved_emi:          editing ? (existing?.approved_emi ?? 0) : 0,
         });
+        if (data.sanction_letter_unavailable) setSanctionChoice("unavailable");
       }
       setLoading(false);
     })();
@@ -83,54 +94,60 @@ function Inner() {
 
   async function save() {
     if (!loan || saving) return;
+    const me = getBusiness();
+    const by = me?.contact_name || "admin";
+    const now = new Date().toISOString();
+
+    // ── Approval details (initial approval OR edit) — all fields mandatory
+    //    except the sanction letter; approved amount must be > 0 and < applied. ──
     if (!details.approved_by) {
-      setError("No lender selected — go back to the View and start the approval again.");
+      setError("No lender selected — go back to the profile and start the approval again.");
       return;
     }
-
-    // Sanctioning MORE than the applicant asked for is legitimate but unusual
-    // — make the admin say so out loud before it's written.
-    const applied = Number(details.applied_loan_amount ?? 0);
-    const approvedAmt = Number(details.approved_loan_amount ?? 0);
-    if (applied > 0 && approvedAmt > applied) {
-      const ok = window.confirm(
-        `The Approved Loan Amount is MORE than the Applied Loan Amount.\n\n` +
-        `Applied:  ${fmtRs(applied)}\n${rupeesInWords(applied)}\n\n` +
-        `Approved: ${fmtRs(approvedAmt)}\n${rupeesInWords(approvedAmt)}\n\n` +
-        `Are you sure you want to save this?`,
-      );
-      if (!ok) return;
+    const applied      = Number(details.applied_loan_amount ?? 0);
+    const approvedAmt  = Number(details.approved_loan_amount ?? 0);
+    const approvedTen  = Number(details.approved_tenure_years ?? 0);
+    const approvedEmi  = Number(details.approved_emi ?? 0);
+    if (!(approvedAmt > 0)) { setError("Approved loan amount must be greater than 0."); return; }
+    if (!(applied > 0))     { setError("The applied loan amount is missing on this application."); return; }
+    if (!(approvedAmt < applied)) {
+      setError(`Approved amount must be less than the applied amount (${fmtRs(applied)} — ${rupeesInWords(applied)}).`);
+      return;
     }
+    if (!(approvedTen > 0)) { setError("Approved tenure (years) is required."); return; }
+    if (!(approvedEmi > 0)) { setError("Approved EMI is required."); return; }
 
     setSaving(true);
     setError(null);
 
-    const me = getBusiness();
-    const by = me?.contact_name || "admin";
-    const now = new Date().toISOString();
-    const entry = { from: loan.status ?? "", to: "approved", by, at: now, note: `Approved by ${LENDER_LABEL[String(details.approved_by)] ?? details.approved_by}` };
-    const history = Array.isArray(loan.status_history) ? [...loan.status_history, entry] : [entry];
+    const patch: Record<string, any> = {
+      approved_lender:  details.approved_by,
+      approval_details: details,
+      // The approval-complete gate — unlocks the Disbursement action + RFD.
+      approval_details_filled: true,
+      // Denormalised out of approval_details so disbursement math / lists / sort
+      // key off a real column.
+      sanctioned_amount: details.approved_loan_amount ?? null,
+      // Sanction letter is part of approval details — record its state here.
+      sanction_letter_unavailable: sanctionChoice === "unavailable",
+      reviewed_by: by, reviewed_at: now,
+    };
 
-    const { error: err } = await supabase()
-      .from("epc_applications")
-      .update({
-        status: "approved",
-        approved_lender: details.approved_by,
-        approved_at: now,
-        approval_details: details,
-        // Denormalised out of approval_details so disbursement math, the
-        // lists and sorting key off a real column — approval_details is a
-        // free-form table whose fields may be restructured later.
-        sanctioned_amount: details.approved_loan_amount ?? null,
-        // A fresh approval supersedes any previous rejection.
-        rejected_lender: null,
-        rejected_at: null,
-        status_history: history,
-        reviewed_by: by,
-        reviewed_at: now,
-      })
-      .eq("id", loan.id);
+    if (editMode === "approval") {
+      // One-time correction from the Edit dropdown — lock afterwards. Status is
+      // left untouched so a case already at RFD/disbursed doesn't regress.
+      patch.approval_details_locked = true;
+    } else {
+      // Fresh approval — set status + supersede any prior rejection.
+      patch.status = "approved";
+      patch.approved_at = now;
+      patch.rejected_lender = null;
+      patch.rejected_at = null;
+      const entry = { from: loan.status ?? "", to: "approved", by, at: now, note: `Approved by ${LENDER_LABEL[String(details.approved_by)] ?? details.approved_by}` };
+      patch.status_history = Array.isArray(loan.status_history) ? [...loan.status_history, entry] : [entry];
+    }
 
+    const { error: err } = await supabase().from("epc_applications").update(patch).eq("id", loan.id);
     if (err) {
       setError("Couldn't save the approval — " + err.message);
       setSaving(false);
@@ -138,7 +155,9 @@ function Inner() {
     }
 
     await logLoanActivity(loan.id, "approved", {
-      detail: `Approved by ${LENDER_LABEL[String(details.approved_by)] ?? details.approved_by}`,
+      detail: editMode === "approval"
+        ? "Approval details edited"
+        : `Approved by ${LENDER_LABEL[String(details.approved_by)] ?? details.approved_by}`,
     });
 
     router.push(`/admin/app/${loan.id}/view` as any);
@@ -167,7 +186,9 @@ function Inner() {
 
       <div className="w-full max-w-5xl mx-auto px-5 sm:px-8 py-8" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
         <div className="rounded-[12px] border border-[#cdeadd] bg-[#f0faf5] p-5 sm:p-6 mb-4">
-          <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">Approval details</div>
+          <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">
+            {editMode === "approval" ? "Edit approval details" : "Approval details"}
+          </div>
           <div className="text-[14px] text-[#5a8a76] mt-0.5 truncate">
             {applicantName}
             {details.approved_by && (
@@ -176,12 +197,64 @@ function Inner() {
           </div>
         </div>
 
-        <SectionCard title="Approval details" accent="green" icon={I.money}>
-          <ApprovalDetailsTable value={details} onChange={setDetails} />
-          <p className="text-[12px] text-[#5a8a76] mt-3">
-            Saved once — these values become read-only on the profile afterwards.
-          </p>
-        </SectionCard>
+        {editMode !== "sanction" && (
+          <SectionCard title="Approval details" accent="green" icon={I.money}>
+            <ApprovalDetailsTable value={details} onChange={setDetails} />
+            <p className="text-[12px] text-[#5a8a76] mt-3">
+              All fields are required. The approved amount must be greater than 0 and
+              less than the applied amount. Saved once, then editable one more time
+              from the profile&rsquo;s Edit menu before it locks.
+            </p>
+          </SectionCard>
+        )}
+
+        {/* Sanction letter — part of Approval details (collected here at approval
+            time). Shown for both the initial approval and the Approval-details edit. */}
+        {(
+          <SectionCard title="Sanction letter" accent="green" icon={I.money}>
+            <p className="text-[13px] text-[#5a8a76] mb-3">
+              Attach the sanction letter, or mark it unavailable for now — you can
+              update it later from the profile&rsquo;s Edit → Approval details.
+            </p>
+            <div className="flex flex-wrap gap-2 mb-3">
+              <button
+                type="button"
+                onClick={() => setSanctionChoice("upload")}
+                className={[
+                  "px-4 py-2 rounded-[8px] text-[13px] font-semibold border transition-colors",
+                  sanctionChoice === "upload" ? "bg-[#178a5c] text-white border-[#178a5c]" : "bg-white text-[#0f3d2e] border-[#cdeadd] hover:bg-[#f0faf5]",
+                ].join(" ")}
+              >
+                Upload sanction letter
+              </button>
+              <button
+                type="button"
+                onClick={() => setSanctionChoice("unavailable")}
+                className={[
+                  "px-4 py-2 rounded-[8px] text-[13px] font-semibold border transition-colors",
+                  sanctionChoice === "unavailable" ? "bg-[#854f0b] text-white border-[#854f0b]" : "bg-white text-[#0f3d2e] border-[#cdeadd] hover:bg-[#f0faf5]",
+                ].join(" ")}
+              >
+                I don&rsquo;t have it now
+              </button>
+            </div>
+            {sanctionChoice === "upload" && (
+              <FileUpload
+                applicationId={loan.id}
+                category="sanction_letter"
+                table="user_application_docs"
+                uploadedBy="admin"
+                maxFiles={1}
+                uploadHint="PDF or image"
+              />
+            )}
+            {sanctionChoice === "unavailable" && (
+              <p className="text-[12px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2">
+                Will be recorded as not available at the time of filling. You can upload it later.
+              </p>
+            )}
+          </SectionCard>
+        )}
 
         {error && <p className="text-[13px] text-red-600 mt-3">{error}</p>}
 

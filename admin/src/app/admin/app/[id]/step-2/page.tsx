@@ -580,7 +580,7 @@ function UploadTile({
           "w-full h-[160px] rounded-input border-2 border-dashed transition-colors flex items-center justify-center text-center px-4 relative",
           has
             ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
-            : "border-line bg-white text-text-muted hover:border-[#185fa5] hover:text-[#185fa5]",
+            : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
           disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
         ].join(" ")}
       >

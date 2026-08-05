@@ -50,7 +50,7 @@ type Loan = {
 
 // EMI + subsidy math shared with the EPC apply flow — see lib/emi.ts.
 import {
-  ROI_MIN, ROI_MAX, TENURES,
+  ROI_MIN, ROI_MAX, TENURES, DEFAULT_INDICATIVE_ROI,
   computeCentralSubsidy, computeEmi, formatRupees,
 } from "@/lib/emi";
 
@@ -94,7 +94,8 @@ function Inner() {
       const l = data as unknown as Loan | null;
       setLoan(l);
       if (l) {
-        if (l.roi_percent != null)   setRoi(String(l.roi_percent));
+        // ROI defaults to the fixed 9.5% backend value; admin may still override.
+        setRoi(String(l.roi_percent ?? DEFAULT_INDICATIVE_ROI));
         if (l.state_subsidy != null) setStateSub(String(l.state_subsidy));
         if (l.selected_tenure_years != null) setTenure(l.selected_tenure_years);
       }
@@ -293,11 +294,12 @@ function Inner() {
                     : "border-line focus:border-[#185fa5]",
                 ].join(" ")}
               />
-              <p className={"mt-1.5 text-[11px] " + (roi && !roiValid ? "text-red-600" : "text-text-muted")}>
-                {roi && !roiValid
-                  ? `ROI must be between ${ROI_MIN}% and ${ROI_MAX}%.`
-                  : `Allowed range: ${ROI_MIN}% – ${ROI_MAX}%.`}
-              </p>
+              {/* Range hint intentionally hidden — the ROI rate is not surfaced.
+                  Validation still applies (red border); admins who override just
+                  don't see the band spelled out. */}
+              {roi && !roiValid && (
+                <p className="mt-1.5 text-[11px] text-red-600">Please enter a valid ROI.</p>
+              )}
             </div>
 
             {isCommercial ? (

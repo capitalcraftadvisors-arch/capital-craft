@@ -170,6 +170,8 @@ function Inner() {
   const dl = deadlineState(loan.first_disbursement_date);
   const sanctioned = loan.sanctioned_amount != null ? Number(loan.sanctioned_amount) : null;
   const firstSaved = loan.first_disbursement_amount != null;
+  // The 1st-disbursement amount entry stays locked until the case is marked RFD.
+  const rfdReached = loan.status === "rfd" || loan.rfd_at != null;
   const remaining = remainingAmount(sanctioned, loan.first_disbursement_amount);
   const reviewState: string | null = loan.completion_docs_status ?? null;
   const allDocsIn = docsUploaded >= docsTotal;
@@ -235,8 +237,24 @@ function Inner() {
         {tab === "disbursement" && (
           <div className="space-y-4">
             {/* 1st disbursement */}
+            {/* 1st Tranche documents — upload BEFORE marking RFD. Both are
+                required for the RFD gate (Feasibility + MMR / Advance receipt). */}
+            <SectionCard title="1st Tranche documents" accent="blue" icon={I.files}>
+              <p className="text-[13px] text-[#5a8a76] mb-3">
+                Upload the Feasibility Report and MMR / Advance Receipt. Once both are in
+                and the approval details are filled, mark the case <strong>RFD</strong> on the
+                profile — that opens the 1st-disbursement entry below.
+              </p>
+              <CompletionDocsSection applicationId={loan.id} uploadedBy="admin" mode="tranche1" />
+            </SectionCard>
+
             <SectionCard title="First disbursement" accent="green" icon={I.money}>
-              {firstSaved ? (
+              {!rfdReached ? (
+                <p className="text-[13px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2">
+                  Locked until the case is marked <strong>RFD</strong> (Ready for Disbursement) on the profile.
+                  Upload the Tranche-1 documents above first.
+                </p>
+              ) : firstSaved ? (
                 <>
                   <KV k="Amount" v={fmtRupees(loan.first_disbursement_amount)} valueClass="text-[#178a5c]" />
                   <KV k="Date" v={fmtDateShort(loan.first_disbursement_date)} />
@@ -288,6 +306,7 @@ function Inner() {
                   <CompletionDocsSection
                     applicationId={loan.id}
                     uploadedBy="admin"
+                    mode="tranche2"
                     onCountChange={(u, t) => { setDocsUploaded(u); setDocsTotal(t); }}
                   />
                 </>

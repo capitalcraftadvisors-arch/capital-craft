@@ -200,7 +200,7 @@ function Inner() {
             <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Select loan tenure</h2>
             <p className="text-[13px] text-text-mid mt-1">
               {validLoan
-                ? `Indicative EMIs @ ${DEFAULT_INDICATIVE_ROI}% p.a. — final rate is set after review.`
+                ? "Indicative EMIs — the final rate is set after review."
                 : "Enter the loan amount to see EMI options."}
             </p>
           </div>

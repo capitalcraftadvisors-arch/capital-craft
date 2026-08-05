@@ -19,7 +19,7 @@ import Select from "@/components/ui/Select";
 export type LenderKey = "creditfair" | "aerem" | "solfin";
 
 const LENDER_OPTIONS: { value: LenderKey; label: string }[] = [
-  { value: "creditfair", label: "CreditFair" },
+  { value: "creditfair", label: "Credit Fair" },
   { value: "aerem",      label: "Aerem" },
   { value: "solfin",     label: "Solfin" },
 ];

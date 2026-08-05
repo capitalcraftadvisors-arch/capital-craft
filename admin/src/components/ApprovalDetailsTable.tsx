@@ -25,7 +25,7 @@ import type { LenderKey } from "@/components/LenderPickerModal";
 import { rupeesInWords, yearsInWords } from "@/lib/numberToWords";
 
 export const LENDER_LABEL: Record<string, string> = {
-  creditfair: "CreditFair",
+  creditfair: "Credit Fair",
   aerem:      "Aerem",
   solfin:     "Solfin",
 };
