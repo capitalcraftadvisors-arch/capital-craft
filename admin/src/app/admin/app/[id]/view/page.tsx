@@ -138,7 +138,7 @@ function buildLoanDocGroups(loan: Loan, docs: Doc[]): LoanDocGroup[] {
     title: "Identity (Steps 1–2)",
     slots: [
       slot("applicant_pan",   "Applicant PAN card", ["borrower_pan"],   null),
-      slot("applicant_photo", "Applicant photo",    ["customer_photo"], loan.customer_photo_path),
+      slot("applicant_photo", "Applicant photo",    ["customer_photo"], loan.customer_photo_path ?? loan.aadhaar_face_path),
       slot("aadhaar_front",   "Aadhaar (front)",    [], loan.aadhaar_front_path),
       slot("aadhaar_back",    "Aadhaar (back)",     [], loan.aadhaar_back_path),
     ],
@@ -277,6 +277,11 @@ function Inner() {
       if (photoDoc) {
         const url = await getDocumentUrl(photoDoc.id);
         if (url) setPhotoUrl(url);
+      } else if (la?.aadhaar_face_path) {
+        // No dedicated applicant photo — fall back to the face cropped from the
+        // borrower's Aadhaar (captured at OCR time) as the applicant photo.
+        const url = await signPath(la.aadhaar_face_path as string);
+        if (url) setPhotoUrl(url);
       }
     })();
   }, [params.id]);
@@ -296,7 +301,8 @@ function Inner() {
     if (url) window.open(url, "_blank", "noopener");
   }
 
-  async function openPath(path: string) {
+  // Sign a *_path column (whitelisted server-side) and RETURN the URL.
+  async function signPath(path: string): Promise<string | null> {
     try {
       const res = await fetch(`/api/admin/loan-app/${params.id}/sign-doc`, {
         method: "POST",
@@ -304,10 +310,15 @@ function Inner() {
         body: JSON.stringify({ path }),
       });
       const data = await res.json().catch(() => ({}));
-      if (data?.ok && data.url) window.open(data.url, "_blank", "noopener");
+      return data?.ok && data.url ? (data.url as string) : null;
     } catch {
-      /* ignore — the eye icon just won't open */
+      return null;
     }
+  }
+
+  async function openPath(path: string) {
+    const url = await signPath(path);
+    if (url) window.open(url, "_blank", "noopener");
   }
 
   // Remove a doc-row-backed document (user_application_docs) — immediate.

@@ -97,6 +97,8 @@ type Coapp = {
   aadhaar_front_path: string | null;
   aadhaar_back_path:  string | null;
   aadhaar_face_path:  string | null;
+  aadhaar_front_signed_url: string | null;
+  aadhaar_back_signed_url:  string | null;
   aadhaar_uploading:  boolean;
   aadhaar_error:      string | null;
 };
@@ -108,8 +110,26 @@ const EMPTY_COAPP: Coapp = {
   aadhaar_name: "", aadhaar_dob: "", aadhaar_gender: "",
   aadhaar_number: "", aadhaar_care_of: "", aadhaar_address: "",
   aadhaar_front_path: null, aadhaar_back_path: null, aadhaar_face_path: null,
+  aadhaar_front_signed_url: null, aadhaar_back_signed_url: null,
   aadhaar_uploading: false, aadhaar_error: null,
 };
+
+// Sign a whitelisted *_path column via the admin sign-doc route; returns the
+// signed URL (or null). Used to make View work on reload for docs that are
+// only persisted as a path column (no user_application_docs row yet).
+async function signLoanPath(id: string, path: string): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/admin/loan-app/${id}/sign-doc`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+      body: JSON.stringify({ path }),
+    });
+    const data = await res.json().catch(() => ({}));
+    return data?.ok && data.url ? (data.url as string) : null;
+  } catch {
+    return null;
+  }
+}
 
 // ── Page ─────────────────────────────────────────────────────────────
 
@@ -208,7 +228,7 @@ function Inner() {
           setProforma({
             path: l.proforma_invoice_path,
             uploaded_at: l.proforma_uploaded_at ?? l.step3_completed_at,
-            signed_url: null,
+            signed_url: await signLoanPath(params.id, l.proforma_invoice_path),
             file_name: String(l.proforma_invoice_path).split("/").pop() ?? "Proforma",
           });
         }
@@ -216,7 +236,7 @@ function Inner() {
           setEbill({
             path: l.ebill_path,
             uploaded_at: l.ebill_uploaded_at ?? l.step3_completed_at,
-            signed_url: null,
+            signed_url: await signLoanPath(params.id, l.ebill_path),
             file_name: String(l.ebill_path).split("/").pop() ?? "E-bill",
           });
         }
@@ -233,6 +253,12 @@ function Inner() {
           setOwnership(l.bill_on_applicant_name ? "yes" : "no");
         }
         if (l.bill_on_applicant_name === false) {
+          // Sign the co-applicant doc paths up front so View works on reload.
+          const [coappPanU, coappFrontU, coappBackU] = await Promise.all([
+            l.coapp_pan_path ? signLoanPath(params.id, l.coapp_pan_path) : Promise.resolve(null),
+            l.coapp_aadhaar_front_path ? signLoanPath(params.id, l.coapp_aadhaar_front_path) : Promise.resolve(null),
+            l.coapp_aadhaar_back_path ? signLoanPath(params.id, l.coapp_aadhaar_back_path) : Promise.resolve(null),
+          ]);
           setCoapp({
             ...EMPTY_COAPP,
             pan:         l.coapp_pan ?? "",
@@ -244,6 +270,7 @@ function Inner() {
             email:       l.coapp_email ?? "",
             pan_path:        l.coapp_pan_path ?? null,
             pan_uploaded_at: l.step3_completed_at,
+            pan_signed_url:  coappPanU,
             aadhaar_name:    l.coapp_aadhaar_name ?? "",
             aadhaar_dob:     l.coapp_aadhaar_dob ?? "",
             aadhaar_gender:  l.coapp_aadhaar_gender ?? "",
@@ -252,6 +279,8 @@ function Inner() {
             aadhaar_address: l.coapp_aadhaar_address ?? "",
             aadhaar_front_path: l.coapp_aadhaar_front_path ?? null,
             aadhaar_back_path:  l.coapp_aadhaar_back_path ?? null,
+            aadhaar_front_signed_url: coappFrontU,
+            aadhaar_back_signed_url:  coappBackU,
           });
         }
       }
@@ -399,6 +428,13 @@ function Inner() {
         return;
       }
       const f = data.fields ?? {};
+      const frontPath = data.storage_paths?.front ?? null;
+      const backPath  = data.storage_paths?.back  ?? null;
+      // Sign the freshly-uploaded front/back so View is available immediately.
+      const [frontU, backU] = await Promise.all([
+        frontPath ? signLoanPath(params.id, frontPath) : Promise.resolve(null),
+        backPath  ? signLoanPath(params.id, backPath)  : Promise.resolve(null),
+      ]);
       setCoapp((c) => ({
         ...c,
         aadhaar_uploading: false,
@@ -409,9 +445,11 @@ function Inner() {
         aadhaar_care_of: c.aadhaar_care_of || (f.care_of ?? ""),
         aadhaar_address: c.aadhaar_address || (f.address ?? ""),
         aadhaar_number:  c.aadhaar_number  || (f.aadhaar_number ?? ""),
-        aadhaar_front_path: data.storage_paths?.front ?? null,
-        aadhaar_back_path:  data.storage_paths?.back  ?? null,
+        aadhaar_front_path: frontPath,
+        aadhaar_back_path:  backPath,
         aadhaar_face_path:  data.storage_paths?.face  ?? null,
+        aadhaar_front_signed_url: frontU,
+        aadhaar_back_signed_url:  backU,
         // Cross-fill the co-applicant's MAIN fields from the Aadhaar
         // when they're still empty — same "fetch details properly"
         // behavior the applicant gets. PAN OCR may already have filled
@@ -970,6 +1008,8 @@ function Inner() {
                 error={coapp.aadhaar_error}
                 hasFront={!!coapp.aadhaar_front_path}
                 hasBack={!!coapp.aadhaar_back_path}
+                frontUrl={coapp.aadhaar_front_signed_url}
+                backUrl={coapp.aadhaar_back_signed_url}
               />
 
               {(coapp.aadhaar_name || coapp.aadhaar_dob || coapp.aadhaar_number) && (
@@ -1174,13 +1214,15 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 // callback only once BOTH files are selected so the server route can
 // process them together (same shape the applicant Step 2 uses).
 function CoappAadhaarPicker({
-  onFiles, uploading, error, hasFront, hasBack,
+  onFiles, uploading, error, hasFront, hasBack, frontUrl, backUrl,
 }: {
   onFiles: (front: File, back: File) => void;
   uploading: boolean;
   error: string | null;
   hasFront: boolean;
   hasBack: boolean;
+  frontUrl?: string | null;
+  backUrl?: string | null;
 }) {
   const frontRef = useRef<HTMLInputElement>(null);
   const backRef  = useRef<HTMLInputElement>(null);
@@ -1194,40 +1236,56 @@ function CoappAadhaarPicker({
   return (
     <div className="space-y-2">
       <div className="grid sm:grid-cols-2 gap-3">
-        <button
-          type="button"
-          onClick={() => frontRef.current?.click()}
-          disabled={uploading}
-          className={[
-            "h-[100px] rounded-input border-2 border-dashed text-center flex items-center justify-center px-3 transition-colors",
-            hasFront || front
-              ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
-              : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
-            uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
-          ].join(" ")}
-        >
-          <div>
-            <p className="text-[12px] font-semibold">Aadhaar Front</p>
-            <p className="text-[10px] mt-0.5">{front ? front.name : "Click to select"}</p>
-          </div>
-        </button>
-        <button
-          type="button"
-          onClick={() => backRef.current?.click()}
-          disabled={uploading}
-          className={[
-            "h-[100px] rounded-input border-2 border-dashed text-center flex items-center justify-center px-3 transition-colors",
-            hasBack || back
-              ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
-              : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
-            uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
-          ].join(" ")}
-        >
-          <div>
-            <p className="text-[12px] font-semibold">Aadhaar Back</p>
-            <p className="text-[10px] mt-0.5">{back ? back.name : "Click to select"}</p>
-          </div>
-        </button>
+        <div>
+          <button
+            type="button"
+            onClick={() => frontRef.current?.click()}
+            disabled={uploading}
+            className={[
+              "w-full h-[100px] rounded-input border-2 border-dashed text-center flex items-center justify-center px-3 transition-colors",
+              hasFront || front
+                ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
+                : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
+              uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
+            ].join(" ")}
+          >
+            <div>
+              <p className="text-[12px] font-semibold">Aadhaar Front</p>
+              <p className="text-[10px] mt-0.5">{front ? front.name : hasFront ? "Uploaded — click to replace" : "Click to select"}</p>
+            </div>
+          </button>
+          {frontUrl && (
+            <a href={frontUrl} target="_blank" rel="noopener" className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[#185fa5] hover:underline">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+              View
+            </a>
+          )}
+        </div>
+        <div>
+          <button
+            type="button"
+            onClick={() => backRef.current?.click()}
+            disabled={uploading}
+            className={[
+              "w-full h-[100px] rounded-input border-2 border-dashed text-center flex items-center justify-center px-3 transition-colors",
+              hasBack || back
+                ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
+                : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
+              uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
+            ].join(" ")}
+          >
+            <div>
+              <p className="text-[12px] font-semibold">Aadhaar Back</p>
+              <p className="text-[10px] mt-0.5">{back ? back.name : hasBack ? "Uploaded — click to replace" : "Click to select"}</p>
+            </div>
+          </button>
+          {backUrl && (
+            <a href={backUrl} target="_blank" rel="noopener" className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[#185fa5] hover:underline">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
+              View
+            </a>
+          )}
+        </div>
       </div>
       <input ref={frontRef} type="file" accept="image/*,application/pdf" className="hidden"
              onChange={(e) => { const f = e.target.files?.[0]; if (f) setFront(f); e.target.value = ""; }} />
