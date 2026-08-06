@@ -219,7 +219,7 @@ function Inner() {
             Loan Offers
           </h1>
           <p className="text-text-mid mt-2 text-[15px]">
-            Set the ROI + subsidy inputs, then pick a tenure. Monthly EMI and
+            Set the subsidy inputs, then pick a tenure. Monthly EMI and
             Subsidy EMI recompute live as you adjust the fields.
           </p>
         </div>
@@ -314,7 +314,7 @@ function Inner() {
             <p className="text-[13px] text-text-mid mt-1">
               {roiValid
                 ? "Pick the tenure the customer prefers. EMIs recompute automatically."
-                : "Enter a valid ROI above to see EMI options."}
+                : "Enter the loan amount in Step 3 to see EMI options."}
             </p>
           </div>
 

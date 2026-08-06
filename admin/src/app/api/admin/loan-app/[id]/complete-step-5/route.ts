@@ -66,8 +66,11 @@ export async function POST(
     // Admin-only route — no required-field blocking. Every offer field is
     // optional; reject only present-and-out-of-range values (tenure stays
     // within the DB CHECK because a present value must be 1-5).
-    if (roi_percent !== null && (roi_percent < 7.5 || roi_percent > 10.8)) {
-      return err("ROI must be between 7.5% and 10.8%.", 400);
+    // ROI is no longer entered by hand — Step 5 sends the fixed indicative
+    // backend rate (EMI is computed at 16% reducing). The old 7.5–10.8 range
+    // check is obsolete; only guard against clearly invalid negatives.
+    if (roi_percent !== null && roi_percent < 0) {
+      return err("ROI cannot be negative.", 400);
     }
     if (central_subsidy !== null && (central_subsidy < 0 || central_subsidy > CENTRAL_SUBSIDY_CAP)) {
       return err("Central subsidy is out of range.", 400);
