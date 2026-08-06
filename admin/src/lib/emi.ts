@@ -10,10 +10,10 @@ export const ROI_MAX = 10.8;
 export const CENTRAL_SUBSIDY_CAP = 78000;
 export const TENURES = [1, 2, 3, 4, 5] as const;
 
-// Indicative ROI used by the EPC self-serve flow, where no RM has set
-// a rate yet. Mid-band, always displayed with the indicative-terms
-// disclaimer; the RM can adjust it later from admin Step 5.
-export const DEFAULT_INDICATIVE_ROI = 9.5;
+// Fixed reducing-balance rate used to compute every loan EMI. This is a
+// BACKEND-ONLY value — the rate itself is never shown to admins or EPCs; only
+// the resulting EMI amounts are displayed.
+export const DEFAULT_INDICATIVE_ROI = 16;
 
 // PM Surya Ghar central subsidy tiers on installed capacity (kW):
 //   1 kW  → ₹30,000

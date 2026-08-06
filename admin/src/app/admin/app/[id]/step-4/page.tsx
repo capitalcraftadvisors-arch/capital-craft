@@ -510,7 +510,13 @@ function Inner() {
                 doc={bankDoc}
                 uploading={uploading}
                 onFile={(f) => void uploadBankStatement(f)}
-                onView={bankDoc ? () => void signAndOpen(bankDoc.path) : undefined}
+                onView={bankDoc ? () => {
+                  // A fresh upload already has a valid signed URL; only fall back
+                  // to the sign-doc route (whitelisted on the persisted *_path)
+                  // for a reloaded doc where no signed_url is in hand.
+                  if (bankDoc.signed_url) window.open(bankDoc.signed_url, "_blank", "noopener");
+                  else void signAndOpen(bankDoc.path);
+                } : undefined}
               />
             </div>
           )}

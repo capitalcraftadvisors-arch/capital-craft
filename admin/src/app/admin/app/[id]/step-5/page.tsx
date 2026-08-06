@@ -50,7 +50,7 @@ type Loan = {
 
 // EMI + subsidy math shared with the EPC apply flow — see lib/emi.ts.
 import {
-  ROI_MIN, ROI_MAX, TENURES, DEFAULT_INDICATIVE_ROI,
+  TENURES, DEFAULT_INDICATIVE_ROI,
   computeCentralSubsidy, computeEmi, formatRupees,
 } from "@/lib/emi";
 
@@ -70,7 +70,6 @@ function Inner() {
   const [loading, setLoading] = useState(true);
 
   // Inputs
-  const [roi, setRoi]                 = useState<string>("");
   const [stateSubsidy, setStateSub]   = useState<string>("");
   const [selectedTenure, setTenure]   = useState<number | null>(null);
 
@@ -94,8 +93,6 @@ function Inner() {
       const l = data as unknown as Loan | null;
       setLoan(l);
       if (l) {
-        // ROI defaults to the fixed 9.5% backend value; admin may still override.
-        setRoi(String(l.roi_percent ?? DEFAULT_INDICATIVE_ROI));
         if (l.state_subsidy != null) setStateSub(String(l.state_subsidy));
         if (l.selected_tenure_years != null) setTenure(l.selected_tenure_years);
       }
@@ -117,9 +114,10 @@ function Inner() {
   const isCommercial = loan?.plant_use_type === "commercial";
   const centralSubsidy = useMemo(() => (isCommercial ? 0 : computeCentralSubsidy(sizeKw)), [sizeKw, isCommercial]);
 
-  // Numeric parsing
-  const roiNum         = Number(roi);
-  const roiValid       = Number.isFinite(roiNum) && roiNum >= ROI_MIN && roiNum <= ROI_MAX;
+  // EMI is computed at a fixed backend rate (never shown). "Valid" now just
+  // means there's a loan amount to compute against.
+  const roiNum         = DEFAULT_INDICATIVE_ROI;
+  const roiValid       = (loan?.loan_amount_required ?? 0) > 0;
   const stateSubsidyN  = Math.max(0, Number(stateSubsidy) || 0);
   const totalSubsidy   = centralSubsidy + stateSubsidyN;
 
@@ -274,34 +272,9 @@ function Inner() {
           <h2 className="font-display font-semibold text-[18px] text-[#0f3d2e]">
             Loan configuration
           </h2>
-          <div className="grid sm:grid-cols-3 gap-4">
-            <div>
-              <label className="block mb-1.5 text-[13px] font-medium text-text-mid">
-                Set ROI (%)
-              </label>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={roi}
-                onChange={(e) => setRoi(e.target.value.replace(/[^\d.]/g, ""))}
-                placeholder="7.5 – 10.8"
-                className={[
-                  "w-full rounded-input border-2 px-3.5 py-2.5 text-[15px] outline-none transition-colors bg-white",
-                  roi && !roiValid
-                    ? "border-red-400 focus:border-red-500"
-                    : roiValid
-                    ? "border-[#178a5c] focus:border-[#178a5c]"
-                    : "border-line focus:border-[#185fa5]",
-                ].join(" ")}
-              />
-              {/* Range hint intentionally hidden — the ROI rate is not surfaced.
-                  Validation still applies (red border); admins who override just
-                  don't see the band spelled out. */}
-              {roi && !roiValid && (
-                <p className="mt-1.5 text-[11px] text-red-600">Please enter a valid ROI.</p>
-              )}
-            </div>
-
+          {/* ROI input removed — EMI is computed at a fixed backend rate that is
+              never surfaced. Only subsidy inputs remain here. */}
+          <div className="grid sm:grid-cols-2 gap-4">
             {isCommercial ? (
               <p className="text-[12px] text-text-muted italic">Subsidy is residential-only — not applicable to C&amp;I (commercial) cases.</p>
             ) : (
@@ -403,7 +376,7 @@ function Inner() {
 
           {!roiValid && (
             <p className="text-[12px] text-text-muted italic">
-              Enter ROI to see EMIs.
+              Enter the loan amount to see EMIs.
             </p>
           )}
         </Card>

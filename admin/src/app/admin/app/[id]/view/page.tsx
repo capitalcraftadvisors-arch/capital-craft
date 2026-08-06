@@ -772,7 +772,8 @@ function Inner() {
           }
         />
 
-        {/* ── PROGRESS TRACKER — Submitted → Docs Sent → Approved → 1st → 2nd ── */}
+        {/* ── PROGRESS TRACKER — hidden once all stages are complete (2nd disbursement) ── */}
+        {!secondDone && (
         <div className="rounded-[12px] border border-[#cdeadd] bg-white p-5 sm:p-6 mb-4">
           <div className="flex items-center gap-2 sm:gap-4">
             <BigProgressStep
@@ -828,6 +829,7 @@ function Inner() {
             />
           </div>
         </div>
+        )}
 
         {/* ── DENSE GRID ────────────────────────────────────────────────── */}
         <div className="grid gap-3 lg:grid-cols-3 items-start">
