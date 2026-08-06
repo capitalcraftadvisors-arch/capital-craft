@@ -1021,7 +1021,7 @@ function LenderCell({
   onAddLender: (name: string) => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number } | null>(null);
   const [newName, setNewName] = useState("");
   const [adding, setAdding] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -1048,14 +1048,16 @@ function LenderCell({
     const W = 340, H = 380, M = 8;              // panel width, est. max height, viewport margin
     const vw = window.innerWidth, vh = window.innerHeight;
     const roomBelow = vh - r.bottom - M;
-    // Flip upward only when there isn't room below AND there's more room above
-    // (fixes the popover getting clipped on the last rows of the table).
-    const up = roomBelow < H && r.top - M > roomBelow;
-    let top = up ? Math.max(M, r.top - 6 - H) : r.bottom + 6;
-    // If opening below would still run past the bottom edge, pull it up to fit.
-    if (!up && top + H > vh - M) top = Math.max(M, vh - M - H);
+    const roomAbove = r.top - M;
     const left = Math.max(M, Math.min(r.right - W, vw - W - M));
-    setPos({ top, left });
+    // When there isn't room below and there's more above, open UPWARD by
+    // anchoring the panel's BOTTOM just above the button — so it stays attached
+    // to the row regardless of its actual height (was floating away before).
+    if (roomBelow < H && roomAbove > roomBelow) {
+      setPos({ bottom: vh - r.top + 6, left });
+    } else {
+      setPos({ top: r.bottom + 6, left });
+    }
   }
   function toggle() { if (!open) place(); setOpen((o) => !o); }
 
@@ -1103,7 +1105,7 @@ function LenderCell({
       {open && pos && (
         <div
           ref={panelRef}
-          style={{ position: "fixed", top: pos.top, left: pos.left, width: 340, zIndex: 60 }}
+          style={{ position: "fixed", top: pos.top, bottom: pos.bottom, left: pos.left, width: 340, maxHeight: "calc(100vh - 16px)", zIndex: 60 }}
           className="rounded-lg border border-line bg-white shadow-xl overflow-hidden text-left"
         >
           <div className="px-3 py-2 border-b border-line bg-[#f0faf5] text-[11px] font-semibold uppercase tracking-wide text-[#5a8a76]">

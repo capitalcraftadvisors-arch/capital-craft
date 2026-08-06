@@ -50,6 +50,8 @@ function Inner() {
   const [loan, setLoan] = useState<Record<string, any> | null>(null);
   const [details, setDetails] = useState<ApprovalDetails>({});
   const [sanctionChoice, setSanctionChoice] = useState<"upload" | "unavailable" | null>(null);
+  const [creditScore, setCreditScore] = useState<string>("");
+  const [creditNone, setCreditNone] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +84,7 @@ function Inner() {
           approved_emi:          editing ? (existing?.approved_emi ?? 0) : 0,
         });
         if (data.sanction_letter_unavailable) setSanctionChoice("unavailable");
+        if (data.credit_score != null) setCreditScore(String(data.credit_score));
       }
       setLoading(false);
     })();
@@ -117,6 +120,12 @@ function Inner() {
     if (!(approvedTen > 0)) { setError("Approved tenure (years) is required."); return; }
     if (!(approvedEmi > 0)) { setError("Approved EMI is required."); return; }
 
+    // Credit score is required on approval — a positive integer or "None".
+    if (!creditNone && !(Number(creditScore) > 0)) {
+      setError("Enter a credit score (a positive number) or tick “None”.");
+      return;
+    }
+
     setSaving(true);
     setError(null);
 
@@ -130,6 +139,8 @@ function Inner() {
       sanctioned_amount: details.approved_loan_amount ?? null,
       // Sanction letter is part of approval details — record its state here.
       sanction_letter_unavailable: sanctionChoice === "unavailable",
+      // Credit score — a positive integer, or null when "None" is chosen.
+      credit_score: creditNone ? null : (Number(creditScore) > 0 ? Number(creditScore) : null),
       reviewed_by: by, reviewed_at: now,
     };
 
@@ -199,6 +210,32 @@ function Inner() {
         {editMode !== "sanction" && (
           <SectionCard title="Approval details" accent="green" icon={I.money}>
             <ApprovalDetailsTable value={details} onChange={setDetails} />
+
+            {/* Credit score — required: a positive integer or "None". */}
+            <div className="mt-4 pt-4 border-t border-[#eef1f4]">
+              <label className="block text-[13px] font-medium text-[#0f3d2e] mb-1.5">Credit score</label>
+              <div className="flex items-center gap-4 flex-wrap">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={creditNone ? "" : creditScore}
+                  disabled={creditNone}
+                  onChange={(e) => setCreditScore(e.target.value.replace(/\D/g, ""))}
+                  placeholder="e.g. 750"
+                  className="w-40 rounded-input border-2 border-line px-3.5 py-2.5 text-[15px] outline-none focus:border-[#178a5c] disabled:bg-bg-tint disabled:opacity-60"
+                />
+                <label className="flex items-center gap-2 text-[14px] text-[#0f3d2e] cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={creditNone}
+                    onChange={(e) => { setCreditNone(e.target.checked); if (e.target.checked) setCreditScore(""); }}
+                    className="h-4 w-4 accent-[#178a5c]"
+                  />
+                  None
+                </label>
+              </div>
+            </div>
+
             <p className="text-[12px] text-[#5a8a76] mt-3">
               All fields are required. The approved amount must be greater than 0 and
               less than the applied amount. Saved once, then editable one more time

@@ -380,12 +380,16 @@ function Inner() {
     router.push(`/admin/app/${loan.id}/approval?lender=${lender}` as any);
   }
 
-  async function onRejectConfirm(lender: LenderKey, reason?: string) {
+  async function onRejectConfirm(lender: LenderKey, reason?: string, creditScore?: number | null) {
     if (!loan) return;
     const why = (reason ?? "").trim();
     await changeStatus(
       "rejected",
-      { rejected_lender: lender, rejected_at: new Date().toISOString(), approved_lender: null, approved_at: null, rejection_reason: why || null },
+      {
+        rejected_lender: lender, rejected_at: new Date().toISOString(),
+        approved_lender: null, approved_at: null, rejection_reason: why || null,
+        ...(creditScore !== undefined ? { credit_score: creditScore } : {}),
+      },
       `Rejected by ${LENDER_LABEL[lender] ?? lender}${why ? ` — ${why}` : ""}`,
     );
   }
@@ -950,13 +954,22 @@ function Inner() {
           <div className="flex flex-col gap-3">
             {approvedPlus && approvalDetails && (
               <SectionCard title="Approval details" accent="green" icon={I.circleCheck} adminOnly>
-                <div className="text-[14px] mb-2">
-                  <span className="text-[#5a8a76] font-medium">Approved By: </span>
-                  <span className="text-[#178a5c] font-bold">
-                    {approvalDetails.approved_by
-                      ? (LENDER_LABEL[String(approvalDetails.approved_by)] ?? String(approvalDetails.approved_by))
-                      : (decidedByLabel ?? "—")}
-                  </span>
+                <div className="flex items-start justify-between gap-3 mb-2">
+                  <div className="text-[14px]">
+                    <span className="text-[#5a8a76] font-medium">Approved By: </span>
+                    <span className="text-[#178a5c] font-bold">
+                      {approvalDetails.approved_by
+                        ? (LENDER_LABEL[String(approvalDetails.approved_by)] ?? String(approvalDetails.approved_by))
+                        : (decidedByLabel ?? "—")}
+                    </span>
+                  </div>
+                  {/* Credit score — small box, top-right corner. */}
+                  <div className="shrink-0 text-center rounded-[8px] border border-[#cdeadd] bg-[#f0faf5] px-3 py-1.5">
+                    <div className="text-[10px] uppercase tracking-wide text-[#5a8a76]">Credit score</div>
+                    <div className="text-[15px] font-bold text-[#0f3d2e] leading-tight">
+                      {loan.credit_score != null ? loan.credit_score : "None"}
+                    </div>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-[14px] border-collapse">

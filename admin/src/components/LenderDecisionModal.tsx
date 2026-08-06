@@ -28,12 +28,13 @@ type Props = {
   kind: "approve" | "reject";
   applicantName?: string | null;
   onClose: () => void;
-  onConfirm: (lender: LenderKey, reason?: string) => void | Promise<void>;
+  onConfirm: (lender: LenderKey, reason?: string, creditScore?: number | null) => void | Promise<void>;
 };
 
 export default function LenderDecisionModal({ open, kind, applicantName, onClose, onConfirm }: Props) {
   const [lender, setLender] = useState<LenderKey | "">("");
   const [reason, setReason] = useState("");
+  const [creditScore, setCreditScore] = useState("");
   const [sure, setSure] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -46,6 +47,7 @@ export default function LenderDecisionModal({ open, kind, applicantName, onClose
     if (busy) return;
     setLender("");
     setReason("");
+    setCreditScore("");
     setSure(false);
     onClose();
   }
@@ -54,9 +56,11 @@ export default function LenderDecisionModal({ open, kind, applicantName, onClose
     if (!lender || !sure || needsReason) return;
     setBusy(true);
     try {
-      await onConfirm(lender as LenderKey, approve ? undefined : reason.trim());
+      const cs = approve ? undefined : (creditScore.trim() ? Number(creditScore) : null);
+      await onConfirm(lender as LenderKey, approve ? undefined : reason.trim(), cs);
       setLender("");
       setReason("");
+      setCreditScore("");
       setSure(false);
       onClose();
     } finally {
@@ -116,6 +120,17 @@ export default function LenderDecisionModal({ open, kind, applicantName, onClose
               rows={3}
               placeholder="Record why the lender rejected this application…"
               className="w-full rounded-input border border-line bg-white px-3 py-2 text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-red-200 resize-y"
+            />
+            <label className="block text-[13px] font-medium text-text mb-1 mt-3">
+              Credit score <span className="text-text-muted font-normal">(optional)</span>
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={creditScore}
+              onChange={(e) => setCreditScore(e.target.value.replace(/\D/g, ""))}
+              placeholder="e.g. 620"
+              className="w-40 rounded-input border border-line bg-white px-3 py-2 text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-red-200"
             />
           </div>
         )}
