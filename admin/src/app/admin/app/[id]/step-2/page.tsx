@@ -199,6 +199,23 @@ function Inner() {
     // Editable fields stay so admin doesn't lose typed edits when swapping the doc.
   }
 
+  // View a previously-saved Aadhaar image (edit/reload) via the admin sign-doc
+  // route — the tiles have no local File to preview in that case.
+  async function signAndOpen(path: string) {
+    try {
+      const res = await fetch(`/api/admin/loan-app/${params.id}/sign-doc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({ path }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.ok && data.url) window.open(data.url, "_blank", "noopener");
+      else alert("Couldn't open the document.");
+    } catch (e) {
+      alert("Couldn't open the document: " + (e as Error).message);
+    }
+  }
+
   const validAadhaar = /^\d{12}$/.test(aadhaarNumber);
   const validForm   =
     name.trim().length > 0 &&
@@ -319,6 +336,7 @@ function Inner() {
               file={frontFile}
               onSelect={setFrontFile}
               disabled={extracting}
+              onViewExisting={!frontFile && uploaded?.storage_paths.front ? () => void signAndOpen(uploaded.storage_paths.front) : undefined}
             />
             <UploadTile
               label="Aadhaar Back"
@@ -326,6 +344,7 @@ function Inner() {
               file={backFile}
               onSelect={setBackFile}
               disabled={extracting}
+              onViewExisting={!backFile && uploaded?.storage_paths.back ? () => void signAndOpen(uploaded.storage_paths.back) : undefined}
             />
           </div>
 
@@ -542,16 +561,20 @@ function Inner() {
 // ── Upload tile ──────────────────────────────────────────────────────
 
 function UploadTile({
-  label, hint, file, onSelect, disabled,
+  label, hint, file, onSelect, disabled, onViewExisting,
 }: {
   label: string;
   hint?: string;
   file: File | null;
   onSelect: (f: File | null) => void;
   disabled?: boolean;
+  // Set when a previously-saved document exists (edit/reload). Opens the stored
+  // file via the sign-doc route so the tile shows "uploaded" + a working View
+  // even before a new file is picked in this session.
+  onViewExisting?: (() => void) | null;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const has = !!file;
+  const has = !!file || !!onViewExisting;
 
   // Local preview URL for the View button — same File object the user just
   // picked, no round-trip. Revoked on file swap / unmount.
@@ -591,17 +614,21 @@ function UploadTile({
               <polyline points="14 2 14 8 20 8" />
               <polyline points="9 15 11 17 15 13" />
             </svg>
-            <p className="text-[13px] font-semibold">{file!.name}</p>
+            <p className="text-[13px] font-semibold">{file ? file.name : "Uploaded"}</p>
             <p className="text-[11px] text-text-muted mt-0.5">
               Click to replace
             </p>
 
-            {/* View (eye) — verify the uploaded file. Stops propagation so
-                it doesn't also fire the parent tile's replace-click. */}
+            {/* View (eye) — a freshly picked file opens from its local object URL;
+                a reloaded document opens via the sign-doc route. */}
             <button
               type="button"
-              onClick={openPreview}
-              disabled={!previewUrl}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (file) { if (previewUrl) window.open(previewUrl, "_blank", "noopener"); }
+                else onViewExisting?.();
+              }}
+              disabled={file ? !previewUrl : !onViewExisting}
               title="View uploaded file"
               aria-label="View uploaded file"
               className="absolute top-2 right-2 p-1.5 rounded bg-white/90 border border-[#cdeadd] text-[#185fa5] hover:bg-white hover:border-[#185fa5] disabled:opacity-50 transition-colors"
