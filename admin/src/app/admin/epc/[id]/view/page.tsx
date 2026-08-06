@@ -300,7 +300,7 @@ function Inner() {
             onClick={() => router.push("/admin")}
             className="text-[14px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1"
           >
-            ← Back
+            ← Back to console
           </button>
         </div>
       </header>

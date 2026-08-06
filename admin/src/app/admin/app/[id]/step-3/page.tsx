@@ -586,7 +586,7 @@ function Inner() {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => router.back()}
+              onClick={() => router.push(`/admin/app/${params.id}/view` as any)}
               aria-label="Back to previous page"
               className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#185fa5] hover:text-[#0f3d2e] transition-colors"
             >

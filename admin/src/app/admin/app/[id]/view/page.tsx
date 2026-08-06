@@ -476,8 +476,6 @@ function Inner() {
   const approvedPlus   = ["approved", "rfd", "sent_to_nbfc", "disbursed"].includes(statusVal);
   const rfdReached     = rfd || loan.rfd_at != null;
   const approvalFilled = loan.approval_details_filled === true;
-  // "Committed" = approved in the system (and beyond). Locks down step edits.
-  const committed   = approvedPlus;
 
   const decidedLender = approvedPlus ? loan.approved_lender : rejected ? loan.rejected_lender : null;
   const decidedByLabel = decidedLender ? (LENDER_LABEL[String(decidedLender)] ?? String(decidedLender)) : null;
@@ -608,8 +606,8 @@ function Inner() {
             Docs Sent
           </HAction>
         )}
-        <HAction variant="approve" icon={I.check} disabled={statusBusy} onClick={() => setApproveOpen(true)}>Approve</HAction>
-        <HAction variant="reject" disabled={statusBusy} onClick={() => setRejectOpen(true)}>Rejection</HAction>
+        <HAction variant="approve" icon={I.check} disabled={statusBusy || !docsSent} title={docsSent ? undefined : "Mark Docs Sent first"} onClick={() => setApproveOpen(true)}>Approve</HAction>
+        <HAction variant="reject" disabled={statusBusy || !docsSent} title={docsSent ? undefined : "Mark Docs Sent first"} onClick={() => setRejectOpen(true)}>Rejection</HAction>
         {(underReview || docsSent) && (
           <HAction variant="amber" icon={PAUSE} disabled={statusBusy} onClick={holdCase}>Hold</HAction>
         )}
@@ -626,7 +624,7 @@ function Inner() {
               onClick={() => router.push("/admin")}
               className="text-[13px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1 shrink-0 mt-1"
             >
-              ← Back
+              ← Back to console
             </button>
             <div className="w-px h-14 bg-[#e2efe9] shrink-0" />
             <div
@@ -686,17 +684,20 @@ function Inner() {
                   icon={I.edit}
                   items={[
                     {
-                      // Approval details INCLUDE the sanction letter (it's collected
-                      // in the approval step), so there's no separate sanction item.
-                      label: loan.approval_details_locked ? "Approval details (locked)" : "Approval details",
-                      disabled: loan.approval_details_locked === true,
+                      // Full profile/step edit — available after approval too.
+                      label: "Edit",
+                      onClick: () => router.push(`/admin/app/${loan.id}/step-1` as any),
+                    },
+                    {
+                      // Approval details INCLUDE the sanction letter. Fully editable,
+                      // repeatedly — no edit-once lock.
+                      label: "Approval details",
                       onClick: () => router.push(`/admin/app/${loan.id}/approval?lender=${loan.approved_lender ?? ""}&edit=approval` as any),
                     },
                     {
                       // "Sanction details" = the disbursement values (matches the
-                      // profile's Sanction-details card).
-                      label: loan.disbursement_details_locked ? "Sanction details (locked)" : "Sanction details",
-                      disabled: loan.disbursement_details_locked === true,
+                      // profile's Sanction-details card). Fully editable, repeatedly.
+                      label: "Sanction details",
                       onClick: () => router.push(`/admin/app/${loan.id}/disbursement` as any),
                     },
                   ]}

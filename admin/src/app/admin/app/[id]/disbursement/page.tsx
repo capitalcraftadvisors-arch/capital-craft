@@ -186,10 +186,10 @@ function Inner() {
       <header className="border-b border-[#cdeadd] bg-white sticky top-0 z-30">
         <div className="w-full px-5 sm:px-8 h-14 flex items-center justify-between">
           <button
-            onClick={() => router.push("/admin")}
+            onClick={() => router.push(`/admin/app/${loan.id}/view` as any)}
             className="text-[14px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1"
           >
-            ← Back
+            ← Back to application
           </button>
           <span className="font-display font-bold text-[18px] text-[#0f3d2e]">Capital Craft</span>
         </div>
@@ -254,18 +254,18 @@ function Inner() {
                   Locked until the case is marked <strong>RFD</strong> (Ready for Disbursement) on the profile.
                   Upload the Tranche-1 documents above first.
                 </p>
-              ) : firstSaved ? (
-                <>
-                  <KV k="Amount" v={fmtRupees(loan.first_disbursement_amount)} valueClass="text-[#178a5c]" />
-                  <KV k="Date" v={fmtDateShort(loan.first_disbursement_date)} />
-                  <KV k="Deadline (45 days)" v={fmtDateShort(loan.disbursement_deadline)} />
-                  <KV k="Remaining (pending)" v={fmtRupees(remaining)} />
-                </>
               ) : (
                 <>
-                  <p className="text-[13px] text-[#5a8a76] mb-3">
-                    Entering the first disbursement starts the {DISBURSEMENT_WINDOW_DAYS}-day completion clock from the date below.
-                  </p>
+                  {firstSaved ? (
+                    <div className="mb-3 text-[12px] text-[#5a8a76]">
+                      Deadline (45 days): <span className="font-semibold text-[#0f3d2e]">{fmtDateShort(loan.disbursement_deadline)}</span>
+                      {" · "}Remaining (pending): <span className="font-semibold text-[#0f3d2e]">{fmtRupees(remaining)}</span>
+                    </div>
+                  ) : (
+                    <p className="text-[13px] text-[#5a8a76] mb-3">
+                      Entering the first disbursement starts the {DISBURSEMENT_WINDOW_DAYS}-day completion clock from the date below.
+                    </p>
+                  )}
                   <div className="grid sm:grid-cols-2 gap-3">
                     <div>
                       <p className="text-[12px] text-[#5a8a76] mb-1">First disbursement amount</p>
@@ -285,7 +285,7 @@ function Inner() {
                   <div className="mt-4">
                     <button type="button" onClick={() => void saveFirst()} disabled={busy}
                       className="px-4 py-2 bg-[#178a5c] text-white rounded text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-60">
-                      {busy ? "Saving…" : "Save first disbursement"}
+                      {busy ? "Saving…" : firstSaved ? "Update first disbursement" : "Save first disbursement"}
                     </button>
                   </div>
                 </>
@@ -339,12 +339,7 @@ function Inner() {
             {/* 2nd disbursement — unlocked by an approved review. */}
             {firstSaved && (
               <SectionCard title="Second disbursement" accent="green" icon={I.money}>
-                {loan.second_disbursement_amount != null ? (
-                  <>
-                    <KV k="Amount" v={fmtRupees(loan.second_disbursement_amount)} valueClass="text-[#178a5c]" />
-                    <KV k="Date" v={fmtDateShort(loan.second_disbursement_date)} />
-                  </>
-                ) : !secondUnlocked ? (
+                {(!secondUnlocked && loan.second_disbursement_amount == null) ? (
                   <p className="text-[13px] text-[#5a8a76]">
                     Available once the completion documents are reviewed and approved above.
                   </p>
@@ -367,7 +362,7 @@ function Inner() {
                     <div className="mt-4">
                       <button type="button" onClick={() => void saveSecond()} disabled={busy}
                         className="px-4 py-2 bg-[#178a5c] text-white rounded text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-60">
-                        {busy ? "Saving…" : "Save second disbursement"}
+                        {busy ? "Saving…" : loan.second_disbursement_amount != null ? "Update second disbursement" : "Save second disbursement"}
                       </button>
                     </div>
                   </>

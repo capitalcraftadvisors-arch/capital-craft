@@ -190,7 +190,7 @@ function Inner() {
     <main className="min-h-screen bg-white">
       <header className="border-b border-[#cdeadd] bg-white sticky top-0 z-30">
         <div className="w-full px-5 sm:px-8 h-14 flex items-center justify-between">
-          <button onClick={() => router.push("/admin")} className="text-[14px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1">← Back</button>
+          <button onClick={() => router.push("/admin")} className="text-[14px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1">← Back to console</button>
           <span className="font-display font-bold text-[18px] text-[#0f3d2e]">Capital Craft</span>
         </div>
       </header>

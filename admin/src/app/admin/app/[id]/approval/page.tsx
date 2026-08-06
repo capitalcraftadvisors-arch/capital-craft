@@ -133,11 +133,10 @@ function Inner() {
       reviewed_by: by, reviewed_at: now,
     };
 
-    if (editMode === "approval") {
-      // One-time correction from the Edit dropdown — lock afterwards. Status is
-      // left untouched so a case already at RFD/disbursed doesn't regress.
-      patch.approval_details_locked = true;
-    } else {
+    // Approval details are fully editable, repeatedly — no edit-once lock. On an
+    // EDIT (editMode === "approval") the status is left untouched so a case
+    // already at RFD/disbursed doesn't regress.
+    if (editMode !== "approval") {
       // Fresh approval — set status + supersede any prior rejection.
       patch.status = "approved";
       patch.approved_at = now;
