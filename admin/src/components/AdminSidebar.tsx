@@ -21,13 +21,14 @@ import { ReactNode, useState } from "react";
 import { useRouter } from "next/navigation";
 import { logout } from "@/lib/auth";
 
-export type ConsoleTab = "epcs" | "apps" | "insurance" | "leads";
+export type ConsoleTab = "epcs" | "apps" | "loanleads" | "insurance" | "leads";
 export type SectionKey = ConsoleTab | "analytics";
 
 // Per-console accent colors (C). Soft professional tints — accents only.
 export const ACCENTS: Record<SectionKey, { label: string; color: string; tint: string }> = {
   epcs:      { label: "EPCs",              color: "#185fa5", tint: "#e8f1fb" },
   apps:      { label: "Loan applications", color: "#178a5c", tint: "#e7f5ee" },
+  loanleads: { label: "Lead",              color: "#4338ca", tint: "#e8e7fb" },
   insurance: { label: "Insurance",         color: "#0e7490", tint: "#e0f2f4" },
   leads:     { label: "Leads (Non-EPC)",   color: "#b45309", tint: "#fbf0e0" },
   analytics: { label: "Analytics",         color: "#6d28d9", tint: "#efe9fb" },
@@ -40,6 +41,9 @@ const ICONS: Record<SectionKey, ReactNode> = {
   apps: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" /><path d="M14 3v6h6M9 13h6M9 17h4" /></svg>
   ),
+  loanleads: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M19 8v6M22 11h-6" /></svg>
+  ),
   insurance: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V6z" /><path d="M9 12l2 2 4-4" /></svg>
   ),
@@ -51,7 +55,7 @@ const ICONS: Record<SectionKey, ReactNode> = {
   ),
 };
 
-const ORDER: SectionKey[] = ["epcs", "apps", "insurance", "leads", "analytics"];
+const ORDER: SectionKey[] = ["epcs", "apps", "loanleads", "insurance", "leads", "analytics"];
 
 export default function AdminSidebar({
   active,

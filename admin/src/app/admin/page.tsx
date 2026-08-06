@@ -22,8 +22,9 @@ import {
 } from "@/lib/disbursement";
 import { policyValidityParts, VALIDITY_TEXT } from "@/lib/insurance-validity";
 import LenderCell from "@/components/LenderCell";
+import LoanLeadsTab from "@/components/LoanLeadsTab";
 
-type Tab = "epcs" | "apps" | "insurance" | "leads";
+type Tab = "epcs" | "apps" | "loanleads" | "insurance" | "leads";
 
 export default function AdminHomePage() {
   return (
@@ -42,7 +43,7 @@ function Inner() {
   // doesn't set this key, so it correctly stays on the EPCs tab.)
   useEffect(() => {
     const t = sessionStorage.getItem("adminList.tab");
-    if (t === "apps" || t === "insurance" || t === "leads") setTab(t);
+    if (t === "apps" || t === "loanleads" || t === "insurance" || t === "leads") setTab(t);
     sessionStorage.removeItem("adminList.tab");
   }, []);
 
@@ -59,7 +60,7 @@ function Inner() {
             <h1 className="font-display text-[24px] sm:text-[28px] font-bold">{section.label}</h1>
           </div>
 
-          {tab === "epcs" ? <EpcsTab /> : tab === "apps" ? <AppsTab /> : tab === "insurance" ? <InsuranceTab /> : <LeadsTab />}
+          {tab === "epcs" ? <EpcsTab /> : tab === "apps" ? <AppsTab /> : tab === "loanleads" ? <LoanLeadsTab /> : tab === "insurance" ? <InsuranceTab /> : <LeadsTab />}
         </section>
       </div>
     </div>
