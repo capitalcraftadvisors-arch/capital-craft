@@ -33,7 +33,7 @@ import { logAudit } from "@/lib/auditLog";
 import { EMAIL_RE, PAN_RE, MOBILE_RE, IFSC_RE, ACCOUNT_RE } from "@/lib/validators";
 
 type Biz = Record<string, any>;
-type Stakeholder = { id: string; name: string; designation: string; mobile: string; email: string };
+type Stakeholder = { id: string; name: string; designation: string; mobile: string; email: string; father_name: string; dob: string; aadhaar_number: string; aadhaar_address: string };
 type Reference = { type: "customer" | "supplier"; name: string; mobile: string };
 
 // Backward-compat: legacy stakeholder rows may be missing mobile/email.
@@ -45,6 +45,10 @@ function normStakeholder(raw: unknown): Stakeholder {
     designation: (r.designation as string) ?? "",
     mobile: (r.mobile as string) ?? "",
     email: (r.email as string) ?? "",
+    father_name: (r.father_name as string) ?? "",
+    dob: (r.dob as string) ?? "",
+    aadhaar_number: (r.aadhaar_number as string) ?? "",
+    aadhaar_address: (r.aadhaar_address as string) ?? "",
   };
 }
 
@@ -464,7 +468,7 @@ function MembersEditor({
         <button
           type="button"
           onClick={() => {
-            setDraft([{ id: crypto.randomUUID(), name: "", designation: rule.defaultDesignation, mobile: "", email: "" }]);
+            setDraft([{ id: crypto.randomUUID(), name: "", designation: rule.defaultDesignation, mobile: "", email: "", father_name: "", dob: "", aadhaar_number: "", aadhaar_address: "" }]);
             setEditing(true);
           }}
           className="text-[12px] text-blue hover:underline"
@@ -487,6 +491,16 @@ function MembersEditor({
               {s.mobile ? `+91 ${s.mobile}` : "—"}
               {s.email ? ` · ${s.email}` : ""}
             </p>
+            {(s.father_name || s.dob || s.aadhaar_number || s.aadhaar_address) && (
+              <p className="text-[12px] text-text-muted mt-0.5">
+                {[
+                  s.father_name && `Father: ${s.father_name}`,
+                  s.dob && `DOB: ${s.dob}`,
+                  s.aadhaar_number && `Aadhaar: ${s.aadhaar_number}`,
+                  s.aadhaar_address,
+                ].filter(Boolean).join(" · ")}
+              </p>
+            )}
             <div className="grid sm:grid-cols-2 gap-3 mt-2">
               <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_pan"            label="Member PAN card" />
               <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_aadhaar_front"  label="Member Aadhaar card (front)" />
@@ -572,6 +586,46 @@ function MembersEditor({
                 setDraft(next);
               }}
             />
+            <input
+              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
+              placeholder="Father's Name"
+              value={s.father_name}
+              onChange={(e) => {
+                const next = [...draft]; next[i] = { ...next[i], father_name: e.target.value };
+                setDraft(next);
+              }}
+            />
+            <input
+              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
+              placeholder="Date of Birth"
+              type="date"
+              value={s.dob}
+              onChange={(e) => {
+                const next = [...draft]; next[i] = { ...next[i], dob: e.target.value };
+                setDraft(next);
+              }}
+            />
+            <input
+              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
+              placeholder="Aadhaar No. (12 digits)"
+              inputMode="numeric"
+              maxLength={12}
+              value={s.aadhaar_number}
+              onChange={(e) => {
+                const v = e.target.value.replace(/\D/g, "");
+                const next = [...draft]; next[i] = { ...next[i], aadhaar_number: v };
+                setDraft(next);
+              }}
+            />
+            <input
+              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white sm:col-span-2"
+              placeholder="Address (as per Aadhaar)"
+              value={s.aadhaar_address}
+              onChange={(e) => {
+                const next = [...draft]; next[i] = { ...next[i], aadhaar_address: e.target.value };
+                setDraft(next);
+              }}
+            />
           </div>
         </div>
       ))}
@@ -579,7 +633,7 @@ function MembersEditor({
         <button
           type="button"
           onClick={() =>
-            setDraft([...draft, { id: crypto.randomUUID(), name: "", designation: rule.defaultDesignation, mobile: "", email: "" }])
+            setDraft([...draft, { id: crypto.randomUUID(), name: "", designation: rule.defaultDesignation, mobile: "", email: "", father_name: "", dob: "", aadhaar_number: "", aadhaar_address: "" }])
           }
           className="text-[12px] text-blue hover:underline"
         >

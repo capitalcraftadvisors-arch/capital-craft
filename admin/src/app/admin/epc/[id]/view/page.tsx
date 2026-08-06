@@ -23,6 +23,7 @@ import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
 import { getDocumentUrl, deleteDocument } from "@/lib/storage";
 import { logAudit } from "@/lib/auditLog";
+import { Period, inPeriod } from "@/lib/period";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import CommentsSection from "@/components/CommentsSection";
 import ActivityLogModal from "@/components/ActivityLogModal";
@@ -126,7 +127,9 @@ function Inner() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const [biz, setBiz] = useState<Biz | null>(null);
-  const [loans, setLoans] = useState<{ status: string; plant_use_type: string | null; loan_display_id: string | null; sanctioned_amount: number | null; first_disbursement_amount: number | null; second_disbursement_amount: number | null }[]>([]);
+  const [loans, setLoans] = useState<{ status: string; plant_use_type: string | null; loan_display_id: string | null; sanctioned_amount: number | null; first_disbursement_amount: number | null; second_disbursement_amount: number | null; created_at: string | null }[]>([]);
+  // EPC Health period filter ("all" = every application this EPC has, ever).
+  const [hPeriod, setHPeriod] = useState<Period | "all">("all");
   const [docs, setDocs] = useState<Doc[]>([]);
   const [lender, setLender] = useState<LenderRow[]>([]);
   const [adminInfo, setAdminInfo] = useState<AdminInfo | null>(null);
@@ -146,7 +149,7 @@ function Inner() {
         supabase().from("epc_documents").select("id, category, file_name, mime_type, stakeholder_id, metadata").eq("business_id", params.id),
         supabase().from("epc_lender_status").select("lender, docs_given, approved, rejected").eq("business_id", params.id),
         supabase().from("epc_admin_info").select("*").eq("business_id", params.id).maybeSingle(),
-        supabase().from("epc_applications").select("status, plant_use_type, loan_display_id, sanctioned_amount, first_disbursement_amount, second_disbursement_amount").eq("epc_business_id", params.id),
+        supabase().from("epc_applications").select("status, plant_use_type, loan_display_id, sanctioned_amount, first_disbursement_amount, second_disbursement_amount, created_at").eq("epc_business_id", params.id),
       ]);
       setBiz(b);
       setDocs((d ?? []) as Doc[]);
@@ -169,6 +172,8 @@ function Inner() {
   // split Residential / C&I via the CC-RES / CC-COM display-id prefix.
   const loanAgg = useMemo(() => {
     type LR = (typeof loans)[number];
+    // Scope to the selected period (by application created_at); "all" = every row.
+    const scoped = hPeriod === "all" ? loans : loans.filter((r) => inPeriod(r.created_at, hPeriod));
     const isRes = (r: LR) => (r.loan_display_id || "").toUpperCase().startsWith("CC-RES") || r.plant_use_type === "residential";
     const isCom = (r: LR) => (r.loan_display_id || "").toUpperCase().startsWith("CC-COM") || r.plant_use_type === "commercial";
     const bucket = (rows: LR[]) => {
@@ -178,8 +183,8 @@ function Inner() {
       const disbursed  = rows.reduce((s, r) => s + (Number(r.first_disbursement_amount) || 0) + (Number(r.second_disbursement_amount) || 0), 0);
       return { submitted, rejected, sanctioned, disbursed, pending: Math.max(0, sanctioned - disbursed) };
     };
-    return { res: bucket(loans.filter(isRes)), com: bucket(loans.filter(isCom)), total: bucket(loans) };
-  }, [loans]);
+    return { res: bucket(scoped.filter(isRes)), com: bucket(scoped.filter(isCom)), total: bucket(scoped) };
+  }, [loans, hPeriod]);
   const r3bTotal = useMemo(
     () => r3bDocs.reduce((s, d) => {
       const v = (d.metadata as { total_taxable_value?: number } | null)?.total_taxable_value;
@@ -254,6 +259,36 @@ function Inner() {
       setBiz({ ...biz, service_type: next });
     } finally {
       setServiceBusy(false);
+    }
+  }
+
+  // Set ONE exclusive lender state (none / docs / approved / rejected) from the
+  // profile — same epc_lender_status upsert the main table's Lender status uses.
+  // Approved / Rejected are gated behind Docs Sent in the UI below.
+  async function setLenderExclusive(lenderKey: "creditfair" | "aerem" | "solfin", target: "none" | "docs" | "approved" | "rejected") {
+    if (!biz) return;
+    if (target === "approved" && !window.confirm("Mark this lender as Approved?")) return;
+    if (target === "rejected" && !window.confirm("Mark this lender as Rejected?")) return;
+    const flags = { docs_given: target === "docs", approved: target === "approved", rejected: target === "rejected" };
+    const dbPatch: Record<string, unknown> = { ...flags, rejected_at: target === "rejected" ? new Date().toISOString() : null };
+    const prev = lender;
+    setLender((arr) => [...arr.filter((x) => x.lender !== lenderKey), { lender: lenderKey, ...flags }]);
+    try {
+      const { data: existing } = await supabase()
+        .from("epc_lender_status")
+        .select("id")
+        .eq("business_id", biz.id)
+        .eq("lender", lenderKey)
+        .maybeSingle();
+      if (existing) {
+        await supabase().from("epc_lender_status").update(dbPatch).eq("id", (existing as { id: string }).id);
+      } else {
+        await supabase().from("epc_lender_status").insert({ business_id: biz.id, lender: lenderKey, ...dbPatch });
+      }
+      await logAudit(biz.id, "field_edit", `lender_${lenderKey}`, null, target);
+    } catch (e) {
+      setLender(prev);
+      alert("Couldn't save lender state: " + (e as Error).message);
     }
   }
 
@@ -430,16 +465,25 @@ function Inner() {
           ];
           return (
           <div className="rounded-[14px] border border-[#cdeadd] bg-[#eefaf3] p-5 sm:p-6 mb-4">
-            {/* Header — title + Overall Sanctioned */}
+            {/* Header — title + period selector (replaces the "all-time" subtitle
+                and the Overall Sanctioned box; all figures below follow it). */}
             <div className="flex items-start justify-between gap-4 mb-4">
               <div>
                 <div className="text-[24px] font-bold text-[#0f3d2e] leading-tight">EPC Health</div>
-                <div className="text-[12px] text-[#5a8a76] mt-0.5">admin only · all-time</div>
+                <div className="text-[12px] text-[#5a8a76] mt-0.5">admin only</div>
               </div>
-              <div className="text-right">
-                <div className="text-[13px] text-[#5a8a76]">Overall Sanctioned</div>
-                <div className="text-[22px] font-bold text-[#178a5c]">{lacs(loanAgg.total.sanctioned)}</div>
-              </div>
+              <select
+                value={hPeriod}
+                onChange={(e) => setHPeriod(e.target.value as Period | "all")}
+                className="rounded-input border border-[#cdeadd] bg-white px-3 py-2 text-[13px] font-medium text-[#0f3d2e] outline-none focus:border-[#178a5c] cursor-pointer shrink-0"
+              >
+                <option value="all">All time</option>
+                <option value="today">Today</option>
+                <option value="week">This Week</option>
+                <option value="month">This Month</option>
+                <option value="quarter">This Quarter</option>
+                <option value="year">This Year</option>
+              </select>
             </div>
 
             {/* Per-segment white cards */}
@@ -616,17 +660,41 @@ function Inner() {
               } />
             </SectionCard>
 
-            <SectionCard title="Lenders" tint icon={I.money} adminOnly>
+            {/* Lender status — settable right here (same epc_lender_status the
+                main table writes). Approved / Rejected unlock only after Docs. */}
+            <SectionCard title="Lender status" tint icon={I.money} adminOnly>
               {(["creditfair", "aerem", "solfin"] as const).map((key) => {
                 const l = lender.find((x) => x.lender === key);
                 const label = key === "creditfair" ? "Credit Fair" : key === "aerem" ? "Aerem" : "Solfin";
                 const state = l
                   ? ((l as any).rejected ? "rejected" : l.approved ? "approved" : l.docs_given ? "docs" : "none")
                   : "none";
+                const opts: Array<{ t: "docs" | "approved" | "rejected"; text: string; active: string }> = [
+                  { t: "docs",     text: "Docs",     active: "bg-[#dceffb] text-[#185fa5] border-[#bcdcf3]" },
+                  { t: "approved", text: "Approved", active: "bg-[#e6f6ee] text-[#0f7a52] border-[#bfe6d5]" },
+                  { t: "rejected", text: "Rejected", active: "bg-red-50 text-red-700 border-red-200" },
+                ];
                 return (
-                  <div key={key} className="flex items-center justify-between text-[14px] py-1">
-                    <span className="text-[#0f3d2e] font-medium">{label}</span>
-                    <LenderStatePill state={state} />
+                  <div key={key} className="flex items-center justify-between gap-2 py-1.5 border-b border-[#eef1f4] last:border-0">
+                    <span className="text-[#0f3d2e] font-medium text-[14px]">{label}</span>
+                    <div className="flex items-center gap-1">
+                      {opts.map((o) => {
+                        const isActive = state === o.t;
+                        const gated = (o.t === "approved" || o.t === "rejected") && state === "none";
+                        return (
+                          <button
+                            key={o.t}
+                            type="button"
+                            disabled={gated}
+                            title={gated ? "Mark Docs sent first" : undefined}
+                            onClick={() => void setLenderExclusive(key, isActive ? "none" : o.t)}
+                            className={`px-2 py-1 rounded-md border text-[11px] font-semibold transition ${isActive ? o.active : "bg-white text-[#5a8a76] border-[#e0f0e8] hover:bg-[#f0faf5]"} ${gated ? "opacity-40 cursor-not-allowed" : ""}`}
+                          >
+                            {o.text}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 );
               })}

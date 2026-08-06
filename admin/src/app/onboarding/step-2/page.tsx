@@ -25,6 +25,7 @@ type Form = {
   legal_name: string;
   trade_name: string;
   gstin_number: string;
+  gst_address: string;
   pm_surya_ghar: SuryaGhar;
   pm_surya_ghar_other: string;
   pm_surya_ghar_capacity: string;
@@ -97,6 +98,7 @@ export default function Step2Page() {
       legal_name: "",
       trade_name: "",
       gstin_number: "",
+      gst_address: "",
       pm_surya_ghar: "",
       pm_surya_ghar_other: "",
       pm_surya_ghar_capacity: "",
@@ -114,7 +116,7 @@ export default function Step2Page() {
       const { data } = await supabase()
         .from("epc_business")
         .select(
-          "business_type, pan_number, legal_name, trade_name, gstin_number, pm_surya_ghar, pm_surya_ghar_other, pm_surya_ghar_capacity",
+          "business_type, pan_number, legal_name, trade_name, gstin_number, gst_address, pm_surya_ghar, pm_surya_ghar_other, pm_surya_ghar_capacity",
         )
         .eq("id", biz.id)
         .maybeSingle();
@@ -124,6 +126,7 @@ export default function Step2Page() {
         legal_name: data?.legal_name ?? "",
         trade_name: data?.trade_name ?? "",
         gstin_number: data?.gstin_number ?? "",
+        gst_address: (data as { gst_address?: string | null })?.gst_address ?? "",
         pm_surya_ghar: ((data?.pm_surya_ghar as SuryaGhar) ?? "") as SuryaGhar,
         pm_surya_ghar_other: data?.pm_surya_ghar_other ?? "",
         pm_surya_ghar_capacity: data?.pm_surya_ghar_capacity ?? "",
@@ -226,6 +229,7 @@ export default function Step2Page() {
         legal_name: values.legal_name.trim() || null,
         trade_name: values.trade_name.trim() || null,
         gstin_number: values.gstin_number.trim().toUpperCase() || null,
+        gst_address: values.gst_address.trim() || null,
         pm_surya_ghar: values.pm_surya_ghar || null,
         pm_surya_ghar_other:
           values.pm_surya_ghar === "other"
@@ -398,6 +402,15 @@ export default function Step2Page() {
                   onChange: (e) => setValue("gstin_number", e.target.value.toUpperCase()),
                 })}
                 error={errors.gstin_number?.message}
+              />
+              <Input
+                label="GST Address"
+                placeholder="Principal place of business (as on GST)"
+                leftIcon={IconTag}
+                {...register("gst_address", {
+                  maxLength: { value: 300, message: "Too long" },
+                })}
+                error={errors.gst_address?.message}
               />
             </FieldGroup>
           )}

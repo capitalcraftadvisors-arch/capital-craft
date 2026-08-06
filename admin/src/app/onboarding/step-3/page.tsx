@@ -32,6 +32,10 @@ type Stakeholder = {
   designation: string;
   mobile: string;
   email: string;
+  father_name: string;
+  dob: string;
+  aadhaar_number: string;
+  aadhaar_address: string;
 };
 
 type BizType = "proprietorship" | "pvt_ltd" | "partnership" | "llp" | null;
@@ -69,6 +73,10 @@ function normalizeStakeholder(raw: unknown): Stakeholder {
     designation: (r.designation as string) ?? "",
     mobile: (r.mobile as string) ?? "",
     email: (r.email as string) ?? "",
+    father_name: (r.father_name as string) ?? "",
+    dob: (r.dob as string) ?? "",
+    aadhaar_number: (r.aadhaar_number as string) ?? "",
+    aadhaar_address: (r.aadhaar_address as string) ?? "",
   };
 }
 
@@ -120,6 +128,7 @@ export default function Step3Page() {
                 designation: c.defaultDesignation,
                 mobile: pocIsProprietor ? ((data?.contact_mobile as string | null) ?? "") : "",
                 email:  pocIsProprietor ? ((data?.contact_email  as string | null) ?? "") : "",
+                father_name: "", dob: "", aadhaar_number: "", aadhaar_address: "",
               }
             : {
                 id: crypto.randomUUID(),
@@ -127,6 +136,7 @@ export default function Step3Page() {
                 designation: c.defaultDesignation,
                 mobile: "",
                 email: "",
+                father_name: "", dob: "", aadhaar_number: "", aadhaar_address: "",
               };
         setStakeholders([seeded]);
       } else {
@@ -159,7 +169,7 @@ export default function Step3Page() {
     setStakeholders((arr) => {
       const next = [
         ...arr,
-        { id: crypto.randomUUID(), name: "", designation: cfg.defaultDesignation, mobile: "", email: "" },
+        { id: crypto.randomUUID(), name: "", designation: cfg.defaultDesignation, mobile: "", email: "", father_name: "", dob: "", aadhaar_number: "", aadhaar_address: "" },
       ];
       void persistJsonb(next);
       return next;
@@ -286,6 +296,10 @@ export default function Step3Page() {
       designation: s.designation.trim(),
       mobile: s.mobile.trim(),
       email: s.email.trim(),
+      father_name: s.father_name.trim(),
+      dob: s.dob.trim(),
+      aadhaar_number: s.aadhaar_number.trim(),
+      aadhaar_address: s.aadhaar_address.trim(),
     }));
 
     const { error } = await supabase()
@@ -367,6 +381,32 @@ export default function Step3Page() {
                 value={s.email}
                 onChange={(e) => updateField(s.id, "email", e.target.value)}
                 error={errors[`${s.id}.email`]}
+              />
+              <Input
+                label="Father's Name"
+                placeholder="Father's full name"
+                value={s.father_name}
+                onChange={(e) => updateField(s.id, "father_name", e.target.value)}
+              />
+              <Input
+                label="Date of Birth"
+                type="date"
+                value={s.dob}
+                onChange={(e) => updateField(s.id, "dob", e.target.value)}
+              />
+              <Input
+                label="Aadhaar No."
+                placeholder="12-digit Aadhaar number"
+                inputMode="numeric"
+                maxLength={12}
+                value={s.aadhaar_number}
+                onChange={(e) => updateField(s.id, "aadhaar_number", e.target.value.replace(/\D/g, ""))}
+              />
+              <Input
+                label="Address (as per Aadhaar)"
+                placeholder="Residential address"
+                value={s.aadhaar_address}
+                onChange={(e) => updateField(s.id, "aadhaar_address", e.target.value)}
               />
             </div>
 
