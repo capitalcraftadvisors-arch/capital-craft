@@ -234,6 +234,12 @@ function Inner() {
             hint="Auto-filled from the EPC's GST registration document."
           />
           <EditableField
+            label="GST Address"
+            value={biz.gst_address}
+            onSave={saveField("gst_address")}
+            hint="Registered address from the GST certificate."
+          />
+          <EditableField
             label="PAN"
             value={biz.pan_number}
             onSave={async (v) => saveField("pan_number")(v.toUpperCase())}
@@ -270,6 +276,22 @@ function Inner() {
               hint="Number of installations — e.g. 25."
             />
           )}
+          <EditableField
+            label="Service"
+            value={biz.service_type}
+            display={(v) =>
+              v === "loans"     ? "Only Loan"
+              : v === "insurance" ? "Only Insurance"
+              : v === "both"      ? "Loan and Insurance"
+              : ""
+            }
+            options={[
+              { value: "loans",     label: "Only Loan" },
+              { value: "insurance", label: "Only Insurance" },
+              { value: "both",      label: "Loan and Insurance" },
+            ]}
+            onSave={saveField("service_type")}
+          />
         </Section>
 
         <Section title="Bank">

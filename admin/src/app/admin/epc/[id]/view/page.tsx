@@ -509,19 +509,41 @@ function Inner() {
               {stakeholders.length === 0 ? (
                 <p className="text-[13px] text-[#5a8a76]">No members recorded.</p>
               ) : (
-                <div className="space-y-2">
-                  {stakeholders.map((s, i) => (
-                    <div key={s.id ?? i} className="px-3 py-2.5 bg-[#f0faf5] rounded-[8px] text-[14px]">
-                      <div className="font-semibold text-[#0f3d2e]">{s.name || "—"}</div>
-                      <div className="text-[13px] text-[#5a8a76] mt-0.5">
-                        {s.designation || roleLabel(biz.business_type)}
-                        {s.mobile ? ` · +91 ${s.mobile}` : ""}
+                <div className="space-y-3">
+                  {stakeholders.map((s, i) => {
+                    const sx = s as Record<string, any>;
+                    return (
+                      <div key={s.id ?? i} className="rounded-[8px] bg-[#f0faf5] p-3">
+                        {stakeholders.length > 1 && (
+                          <div className="text-[12px] font-semibold text-[#178a5c] mb-1">
+                            {s.designation || roleLabel(biz.business_type)} {i + 1}
+                          </div>
+                        )}
+                        <KV k="Name" v={s.name} />
+                        <KV k="Father's Name" v={sx.father_name} />
+                        <KV k="Mobile No." v={s.mobile ? `+91 ${s.mobile}` : "—"} />
+                        <KV k="Email ID" v={s.email} valueClass="text-[#185fa5]" />
+                        <KV k="DOB" v={sx.dob} />
+                        <KV k="Aadhaar No." v={sx.aadhaar_number} />
+                        <KV k="Address" v={sx.aadhaar_address} />
                       </div>
-                      {s.email && <div className="text-[#185fa5] text-[12px] mt-0.5 truncate">{s.email}</div>}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
+            </SectionCard>
+
+            {/* Business details — Trade Name / GSTIN / GST Address / Constitution /
+                PM Surya Ghar. GST Address is a manual field (edit + onboarding). */}
+            <SectionCard title="Business details" accent="blue" icon={I.building}>
+              <KV k="Trade Name" v={biz.trade_name} />
+              <KV k="GSTIN" v={biz.gstin_number} />
+              <KV k="GST Address" v={biz.gst_address} />
+              <KV k="Constitution Type" v={btLabel} />
+              <KV k="PM Surya Ghar Registered" v={
+                biz.pm_surya_ghar === "yes" ? "Yes" : biz.pm_surya_ghar === "no" ? "No"
+                  : (biz.pm_surya_ghar ? cap(biz.pm_surya_ghar) : "—")
+              } />
             </SectionCard>
 
             <SectionCard title="Bank" accent="blue" icon={I.bank}>
