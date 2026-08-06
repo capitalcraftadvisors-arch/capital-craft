@@ -22,7 +22,7 @@ import LoanActivityLogModal from "@/components/LoanActivityLogModal";
 import LenderDecisionModal from "@/components/LenderDecisionModal";
 import { LENDER_LABEL, type ApprovalDetails } from "@/components/ApprovalDetailsTable";
 import LenderPickerModal, { type LenderKey } from "@/components/LenderPickerModal";
-import ProfileTabBar, { TabButton, DownloadMenu } from "@/components/ProfileTabBar";
+import ProfileTabBar, { TabButton, DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { deadlineState, DEADLINE_PILL, remainingAmount, fmtDateShort } from "@/lib/disbursement";
 import {
@@ -81,12 +81,6 @@ const DOC_LABEL: Record<string, string> = {
 
 // Local trash glyph — kept here (not in ViewKit) so the shared kit and the
 // EPC View that imports it stay untouched.
-const TRASH = (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-    <path d="M10 11v6M14 11v6" />
-  </svg>
-);
 const PAUSE = (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
     <path d="M10 5v14M14 5v14" />
@@ -527,6 +521,38 @@ function Inner() {
   const markRfd = () =>
     void changeStatus("rfd", { rfd_at: new Date().toISOString() }, "Ready for disbursement");
 
+  // Change review — undo the current lender decision (and any abort) and move
+  // the application back to Docs Sent so the admin can Approve/Reject again.
+  // Fixes cases mistakenly marked Approved/Rejected by lender.
+  const changeReview = () => {
+    if (!window.confirm(
+      "Change the review?\n\nThis undoes the current lender decision (and any abort) and moves the application back to Docs Sent, where you can Approve or Reject again.",
+    )) return;
+    void changeStatus("docs_sent", {
+      approved_lender: null, approved_at: null,
+      rejected_lender: null, rejected_at: null,
+      rfd_at: null, approval_details_filled: false,
+      aborted_at: null, abort_reason: null,
+    }, "Review changed — reverted to Docs Sent");
+  };
+
+  // Three-dot overflow menu (replaces the bare trash button). "Change review"
+  // only appears once there's a decision/abort to undo.
+  const canChangeReview = approvedPlus || rejected || aborted;
+  const kebabItems = [
+    ...(canChangeReview ? [{
+      label: "Change review",
+      icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></svg>),
+      onClick: changeReview,
+    }] : []),
+    {
+      label: "Delete",
+      icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>),
+      onClick: () => setDelOpen(true),
+      danger: true,
+    },
+  ];
+
   const markDocsSent = () =>
     void changeStatus("docs_sent", { docs_sent_at: new Date().toISOString() }, "Docs sent to lender");
   const holdCase = () =>
@@ -726,14 +752,7 @@ function Inner() {
           }
           right={
             aborted ? (
-              <button
-                type="button"
-                onClick={() => setDelOpen(true)}
-                title="Delete" aria-label="Delete"
-                className="inline-flex items-center justify-center w-9 h-9 rounded-[8px] border border-red-300 bg-white text-red-700 hover:bg-red-50 hover:border-red-500 transition-colors shrink-0"
-              >
-                {TRASH}
-              </button>
+              <KebabMenu items={kebabItems} />
             ) : (
               <>
                 {statusActions}
@@ -745,16 +764,9 @@ function Inner() {
                     Disbursement
                   </HAction>
                 )}
-                {/* Delete is now available at EVERY stage (incl. after approval) —
-                    A2. The type-DELETE modal + protections are unchanged. */}
-                <button
-                  type="button"
-                  onClick={() => setDelOpen(true)}
-                  title="Delete" aria-label="Delete"
-                  className="inline-flex items-center justify-center w-9 h-9 rounded-[8px] border border-red-300 bg-white text-red-700 hover:bg-red-50 hover:border-red-500 transition-colors shrink-0"
-                >
-                  {TRASH}
-                </button>
+                {/* Three-dot menu — Change review (undo lender decision) + Delete
+                    (type-DELETE modal). Available at every stage. */}
+                <KebabMenu items={kebabItems} />
               </>
             )
           }

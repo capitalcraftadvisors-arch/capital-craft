@@ -97,6 +97,56 @@ export function DownloadMenu({
   );
 }
 
+// A compact three-dot (⋯) overflow menu — used on profiles to hold secondary
+// actions (e.g. Change review / Delete) instead of a bare trash button.
+export function KebabMenu({
+  items,
+}: {
+  items: Array<{ label: string; icon?: ReactNode; onClick: () => void; danger?: boolean }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        title="More actions"
+        aria-label="More actions"
+        className="inline-flex items-center justify-center w-9 h-9 rounded-[8px] border border-[#cdeadd] bg-white text-[#0f3d2e] hover:bg-[#f0faf5] transition-colors shrink-0"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="12" cy="19" r="1.7" /></svg>
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-40 min-w-[190px] rounded-[10px] border border-[#cdeadd] bg-white shadow-lg py-1">
+          {items.map((it, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => { setOpen(false); it.onClick(); }}
+              className={[
+                "w-full text-left px-3.5 py-2 text-[13px] font-medium inline-flex items-center gap-2 transition-colors",
+                it.danger ? "text-red-700 hover:bg-red-50" : "text-[#0f3d2e] hover:bg-[#f0faf5]",
+              ].join(" ")}
+            >
+              {it.icon && <span className="shrink-0 inline-flex">{it.icon}</span>}
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ProfileTabBar({
   left, right,
 }: {
