@@ -24,6 +24,7 @@ import { getToken } from "@/lib/auth";
 import { getDocumentUrl, deleteDocument } from "@/lib/storage";
 import { logAudit } from "@/lib/auditLog";
 import { Period, inPeriod } from "@/lib/period";
+import LenderCell, { LenderInfo, LenderMap } from "@/components/LenderCell";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import CommentsSection from "@/components/CommentsSection";
 import ActivityLogModal from "@/components/ActivityLogModal";
@@ -132,6 +133,13 @@ function Inner() {
   const [hPeriod, setHPeriod] = useState<Period | "all">("all");
   const [docs, setDocs] = useState<Doc[]>([]);
   const [lender, setLender] = useState<LenderRow[]>([]);
+  // Global lender registry (same dropdown the main table uses). Static fallback
+  // matches the admin dashboard's; overwritten by the `lenders` table if present.
+  const [lenderList, setLenderList] = useState<LenderInfo[]>([
+    { key: "aerem",      label: "Aerem",       sort_order: 10 },
+    { key: "creditfair", label: "Credit Fair", sort_order: 20 },
+    { key: "solfin",     label: "Solfin",      sort_order: 30 },
+  ]);
   const [adminInfo, setAdminInfo] = useState<AdminInfo | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
@@ -158,6 +166,18 @@ function Inner() {
       setLoans((la ?? []) as typeof loans);
     })();
   }, [params.id, activityRefresh]);
+
+  // Global lender registry — same list/query the main table dropdown uses.
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase()
+        .from("lenders")
+        .select("key,label,sort_order")
+        .eq("is_active", true)
+        .order("sort_order", { ascending: true });
+      if (data && data.length) setLenderList(data as LenderInfo[]);
+    })();
+  }, []);
 
   // Bumped whenever the inline CommentsSection writes something — so the
   // Activity log modal (which reads from admin_edit_log) reflects the
@@ -200,6 +220,15 @@ function Inner() {
 
   const docsGivenCount = lender.filter((l) => l.docs_given).length;
   const anyApproved = lender.some((l) => l.approved);
+
+  // Shape the loaded lender rows into the LenderMap the shared dropdown expects.
+  const lenderMap: LenderMap = useMemo(() => {
+    const m: LenderMap = {};
+    for (const l of lender) {
+      m[l.lender] = { docs_given: !!l.docs_given, approved: !!l.approved, rejected: !!(l as { rejected?: boolean }).rejected };
+    }
+    return m;
+  }, [lender]);
 
   async function openDoc(id: string) {
     const u = await getDocumentUrl(id);
@@ -265,7 +294,7 @@ function Inner() {
   // Set ONE exclusive lender state (none / docs / approved / rejected) from the
   // profile — same epc_lender_status upsert the main table's Lender status uses.
   // Approved / Rejected are gated behind Docs Sent in the UI below.
-  async function setLenderExclusive(lenderKey: "creditfair" | "aerem" | "solfin", target: "none" | "docs" | "approved" | "rejected") {
+  async function setLenderExclusive(lenderKey: string, target: "none" | "docs" | "approved" | "rejected") {
     if (!biz) return;
     if (target === "approved" && !window.confirm("Mark this lender as Approved?")) return;
     if (target === "rejected" && !window.confirm("Mark this lender as Rejected?")) return;
@@ -290,6 +319,19 @@ function Inner() {
       setLender(prev);
       alert("Couldn't save lender state: " + (e as Error).message);
     }
+  }
+
+  // Add a lender to the global registry (GLOBAL — appears on every dropdown).
+  async function addLender(name: string) {
+    const label = name.trim();
+    if (!label) return;
+    const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    if (!key) { alert("Please enter a valid lender name."); return; }
+    if (lenderList.some((l) => l.key === key)) { alert("That lender already exists."); return; }
+    const sort_order = Math.max(100, ...lenderList.map((l) => l.sort_order ?? 100)) + 10;
+    const { error } = await supabase().from("lenders").insert({ key, label, sort_order });
+    if (error) { alert("Couldn't add lender: " + error.message); return; }
+    setLenderList((cur) => [...cur, { key, label, sort_order }]);
   }
 
   async function downloadZip(lender: LenderKey) {
@@ -370,7 +412,8 @@ function Inner() {
           </div>
         </div>
 
-        {/* ── TAB / ACTION ROW — tabs + Review by CC (left), ⋯ menu (right). ── */}
+        {/* ── TAB / ACTION ROW — tabs (left); Review-by-CC → status + lender
+             dropdown → ⋯ menu (right), mirroring the loan-application bar. ── */}
         <ProfileTabBar
           left={
             <>
@@ -378,10 +421,13 @@ function Inner() {
               <TabButton label="Edit" icon={I.edit} onClick={() => router.push(`/admin/epc/${biz.id}` as any)} />
               <TabButton label="Activity Log" icon={I.eye} onClick={() => setActivityOpen(true)} />
               <TabButton label="Download ZIP" icon={I.download} disabled={downloading} onClick={() => setZipPickerOpen(true)} />
-              {/* Review by CC — shows once docs are uploaded (non-draft). Picking
-                  Approved / Rejected sets the internal status; the progress report
-                  then reads "Review by CC — Completed". */}
-              {biz.status !== "draft" && (
+            </>
+          }
+          right={
+            <>
+              {/* Before a CC decision (docs uploaded, not yet decided): the
+                  Review-by-CC dropdown to set Approved / Rejected. */}
+              {biz.status !== "draft" && biz.status !== "approved" && biz.status !== "rejected" && (
                 <DownloadMenu
                   label="Review by CC"
                   items={[
@@ -390,21 +436,49 @@ function Inner() {
                   ]}
                 />
               )}
+              {/* After the CC decision: a status box (Approved/Rejected by CC)
+                  plus the SAME lender-status dropdown the main table uses, so
+                  the lender decision can be set / rejected from here too. */}
+              {(biz.status === "approved" || biz.status === "rejected") && (
+                <>
+                  <span
+                    className={
+                      "inline-flex items-center px-3 py-1.5 rounded-[8px] text-[13px] font-semibold border whitespace-nowrap " +
+                      (biz.status === "approved"
+                        ? "bg-[#e6f6ee] text-[#0f7a52] border-[#bfe6d5]"
+                        : "bg-red-50 text-red-700 border-red-200")
+                    }
+                  >
+                    {biz.status === "approved" ? "Approved by CC" : "Rejected by CC"}
+                  </span>
+                  <LenderCell
+                    state={lenderMap}
+                    lenders={lenderList}
+                    onSet={(l, target) => void setLenderExclusive(l, target)}
+                    onAddLender={addLender}
+                  />
+                </>
+              )}
+              {biz.business_type !== "admin" && (
+                <KebabMenu
+                  items={[
+                    ...((biz.status === "approved" || biz.status === "rejected")
+                      ? [{
+                          label: "Change review",
+                          icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></svg>),
+                          onClick: () => { if (window.confirm("Revert the CC review back to Under Review?")) void changeStatus("under_review"); },
+                        }]
+                      : []),
+                    {
+                      label: "Delete",
+                      icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>),
+                      onClick: () => setDeleteOpen(true),
+                      danger: true,
+                    },
+                  ]}
+                />
+              )}
             </>
-          }
-          right={
-            biz.business_type !== "admin" ? (
-              <KebabMenu
-                items={[
-                  {
-                    label: "Delete",
-                    icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>),
-                    onClick: () => setDeleteOpen(true),
-                    danger: true,
-                  },
-                ]}
-              />
-            ) : undefined
           }
         />
 
@@ -660,41 +734,19 @@ function Inner() {
               } />
             </SectionCard>
 
-            {/* Lender status — settable right here (same epc_lender_status the
-                main table writes). Approved / Rejected unlock only after Docs. */}
-            <SectionCard title="Lender status" tint icon={I.money} adminOnly>
+            {/* Lenders — read-only summary of the three main lenders. The
+                settable dropdown lives in the action bar (after CC review). */}
+            <SectionCard title="Lenders" tint icon={I.money} adminOnly>
               {(["creditfair", "aerem", "solfin"] as const).map((key) => {
                 const l = lender.find((x) => x.lender === key);
                 const label = key === "creditfair" ? "Credit Fair" : key === "aerem" ? "Aerem" : "Solfin";
                 const state = l
-                  ? ((l as any).rejected ? "rejected" : l.approved ? "approved" : l.docs_given ? "docs" : "none")
+                  ? ((l as { rejected?: boolean }).rejected ? "rejected" : l.approved ? "approved" : l.docs_given ? "docs" : "none")
                   : "none";
-                const opts: Array<{ t: "docs" | "approved" | "rejected"; text: string; active: string }> = [
-                  { t: "docs",     text: "Docs",     active: "bg-[#dceffb] text-[#185fa5] border-[#bcdcf3]" },
-                  { t: "approved", text: "Approved", active: "bg-[#e6f6ee] text-[#0f7a52] border-[#bfe6d5]" },
-                  { t: "rejected", text: "Rejected", active: "bg-red-50 text-red-700 border-red-200" },
-                ];
                 return (
-                  <div key={key} className="flex items-center justify-between gap-2 py-1.5 border-b border-[#eef1f4] last:border-0">
-                    <span className="text-[#0f3d2e] font-medium text-[14px]">{label}</span>
-                    <div className="flex items-center gap-1">
-                      {opts.map((o) => {
-                        const isActive = state === o.t;
-                        const gated = (o.t === "approved" || o.t === "rejected") && state === "none";
-                        return (
-                          <button
-                            key={o.t}
-                            type="button"
-                            disabled={gated}
-                            title={gated ? "Mark Docs sent first" : undefined}
-                            onClick={() => void setLenderExclusive(key, isActive ? "none" : o.t)}
-                            className={`px-2 py-1 rounded-md border text-[11px] font-semibold transition ${isActive ? o.active : "bg-white text-[#5a8a76] border-[#e0f0e8] hover:bg-[#f0faf5]"} ${gated ? "opacity-40 cursor-not-allowed" : ""}`}
-                          >
-                            {o.text}
-                          </button>
-                        );
-                      })}
-                    </div>
+                  <div key={key} className="flex items-center justify-between text-[14px] py-1">
+                    <span className="text-[#0f3d2e] font-medium">{label}</span>
+                    <LenderStatePill state={state} />
                   </div>
                 );
               })}
