@@ -27,7 +27,7 @@ import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import CommentsSection from "@/components/CommentsSection";
 import ActivityLogModal from "@/components/ActivityLogModal";
 import DeleteEpcModal from "@/components/DeleteEpcModal";
-import ProfileTabBar, { TabButton } from "@/components/ProfileTabBar";
+import ProfileTabBar, { TabButton, DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
 // Shared view chrome — the SAME kit the Loan Application View imports, so the
 // two dashboards can't drift apart. EPC-specific pieces stay in this file.
 import {
@@ -319,77 +319,62 @@ function Inner() {
                 {legalSub && <div className="text-[14px] text-[#5a8a76] truncate mt-0.5">{legalSub}</div>}
               </div>
             </div>
-            <div className="flex gap-2 items-center flex-wrap">
-              {biz.epc_display_id && (
-                <Pill tint="blue" icon={I.id}>{biz.epc_display_id}</Pill>
+            {/* Top-right — selected Service (chips removed), plus a Rejected-by-
+                Lender flag when applicable. */}
+            <div className="text-right shrink-0">
+              <div className="text-[11px] uppercase tracking-wide text-[#5a8a76]">Service</div>
+              <div className="text-[15px] font-bold text-[#0f3d2e]">
+                {biz.service_type ? (SERVICE_LABEL[biz.service_type] ?? biz.service_type) : "Not set"}
+              </div>
+              {lender.some((l) => l.rejected) && (
+                <div className="mt-1 inline-block px-2.5 py-0.5 rounded-full text-[12px] font-semibold bg-red-50 text-red-700 border border-red-200">
+                  Rejected by Lender
+                </div>
               )}
-              {btLabel && <Pill tint="blue">{btLabel}</Pill>}
-              {biz.gstin_number && <Pill tint="blue">GSTIN {biz.gstin_number}</Pill>}
-              {biz.pm_surya_ghar && (
-                <Pill tint="blue">
-                  PM Surya Ghar: {biz.pm_surya_ghar === "other" ? (biz.pm_surya_ghar_other || "Other") : cap(biz.pm_surya_ghar)}
-                </Pill>
-              )}
-              <Pill tint="amber">
-                {biz.status === "under_review" ? "Under review" :
-                 biz.status === "approved"     ? "Approved" :
-                 biz.status === "on_hold"      ? "On hold" :
-                 biz.status === "rejected"     ? "Rejected" : "Draft"}
-              </Pill>
             </div>
           </div>
         </div>
 
-        {/* ── TAB / ACTION ROW — tabs (left) + Delete (right). Sits between the
-            heading bar and the internal-status/service band (A3). The internal
-            Approve/Hold/Reject controls stay in the internal-status band. ── */}
+        {/* ── TAB / ACTION ROW — tabs + Review by CC (left), ⋯ menu (right). ── */}
         <ProfileTabBar
           left={
             <>
-              <TabButton label="Application" icon={I.building} active />
+              <TabButton label="Profile" icon={I.building} active />
               <TabButton label="Edit" icon={I.edit} onClick={() => router.push(`/admin/epc/${biz.id}` as any)} />
               <TabButton label="Activity Log" icon={I.eye} onClick={() => setActivityOpen(true)} />
               <TabButton label="Download ZIP" icon={I.download} disabled={downloading} onClick={() => setZipPickerOpen(true)} />
+              {/* Review by CC — shows once docs are uploaded (non-draft). Picking
+                  Approved / Rejected sets the internal status; the progress report
+                  then reads "Review by CC — Completed". */}
+              {biz.status !== "draft" && (
+                <DownloadMenu
+                  label="Review by CC"
+                  items={[
+                    { label: "Approved", onClick: () => void changeStatus("approved") },
+                    { label: "Rejected", onClick: () => void changeStatus("rejected") },
+                  ]}
+                />
+              )}
             </>
           }
           right={
             biz.business_type !== "admin" ? (
-              <button
-                type="button"
-                onClick={() => setDeleteOpen(true)}
-                title="Delete profile" aria-label="Delete profile"
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-[13px] font-semibold border border-red-300 text-red-700 rounded-[8px] hover:bg-red-50 hover:border-red-500 transition-colors"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
-                Delete
-              </button>
+              <KebabMenu
+                items={[
+                  {
+                    label: "Delete",
+                    icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>),
+                    onClick: () => setDeleteOpen(true),
+                    danger: true,
+                  },
+                ]}
+              />
             ) : undefined
           }
         />
 
-        {/* ── INTERNAL STATUS BAND — admin-only, visually distinct ──── */}
-        {/* Slate palette (not brand green) so it can't be confused with     */}
-        {/* the lender "Approved" tick, which is what actually unlocks the   */}
-        {/* EPC's loan application. This field is purely internal admin      */}
-        {/* tracking; the EPC never sees it and it never gates their access. */}
-        {/* Internal status + Service side by side (stacks on narrow). */}
-        <div className="grid gap-4 lg:grid-cols-2">
-          <InternalStatusBand
-            current={biz.status}
-            busy={statusBusy}
-            onChange={changeStatus}
-          />
-
-          {/* ── SERVICE — now shown on EVERY EPC profile, side by side with the
-              internal-status band (was previously approved-only). ── */}
-          <ServiceBand
-            current={biz.service_type ?? null}
-            busy={serviceBusy}
-            onChange={setService}
-          />
-        </div>
-
-        {/* ── PROGRESS TRACKER — prominent standalone band ─────────── */}
+        {/* ── PROGRESS TRACKER — hidden once a lender approves (diminishes) ── */}
+        {!anyApproved && (
         <div className="rounded-[12px] border border-[#cdeadd] bg-white p-6 sm:p-8 mb-4">
           <div className="flex items-center gap-3 sm:gap-6">
             <BigProgressStep
@@ -399,6 +384,16 @@ function Inner() {
               sub={biz.status !== "draft" ? "Complete" : "Pending"}
             />
             <BigConnector active={biz.status !== "draft"} />
+            <BigProgressStep
+              icon={I.circleCheck}
+              done={biz.status === "approved" || biz.status === "rejected"}
+              failed={biz.status === "rejected"}
+              inProgress={biz.status !== "draft" && biz.status !== "approved" && biz.status !== "rejected"}
+              label="Review by CC"
+              sub={biz.status === "approved" ? "Completed — Approved" : biz.status === "rejected" ? "Completed — Rejected" : biz.status !== "draft" ? "Incomplete" : "Pending"}
+              mutedIfPending
+            />
+            <BigConnector active={biz.status === "approved" || biz.status === "rejected"} />
             <BigProgressStep
               icon={I.send}
               done={docsGivenCount === 3}
@@ -416,6 +411,7 @@ function Inner() {
             />
           </div>
         </div>
+        )}
 
         {/* ── EPC HEALTH — all-time aggregate; only once internally approved ─ */}
         {biz.status === "approved" && (() => {
