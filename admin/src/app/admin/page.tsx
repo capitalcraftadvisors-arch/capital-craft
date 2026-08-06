@@ -140,6 +140,80 @@ function inCurrentFY(dateStr: string | null | undefined): boolean {
   return t >= start && t < end;
 }
 
+// ── Summary-card time period (Today / Week / Month / Quarter / Year / Custom) ──
+type Period = "today" | "week" | "month" | "quarter" | "year" | "custom";
+const PERIOD_OPTIONS: Array<{ value: Period; label: string }> = [
+  { value: "today",   label: "Today" },
+  { value: "week",    label: "This Week" },
+  { value: "month",   label: "This Month" },
+  { value: "quarter", label: "This Quarter" },
+  { value: "year",    label: "This Year" },
+  { value: "custom",  label: "Custom range" },
+];
+function periodBounds(period: Period, from?: string, to?: string): { start: number; end: number } {
+  const DAY = 86400000;
+  if (period === "custom") {
+    return {
+      start: from ? Date.parse(from + "T00:00:00+05:30") : -Infinity,
+      end:   to   ? Date.parse(to + "T23:59:59.999+05:30") : Infinity,
+    };
+  }
+  const p = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kolkata", year: "numeric", month: "numeric", day: "numeric", weekday: "short" }).formatToParts(new Date());
+  const y = Number(p.find((x) => x.type === "year")?.value);
+  const m = Number(p.find((x) => x.type === "month")?.value);
+  const d = Number(p.find((x) => x.type === "day")?.value);
+  const wd = p.find((x) => x.type === "weekday")?.value ?? "Mon";
+  const mid = (yy: number, mm: number, dd: number) =>
+    Date.parse(`${yy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}T00:00:00+05:30`);
+  const todayStart = mid(y, m, d);
+  switch (period) {
+    case "today":   return { start: todayStart, end: todayStart + DAY };
+    case "week": {
+      const off = Math.max(0, ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(wd));
+      const start = todayStart - off * DAY;
+      return { start, end: start + 7 * DAY };
+    }
+    case "month":   return { start: mid(y, m, 1), end: m === 12 ? mid(y + 1, 1, 1) : mid(y, m + 1, 1) };
+    case "quarter": {
+      const qs = m - ((m - 1) % 3);
+      const qe = qs + 3;
+      return { start: mid(y, qs, 1), end: qe > 12 ? mid(y + 1, qe - 12, 1) : mid(y, qe, 1) };
+    }
+    case "year":    return { start: mid(y, 1, 1), end: mid(y + 1, 1, 1) };
+    default:        return { start: -Infinity, end: Infinity };
+  }
+}
+function inPeriod(dateStr: string | null | undefined, period: Period, from?: string, to?: string): boolean {
+  if (!dateStr) return false;
+  const t = Date.parse(dateStr);
+  if (isNaN(t)) return false;
+  const { start, end } = periodBounds(period, from, to);
+  return t >= start && t < end;
+}
+function PeriodPicker({ period, onPeriod, from, onFrom, to, onTo }: {
+  period: Period; onPeriod: (p: Period) => void;
+  from: string; onFrom: (v: string) => void; to: string; onTo: (v: string) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2 flex-wrap mb-3">
+      <select
+        value={period}
+        onChange={(e) => onPeriod(e.target.value as Period)}
+        className="rounded-input border border-line bg-white px-3 py-2 text-[13px] font-medium text-[#0f3d2e] outline-none focus:border-[#185fa5] cursor-pointer"
+      >
+        {PERIOD_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+      {period === "custom" && (
+        <>
+          <input type="date" value={from} onChange={(e) => onFrom(e.target.value)} className="rounded-input border border-line bg-white px-2.5 py-2 text-[13px]" />
+          <span className="text-[12px] text-text-muted">to</span>
+          <input type="date" value={to} onChange={(e) => onTo(e.target.value)} className="rounded-input border border-line bg-white px-2.5 py-2 text-[13px]" />
+        </>
+      )}
+    </div>
+  );
+}
+
 // Compact, clickable stat cards. Clicking sets the active category (key);
 // clicking the active one — or the "" (Total) card — clears it. Each card's
 // count is computed with the SAME predicate the table filters on, so a card's
@@ -675,7 +749,10 @@ function EpcsTab() {
   }
 
   // Mutually-exclusive stage cards (sum = Total) + Application Unseen (overlap).
-  const fyRows = useMemo(() => rows.filter((r) => inCurrentFY(r.created_at)), [rows]);
+  const [period, setPeriod] = useState<Period>("month");
+  const [pFrom, setPFrom] = useState("");
+  const [pTo, setPTo] = useState("");
+  const fyRows = useMemo(() => rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo)), [rows, period, pFrom, pTo]);
   const cards: SummaryCard[] = [
     { key: "",                label: "Total EPCs",          value: fyRows.length },
     { key: "unseen",          label: "Application Unseen",  value: fyRows.filter((r) => catMatch(r, "unseen")).length },
@@ -728,6 +805,7 @@ function EpcsTab() {
 
   return (
     <>
+      <PeriodPicker period={period} onPeriod={setPeriod} from={pFrom} onFrom={setPFrom} to={pTo} onTo={setPTo} />
       <SummaryCards accent={ACCENTS.epcs.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
       <div className="flex items-center gap-3 mb-3">
@@ -966,7 +1044,18 @@ function LenderCell({
 
   function place() {
     const r = btnRef.current?.getBoundingClientRect();
-    if (r) setPos({ top: r.bottom + 6, left: Math.max(8, r.right - 340) });
+    if (!r) return;
+    const W = 340, H = 380, M = 8;              // panel width, est. max height, viewport margin
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const roomBelow = vh - r.bottom - M;
+    // Flip upward only when there isn't room below AND there's more room above
+    // (fixes the popover getting clipped on the last rows of the table).
+    const up = roomBelow < H && r.top - M > roomBelow;
+    let top = up ? Math.max(M, r.top - 6 - H) : r.bottom + 6;
+    // If opening below would still run past the bottom edge, pull it up to fit.
+    if (!up && top + H > vh - M) top = Math.max(M, vh - M - H);
+    const left = Math.max(M, Math.min(r.right - W, vw - W - M));
+    setPos({ top, left });
   }
   function toggle() { if (!open) place(); setOpen((o) => !o); }
 
@@ -1409,7 +1498,10 @@ function AppsTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, q, categoryFilter, statusFilter, epcFilter, lenderFilter, dateFrom, dateTo, sortKey]);
 
-  const fyRows = useMemo(() => rows.filter((r) => inCurrentFY(r.created_at)), [rows]);
+  const [period, setPeriod] = useState<Period>("month");
+  const [pFrom, setPFrom] = useState("");
+  const [pTo, setPTo] = useState("");
+  const fyRows = useMemo(() => rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo)), [rows, period, pFrom, pTo]);
   const cards: SummaryCard[] = [
     { key: "",             label: "Total Applications", value: fyRows.length },
     { key: "unseen",       label: "Application Unseen", value: fyRows.filter((r) => catMatch(r, "unseen")).length },
@@ -1465,6 +1557,7 @@ function AppsTab() {
 
   return (
     <>
+      <PeriodPicker period={period} onPeriod={setPeriod} from={pFrom} onFrom={setPFrom} to={pTo} onTo={setPTo} />
       <SummaryCards accent={ACCENTS.apps.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
       <div className="flex items-center gap-3 mb-3">
@@ -1930,7 +2023,10 @@ function InsuranceTab() {
     hold: "bg-[#dceffb] text-[#185fa5]",
   };
 
-  const fyRows = useMemo(() => rows.filter((r) => inCurrentFY(r.created_at)), [rows]);
+  const [period, setPeriod] = useState<Period>("month");
+  const [pFrom, setPFrom] = useState("");
+  const [pTo, setPTo] = useState("");
+  const fyRows = useMemo(() => rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo)), [rows, period, pFrom, pTo]);
   const cards: SummaryCard[] = [
     { key: "",                label: "Total Applications", value: fyRows.length },
     { key: "docs_pending",    label: "Docs Pending",       value: fyRows.filter((r) => catMatch(r, "docs_pending")).length },
@@ -1947,6 +2043,7 @@ function InsuranceTab() {
 
   return (
     <>
+      <PeriodPicker period={period} onPeriod={setPeriod} from={pFrom} onFrom={setPFrom} to={pTo} onTo={setPTo} />
       <SummaryCards accent={ACCENTS.insurance.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
       <div className="mb-3 flex items-center gap-3">
@@ -2171,7 +2268,10 @@ function LeadsTab() {
     return true;
   });
 
-  const fyRows = rows.filter((r) => inCurrentFY(r.created_at));
+  const [period, setPeriod] = useState<Period>("month");
+  const [pFrom, setPFrom] = useState("");
+  const [pTo, setPTo] = useState("");
+  const fyRows = rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo));
   const cards: SummaryCard[] = [
     { key: "",          label: "Total Leads", value: fyRows.length },
     { key: "new",       label: "New",         value: fyRows.filter((r) => r.status === "new").length },
@@ -2189,6 +2289,7 @@ function LeadsTab() {
 
   return (
     <>
+      <PeriodPicker period={period} onPeriod={setPeriod} from={pFrom} onFrom={setPFrom} to={pTo} onTo={setPTo} />
       <SummaryCards accent={ACCENTS.leads.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
       <div className="flex items-center gap-3 mb-3">

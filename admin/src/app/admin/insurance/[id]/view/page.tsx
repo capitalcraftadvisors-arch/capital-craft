@@ -217,7 +217,7 @@ function Inner() {
         <ProfileTabBar
           left={
             <>
-              <TabButton label="Application" icon={I.user} active />
+              <TabButton label="Profile" icon={I.user} active />
               <TabButton label="Edit" icon={I.edit} onClick={() => router.push(`/dashboard/insurance/${app.id}/step-1` as any)} />
               <TabButton label="Download ZIP" icon={I.download} disabled={downloading} onClick={() => void downloadZip()} />
             </>

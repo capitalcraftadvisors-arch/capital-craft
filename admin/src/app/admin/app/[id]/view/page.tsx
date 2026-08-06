@@ -700,7 +700,7 @@ function Inner() {
         <ProfileTabBar
           left={
             <>
-              <TabButton label="Application" icon={I.user} active />
+              <TabButton label="Profile" icon={I.user} active />
               {/* After approval, Edit becomes a dropdown of the three editable
                   sections (each editable once, then locked). Before approval it's
                   the normal jump to the step flow. */}
