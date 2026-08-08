@@ -40,7 +40,11 @@ enabled = true
 file_size_limit = "50MiB"
 
 [auth]
-enabled = false
+# Local-only: this project mints its own JWTs via an edge function, so GoTrue
+# isn't used at runtime — but enabling it locally makes `supabase start` set up
+# the auth schema + auth.jwt()/uid()/role() helpers the RLS policies rely on
+# (hosted Supabase provides these automatically). Never used by production.
+enabled = true
 
 [edge_runtime]
 enabled = true

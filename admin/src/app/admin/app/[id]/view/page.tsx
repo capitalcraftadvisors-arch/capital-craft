@@ -503,12 +503,15 @@ function Inner() {
   // present (tranche/completion docs excluded) — mirrors the dashboard's
   // loanDocsPending. The Docs Sent button stays gated on this.
   const hasCat = (c: string) => docs.some((d) => d.category === c);
+  // Required docs to enable Doc Sent (Steps 1–4). Rooftop photo (Step 3) is
+  // intentionally NOT required — optional in backend logic only, with no
+  // "optional" label in the UI. Sanction Letter / Tranche 1 / Tranche 2 are
+  // NOT required here (they only come after approval).
   const appDocsComplete =
     hasCat("borrower_pan") &&
     !!loan.aadhaar_front_path && !!loan.aadhaar_back_path &&
     (hasCat("quotation")        || !!loan.proforma_invoice_path) &&
     (hasCat("electricity_bill") || !!loan.ebill_path) &&
-    (hasCat("borrower_photo")   || !!loan.rooftop_photo_path) &&
     (hasCat("customer_photo")   || !!loan.customer_photo_path) &&
     (hasCat("bank_statement")   || !!loan.bank_statement_path) &&
     (!hasCoapp || (!!loan.coapp_pan_path && !!loan.coapp_aadhaar_front_path && !!loan.coapp_aadhaar_back_path));
