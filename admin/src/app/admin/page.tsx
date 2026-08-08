@@ -23,6 +23,7 @@ import {
 import { policyValidityParts, VALIDITY_TEXT } from "@/lib/insurance-validity";
 import LenderCell from "@/components/LenderCell";
 import LoanLeadsTab from "@/components/LoanLeadsTab";
+import { LOAN_LENDER_COLS, latestLenderStatus, latestStatusLabel, type LoanLenderRow } from "@/lib/loan-lenders";
 
 type Tab = "epcs" | "apps" | "loanleads" | "insurance" | "leads";
 
@@ -1063,6 +1064,8 @@ function AppsTab() {
     epc_business: { contact_name: string | null; trade_name: string | null; legal_name: string | null; epc_display_id: string | null } | null;
   };
   const [rows, setRows] = useState<Row[]>([]);
+  // 6h — per-application latest lender status label (most-recent event).
+  const [lenderLatest, setLenderLatest] = useState<Record<string, string>>({});
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   // Client-side filters over the already-loaded list.
@@ -1162,6 +1165,18 @@ function AppsTab() {
         )
         .order("created_at", { ascending: false });
       setRows((data ?? []) as unknown as Row[]);
+
+      // Per-lender latest status (6h) — group loan_application_lenders by app,
+      // then the most-recent event across each app's lenders becomes its label.
+      const { data: ll } = await supabase().from("loan_application_lenders").select(LOAN_LENDER_COLS);
+      const byApp: Record<string, LoanLenderRow[]> = {};
+      for (const lr of ((ll ?? []) as unknown as LoanLenderRow[])) (byApp[lr.application_id] ??= []).push(lr);
+      const map: Record<string, string> = {};
+      for (const [appId, appRows] of Object.entries(byApp)) {
+        const label = latestStatusLabel(latestLenderStatus(appRows));
+        if (label) map[appId] = label;
+      }
+      setLenderLatest(map);
     })();
   }, []);
 
@@ -1520,7 +1535,7 @@ function AppsTab() {
                     <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#eef1f0] text-[#5a8a76]">
                       Draft
                     </span>
-                  ) : r.status === "docs_sent" ? (
+                  ) : r.status === "docs_sent" && !lenderLatest[r.id] ? (
                     <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#dceffb] text-[#185fa5]">
                       Docs Sent
                     </span>
@@ -1531,6 +1546,11 @@ function AppsTab() {
                   ) : r.status === "approved" && r.first_disbursement_amount != null ? (
                     <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#dceffb] text-[#185fa5]">
                       1st Disbursement Done
+                    </span>
+                  ) : lenderLatest[r.id] ? (
+                    // 6h — latest status across all lenders (most-recent event).
+                    <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide bg-[#eef0fb] text-[#4338ca]">
+                      {lenderLatest[r.id]}
                     </span>
                   ) : (
                     <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${OUTCOME_PILL[lenderOutcome(r.status)]}`}>

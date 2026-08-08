@@ -164,6 +164,36 @@ function Inner() {
       return;
     }
 
+    // Per-lender record (loan_application_lenders): mark THIS lender approved and
+    // store ITS OWN approval details (6h), so multiple lenders each keep a
+    // separate record and the Lender Status box shows the approved tick.
+    if (lender) {
+      const label = search.get("label") || LENDER_LABEL[String(lender)] || String(lender);
+      const { data: existingLender } = await supabase()
+        .from("loan_application_lenders")
+        .select("id, approved_at")
+        .eq("application_id", loan.id)
+        .eq("lender_key", lender)
+        .maybeSingle();
+      const lp: Record<string, unknown> = {
+        approval_recorded_at: now,
+        approval_details: details,
+        rejected_at: null,
+        rejection_reason: null,
+      };
+      if (editMode !== "approval") lp.approved_at = now;
+      if (existingLender) {
+        const ex = existingLender as { id: string; approved_at: string | null };
+        if (!ex.approved_at && lp.approved_at == null) lp.approved_at = now;
+        await supabase().from("loan_application_lenders").update(lp).eq("id", ex.id);
+      } else {
+        await supabase().from("loan_application_lenders").insert({
+          application_id: loan.id, lender_key: lender, lender_label: label,
+          docs_sent_at: now, approved_at: now, ...lp,
+        });
+      }
+    }
+
     await logLoanActivity(loan.id, "approved", {
       detail: editMode === "approval"
         ? "Approval details edited"

@@ -19,8 +19,13 @@ import { getDocumentUrl, deleteDocument } from "@/lib/storage";
 import DeleteLoanAppModal from "@/components/DeleteLoanAppModal";
 import CommentsSection from "@/components/CommentsSection";
 import LoanActivityLogModal from "@/components/LoanActivityLogModal";
-import LenderDecisionModal from "@/components/LenderDecisionModal";
 import { LENDER_LABEL, type ApprovalDetails } from "@/components/ApprovalDetailsTable";
+import LoanLenderPickerModal, { type PickerLender } from "@/components/LoanLenderPickerModal";
+import LoanLenderStatusBox from "@/components/LoanLenderStatusBox";
+import {
+  LOAN_LENDER_COLS, DEFAULT_LOAN_LENDERS, type LoanLenderRow,
+  latestLenderStatus, lendersWithDocs, approvedLenders,
+} from "@/lib/loan-lenders";
 import LenderPickerModal, { type LenderKey } from "@/components/LenderPickerModal";
 import ProfileTabBar, { TabButton, DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
 import { logLoanActivity } from "@/lib/loanAudit";
@@ -253,13 +258,17 @@ function Inner() {
   const [trancheBusy, setTrancheBusy] = useState<null | "1" | "2">(null);
   const [approveOpen, setApproveOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
+  const [docSentPickerOpen, setDocSentPickerOpen] = useState(false);
   const [zipPickerOpen, setZipPickerOpen] = useState(false);
   const [abortOpen, setAbortOpen] = useState(false);
   const [abortReason, setAbortReason] = useState("");
+  const [lenderRows, setLenderRows] = useState<LoanLenderRow[]>([]);
+  // 6h — which approved lender's details are shown in the Approval Details card.
+  const [detailsLender, setDetailsLender] = useState<string>("");
 
   useEffect(() => {
     void (async () => {
-      const [{ data: la }, { data: dd }] = await Promise.all([
+      const [{ data: la }, { data: dd }, { data: ll }] = await Promise.all([
         supabase().from("epc_applications")
           .select("*, epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)")
           .eq("id", params.id)
@@ -267,10 +276,15 @@ function Inner() {
         supabase().from("user_application_docs")
           .select("id, category, storage_path, file_name, mime_type")
           .eq("application_id", params.id),
+        supabase().from("loan_application_lenders")
+          .select(LOAN_LENDER_COLS)
+          .eq("application_id", params.id)
+          .order("docs_sent_at", { ascending: true }),
       ]);
       setLoan(la);
       const docRows = (dd ?? []) as Doc[];
       setDocs(docRows);
+      setLenderRows((ll ?? []) as unknown as LoanLenderRow[]);
       setLoading(false);
 
       const photoDoc = docRows.find((d) => d.category === "customer_photo");
@@ -516,6 +530,21 @@ function Inner() {
     (hasCat("bank_statement")   || !!loan.bank_statement_path) &&
     (!hasCoapp || (!!loan.coapp_pan_path && !!loan.coapp_aadhaar_front_path && !!loan.coapp_aadhaar_back_path));
 
+  // ── Per-lender (loan_application_lenders) derived state ──────────────
+  const latest = latestLenderStatus(lenderRows);
+  const withDocs = lendersWithDocs(lenderRows);
+  const approvedRows = approvedLenders(lenderRows);
+  const anyApprovedLender = approvedRows.length > 0;
+  const anyLenderActivity = lenderRows.some((r) => r.docs_sent_at || r.approved_at || r.rejected_at);
+  // Lenders that can still be sent docs (defaults + any custom already added, minus already-sent).
+  const availableForDocSent: PickerLender[] = [
+    ...DEFAULT_LOAN_LENDERS,
+    ...lenderRows
+      .filter((r) => !DEFAULT_LOAN_LENDERS.some((d) => d.key === r.lender_key))
+      .map((r) => ({ key: r.lender_key, label: r.lender_label })),
+  ].filter((l) => !lenderRows.some((r) => r.lender_key === l.key && r.docs_sent_at));
+  const withDocsOptions: PickerLender[] = withDocs.map((r) => ({ key: r.lender_key, label: r.lender_label }));
+
   // Tracker reads an "effective" status so a held case still shows where it
   // was parked (Resume returns it there).
   const effStatus = onHold ? (loan.status_before_hold ?? "under_review") : statusVal;
@@ -556,8 +585,18 @@ function Inner() {
 
   // Three-dot overflow menu (replaces the bare trash button). "Change review"
   // only appears once there's a decision/abort to undo.
-  const canChangeReview = approvedPlus || rejected || aborted;
+  const canChangeReview = approvedPlus || rejected || aborted || anyLenderActivity;
   const kebabItems = [
+    ...(canRfd ? [{
+      label: "Mark RFD (ready for disbursement)",
+      icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M9 12l2 2 4-4" /></svg>),
+      onClick: markRfd,
+    }] : []),
+    ...(!aborted ? [{
+      label: "Abort application",
+      icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M5.6 5.6l12.8 12.8" /></svg>),
+      onClick: () => setAbortOpen(true),
+    }] : []),
     ...(canChangeReview ? [{
       label: "Change review",
       icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></svg>),
@@ -573,6 +612,78 @@ function Inner() {
 
   const markDocsSent = () =>
     void changeStatus("docs_sent", { docs_sent_at: new Date().toISOString() }, "Docs sent to lender");
+
+  // ── Per-lender actions ───────────────────────────────────────────────
+  async function reloadLenders(): Promise<LoanLenderRow[]> {
+    const { data } = await supabase()
+      .from("loan_application_lenders").select(LOAN_LENDER_COLS)
+      .eq("application_id", params.id).order("docs_sent_at", { ascending: true });
+    const rows = (data ?? []) as unknown as LoanLenderRow[];
+    setLenderRows(rows);
+    return rows;
+  }
+
+  // Keep epc_applications.status at the FURTHEST state (approval sticks) so the
+  // tracker + disbursement keep working; the dashboard headline shows the LATEST
+  // event separately (computed from the per-lender rows).
+  async function syncHeadline(rows: LoanLenderRow[]) {
+    if (!loan) return;
+    const approvedNow = rows.filter((r) => r.approved_at);
+    const anyDocs = rows.some((r) => r.docs_sent_at);
+    const anyRej = rows.some((r) => r.rejected_at);
+    let next: string = loan.status ?? "under_review";
+    if (approvedNow.length) next = "approved";
+    else if (anyDocs) next = "docs_sent";
+    else if (anyRej) next = "rejected";
+    const latestApproved = approvedNow.slice().sort((a, b) => (String(b.approved_at) > String(a.approved_at) ? 1 : -1))[0]?.lender_key ?? null;
+    const patch: Record<string, unknown> = { status: next };
+    if (approvedNow.length) patch.approved_lender = latestApproved;
+    await supabase().from("epc_applications").update(patch).eq("id", loan.id);
+    setLoan((prev) => (prev ? ({ ...prev, ...patch } as Loan) : prev));
+  }
+
+  async function sendDocsToLender(lender: PickerLender) {
+    if (!loan || statusBusy) return;
+    setStatusBusy(true); setStatusMsg(null);
+    try {
+      const existing = lenderRows.find((r) => r.lender_key === lender.key);
+      if (existing) {
+        if (!existing.docs_sent_at) {
+          await supabase().from("loan_application_lenders").update({ docs_sent_at: new Date().toISOString() }).eq("id", existing.id);
+        }
+      } else {
+        await supabase().from("loan_application_lenders").insert({ application_id: loan.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: new Date().toISOString() });
+      }
+      const rows = await reloadLenders();
+      await logLoanActivity(loan.id, "status_change", { detail: `Docs sent to ${lender.label}` });
+      await syncHeadline(rows);
+      setStatusMsg(`Docs sent to ${lender.label}.`);
+    } catch (e) { setStatusMsg("Couldn't record: " + (e as Error).message); }
+    finally { setStatusBusy(false); }
+  }
+
+  // Approve routes to the approval-details screen for that lender; the approval
+  // page writes the lender's approved_at + approval_details and syncs status.
+  function approvePickLender(lender: PickerLender) {
+    if (!loan) return;
+    router.push(`/admin/app/${loan.id}/approval?lender=${lender.key}&label=${encodeURIComponent(lender.label)}` as any);
+  }
+
+  async function rejectLenderNow(lender: PickerLender, reason?: string) {
+    if (!loan || statusBusy) return;
+    setStatusBusy(true); setStatusMsg(null);
+    try {
+      const existing = lenderRows.find((r) => r.lender_key === lender.key);
+      const patch = { rejected_at: new Date().toISOString(), rejection_reason: reason || null, approved_at: null, approval_details: null };
+      if (existing) await supabase().from("loan_application_lenders").update(patch).eq("id", existing.id);
+      else await supabase().from("loan_application_lenders").insert({ application_id: loan.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: new Date().toISOString(), ...patch });
+      const rows = await reloadLenders();
+      await logLoanActivity(loan.id, "rejected", { detail: `Rejected by ${lender.label}${reason ? ` — ${reason}` : ""}` });
+      await syncHeadline(rows);
+      setStatusMsg(`Rejected by ${lender.label}.`);
+    } catch (e) { setStatusMsg("Couldn't record: " + (e as Error).message); }
+    finally { setStatusBusy(false); }
+  }
   const holdCase = () =>
     void changeStatus("on_hold", { hold_at: new Date().toISOString(), status_before_hold: loan.status }, "Put on hold");
   const resumeHold = () => {
@@ -600,6 +711,9 @@ function Inner() {
   // Header status/decision actions — Submitted → Docs Sent → Approve/Reject,
   // plus Hold/Resume. Approve/Reject handlers unchanged; the back-transitions
   // retarget to Docs Sent, and Docs Sent → Under Review is the single undo.
+  // Per-lender action bar: the three controls stay visible at every stage
+  // (6f). Doc Sent opens a lender picker (already-sent lenders excluded, 6b/6g);
+  // Approve / Reject pick from the lenders that have docs (6e).
   const statusActions =
     onHold ? (
       <>
@@ -608,51 +722,35 @@ function Inner() {
         </span>
         <HAction variant="primary" disabled={statusBusy} onClick={resumeHold}>Resume</HAction>
       </>
-    ) : approved ? (
-      // No "Approved" pill here — the tracker already shows the Approved stage.
-      // The bar carries the next actions: Mark RFD + Disbursement (+ Abort).
+    ) : (
       <>
         <HAction
           variant="primary"
-          disabled={statusBusy || !canRfd}
-          title={canRfd ? undefined : (!approvalFilled ? "Fill approval details first" : !tranche1Complete ? "Upload both Tranche-1 documents first" : undefined)}
-          onClick={markRfd}
+          icon={I.send}
+          disabled={statusBusy || !appDocsComplete}
+          title={appDocsComplete ? undefined : "Upload all required documents first"}
+          onClick={() => setDocSentPickerOpen(true)}
         >
-          Mark RFD
+          Doc Sent
         </HAction>
-        <HAction variant="reject" disabled={statusBusy} onClick={() => setAbortOpen(true)}>Abort</HAction>
-      </>
-    ) : rfd ? (
-      // No "RFD" pill either — the tracker shows the RFD stage; the bar just
-      // carries Disbursement (rendered next to statusActions) + Abort.
-      <>
-        <HAction variant="reject" disabled={statusBusy} onClick={() => setAbortOpen(true)}>Abort</HAction>
-      </>
-    ) : rejected ? (
-      <HAction variant="ghost" disabled={statusBusy} onClick={() => void changeStatus("docs_sent")}>Re-open to Docs Sent</HAction>
-    ) : (
-      <>
-        {docsSent ? (
-          <>
-            <span className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border bg-[#dceffb] text-[#185fa5] border-[#bfe0f5] inline-flex items-center gap-1.5">
-              {I.send} Docs sent
-            </span>
-            <HAction variant="ghost" disabled={statusBusy} onClick={() => void changeStatus("under_review")}>Undo → Under Review</HAction>
-          </>
-        ) : (
-          <HAction
-            variant="primary"
-            icon={I.send}
-            disabled={statusBusy || !appDocsComplete}
-            title={appDocsComplete ? undefined : "Upload all application documents first"}
-            onClick={markDocsSent}
-          >
-            Docs Sent
-          </HAction>
-        )}
-        <HAction variant="approve" icon={I.check} disabled={statusBusy || !docsSent} title={docsSent ? undefined : "Mark Docs Sent first"} onClick={() => setApproveOpen(true)}>Approve</HAction>
-        <HAction variant="reject" disabled={statusBusy || !docsSent} title={docsSent ? undefined : "Mark Docs Sent first"} onClick={() => setRejectOpen(true)}>Rejection</HAction>
-        {(underReview || docsSent) && (
+        <HAction
+          variant="approve"
+          icon={I.check}
+          disabled={statusBusy || withDocs.length === 0}
+          title={withDocs.length ? undefined : "Send docs to a lender first"}
+          onClick={() => setApproveOpen(true)}
+        >
+          Approve
+        </HAction>
+        <HAction
+          variant="reject"
+          disabled={statusBusy || withDocs.length === 0}
+          title={withDocs.length ? undefined : "Send docs to a lender first"}
+          onClick={() => setRejectOpen(true)}
+        >
+          Reject
+        </HAction>
+        {(underReview || docsSent) && !anyApprovedLender && (
           <HAction variant="amber" icon={PAUSE} disabled={statusBusy} onClick={holdCase}>Hold</HAction>
         )}
       </>
@@ -777,7 +875,7 @@ function Inner() {
                 {/* Disbursement page opens once approval details are filled — it
                     hosts the Tranche-1 upload; the 1st-amount field there stays
                     locked until RFD is marked. */}
-                {approvedPlus && approvalFilled && (
+                {anyApprovedLender && (
                   <HAction variant="amber" icon={I.money} onClick={() => router.push(`/admin/app/${loan.id}/disbursement` as any)}>
                     Disbursement
                   </HAction>
@@ -789,6 +887,14 @@ function Inner() {
             )
           }
         />
+
+        {/* Per-lender status box (6d) — one row per lender with its own
+            docs-sent / approved / rejected timeline. */}
+        {lenderRows.length > 0 && (
+          <div className="mb-4">
+            <LoanLenderStatusBox rows={lenderRows} />
+          </div>
+        )}
 
         {/* ── PROGRESS TRACKER — hidden once all stages are complete (2nd disbursement) ── */}
         {!secondDone && (
@@ -1065,19 +1171,37 @@ function Inner() {
         epcName={applicantName}
         onConfirm={(lender) => downloadZip(lender)}
       />
-      <LenderDecisionModal
-        open={approveOpen}
-        kind="approve"
-        applicantName={applicantName}
-        onClose={() => setApproveOpen(false)}
-        onConfirm={onApproveConfirm}
+      <LoanLenderPickerModal
+        open={docSentPickerOpen}
+        title="Send documents to a lender"
+        subtitle={`For ${applicantName}. Pick the lender you're sending the documents to.`}
+        options={availableForDocSent}
+        allowAdd
+        confirmLabel="Mark docs sent"
+        tone="blue"
+        onClose={() => setDocSentPickerOpen(false)}
+        onConfirm={(l) => sendDocsToLender(l)}
       />
-      <LenderDecisionModal
+      <LoanLenderPickerModal
+        open={approveOpen}
+        title="Approve application"
+        subtitle={`For ${applicantName}. Which lender approved? You'll fill in the approval details next.`}
+        options={withDocsOptions}
+        confirmLabel="Continue to details"
+        tone="green"
+        onClose={() => setApproveOpen(false)}
+        onConfirm={(l) => approvePickLender(l)}
+      />
+      <LoanLenderPickerModal
         open={rejectOpen}
-        kind="reject"
-        applicantName={applicantName}
+        title="Reject application"
+        subtitle={`For ${applicantName}. Which lender rejected?`}
+        options={withDocsOptions}
+        needReason
+        confirmLabel="Mark rejected"
+        tone="red"
         onClose={() => setRejectOpen(false)}
-        onConfirm={onRejectConfirm}
+        onConfirm={(l, reason) => rejectLenderNow(l, reason)}
       />
       {abortOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => { if (!statusBusy) setAbortOpen(false); }}>

@@ -31,13 +31,11 @@ create table if not exists loan_application_lenders (
   rejected_at       timestamptz,
   rejection_reason  text,
 
-  -- Per-lender approval details (mirror the single-approval columns so the
-  -- Approval Details section can show a separate record per approved lender).
-  credit_score          integer,
-  applied_amount        numeric(14,2),
-  approved_amount       numeric(14,2),
-  tenure_years          smallint,
-  emi                   numeric(14,2),
+  -- Per-lender approval details — the SAME shape as epc_applications.approval_details
+  -- (applied-vs-approved amount/tenure/EMI, approved_by, credit_score, sanction
+  -- letter refs, …), so each approved lender keeps its own full record and the
+  -- Approval Details section can switch between them.
+  approval_details      jsonb,
   approval_recorded_at  timestamptz,
 
   created_at        timestamptz not null default now(),
