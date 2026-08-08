@@ -888,14 +888,6 @@ function Inner() {
           }
         />
 
-        {/* Per-lender status box (6d) — one row per lender with its own
-            docs-sent / approved / rejected timeline. */}
-        {lenderRows.length > 0 && (
-          <div className="mb-4">
-            <LoanLenderStatusBox rows={lenderRows} />
-          </div>
-        )}
-
         {/* ── PROGRESS TRACKER — hidden once all stages are complete (2nd disbursement) ── */}
         {!secondDone && (
         <div className="rounded-[12px] border border-[#cdeadd] bg-white p-5 sm:p-6 mb-4">
@@ -1074,30 +1066,30 @@ function Inner() {
           <div className="flex flex-col gap-3">
             {approvedPlus && approvalDetails && (
               <SectionCard title="Approval details" accent="green" icon={I.circleCheck} adminOnly>
-                <div className="flex items-start justify-between gap-3 mb-2">
-                  <div className="text-[14px]">
-                    <span className="text-[#5a8a76] font-medium">Approved By: </span>
-                    <span className="text-[#178a5c] font-bold">
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <div className="text-[15px] leading-snug">
+                    <div className="text-[11px] uppercase tracking-wide text-[#5a8a76] font-medium">Approved by</div>
+                    <div className="text-[18px] text-[#178a5c] font-bold">
                       {approvalDetails.approved_by
                         ? (LENDER_LABEL[String(approvalDetails.approved_by)] ?? String(approvalDetails.approved_by))
                         : (decidedByLabel ?? "—")}
-                    </span>
+                    </div>
                   </div>
-                  {/* Credit score — small box, top-right corner. */}
-                  <div className="shrink-0 text-center rounded-[8px] border border-[#cdeadd] bg-[#f0faf5] px-3 py-1.5">
+                  {/* Credit score — box, top-right corner. */}
+                  <div className="shrink-0 text-center rounded-[10px] border border-[#cdeadd] bg-[#f0faf5] px-4 py-2.5">
                     <div className="text-[10px] uppercase tracking-wide text-[#5a8a76]">Credit score</div>
-                    <div className="text-[15px] font-bold text-[#0f3d2e] leading-tight">
+                    <div className="text-[18px] font-bold text-[#0f3d2e] leading-tight">
                       {loan.credit_score != null ? loan.credit_score : "None"}
                     </div>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full text-[14px] border-collapse">
+                  <table className="w-full text-[15px] border-collapse">
                     <thead>
-                      <tr className="border-b border-[#e0f0e8]">
-                        <th className="py-1.5 pr-4 text-left font-medium text-[#5a8a76]"></th>
-                        <th className="py-1.5 px-3 text-right text-[11px] font-semibold uppercase tracking-wider text-[#8ab3a1]">Applied</th>
-                        <th className="py-1.5 px-3 text-right text-[11px] font-semibold uppercase tracking-wider text-[#178a5c]">Approved</th>
+                      <tr className="border-b-2 border-[#e0f0e8]">
+                        <th className="py-2 pr-4 text-left font-medium text-[#5a8a76]"></th>
+                        <th className="py-2 px-3 text-right text-[11px] font-semibold uppercase tracking-wider text-[#8ab3a1]">Applied</th>
+                        <th className="py-2 px-3 text-right text-[11px] font-semibold uppercase tracking-wider text-[#178a5c]">Approved</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1107,26 +1099,44 @@ function Inner() {
                         { label: "EMI",         applied: approvalDetails.tentative_emi,         approved: approvalDetails.approved_emi,         money: true, suffix: undefined },
                       ].map((r) => (
                         <tr key={r.label} className="border-b border-[#e0f0e8] last:border-0">
-                          <td className="py-2 pr-4 text-[#5a8a76] font-medium">{r.label}</td>
+                          <td className="py-2.5 pr-4 text-[#5a8a76] font-medium">{r.label}</td>
                           {/* Applied = muted; Approved = bold dark. */}
-                          <td className="py-2 px-3 text-right font-medium text-[#9aa5a0]">{fmtApproval(r.applied, r.money, r.suffix)}</td>
-                          <td className="py-2 px-3 text-right font-bold text-[#0f3d2e]">{fmtApproval(r.approved, r.money, r.suffix)}</td>
+                          <td className="py-2.5 px-3 text-right font-medium text-[#9aa5a0]">{fmtApproval(r.applied, r.money, r.suffix)}</td>
+                          <td className="py-2.5 px-3 text-right font-bold text-[#0f3d2e]">{fmtApproval(r.approved, r.money, r.suffix)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
+
+                {/* Sanction letter — status lives here in Approval details. */}
+                <div className="mt-3">
+                  {loan.sanction_letter_unavailable ? (
+                    <p className="text-[12px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2 flex items-center gap-1.5">
+                      <span aria-hidden>⚠</span> Sanction letter was not available at the time of filling.
+                    </p>
+                  ) : hasCat("sanction_letter") ? (
+                    <div className="flex items-center justify-between gap-2 text-[13px] text-[#0f3d2e] bg-[#f0faf5] border border-[#cdeadd] rounded-[8px] px-3 py-2">
+                      <span className="font-semibold">Sanction letter on file</span>
+                      <button
+                        type="button"
+                        onClick={() => { const d = docs.find((x) => x.category === "sanction_letter"); if (d) void openDoc(d.id); }}
+                        className="inline-flex items-center gap-1 text-[#185fa5] font-semibold hover:underline"
+                      >
+                        {I.eye} View
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-[12px] text-[#5a8a76]">Sanction letter: pending.</p>
+                  )}
+                </div>
+
                 <p className="text-[12px] text-[#5a8a76] mt-2">Recorded {fmtDate(loan.approved_at)} · read-only</p>
               </SectionCard>
             )}
 
             {approvedPlus && (
               <SectionCard title="Sanction details" accent="green" icon={I.money} adminOnly>
-                {loan.sanction_letter_unavailable && (
-                  <p className="text-[12px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2 mb-2">
-                    Sanction letter was not available at the time of filling.
-                  </p>
-                )}
                 <StepBlock title="1st Disbursement">
                   <KV k="Amount" v={fmtRupees(loan.first_disbursement_amount)} valueClass="text-[#178a5c]" />
                   <KV k="Date" v={fmtDateShort(loan.first_disbursement_date)} />
@@ -1153,6 +1163,9 @@ function Inner() {
                 </div>
               </SectionCard>
             )}
+
+            {/* Per-lender status — compact, directly above Comments (6d). */}
+            {lenderRows.length > 0 && <LoanLenderStatusBox rows={lenderRows} />}
 
             <SectionCard title="Comments" tint icon={I.lock} adminOnly>
               <CommentsSection
