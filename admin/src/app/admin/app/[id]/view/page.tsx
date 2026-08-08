@@ -544,6 +544,16 @@ function Inner() {
       .map((r) => ({ key: r.lender_key, label: r.lender_label })),
   ].filter((l) => !lenderRows.some((r) => r.lender_key === l.key && r.docs_sent_at));
   const withDocsOptions: PickerLender[] = withDocs.map((r) => ({ key: r.lender_key, label: r.lender_label }));
+  // Approval Details are shown per selected lender via chips (6h). Default to
+  // the finalized lender (approved_lender), else the first approved lender.
+  const selDetailsKey = detailsLender || (loan.approved_lender as string) || approvedRows[0]?.lender_key || "";
+  const selRow = approvedRows.find((r) => r.lender_key === selDetailsKey) ?? null;
+  const shownDetails = ((selRow?.approval_details as ApprovalDetails | null) ?? approvalDetails) as ApprovalDetails | null;
+  const shownCredit =
+    (selRow?.approval_details as { credit_score?: number | null } | null)?.credit_score ??
+    (selDetailsKey === loan.approved_lender ? (loan.credit_score ?? null) : null);
+  const shownLenderLabel = selRow?.lender_label
+    || (selDetailsKey ? (LENDER_LABEL[selDetailsKey] ?? selDetailsKey) : (decidedByLabel ?? "—"));
 
   // Tracker reads an "effective" status so a held case still shows where it
   // was parked (Resume returns it there).
@@ -682,6 +692,31 @@ function Inner() {
       await syncHeadline(rows);
       setStatusMsg(`Rejected by ${lender.label}.`);
     } catch (e) { setStatusMsg("Couldn't record: " + (e as Error).message); }
+    finally { setStatusBusy(false); }
+  }
+
+  // Finalize one approved lender — it becomes approved_lender and drives
+  // disbursement (its approved amount → sanctioned_amount). Reuses the existing
+  // columns, so the rest of the app is unchanged.
+  async function finalizeLender(key: string) {
+    if (!loan || statusBusy) return;
+    const row = lenderRows.find((r) => r.lender_key === key && r.approved_at);
+    if (!row) return;
+    const d = (row.approval_details ?? {}) as Record<string, unknown>;
+    setStatusBusy(true); setStatusMsg(null);
+    try {
+      const patch: Record<string, unknown> = {
+        approved_lender: key,
+        approval_details: d,
+        sanctioned_amount: (d.approved_loan_amount as number | null) ?? loan.sanctioned_amount ?? null,
+        credit_score: (d.credit_score as number | null) ?? null,
+      };
+      await supabase().from("epc_applications").update(patch).eq("id", loan.id);
+      setLoan((prev) => (prev ? ({ ...prev, ...patch } as Loan) : prev));
+      setDetailsLender(key);
+      await logLoanActivity(loan.id, "status_change", { detail: `Finalized ${row.lender_label} for disbursement` });
+      setStatusMsg(`${row.lender_label} finalized.`);
+    } catch (e) { setStatusMsg("Couldn't finalize: " + (e as Error).message); }
     finally { setStatusBusy(false); }
   }
   const holdCase = () =>
@@ -1066,20 +1101,47 @@ function Inner() {
           <div className="flex flex-col gap-3">
             {approvedPlus && approvalDetails && (
               <SectionCard title="Approval details" accent="green" icon={I.circleCheck} adminOnly>
+                {/* Lender chips — switch which approved lender's details show.
+                    The finalized one (approved_lender) has a ✓ + green fill. */}
+                {approvedRows.length > 1 && (
+                  <div className="flex flex-wrap gap-1.5 mb-3">
+                    {approvedRows.map((r) => {
+                      const isFinal = loan.approved_lender === r.lender_key;
+                      const isSel = selDetailsKey === r.lender_key;
+                      return (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => setDetailsLender(r.lender_key)}
+                          className={[
+                            "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-semibold border transition-colors",
+                            isSel ? "bg-[#178a5c] text-white border-[#178a5c]"
+                                  : "bg-white text-[#0f3d2e] border-[#cdeadd] hover:bg-[#f0faf5]",
+                          ].join(" ")}
+                        >
+                          {isFinal && <span className={isSel ? "text-white" : "text-[#178a5c]"}>✓</span>}
+                          {r.lender_label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div className="text-[15px] leading-snug">
-                    <div className="text-[11px] uppercase tracking-wide text-[#5a8a76] font-medium">Approved by</div>
-                    <div className="text-[18px] text-[#178a5c] font-bold">
-                      {approvalDetails.approved_by
-                        ? (LENDER_LABEL[String(approvalDetails.approved_by)] ?? String(approvalDetails.approved_by))
-                        : (decidedByLabel ?? "—")}
+                    <div className="text-[11px] uppercase tracking-wide text-[#5a8a76] font-medium">
+                      {approvedRows.length > 1 ? "Viewing" : "Approved by"}
                     </div>
+                    <div className="text-[18px] text-[#178a5c] font-bold">{shownLenderLabel}</div>
+                    {approvedRows.length > 1 && loan.approved_lender === selDetailsKey && (
+                      <div className="text-[11px] font-semibold text-[#0f7a52] mt-0.5">✓ Finalized for disbursement</div>
+                    )}
                   </div>
                   {/* Credit score — box, top-right corner. */}
                   <div className="shrink-0 text-center rounded-[10px] border border-[#cdeadd] bg-[#f0faf5] px-4 py-2.5">
                     <div className="text-[10px] uppercase tracking-wide text-[#5a8a76]">Credit score</div>
                     <div className="text-[18px] font-bold text-[#0f3d2e] leading-tight">
-                      {loan.credit_score != null ? loan.credit_score : "None"}
+                      {shownCredit != null ? shownCredit : "None"}
                     </div>
                   </div>
                 </div>
@@ -1094,9 +1156,9 @@ function Inner() {
                     </thead>
                     <tbody>
                       {[
-                        { label: "Loan Amount", applied: approvalDetails.applied_loan_amount, approved: approvalDetails.approved_loan_amount, money: true, suffix: undefined as string | undefined },
-                        { label: "Tenure",      applied: approvalDetails.applied_tenure_years, approved: approvalDetails.approved_tenure_years, money: false, suffix: "years" },
-                        { label: "EMI",         applied: approvalDetails.tentative_emi,         approved: approvalDetails.approved_emi,         money: true, suffix: undefined },
+                        { label: "Loan Amount", applied: shownDetails?.applied_loan_amount, approved: shownDetails?.approved_loan_amount, money: true, suffix: undefined as string | undefined },
+                        { label: "Tenure",      applied: shownDetails?.applied_tenure_years, approved: shownDetails?.approved_tenure_years, money: false, suffix: "years" },
+                        { label: "EMI",         applied: shownDetails?.tentative_emi,         approved: shownDetails?.approved_emi,         money: true, suffix: undefined },
                       ].map((r) => (
                         <tr key={r.label} className="border-b border-[#e0f0e8] last:border-0">
                           <td className="py-2.5 pr-4 text-[#5a8a76] font-medium">{r.label}</td>
@@ -1108,6 +1170,18 @@ function Inner() {
                     </tbody>
                   </table>
                 </div>
+
+                {/* Finalize — shown when viewing a non-finalized approved lender. */}
+                {approvedRows.length > 1 && selDetailsKey && loan.approved_lender !== selDetailsKey && (
+                  <button
+                    type="button"
+                    disabled={statusBusy}
+                    onClick={() => void finalizeLender(selDetailsKey)}
+                    className="mt-3 w-full inline-flex items-center justify-center gap-1.5 rounded-[8px] bg-[#178a5c] text-white text-[13px] font-semibold px-4 py-2 hover:bg-[#0f7a52] disabled:opacity-60"
+                  >
+                    Finalize {shownLenderLabel} for disbursement
+                  </button>
+                )}
 
                 {/* Sanction letter — status lives here in Approval details. */}
                 <div className="mt-3">

@@ -177,7 +177,9 @@ function Inner() {
         .maybeSingle();
       const lp: Record<string, unknown> = {
         approval_recorded_at: now,
-        approval_details: details,
+        // Store credit score inside the per-lender details so each lender's card
+        // shows its own score when comparing/finalizing.
+        approval_details: { ...details, credit_score: creditNone ? null : (Number(creditScore) > 0 ? Number(creditScore) : null) },
         rejected_at: null,
         rejection_reason: null,
       };
