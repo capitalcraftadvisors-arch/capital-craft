@@ -235,8 +235,8 @@ export default function FileUpload(props: Props) {
       {canUploadMore && (
         <label
           className={[
-            "flex flex-col items-center justify-center min-h-[132px] border-2 border-dashed border-[#185fa5] rounded-input bg-white",
-            "px-4 py-6 text-center cursor-pointer hover:bg-[#f2f7fc] transition-colors",
+            "flex flex-col items-center justify-center min-h-[96px] border-2 border-dashed border-[#185fa5] rounded-input bg-white",
+            "px-4 py-4 text-center cursor-pointer hover:bg-[#f2f7fc] transition-colors",
           ].join(" ")}
         >
           <input

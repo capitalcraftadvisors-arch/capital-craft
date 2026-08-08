@@ -100,7 +100,10 @@ function fmtDate(v: string): string {
 }
 
 function evFromLog(r: LogRow): Ev {
-  const by = r.actor_name || (r.actor === "admin" ? "Admin" : "EPC");
+  // Admin actions always read as "Admin" (never the individual admin's name);
+  // EPC actions keep the EPC's own name. This is consistent for every row —
+  // client- and server-logged alike — regardless of any stored actor_name.
+  const by = r.actor === "admin" ? "Admin" : (r.actor_name || "EPC");
   switch (r.action) {
     case "step_completed":
       return {

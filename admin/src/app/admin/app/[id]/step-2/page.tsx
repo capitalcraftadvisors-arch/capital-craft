@@ -285,8 +285,8 @@ function Inner() {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => router.push(`/admin/app/${params.id}/view` as any)}
-              aria-label="Back to previous page"
+              onClick={() => router.push(`/admin/app/${params.id}/step-1` as any)}
+              aria-label="Back to previous step"
               className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#185fa5] hover:text-[#0f3d2e] transition-colors"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
@@ -600,7 +600,7 @@ function UploadTile({
         onClick={() => inputRef.current?.click()}
         disabled={disabled}
         className={[
-          "w-full h-[160px] rounded-input border-2 border-dashed transition-colors flex items-center justify-center text-center px-4 relative",
+          "w-full h-[108px] rounded-input border-2 border-dashed transition-colors flex items-center justify-center text-center px-4 relative",
           has
             ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
             : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",

@@ -33,11 +33,14 @@ export async function logLoanActivity(
 ): Promise<void> {
   try {
     const me = getBusiness();
+    const isAdmin = me?.business_type === "admin";
     await supabase().from("loan_activity_log").insert({
       application_id: applicationId,
-      actor: me?.business_type === "admin" ? "admin" : "epc",
+      actor: isAdmin ? "admin" : "epc",
       actor_id: me?.id ?? null,
-      actor_name: me?.contact_name ?? null,
+      // Admin entries are shown generically as "Admin" — don't store the
+      // individual admin's personal name. EPC entries keep the EPC name.
+      actor_name: isAdmin ? null : (me?.contact_name ?? null),
       action,
       step: extra.step ?? null,
       detail: extra.detail ?? null,

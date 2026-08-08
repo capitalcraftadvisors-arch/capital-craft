@@ -624,8 +624,8 @@ function Inner() {
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => router.push(`/admin/app/${params.id}/view` as any)}
-              aria-label="Back to previous page"
+              onClick={() => router.push(`/admin/app/${params.id}/step-2` as any)}
+              aria-label="Back to previous step"
               className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#185fa5] hover:text-[#0f3d2e] transition-colors"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
@@ -1229,9 +1229,11 @@ function CoappAadhaarPicker({
   const [front, setFront] = useState<File | null>(null);
   const [back,  setBack]  = useState<File | null>(null);
 
-  useEffect(() => {
-    if (front && back) onFiles(front, back);
-  }, [front, back, onFiles]);
+  // Extraction fires ONLY from the explicit "Extract details" button below —
+  // the same mechanism the main applicant (Step 2) uses. The previous auto-fire
+  // useEffect had `onFiles` in its deps, and since the parent recreates that
+  // callback every render, it looped (upload → re-render → new onFiles →
+  // effect → upload …) — the source of the "Failed to fetch" + glitching.
 
   return (
     <div className="space-y-2">
@@ -1242,7 +1244,7 @@ function CoappAadhaarPicker({
             onClick={() => frontRef.current?.click()}
             disabled={uploading}
             className={[
-              "w-full h-[100px] rounded-input border-2 border-dashed text-center flex items-center justify-center px-3 transition-colors",
+              "w-full h-[84px] rounded-input border-2 border-dashed text-center flex items-center justify-center px-3 transition-colors",
               hasFront || front
                 ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
                 : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
@@ -1267,7 +1269,7 @@ function CoappAadhaarPicker({
             onClick={() => backRef.current?.click()}
             disabled={uploading}
             className={[
-              "w-full h-[100px] rounded-input border-2 border-dashed text-center flex items-center justify-center px-3 transition-colors",
+              "w-full h-[84px] rounded-input border-2 border-dashed text-center flex items-center justify-center px-3 transition-colors",
               hasBack || back
                 ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
                 : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
@@ -1291,7 +1293,15 @@ function CoappAadhaarPicker({
              onChange={(e) => { const f = e.target.files?.[0]; if (f) setFront(f); e.target.value = ""; }} />
       <input ref={backRef} type="file" accept="image/*,application/pdf" className="hidden"
              onChange={(e) => { const f = e.target.files?.[0]; if (f) setBack(f); e.target.value = ""; }} />
-      {uploading && <p className="text-[12px] text-text-muted">Extracting Aadhaar details…</p>}
+      <button
+        type="button"
+        onClick={() => { if (front && back && !uploading) onFiles(front, back); }}
+        disabled={!front || !back || uploading}
+        className="w-full inline-flex items-center justify-center gap-2 rounded-input bg-[#185fa5] text-white text-[13px] font-semibold px-4 py-2.5 hover:bg-[#134a80] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      >
+        {uploading ? "Extracting details…" : "Extract details"}
+      </button>
+      <p className="text-[11px] text-text-muted">Select both front and back, then Extract — same Google Vision OCR as the main applicant.</p>
       {error && <p className="text-[12px] text-red-700">{error}</p>}
     </div>
   );
