@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { getToken } from "@/lib/auth";
 
 type LeadRow = {
   id: string;
@@ -21,6 +22,8 @@ type LeadRow = {
   project_size: number | null;
   project_size_unit: string | null;
   email: string | null;
+  lead_owner_name: string | null;
+  created_by: string | null;
   epc_business_id: string | null;
   epc_name_custom: string | null;
   status: string;
@@ -37,6 +40,10 @@ function epcName(r: LeadRow): string {
   if (b) return b.trade_name || b.legal_name || b.contact_name || "—";
   return r.epc_name_custom || "—";
 }
+function createdByLabel(v: string | null): string {
+  if (!v) return "—";
+  return v === "admin" ? "Admin" : v;
+}
 
 export default function LoanLeadsTab() {
   const router = useRouter();
@@ -44,12 +51,13 @@ export default function LoanLeadsTab() {
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
+  const [converting, setConverting] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
     const { data } = await supabase()
       .from("loan_leads")
-      .select("id, lead_display_id, name, mobile, dob, loan_amount, project_size, project_size_unit, email, epc_business_id, epc_name_custom, status, created_at, epc_business:epc_business_id(trade_name, legal_name, contact_name, epc_display_id)")
+      .select("id, lead_display_id, name, mobile, dob, loan_amount, project_size, project_size_unit, email, lead_owner_name, created_by, epc_business_id, epc_name_custom, status, created_at, epc_business:epc_business_id(trade_name, legal_name, contact_name, epc_display_id)")
       .eq("status", "under_review")
       .order("created_at", { ascending: false });
     setRows((data ?? []) as unknown as LeadRow[]);
@@ -82,14 +90,37 @@ export default function LoanLeadsTab() {
     router.push(`/admin/lead/${(data as { id: string }).id}/step-1`);
   }
 
+  // "Ready for Loan" — convert the lead into a loan-application draft. Needs a
+  // real (onboarded) EPC; custom-name leads must pick one on the profile first.
+  async function readyForLoan(r: LeadRow) {
+    if (converting) return;
+    if (!r.epc_business_id) {
+      alert("This lead has a typed EPC name. Open the lead and assign an onboarded EPC before moving it to Loan Applications.");
+      router.push(`/admin/lead/${r.id}/view`);
+      return;
+    }
+    if (!window.confirm(`Move "${r.name || "this lead"}" to Loan Applications as a new draft? It will disappear from Leads.`)) return;
+    setConverting(r.id);
+    try {
+      const res = await fetch(`/api/admin/lead/${r.id}/convert-to-loan-app`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) { alert(data?.error || `Conversion failed (HTTP ${res.status}).`); setConverting(null); return; }
+      router.push(`/admin/app/${data.application_id}/view`);
+    } catch (e) {
+      alert("Conversion failed: " + (e as Error).message);
+      setConverting(null);
+    }
+  }
+
   return (
     <div className="w-full">
       {/* Toolbar */}
       <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
-        <div>
-          <h1 className="text-[22px] font-bold text-[#0f3d2e]">Leads</h1>
-          <p className="text-[13px] text-[#5a8a76] mt-0.5">Admin-created loan leads. Mark a lead “Ready for loan application” to move it into Loan Applications.</p>
-        </div>
+        {/* Heading comes from the page shell's section header ("Leads"). */}
+        <p className="text-[13px] text-[#5a8a76]">Admin-created loan leads. Mark a lead “Ready for loan application” to move it into Loan Applications.</p>
         <button
           type="button"
           onClick={() => void addLead()}
@@ -116,19 +147,20 @@ export default function LoanLeadsTab() {
           <table className="w-full min-w-[860px] text-[14px]">
             <thead className="bg-[#eef0fb] border-b border-[#dcd9f5] text-[#4338ca]">
               <tr>
-                <th className="text-left font-semibold px-4 py-3">Lead details</th>
-                <th className="text-center font-semibold px-4 py-3">EPC</th>
-                <th className="text-center font-semibold px-4 py-3">Loan amount</th>
+                <th className="text-left font-semibold px-4 py-3">Borrower name</th>
+                <th className="text-left font-semibold px-4 py-3">EPC · Lead owner</th>
                 <th className="text-center font-semibold px-4 py-3">Project size</th>
-                <th className="text-center font-semibold px-4 py-3">Status</th>
+                <th className="text-center font-semibold px-4 py-3">Loan amount</th>
                 <th className="text-center font-semibold px-4 py-3">Created on</th>
+                <th className="text-center font-semibold px-4 py-3">Created by</th>
+                <th className="text-center font-semibold px-4 py-3">Action</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-[#5a8a76]">Loading…</td></tr>
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-[#5a8a76]">Loading…</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-[#5a8a76]">No leads yet. Click “Add lead” to create one.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-[#5a8a76]">No leads yet. Click “Add lead” to create one.</td></tr>
               ) : (
                 filtered.map((r) => (
                   <tr
@@ -143,20 +175,32 @@ export default function LoanLeadsTab() {
                         {r.mobile && <span>· +91 {r.mobile}</span>}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-center">
+                    <td className="px-4 py-3">
                       <div className="text-[#0f3d2e]">{epcName(r)}</div>
-                      {r.epc_business?.epc_display_id && <div className="text-[11px] text-[#5a8a76] font-mono">{r.epc_business.epc_display_id}</div>}
-                      {!r.epc_business_id && r.epc_name_custom && <div className="text-[11px] text-amber-700">Not in system</div>}
+                      {r.lead_owner_name
+                        ? <div className="text-[12px] text-[#5a8a76]">Owner: {r.lead_owner_name}</div>
+                        : <div className="text-[12px] text-[#b6bfc9]">Owner: —</div>}
+                      {!r.epc_business_id && r.epc_name_custom && <div className="text-[11px] text-amber-700">Not onboarded</div>}
                     </td>
-                    <td className="px-4 py-3 text-center font-semibold text-[#0f3d2e]">{rupees(r.loan_amount)}</td>
                     <td className="px-4 py-3 text-center text-[#0f3d2e]">
                       {r.project_size != null ? `${r.project_size} ${(r.project_size_unit || "kw").toUpperCase()}` : "—"}
                     </td>
-                    <td className="px-4 py-3 text-center">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[12px] font-semibold bg-[#fef0d6] text-[#854f0b]">Under review</span>
-                    </td>
+                    <td className="px-4 py-3 text-center font-semibold text-[#0f3d2e]">{rupees(r.loan_amount)}</td>
                     <td className="px-4 py-3 text-center text-[13px] text-[#5a8a76]">
                       {new Date(r.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                    </td>
+                    <td className="px-4 py-3 text-center text-[13px] text-[#5a8a76]">{createdByLabel(r.created_by)}</td>
+                    <td className="px-4 py-3 text-center">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); void readyForLoan(r); }}
+                        disabled={converting === r.id}
+                        className="inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-60"
+                        style={{ backgroundColor: "#178a5c" }}
+                        title="Move this lead to Loan Applications"
+                      >
+                        {converting === r.id ? "Moving…" : "Ready for Loan"}
+                      </button>
                     </td>
                   </tr>
                 ))

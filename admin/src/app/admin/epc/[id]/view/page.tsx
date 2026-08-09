@@ -363,8 +363,6 @@ function Inner() {
   if (!biz) return <div className="p-10 text-center text-[#5a8a76]">Loading…</div>;
 
   const trade = biz.trade_name || biz.legal_name || biz.contact_name || "—";
-  const legalSub = biz.legal_name && biz.trade_name && biz.legal_name !== biz.trade_name
-    ? `Legal: ${biz.legal_name}` : null;
   const btLabel = BUSINESS_TYPE_LABEL[biz.business_type ?? ""] ?? biz.business_type;
 
   const proprietorLabel = biz.business_type === "proprietorship" ? "Proprietorship" : btLabel;
@@ -392,8 +390,8 @@ function Inner() {
                 {I.building}
               </div>
               <div className="min-w-0">
+                {/* Header bar shows trade name + EPC id only — legal name removed. */}
                 <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">{trade}</div>
-                {legalSub && <div className="text-[14px] text-[#5a8a76] truncate mt-0.5">{legalSub}</div>}
                 {biz.epc_display_id && <div className="text-[14px] font-medium text-[#0f7a52] truncate mt-0.5">{biz.epc_display_id}</div>}
               </div>
             </div>
@@ -624,6 +622,15 @@ function Inner() {
               )}
             </SectionCard>
 
+            {/* Business details first (swapped above Proprietor details) —
+                Trade Name / GSTIN / GST Address / Constitution. */}
+            <SectionCard title="Business details" accent="blue" icon={I.building}>
+              <KV k="Trade Name" v={biz.trade_name} />
+              <KV k="GSTIN" v={biz.gstin_number} />
+              <KV k="GST Address" v={biz.gst_address} />
+              <KV k="Constitution Type" v={btLabel} />
+            </SectionCard>
+
             <SectionCard title={peopleHeading(biz.business_type)} accent="green" icon={I.users}>
               {stakeholders.length === 0 ? (
                 <p className="text-[13px] text-[#5a8a76]">No members recorded.</p>
@@ -650,15 +657,6 @@ function Inner() {
                   })}
                 </div>
               )}
-            </SectionCard>
-
-            {/* Business details — Trade Name / GSTIN / GST Address / Constitution /
-                PM Surya Ghar. GST Address is a manual field (edit + onboarding). */}
-            <SectionCard title="Business details" accent="blue" icon={I.building}>
-              <KV k="Trade Name" v={biz.trade_name} />
-              <KV k="GSTIN" v={biz.gstin_number} />
-              <KV k="GST Address" v={biz.gst_address} />
-              <KV k="Constitution Type" v={btLabel} />
             </SectionCard>
 
             <SectionCard title="Bank" accent="blue" icon={I.bank}>

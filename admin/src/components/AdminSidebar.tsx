@@ -28,7 +28,7 @@ export type SectionKey = ConsoleTab | "analytics";
 export const ACCENTS: Record<SectionKey, { label: string; color: string; tint: string }> = {
   epcs:      { label: "EPCs",              color: "#185fa5", tint: "#e8f1fb" },
   apps:      { label: "Loan applications", color: "#178a5c", tint: "#e7f5ee" },
-  loanleads: { label: "Lead",              color: "#4338ca", tint: "#e8e7fb" },
+  loanleads: { label: "Leads",             color: "#4338ca", tint: "#e8e7fb" },
   insurance: { label: "Insurance",         color: "#0e7490", tint: "#e0f2f4" },
   leads:     { label: "Leads (Non-EPC)",   color: "#b45309", tint: "#fbf0e0" },
   analytics: { label: "Analytics",         color: "#6d28d9", tint: "#efe9fb" },

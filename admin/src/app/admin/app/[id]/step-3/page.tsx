@@ -240,6 +240,15 @@ function Inner() {
             file_name: String(l.ebill_path).split("/").pop() ?? "E-bill",
           });
         }
+        // Re-hydrate an already-uploaded rooftop photo so the (now mandatory)
+        // Next gate isn't re-blocked on reopen.
+        if (l.rooftop_photo_path) {
+          setRooftopDoc({
+            id: "",
+            storage_path: l.rooftop_photo_path,
+            file_name: String(l.rooftop_photo_path).split("/").pop() ?? "Rooftop photo",
+          });
+        }
         if (l.project_size != null)         setProjectSize(String(l.project_size));
         if (l.project_size_unit === "mw")   setProjectUnit("mw");
         if (l.total_project_cost != null)   setTotalCost(String(l.total_project_cost));
@@ -512,7 +521,7 @@ function Inner() {
     !coappEmailConflict;
 
   const canNext =
-    !!proforma && !!ebill &&
+    !!proforma && !!ebill && !!rooftopDoc &&   // rooftop photo now mandatory
     validSize && validCost && validLoan && !loanExceedsCost &&
     addressComplete &&
     ownership !== null &&
@@ -825,7 +834,7 @@ function Inner() {
           {/* Rooftop photo — geo-tagged, reuses EPC office-photo pipeline */}
           <div className="pt-2 border-t border-line">
             <p className="text-[13px] font-medium text-text-mid mb-1.5">
-              Rooftop photo (geo-tagged)
+              Rooftop photo (geo-tagged) <span className="text-red-500">*</span>
             </p>
             <p className="text-[12px] text-text-muted mb-3">
               Take a photo of the installation rooftop so the site can be verified.

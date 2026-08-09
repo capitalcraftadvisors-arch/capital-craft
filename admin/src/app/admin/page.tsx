@@ -37,6 +37,11 @@ export default function AdminHomePage() {
 
 function Inner() {
   const [tab, setTab] = useState<Tab>("epcs");
+  // Summary period is owned here so the picker can sit in the section header
+  // (top-right). Default is per-tab: EPCs = This Year, all others = This Month.
+  const [period, setPeriod] = useState<Period>("year");
+  const [pFrom, setPFrom] = useState("");
+  const [pTo, setPTo] = useState("");
 
   // Coming back from a loan/insurance View should land on the right tab (the
   // list then restores scroll + highlights the row you came from). Consumed
@@ -48,20 +53,39 @@ function Inner() {
     sessionStorage.removeItem("adminList.tab");
   }, []);
 
+  // Reset the period to the active tab's default whenever the tab changes.
+  useEffect(() => {
+    setPeriod(tab === "epcs" ? "year" : "month");
+    setPFrom(""); setPTo("");
+  }, [tab]);
+
   const section = ACCENTS[tab];
+  // Tabs that carry summary cards + a period picker (loanleads/analytics don't).
+  const showPeriod = tab === "epcs" || tab === "apps" || tab === "insurance" || tab === "leads";
+  const periodProps: TabPeriodProps = { period, pFrom, pTo };
 
   return (
     <div className="min-h-screen bg-bg-soft md:flex">
       <AdminSidebar active={tab} onSelectTab={setTab} />
       <div className="flex-1 min-w-0">
         <section className="w-full px-4 sm:px-6 py-8">
-          {/* Section header with the console's accent bar. */}
-          <div className="mb-6 flex items-center gap-2.5">
-            <span className="inline-block w-1.5 h-7 rounded-full" style={{ backgroundColor: section.color }} />
-            <h1 className="font-display text-[24px] sm:text-[28px] font-bold">{section.label}</h1>
+          {/* Section header with the console's accent bar; period picker on the
+              right, aligned with the heading. */}
+          <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2.5">
+              <span className="inline-block w-1.5 h-7 rounded-full" style={{ backgroundColor: section.color }} />
+              <h1 className="font-display text-[24px] sm:text-[28px] font-bold">{section.label}</h1>
+            </div>
+            {showPeriod && (
+              <PeriodPicker period={period} onPeriod={setPeriod} from={pFrom} onFrom={setPFrom} to={pTo} onTo={setPTo} />
+            )}
           </div>
 
-          {tab === "epcs" ? <EpcsTab /> : tab === "apps" ? <AppsTab /> : tab === "loanleads" ? <LoanLeadsTab /> : tab === "insurance" ? <InsuranceTab /> : <LeadsTab />}
+          {tab === "epcs" ? <EpcsTab {...periodProps} />
+            : tab === "apps" ? <AppsTab {...periodProps} />
+            : tab === "loanleads" ? <LoanLeadsTab />
+            : tab === "insurance" ? <InsuranceTab {...periodProps} />
+            : <LeadsTab {...periodProps} />}
         </section>
       </div>
     </div>
@@ -145,6 +169,9 @@ function inCurrentFY(dateStr: string | null | undefined): boolean {
 
 // ── Summary-card time period (Today / Week / Month / Quarter / Year / Custom) ──
 type Period = "today" | "week" | "month" | "quarter" | "year" | "custom";
+// Period is owned by the page shell and passed to each summary tab so the
+// picker can live in the section header (top-right), with a per-tab default.
+type TabPeriodProps = { period: Period; pFrom: string; pTo: string };
 const PERIOD_OPTIONS: Array<{ value: Period; label: string }> = [
   { value: "today",   label: "Today" },
   { value: "week",    label: "This Week" },
@@ -198,7 +225,7 @@ function PeriodPicker({ period, onPeriod, from, onFrom, to, onTo }: {
   from: string; onFrom: (v: string) => void; to: string; onTo: (v: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-2 flex-wrap mb-3">
+    <div className="flex items-center gap-2 flex-wrap">
       <select
         value={period}
         onChange={(e) => onPeriod(e.target.value as Period)}
@@ -417,7 +444,7 @@ const IconArrowDown = (
   </svg>
 );
 
-function EpcsTab() {
+function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
   const router = useRouter();
   type Row = {
     id: string;
@@ -752,9 +779,6 @@ function EpcsTab() {
   }
 
   // Mutually-exclusive stage cards (sum = Total) + Application Unseen (overlap).
-  const [period, setPeriod] = useState<Period>("year");
-  const [pFrom, setPFrom] = useState("");
-  const [pTo, setPTo] = useState("");
   const fyRows = useMemo(() => rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo)), [rows, period, pFrom, pTo]);
   const cards: SummaryCard[] = [
     { key: "",                label: "Total EPCs",          value: fyRows.length },
@@ -808,7 +832,6 @@ function EpcsTab() {
 
   return (
     <>
-      <PeriodPicker period={period} onPeriod={setPeriod} from={pFrom} onFrom={setPFrom} to={pTo} onTo={setPTo} />
       <SummaryCards accent={ACCENTS.epcs.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
       <div className="flex items-center gap-3 mb-3">
@@ -1020,7 +1043,7 @@ function SortMark({ active, dir }: { active: boolean; dir: SortDir }) {
 
 // ── Loan applications tab (unchanged) ──────────────────────────────────────
 
-function AppsTab() {
+function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
   const router = useRouter();
   type Row = {
     id: string;
@@ -1332,9 +1355,6 @@ function AppsTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, q, categoryFilter, statusFilter, epcFilter, lenderFilter, dateFrom, dateTo, sortKey]);
 
-  const [period, setPeriod] = useState<Period>("year");
-  const [pFrom, setPFrom] = useState("");
-  const [pTo, setPTo] = useState("");
   const fyRows = useMemo(() => rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo)), [rows, period, pFrom, pTo]);
   const cards: SummaryCard[] = [
     { key: "",             label: "Total Applications", value: fyRows.length },
@@ -1391,7 +1411,6 @@ function AppsTab() {
 
   return (
     <>
-      <PeriodPicker period={period} onPeriod={setPeriod} from={pFrom} onFrom={setPFrom} to={pTo} onTo={setPTo} />
       <SummaryCards accent={ACCENTS.apps.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
       <div className="flex items-center gap-3 mb-3">
@@ -1641,7 +1660,7 @@ function AppsTab() {
 // insurance_applications with View + Edit + Download ZIP. Shares the loan
 // list's scroll-restore + #dceffb highlight (appsList.* keys); the
 // "insurance" tab is restored on Back.
-function InsuranceTab() {
+function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
   const router = useRouter();
   type Row = {
     id: string;
@@ -1862,9 +1881,6 @@ function InsuranceTab() {
     hold: "bg-[#dceffb] text-[#185fa5]",
   };
 
-  const [period, setPeriod] = useState<Period>("year");
-  const [pFrom, setPFrom] = useState("");
-  const [pTo, setPTo] = useState("");
   const fyRows = useMemo(() => rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo)), [rows, period, pFrom, pTo]);
   const cards: SummaryCard[] = [
     { key: "",                label: "Total Applications", value: fyRows.length },
@@ -1882,7 +1898,6 @@ function InsuranceTab() {
 
   return (
     <>
-      <PeriodPicker period={period} onPeriod={setPeriod} from={pFrom} onFrom={setPFrom} to={pTo} onTo={setPTo} />
       <SummaryCards accent={ACCENTS.insurance.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
       <div className="mb-3 flex items-center gap-3">
@@ -2059,7 +2074,7 @@ const LEAD_STATUS_PILL: Record<string, string> = {
   converted: "bg-[#e6f6ee] text-[#178a5c]",
   closed:    "bg-[#eef1f0] text-[#5a8a76]",
 };
-function LeadsTab() {
+function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
   const [rows, setRows] = useState<Lead[]>([]);
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
@@ -2107,9 +2122,6 @@ function LeadsTab() {
     return true;
   });
 
-  const [period, setPeriod] = useState<Period>("year");
-  const [pFrom, setPFrom] = useState("");
-  const [pTo, setPTo] = useState("");
   const fyRows = rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo));
   const cards: SummaryCard[] = [
     { key: "",          label: "Total Leads", value: fyRows.length },
@@ -2128,7 +2140,6 @@ function LeadsTab() {
 
   return (
     <>
-      <PeriodPicker period={period} onPeriod={setPeriod} from={pFrom} onFrom={setPFrom} to={pTo} onTo={setPTo} />
       <SummaryCards accent={ACCENTS.leads.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
       <div className="flex items-center gap-3 mb-3">
