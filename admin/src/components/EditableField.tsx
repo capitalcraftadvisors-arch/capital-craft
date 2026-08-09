@@ -10,7 +10,7 @@
 //
 // Variants: text (default), select (when options provided).
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 type Option = { value: string; label: string };
 
@@ -22,6 +22,9 @@ type Props = {
   // Inline edit input type.
   type?: "text" | "email" | "tel" | "number";
   options?: Option[];                                   // makes it a select
+  // Direct-dropdown mode: an always-visible <select> (no "Edit" click) that
+  // saves the moment a choice is picked. Only meaningful with options.
+  inlineSelect?: boolean;
   // Validation: return error string or null for OK.
   validate?: (v: string) => string | null;
   // Called when user clicks Save. Resolve = success, reject = stays editing.
@@ -32,13 +35,19 @@ type Props = {
 };
 
 export default function EditableField({
-  label, value, display, type = "text", options,
+  label, value, display, type = "text", options, inlineSelect,
   validate, onSave, readOnly, placeholder, hint,
 }: Props) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState<string>(value ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Keep the local copy in sync when the parent reloads/updates the value
+  // (e.g. after an optimistic save), except while mid-edit in text mode.
+  useEffect(() => {
+    if (!editing) setVal(value ?? "");
+  }, [value, editing]);
 
   function start() {
     setVal(value ?? "");
@@ -67,6 +76,43 @@ export default function EditableField({
   }
 
   const shown = display ? display(value) : (value ?? "");
+
+  // Direct-dropdown mode — always-visible select, saves on change, no "Edit".
+  if (inlineSelect && options && !readOnly) {
+    async function pick(next: string) {
+      setVal(next);
+      setError(null);
+      setSaving(true);
+      try {
+        await onSave(next);
+      } catch (e) {
+        setError((e as Error)?.message ?? "Save failed");
+        setVal(value ?? "");            // revert on failure
+      } finally {
+        setSaving(false);
+      }
+    }
+    return (
+      <div className="flex items-center gap-4 text-[13px] py-1.5">
+        <dt className="text-text-muted min-w-[140px] shrink-0">{label}</dt>
+        <dd className="flex-1 flex items-center gap-2 flex-wrap">
+          <select
+            value={val}
+            disabled={saving}
+            onChange={(e) => void pick(e.target.value)}
+            className="min-w-[160px] border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white disabled:opacity-60"
+          >
+            <option value="">Select…</option>
+            {options.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          {saving && <span className="text-[12px] text-text-muted">Saving…</span>}
+          {error && <span className="text-[12px] text-red-500">{error}</span>}
+        </dd>
+      </div>
+    );
+  }
 
   if (!editing) {
     return (

@@ -262,6 +262,7 @@ function Inner() {
               : ""
             }
             options={PM_SURYA_GHAR_OPTIONS}
+            inlineSelect
             onSave={saveField("pm_surya_ghar")}
           />
           {biz.pm_surya_ghar === "other" && (
@@ -284,16 +285,17 @@ function Inner() {
             label="Service"
             value={biz.service_type}
             display={(v) =>
-              v === "loans"     ? "Only Loan"
-              : v === "insurance" ? "Only Insurance"
+              v === "loans"     ? "Loan"
+              : v === "insurance" ? "Insurance"
               : v === "both"      ? "Loan and Insurance"
               : ""
             }
             options={[
-              { value: "loans",     label: "Only Loan" },
-              { value: "insurance", label: "Only Insurance" },
+              { value: "loans",     label: "Loan" },
+              { value: "insurance", label: "Insurance" },
               { value: "both",      label: "Loan and Insurance" },
             ]}
+            inlineSelect
             onSave={saveField("service_type")}
           />
         </Section>

@@ -1103,29 +1103,18 @@ function Inner() {
             {lenderRows.length > 0 && <LoanLenderStatusBox rows={lenderRows} />}
             {approvedPlus && approvalDetails && (
               <SectionCard title="Approval details" accent="green" icon={I.circleCheck} adminOnly>
-                {/* Header band — the selected lender name + finalize control
-                    sit directly under the "Approval details" title (loan #L2).
-                    Lender tabs (chips) and the credit-score box are pinned to
-                    the top-right corner. Finalize behaviour is unchanged:
-                    "✓ Finalized" for the chosen lender, a "Finalize" button
-                    when a different approved lender's tab is selected. */}
+                {/* Header band — the selected lender name sits directly under
+                    the "Approval details" title (loan #L2). Lender tabs (chips)
+                    and the credit-score box are pinned to the top-right corner.
+                    The finalize ACTION is a full-width bar under the table (see
+                    below); here we only show a "✓ Finalized" marker for the
+                    lender that has been chosen for disbursement. */}
                 <div className="flex items-start justify-between gap-3 mb-3">
-                  {/* Left — lender + finalize, tight under the heading. */}
+                  {/* Left — lender name (+ finalized marker), tight under heading. */}
                   <div className="leading-snug">
                     <div className="text-[18px] text-[#178a5c] font-bold">{shownLenderLabel}</div>
-                    {approvedRows.length > 1 && (
-                      loan.approved_lender === selDetailsKey ? (
-                        <div className="text-[12px] font-semibold text-[#0f7a52] mt-1">✓ Finalized</div>
-                      ) : (
-                        <button
-                          type="button"
-                          disabled={statusBusy}
-                          onClick={() => void finalizeLender(selDetailsKey)}
-                          className="mt-1 inline-flex items-center gap-1 rounded-[6px] bg-[#178a5c] text-white text-[12px] font-semibold px-3 py-1 hover:bg-[#0f7a52] disabled:opacity-60"
-                        >
-                          Finalize
-                        </button>
-                      )
+                    {approvedRows.length > 1 && loan.approved_lender === selDetailsKey && (
+                      <div className="text-[12px] font-semibold text-[#0f7a52] mt-1">✓ Finalized</div>
                     )}
                   </div>
                   {/* Right — lender tabs above the credit-score box. */}
@@ -1187,6 +1176,21 @@ function Inner() {
                     </tbody>
                   </table>
                 </div>
+
+                {/* Finalize action — full-width bar directly under the table
+                    (loan #L2). Appears only when a non-finalized approved
+                    lender's tab is selected; finalizing makes it the
+                    disbursement lender. */}
+                {approvedRows.length > 1 && selRow && selDetailsKey !== loan.approved_lender && (
+                  <button
+                    type="button"
+                    disabled={statusBusy}
+                    onClick={() => void finalizeLender(selDetailsKey)}
+                    className="mt-3 w-full inline-flex items-center justify-center gap-1.5 rounded-[8px] bg-[#178a5c] text-white text-[14px] font-semibold px-4 py-2.5 hover:bg-[#0f7a52] disabled:opacity-60"
+                  >
+                    Finalize {shownLenderLabel}
+                  </button>
+                )}
 
                 {/* Sanction letter — status lives here in Approval details. */}
                 <div className="mt-3">
