@@ -1568,9 +1568,11 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                       1st Disbursement Done
                     </span>
                   ) : r.approved_lender ? (
-                    // Finalized — a lender has been chosen for disbursement.
+                    // Finalized for disbursement — show the approval by that
+                    // lender (not the latest event, which may be a different
+                    // lender's later rejection).
                     <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide bg-[#e6f6ee] text-[#0f7a52]">
-                      Finalized · {LENDER_LABEL[String(r.approved_lender)] ?? String(r.approved_lender)}
+                      Approved by {LENDER_LABEL[String(r.approved_lender)] ?? String(r.approved_lender)}
                     </span>
                   ) : lenderLatest[r.id] ? (
                     // 6h — latest status across all lenders (most-recent event).
