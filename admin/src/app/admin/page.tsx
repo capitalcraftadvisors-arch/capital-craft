@@ -24,6 +24,7 @@ import { policyValidityParts, VALIDITY_TEXT } from "@/lib/insurance-validity";
 import LenderCell from "@/components/LenderCell";
 import LoanLeadsTab from "@/components/LoanLeadsTab";
 import { LOAN_LENDER_COLS, latestLenderStatus, latestStatusLabel, type LoanLenderRow } from "@/lib/loan-lenders";
+import { LENDER_LABEL } from "@/components/ApprovalDetailsTable";
 
 type Tab = "epcs" | "apps" | "loanleads" | "insurance" | "leads";
 
@@ -1565,6 +1566,11 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                   ) : r.status === "approved" && r.first_disbursement_amount != null ? (
                     <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#dceffb] text-[#185fa5]">
                       1st Disbursement Done
+                    </span>
+                  ) : r.approved_lender ? (
+                    // Finalized — a lender has been chosen for disbursement.
+                    <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide bg-[#e6f6ee] text-[#0f7a52]">
+                      Finalized · {LENDER_LABEL[String(r.approved_lender)] ?? String(r.approved_lender)}
                     </span>
                   ) : lenderLatest[r.id] ? (
                     // 6h — latest status across all lenders (most-recent event).

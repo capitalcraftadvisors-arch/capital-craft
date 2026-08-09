@@ -62,7 +62,6 @@ const BUSINESS_TYPE_OPTIONS = [
 const PM_SURYA_GHAR_OPTIONS = [
   { value: "yes",   label: "Yes" },
   { value: "no",    label: "No" },
-  { value: "other", label: "Other" },
 ];
 
 const DESIGNATION_OPTIONS = [
