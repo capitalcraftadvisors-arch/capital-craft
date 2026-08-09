@@ -105,6 +105,7 @@ serve(async (req) => {
       gstin,
       legal_name,
       trade_name,
+      address: matchGstAddress(text),
       raw_text: text.slice(0, RAW_TEXT_CAP),
     });
   } catch (e) {
@@ -164,6 +165,44 @@ async function ocrPdf(base64: string, mimeType: string): Promise<string> {
 function matchGstin(text: string): string | null {
   const m = text.match(/\b\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]\b/);
   return m ? m[0] : null;
+}
+
+// Principal Place of Business address. Mirrors the client-side parseGstAddress
+// in admin/src/lib/gst-address.ts — keep the two in sync. Collects the lines
+// after the address label until a sibling field label or the 6-digit PIN.
+const GST_ADDRESS_LABEL_RE =
+  /Address\s+of\s+(?:the\s+)?Principal\s+Place\s+of\s+Business|Principal\s+Place\s+of\s+Business/i;
+const GST_ADDRESS_STOP_RE =
+  /^(?:\s*\d+(?:\.\d+)?\s*[.)]?\s*)?(?:Date\s+of\s+(?:Liability|Validity|Registration|filing)|Period\s+of\s+Validity|Type\s+of\s+Registration|Nature\s+of\s+Business|Particulars\s+of|Approving\s+Authority|Signature|Constitution\s+of\s+Business|GSTIN|Legal\s+Name|Trade\s+Name|Additional\s+trade|Annexure|Note\s*:)\b/i;
+
+function matchGstAddress(text: string): string | null {
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const stripped = lines[i].replace(/^\s*\d+\s*[.)]\s*/, "");
+    if (!GST_ADDRESS_LABEL_RE.test(stripped)) continue;
+
+    const parts: string[] = [];
+    const sameLine = stripped
+      .replace(GST_ADDRESS_LABEL_RE, "")
+      .replace(/^[\s:.\-,]+/, "")
+      .trim();
+    if (sameLine && !GST_ADDRESS_STOP_RE.test(sameLine)) parts.push(sameLine);
+
+    for (let j = i + 1; j < Math.min(i + 12, lines.length); j++) {
+      const raw = lines[j].replace(/^\s*\d+\s*[.)]\s*/, "").trim();
+      if (!raw) { if (parts.length) break; else continue; }
+      if (GST_ADDRESS_LABEL_RE.test(raw)) continue;
+      if (GST_ADDRESS_STOP_RE.test(raw)) break;
+      parts.push(raw);
+      if (/\b\d{6}\b/.test(raw)) break; // PIN code = address end
+    }
+
+    if (parts.length) {
+      const joined = parts.join(", ").replace(/\s*,\s*,\s*/g, ", ").replace(/[,\s]+$/, "").trim();
+      if (joined) return joined.length > 300 ? joined.slice(0, 300) : joined;
+    }
+  }
+  return null;
 }
 
 // Strip "1. ", "2. ", "3. " from the head of a line so label matchers
