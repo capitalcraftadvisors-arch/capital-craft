@@ -152,6 +152,7 @@ export default function Step2Page() {
       if (r.legal_name) setValue("legal_name", r.legal_name, { shouldValidate: true });
       if (r.trade_name) setValue("trade_name", r.trade_name, { shouldValidate: true });
       if (r.gstin)      setValue("gstin_number", r.gstin,      { shouldValidate: true });
+      if (r.address)    setValue("gst_address", r.address,     { shouldValidate: true });
       // Persist OCR audit trail on the gstin doc row for future debugging.
       try {
         await supabase()
@@ -162,6 +163,7 @@ export default function Step2Page() {
               gstin: r.gstin ?? null,
               legal_name: r.legal_name ?? null,
               trade_name: r.trade_name ?? null,
+              address: r.address ?? null,
             },
           })
           .eq("id", docId);

@@ -752,7 +752,7 @@ function EpcsTab() {
   }
 
   // Mutually-exclusive stage cards (sum = Total) + Application Unseen (overlap).
-  const [period, setPeriod] = useState<Period>("month");
+  const [period, setPeriod] = useState<Period>("year");
   const [pFrom, setPFrom] = useState("");
   const [pTo, setPTo] = useState("");
   const fyRows = useMemo(() => rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo)), [rows, period, pFrom, pTo]);
@@ -1332,7 +1332,7 @@ function AppsTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, q, categoryFilter, statusFilter, epcFilter, lenderFilter, dateFrom, dateTo, sortKey]);
 
-  const [period, setPeriod] = useState<Period>("month");
+  const [period, setPeriod] = useState<Period>("year");
   const [pFrom, setPFrom] = useState("");
   const [pTo, setPTo] = useState("");
   const fyRows = useMemo(() => rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo)), [rows, period, pFrom, pTo]);
@@ -1862,7 +1862,7 @@ function InsuranceTab() {
     hold: "bg-[#dceffb] text-[#185fa5]",
   };
 
-  const [period, setPeriod] = useState<Period>("month");
+  const [period, setPeriod] = useState<Period>("year");
   const [pFrom, setPFrom] = useState("");
   const [pTo, setPTo] = useState("");
   const fyRows = useMemo(() => rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo)), [rows, period, pFrom, pTo]);
@@ -2107,7 +2107,7 @@ function LeadsTab() {
     return true;
   });
 
-  const [period, setPeriod] = useState<Period>("month");
+  const [period, setPeriod] = useState<Period>("year");
   const [pFrom, setPFrom] = useState("");
   const [pTo, setPTo] = useState("");
   const fyRows = rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo));

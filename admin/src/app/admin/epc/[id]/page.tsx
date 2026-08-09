@@ -586,25 +586,8 @@ function MembersEditor({
                 setDraft(next);
               }}
             />
-            <input
-              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
-              placeholder="Father's Name"
-              value={s.father_name}
-              onChange={(e) => {
-                const next = [...draft]; next[i] = { ...next[i], father_name: e.target.value };
-                setDraft(next);
-              }}
-            />
-            <input
-              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
-              placeholder="Date of Birth"
-              type="date"
-              value={s.dob}
-              onChange={(e) => {
-                const next = [...draft]; next[i] = { ...next[i], dob: e.target.value };
-                setDraft(next);
-              }}
-            />
+            {/* Father's Name / DOB / Address are captured in onboarding and shown
+                on the profile — not editable here. Aadhaar No. stays editable. */}
             <input
               className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
               placeholder="Aadhaar No. (12 digits)"
@@ -614,15 +597,6 @@ function MembersEditor({
               onChange={(e) => {
                 const v = e.target.value.replace(/\D/g, "");
                 const next = [...draft]; next[i] = { ...next[i], aadhaar_number: v };
-                setDraft(next);
-              }}
-            />
-            <input
-              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white sm:col-span-2"
-              placeholder="Address (as per Aadhaar)"
-              value={s.aadhaar_address}
-              onChange={(e) => {
-                const next = [...draft]; next[i] = { ...next[i], aadhaar_address: e.target.value };
                 setDraft(next);
               }}
             />

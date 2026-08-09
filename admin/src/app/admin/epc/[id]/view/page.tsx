@@ -394,6 +394,7 @@ function Inner() {
               <div className="min-w-0">
                 <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">{trade}</div>
                 {legalSub && <div className="text-[14px] text-[#5a8a76] truncate mt-0.5">{legalSub}</div>}
+                {biz.epc_display_id && <div className="text-[14px] font-medium text-[#0f7a52] truncate mt-0.5">{biz.epc_display_id}</div>}
               </div>
             </div>
             {/* Top-right — selected Service (chips removed), plus a Rejected-by-
@@ -658,10 +659,6 @@ function Inner() {
               <KV k="GSTIN" v={biz.gstin_number} />
               <KV k="GST Address" v={biz.gst_address} />
               <KV k="Constitution Type" v={btLabel} />
-              <KV k="PM Surya Ghar Registered" v={
-                biz.pm_surya_ghar === "yes" ? "Yes" : biz.pm_surya_ghar === "no" ? "No"
-                  : (biz.pm_surya_ghar ? cap(biz.pm_surya_ghar) : "—")
-              } />
             </SectionCard>
 
             <SectionCard title="Bank" accent="blue" icon={I.bank}>
@@ -823,9 +820,9 @@ function Inner() {
 // Service band — same shape as the internal-status band, but green (brand)
 // since this is a positive, EPC-affecting choice. Sets epc_business.service_type.
 const SERVICE_LABEL: Record<string, string> = {
-  loans:     "Service provided: Loan",
-  insurance: "Service provided: Insurance",
-  both:      "Service provided: Both loan and insurance",
+  loans:     "Loan",
+  insurance: "Insurance",
+  both:      "Loan and Insurance",
 };
 
 function ServiceBand({

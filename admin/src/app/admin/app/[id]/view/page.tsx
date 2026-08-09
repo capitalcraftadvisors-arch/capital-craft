@@ -1099,12 +1099,13 @@ function Inner() {
 
           {/* COL 3 — decision, sanction, comments */}
           <div className="flex flex-col gap-3">
+            {/* Lender status — directly above Approval details (loan #L1). */}
+            {lenderRows.length > 0 && <LoanLenderStatusBox rows={lenderRows} />}
             {approvedPlus && approvalDetails && (
               <SectionCard title="Approval details" accent="green" icon={I.circleCheck} adminOnly>
-                {/* Lender chips — switch which approved lender's details show.
-                    The finalized one (approved_lender) has a ✓ + green fill. */}
+                {/* Lender chips — top-right corner of the box (6h). */}
                 {approvedRows.length > 1 && (
-                  <div className="flex flex-wrap gap-1.5 mb-3">
+                  <div className="flex justify-end flex-wrap gap-1.5 mb-2">
                     {approvedRows.map((r) => {
                       const isFinal = loan.approved_lender === r.lender_key;
                       const isSel = selDetailsKey === r.lender_key;
@@ -1128,13 +1129,21 @@ function Inner() {
                 )}
 
                 <div className="flex items-start justify-between gap-3 mb-3">
-                  <div className="text-[15px] leading-snug">
-                    <div className="text-[11px] uppercase tracking-wide text-[#5a8a76] font-medium">
-                      {approvedRows.length > 1 ? "Viewing" : "Approved by"}
-                    </div>
+                  <div className="leading-snug">
                     <div className="text-[18px] text-[#178a5c] font-bold">{shownLenderLabel}</div>
-                    {approvedRows.length > 1 && loan.approved_lender === selDetailsKey && (
-                      <div className="text-[11px] font-semibold text-[#0f7a52] mt-0.5">✓ Finalized for disbursement</div>
+                    {approvedRows.length > 1 && (
+                      loan.approved_lender === selDetailsKey ? (
+                        <div className="text-[12px] font-semibold text-[#0f7a52] mt-1">✓ Finalized</div>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={statusBusy}
+                          onClick={() => void finalizeLender(selDetailsKey)}
+                          className="mt-1 inline-flex items-center gap-1 rounded-[6px] bg-[#178a5c] text-white text-[12px] font-semibold px-3 py-1 hover:bg-[#0f7a52] disabled:opacity-60"
+                        >
+                          Finalize
+                        </button>
+                      )
                     )}
                   </div>
                   {/* Credit score — box, top-right corner. */}
@@ -1170,18 +1179,6 @@ function Inner() {
                     </tbody>
                   </table>
                 </div>
-
-                {/* Finalize — shown when viewing a non-finalized approved lender. */}
-                {approvedRows.length > 1 && selDetailsKey && loan.approved_lender !== selDetailsKey && (
-                  <button
-                    type="button"
-                    disabled={statusBusy}
-                    onClick={() => void finalizeLender(selDetailsKey)}
-                    className="mt-3 w-full inline-flex items-center justify-center gap-1.5 rounded-[8px] bg-[#178a5c] text-white text-[13px] font-semibold px-4 py-2 hover:bg-[#0f7a52] disabled:opacity-60"
-                  >
-                    Finalize {shownLenderLabel} for disbursement
-                  </button>
-                )}
 
                 {/* Sanction letter — status lives here in Approval details. */}
                 <div className="mt-3">
@@ -1237,9 +1234,6 @@ function Inner() {
                 </div>
               </SectionCard>
             )}
-
-            {/* Per-lender status — compact, directly above Comments (6d). */}
-            {lenderRows.length > 0 && <LoanLenderStatusBox rows={lenderRows} />}
 
             <SectionCard title="Comments" tint icon={I.lock} adminOnly>
               <CommentsSection
