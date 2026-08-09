@@ -1103,32 +1103,14 @@ function Inner() {
             {lenderRows.length > 0 && <LoanLenderStatusBox rows={lenderRows} />}
             {approvedPlus && approvalDetails && (
               <SectionCard title="Approval details" accent="green" icon={I.circleCheck} adminOnly>
-                {/* Lender chips — top-right corner of the box (6h). */}
-                {approvedRows.length > 1 && (
-                  <div className="flex justify-end flex-wrap gap-1.5 mb-2">
-                    {approvedRows.map((r) => {
-                      const isFinal = loan.approved_lender === r.lender_key;
-                      const isSel = selDetailsKey === r.lender_key;
-                      return (
-                        <button
-                          key={r.id}
-                          type="button"
-                          onClick={() => setDetailsLender(r.lender_key)}
-                          className={[
-                            "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-semibold border transition-colors",
-                            isSel ? "bg-[#178a5c] text-white border-[#178a5c]"
-                                  : "bg-white text-[#0f3d2e] border-[#cdeadd] hover:bg-[#f0faf5]",
-                          ].join(" ")}
-                        >
-                          {isFinal && <span className={isSel ? "text-white" : "text-[#178a5c]"}>✓</span>}
-                          {r.lender_label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-
+                {/* Header band — the selected lender name + finalize control
+                    sit directly under the "Approval details" title (loan #L2).
+                    Lender tabs (chips) and the credit-score box are pinned to
+                    the top-right corner. Finalize behaviour is unchanged:
+                    "✓ Finalized" for the chosen lender, a "Finalize" button
+                    when a different approved lender's tab is selected. */}
                 <div className="flex items-start justify-between gap-3 mb-3">
+                  {/* Left — lender + finalize, tight under the heading. */}
                   <div className="leading-snug">
                     <div className="text-[18px] text-[#178a5c] font-bold">{shownLenderLabel}</div>
                     {approvedRows.length > 1 && (
@@ -1146,11 +1128,37 @@ function Inner() {
                       )
                     )}
                   </div>
-                  {/* Credit score — box, top-right corner. */}
-                  <div className="shrink-0 text-center rounded-[10px] border border-[#cdeadd] bg-[#f0faf5] px-4 py-2.5">
-                    <div className="text-[10px] uppercase tracking-wide text-[#5a8a76]">Credit score</div>
-                    <div className="text-[18px] font-bold text-[#0f3d2e] leading-tight">
-                      {shownCredit != null ? shownCredit : "None"}
+                  {/* Right — lender tabs above the credit-score box. */}
+                  <div className="shrink-0 flex flex-col items-end gap-2">
+                    {approvedRows.length > 1 && (
+                      <div className="flex justify-end flex-wrap gap-1.5">
+                        {approvedRows.map((r) => {
+                          const isFinal = loan.approved_lender === r.lender_key;
+                          const isSel = selDetailsKey === r.lender_key;
+                          return (
+                            <button
+                              key={r.id}
+                              type="button"
+                              onClick={() => setDetailsLender(r.lender_key)}
+                              className={[
+                                "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-semibold border transition-colors",
+                                isSel ? "bg-[#178a5c] text-white border-[#178a5c]"
+                                      : "bg-white text-[#0f3d2e] border-[#cdeadd] hover:bg-[#f0faf5]",
+                              ].join(" ")}
+                            >
+                              {isFinal && <span className={isSel ? "text-white" : "text-[#178a5c]"}>✓</span>}
+                              {r.lender_label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {/* Credit score box. */}
+                    <div className="text-center rounded-[10px] border border-[#cdeadd] bg-[#f0faf5] px-4 py-2.5">
+                      <div className="text-[10px] uppercase tracking-wide text-[#5a8a76]">Credit score</div>
+                      <div className="text-[18px] font-bold text-[#0f3d2e] leading-tight">
+                        {shownCredit != null ? shownCredit : "None"}
+                      </div>
                     </div>
                   </div>
                 </div>
