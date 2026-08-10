@@ -152,19 +152,30 @@ export function parseAadhaar(text: string): AadhaarFields {
   const coMatch = text.match(/(?:S|D|C|W|H)\s*[\/\\.]\s*O\s*[:\-]?\s*([A-Za-z][A-Za-z\s.]{1,80})/i);
   const care_of = coMatch ? cleanValue(coMatch[1]) : null;
 
-  // Name: first line that is (a) mostly letters, (b) not a common
-  // Aadhaar noise label, (c) appears BEFORE the DOB line if we found one.
-  // Falls back to the strongest name-shaped candidate anywhere in the text.
-  const noise = /(government|india|unique|identification|aadhaar|male|female|dob|year of birth|address|s\/o|d\/o|c\/o|w\/o|h\/o|पहचान|आधार|भारत|सरकार)/i;
-  const nameCandidates = lines.filter((l) => {
-    if (l.length < 3 || l.length > 60) return false;
+  // Name: a 2–4 word all-letters line that isn't an Aadhaar label OR a
+  // phone-camera watermark ("Powered by … Camera", "Shot on …", brand names),
+  // which OCR otherwise picks up as the name. Preference goes to a candidate
+  // that sits ABOVE the identity block (DOB / gender / number) — the real name
+  // is printed there, while watermarks sit at the photo's edge.
+  const noise = /(government|india|unique|identification|authority|aadhaar|male|female|\bdob\b|year of birth|address|s\/o|d\/o|c\/o|w\/o|h\/o|powered\s*by|\bcamera\b|shot\s*on|redmi|vivo|\boppo\b|samsung|oneplus|realme|\bpoco\b|iphone|huawei|xiaomi|motorola|\bmobile\b|\bvid\b|enrol|download|पहचान|आधार|भारत|सरकार)/i;
+  const isNameLine = (l: string): boolean => {
+    if (l.length < 3 || l.length > 40) return false;
     if (noise.test(l)) return false;
-    // Require at least two words made of letters (rules out numbers-only
-    // strings and single tokens like "MALE").
-    const alphaWords = l.split(/\s+/).filter((w) => /^[A-Za-z][A-Za-z.'-]+$/.test(w));
-    return alphaWords.length >= 2;
-  });
-  const name = nameCandidates.length > 0 ? cleanValue(nameCandidates[0]) : null;
+    if (/\d/.test(l)) return false;                 // names carry no digits
+    const words = l.split(/\s+/);
+    if (words.length < 2 || words.length > 4) return false;
+    return words.every((w) => /^[A-Za-z][A-Za-z.'-]+$/.test(w)); // every word is a word
+  };
+  const nameCandidates = lines.filter(isNameLine);
+  // Index where the identity block begins (DOB / gender / 12-digit number).
+  const idIdx = lines.findIndex(
+    (l) => /\b(DOB|Date of Birth|Year of Birth)\b/i.test(l) ||
+           /\b\d{4}\s?\d{4}\s?\d{4}\b/.test(l) ||
+           /\b(male|female|पुरुष|महिला)\b/i.test(l),
+  );
+  const above = idIdx >= 0 ? nameCandidates.filter((c) => lines.indexOf(c) < idIdx) : [];
+  const picked = above.length > 0 ? above[above.length - 1] : (nameCandidates[0] ?? null);
+  const name = picked ? cleanValue(picked) : null;
 
   // Address: heuristic — everything between an "Address" label and the
   // address end. An Indian address ENDS at its 6-digit PIN code, so we cut
