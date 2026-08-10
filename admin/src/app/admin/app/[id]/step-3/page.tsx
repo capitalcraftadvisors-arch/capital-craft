@@ -878,16 +878,16 @@ function Inner() {
           <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">
             Please confirm the electricity bill is in the name of the applicant.
           </h2>
-          {ebillName ? (
-            <p className="text-[13px]">
-              Name on e-bill:{" "}
-              <span className="font-semibold text-[#0f3d2e]">{ebillName}</span>
-            </p>
-          ) : (
-            <p className="text-[13px] text-text-muted">
-              Name on e-bill not detected. Confirm ownership manually below.
-            </p>
-          )}
+          {/* Name on e-bill — always an editable field so it is captured even
+              when the OCR can't read it off the bill (auto-filled when it can,
+              otherwise the admin types it). */}
+          <Input
+            label="Name on e-bill"
+            value={ebillName}
+            onChange={(e) => setEbillName(e.target.value)}
+            placeholder="Name as printed on the electricity bill"
+            hint={ebillName ? "Auto-filled from the bill — edit if it doesn't match." : "Not auto-detected — type the name shown on the bill."}
+          />
           <div className="grid sm:grid-cols-2 gap-3">
             <button
               type="button"
