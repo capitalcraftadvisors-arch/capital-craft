@@ -96,6 +96,11 @@ function Inner() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  // Signed URL of the STORED Aadhaar front (shown on edit/reload when there's
+  // no freshly-picked File), plus a viewer rotation (0/90/180/270).
+  const [frontStoredUrl, setFrontStoredUrl] = useState<string | null>(null);
+  const [frontRotate, setFrontRotate] = useState(0);
+
   // Object URL for front-file preview
   const frontPreviewUrl = useMemo(() => {
     if (!frontFile) return null;
@@ -145,6 +150,19 @@ function Inner() {
         setAadhaarNumber(row.aadhaar_number ?? "");
         setCareOf(row.aadhaar_care_of ?? "");
         setAddress(row.aadhaar_address ?? "");
+        // Sign the stored front image so it renders in the preview on edit
+        // (PDF fronts have no inline thumbnail — they fall back to the label).
+        if (row.aadhaar_front_path && !/\.pdf$/i.test(String(row.aadhaar_front_path))) {
+          try {
+            const r2 = await fetch(`/api/admin/loan-app/${params.id}/sign-doc`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+              body: JSON.stringify({ path: row.aadhaar_front_path }),
+            });
+            const d2 = await r2.json().catch(() => ({}));
+            if (d2?.ok && d2.url) setFrontStoredUrl(d2.url as string);
+          } catch { /* preview is best-effort */ }
+        }
       }
       setLoading(false);
     })();
@@ -490,36 +508,48 @@ function Inner() {
                 </div>
               </div>
 
-              {/* Face thumbnail */}
+              {/* Front / face preview — shows the detected face, a freshly
+                  picked front File, or (on edit) the STORED front image, with a
+                  rotate control for sideways scans. */}
               <div className="flex flex-col items-center">
                 <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold mb-2">
                   {uploaded.face_signed_url ? "Detected face" : "Front upload"}
                 </p>
                 <div className="w-full h-[220px] rounded-input border-2 border-[#cdeadd] bg-white overflow-hidden flex items-center justify-center">
-                  {uploaded.face_signed_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={uploaded.face_signed_url}
-                      alt="Detected face"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : frontPreviewUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={frontPreviewUrl}
-                      alt="Aadhaar front"
-                      className="w-full h-full object-contain"
-                    />
-                  ) : (
-                    <div className="text-center px-4">
-                      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#5a8a76" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mx-auto">
-                        <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
-                        <circle cx="12" cy="13" r="4" />
-                      </svg>
-                      <p className="text-[11px] text-text-muted mt-2">PDF upload — no thumbnail</p>
-                    </div>
-                  )}
+                  {(() => {
+                    const src = uploaded.face_signed_url || frontPreviewUrl || frontStoredUrl;
+                    if (!src) {
+                      return (
+                        <div className="text-center px-4">
+                          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#5a8a76" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mx-auto">
+                            <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+                            <circle cx="12" cy="13" r="4" />
+                          </svg>
+                          <p className="text-[11px] text-text-muted mt-2">PDF upload — no thumbnail</p>
+                        </div>
+                      );
+                    }
+                    return (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={src}
+                        alt="Aadhaar front"
+                        className={uploaded.face_signed_url ? "w-full h-full object-cover" : "w-full h-full object-contain"}
+                        style={{ transform: `rotate(${frontRotate}deg)`, transition: "transform 0.2s" }}
+                      />
+                    );
+                  })()}
                 </div>
+                {(uploaded.face_signed_url || frontPreviewUrl || frontStoredUrl) && (
+                  <button
+                    type="button"
+                    onClick={() => setFrontRotate((r) => (r + 90) % 360)}
+                    className="mt-2 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#185fa5] hover:underline"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
+                    Rotate
+                  </button>
+                )}
               </div>
             </div>
           </Card>

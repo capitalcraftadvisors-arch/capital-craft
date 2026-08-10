@@ -153,9 +153,11 @@ function Inner() {
         .maybeSingle();
       const row = data as unknown as (Loan & Record<string, any>) | null;
       setLoan(row);
-      // Prefill from a previous Step 4 save (edit / resume pass). No
-      // forward-redirect — the flow stays editable from the Step-6 review.
-      if (row && row.step4_completed_at) {
+      // Prefill from whatever is saved — NOT gated on step4_completed_at, so an
+      // already-uploaded bank statement + bank details re-hydrate on edit even
+      // if the step was never formally completed (each setter is guarded on its
+      // own value, so a blank first visit stays blank).
+      if (row) {
         if (row.employment_type)   setEmployment(row.employment_type);
         if (row.profession)        setProfession(row.profession);
         if (row.profession_other)  setProfessionOther(row.profession_other);
@@ -177,7 +179,9 @@ function Inner() {
         if (row.bank_ifsc)           setIfsc(row.bank_ifsc);
         if (row.bank_account_type)   setAccountType(row.bank_account_type);
         if (row.bank_mobile)         setBankMobile(row.bank_mobile);
-        setBankConfirmed(true);   // was confirmed at the previous save
+        // Only treat the bank as pre-confirmed when there IS saved bank data —
+        // otherwise a blank first visit would skip confirmation.
+        if (row.bank_statement_path || row.bank_account_no) setBankConfirmed(true);
       }
       setLoading(false);
     })();

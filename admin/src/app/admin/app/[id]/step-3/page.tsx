@@ -216,11 +216,14 @@ function Inner() {
         .maybeSingle();
       const l = data as unknown as (Loan & Record<string, any>) | null;
       setLoan(l);
-      // Full prefill from a PREVIOUS Step 3 save (edit / resume pass).
-      // On first visit everything starts blank — including the pincode,
-      // which is intentionally NOT copied from the registration page
-      // because the installation site may be at a different place.
-      if (l && l.step3_completed_at) {
+      // Prefill from whatever is already saved — do NOT gate on
+      // step3_completed_at. Every setter below is individually guarded on its
+      // own value/path, so a first visit (all columns null) still starts blank,
+      // while an edit/resume ALWAYS re-hydrates uploaded docs + fields even if
+      // the step was never formally "completed". Gating on the completion flag
+      // was hiding already-uploaded docs on edit (fresh upload box) and letting
+      // the subsequent save null-out their *_path columns.
+      if (l) {
         setPincode(l.install_pincode ?? "");
         setState(l.install_state ?? "");
         setCity(l.install_city ?? "");

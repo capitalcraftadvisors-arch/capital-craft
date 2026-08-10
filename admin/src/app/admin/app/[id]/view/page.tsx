@@ -517,17 +517,20 @@ function Inner() {
   // present (tranche/completion docs excluded) — mirrors the dashboard's
   // loanDocsPending. The Docs Sent button stays gated on this.
   const hasCat = (c: string) => docs.some((d) => d.category === c);
-  // Required docs to enable Doc Sent — the core KYC + loan documents a lender
-  // needs. Applicant photo (customer_photo) and Rooftop photo (borrower_photo)
-  // are NOT required here: neither is reliably captured in the application flow,
-  // so requiring them blocked nearly every application from sending docs. They
-  // stay uploadable, just non-blocking. Sanction Letter / Tranche 1 / Tranche 2
-  // are also NOT required here (they only come after approval).
+  // Every document through Step 4 is REQUIRED to enable Doc Sent — Applicant PAN
+  // + Applicant photo + Aadhaar (front/back) [Steps 1–2], Quotation + Electricity
+  // bill + Rooftop photo [Step 3], Bank statement [Step 4], and the co-applicant
+  // KYC when there is a co-applicant. Missing any one blocks Doc Sent. Each doc
+  // is matched by its user_application_docs category OR its *_path column, so it
+  // counts however it was captured. Sanction Letter / Tranche docs come later and
+  // are NOT required here.
   const appDocsComplete =
     hasCat("borrower_pan") &&
+    (hasCat("customer_photo")   || !!loan.customer_photo_path) &&
     !!loan.aadhaar_front_path && !!loan.aadhaar_back_path &&
     (hasCat("quotation")        || !!loan.proforma_invoice_path) &&
     (hasCat("electricity_bill") || !!loan.ebill_path) &&
+    (hasCat("borrower_photo")   || !!loan.rooftop_photo_path) &&
     (hasCat("bank_statement")   || !!loan.bank_statement_path) &&
     (!hasCoapp || (!!loan.coapp_pan_path && !!loan.coapp_aadhaar_front_path && !!loan.coapp_aadhaar_back_path));
 
