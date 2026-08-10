@@ -23,6 +23,7 @@
 import sharp from "sharp";
 import { uploadBuffer } from "@/lib/gcs";
 import { visionDocumentText, visionDetectFaceBox } from "@/lib/vision-server";
+import { isValidAadhaar, sanitizeIndianAddress } from "@/lib/doc-validation";
 
 const AADHAAR_FILE_MAX = 6 * 1024 * 1024;   // safety cap on request bodies
 const FACE_PADDING_PCT = 0.15;
@@ -128,8 +129,11 @@ export function parseAadhaar(text: string): AadhaarFields {
   // 12-digit Aadhaar number (usually printed as 3 groups of 4).
   const numberMatch = text.match(/\b(\d{4})\s?(\d{4})\s?(\d{4})\b/);
   const rawDigits   = numberMatch ? (numberMatch[1] + numberMatch[2] + numberMatch[3]) : null;
-  const aadhaar_number = rawDigits && rawDigits.length === 12 ? rawDigits : null;
-  const aadhaar_masked = maskAadhaar(rawDigits);
+  // Only accept a number that passes the Aadhaar Verhoeff check-digit. A
+  // mis-read (any wrong digit) fails it, so it's rejected rather than shown as
+  // a real number the admin might trust.
+  const aadhaar_number = rawDigits && isValidAadhaar(rawDigits) ? rawDigits : null;
+  const aadhaar_masked = aadhaar_number ? maskAadhaar(aadhaar_number) : null;
 
   // DOB: prefer explicit "DOB" label. Fall back to "Year of Birth".
   const dobLabelMatch =
@@ -188,8 +192,10 @@ export function parseAadhaar(text: string): AadhaarFields {
     const stripped = tail
       .slice(0, cutAt)
       .replace(/\b(?:Download\s*Da[lt]e|help@uidai|www\.uidai|\bVID\b|\b1947\b)\b.*/is, "");
-    address = cleanValue(stripped.replace(/\s+/g, " "));
-    if (address.length < 8) address = null;
+    // Sanity-gate the result: keep only the English portion, and require it to
+    // look like a real Indian address (contains a PIN code). If it doesn't,
+    // return null instead of the random words OCR sometimes leaves here.
+    address = sanitizeIndianAddress(cleanValue(stripped.replace(/\s+/g, " ")));
   }
 
   return {
