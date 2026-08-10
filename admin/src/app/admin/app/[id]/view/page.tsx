@@ -527,7 +527,9 @@ function Inner() {
     (hasCat("quotation")        || !!loan.proforma_invoice_path) &&
     (hasCat("electricity_bill") || !!loan.ebill_path) &&
     (hasCat("customer_photo")   || !!loan.customer_photo_path) &&
-    (hasCat("borrower_photo")   || !!loan.rooftop_photo_path) &&   // Rooftop photo now mandatory
+    // Rooftop photo is enforced at upload time (step-3), NOT retroactively at
+    // the Doc-Sent gate — otherwise applications created before rooftop became
+    // mandatory (which never captured one) can never send docs.
     (hasCat("bank_statement")   || !!loan.bank_statement_path) &&
     (!hasCoapp || (!!loan.coapp_pan_path && !!loan.coapp_aadhaar_front_path && !!loan.coapp_aadhaar_back_path));
 
