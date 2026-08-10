@@ -25,6 +25,7 @@ import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
 import { extractPan } from "@/lib/ocr";
 import { EMAIL_RE, MOBILE_RE } from "@/lib/validators";
+import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
 
 // The five policy keys recorded in the consent legal breadcrumb. The
 // visible consent line mentions three by name (Terms / Privacy / Cookie)
@@ -131,7 +132,7 @@ function Inner() {
         .select(
           "id, epc_business_id, status, current_step, " +
           "install_pincode, install_state, install_district, install_city, " +
-          "borrower_mobile, borrower_email, borrower_pan, borrower_father_name, system_type, plant_use_type, consent_at, customer_photo_path",
+          "borrower_mobile, borrower_email, borrower_pan, borrower_father_name, system_type, plant_use_type, consent_at, customer_photo_path, created_at, aadhaar_face_path",
         )
         .eq("id", params.id)
         .maybeSingle();
@@ -148,6 +149,9 @@ function Inner() {
       if (row.borrower_pan)     { setPanNumber(row.borrower_pan); setPanUploaded(true); }
       if (row.borrower_father_name) setPanFatherName(row.borrower_father_name);
       if (row.customer_photo_path) { setPhotoPath(row.customer_photo_path); setPhotoUploaded(true); }
+      // Grandfathered profiles (created before the passport-photo cutover) count
+      // the Aadhaar face as the applicant photo — don't force a re-upload.
+      else if (aadhaarFaceCountsAsPhoto({ created_at: row.created_at, aadhaar_face_path: row.aadhaar_face_path })) { setPhotoUploaded(true); }
       if (row.system_type)      setSystemType(row.system_type);
       if (row.plant_use_type)   setPlantUse(row.plant_use_type);
       if (row.consent_at)       setConsented(true);

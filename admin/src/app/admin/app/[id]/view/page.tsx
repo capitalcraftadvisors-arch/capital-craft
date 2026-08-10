@@ -29,6 +29,7 @@ import {
 import LenderPickerModal, { type LenderKey } from "@/components/LenderPickerModal";
 import ProfileTabBar, { TabButton, DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
 import { logLoanActivity } from "@/lib/loanAudit";
+import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
 import { deadlineState, DEADLINE_PILL, remainingAmount, fmtDateShort } from "@/lib/disbursement";
 import {
   I, SectionCard, KV, StepBlock, DocGrid, BigProgressStep, BigConnector, type ViewDocSlot,
@@ -143,7 +144,7 @@ function buildLoanDocGroups(loan: Loan, docs: Doc[]): LoanDocGroup[] {
     title: "Identity (Steps 1–2)",
     slots: [
       slot("applicant_pan",   "Applicant PAN card", ["borrower_pan"],   null),
-      slot("applicant_photo", "Applicant photo",    ["customer_photo"], loan.customer_photo_path ?? loan.aadhaar_face_path),
+      slot("applicant_photo", "Applicant photo",    ["customer_photo"], loan.customer_photo_path ?? (aadhaarFaceCountsAsPhoto(loan) ? loan.aadhaar_face_path : null)),
       slot("aadhaar_front",   "Aadhaar (front)",    [], loan.aadhaar_front_path),
       slot("aadhaar_back",    "Aadhaar (back)",     [], loan.aadhaar_back_path),
     ],
@@ -526,7 +527,7 @@ function Inner() {
   // are NOT required here.
   const appDocsComplete =
     hasCat("borrower_pan") &&
-    (hasCat("customer_photo")   || !!loan.customer_photo_path) &&
+    (hasCat("customer_photo")   || !!loan.customer_photo_path || aadhaarFaceCountsAsPhoto(loan)) &&
     !!loan.aadhaar_front_path && !!loan.aadhaar_back_path &&
     (hasCat("quotation")        || !!loan.proforma_invoice_path) &&
     (hasCat("electricity_bill") || !!loan.ebill_path) &&
