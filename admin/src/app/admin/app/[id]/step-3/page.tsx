@@ -521,7 +521,9 @@ function Inner() {
     !coappEmailConflict;
 
   const canNext =
-    !!proforma && !!ebill && !!rooftopDoc &&   // rooftop photo now mandatory
+    // Rooftop photo is NOT required to proceed — requiring it blocked editing
+    // (incl. saving the e-bill name) on applications without one.
+    !!proforma && !!ebill &&
     validSize && validCost && validLoan && !loanExceedsCost &&
     addressComplete &&
     ownership !== null &&
@@ -834,7 +836,7 @@ function Inner() {
           {/* Rooftop photo — geo-tagged, reuses EPC office-photo pipeline */}
           <div className="pt-2 border-t border-line">
             <p className="text-[13px] font-medium text-text-mid mb-1.5">
-              Rooftop photo (geo-tagged) <span className="text-red-500">*</span>
+              Rooftop photo (geo-tagged)
             </p>
             <p className="text-[12px] text-text-muted mb-3">
               Take a photo of the installation rooftop so the site can be verified.
