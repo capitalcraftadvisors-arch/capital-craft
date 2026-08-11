@@ -2,6 +2,7 @@ import { FUNCTIONS_URL } from "./supabase";
 import { getToken } from "./auth";
 import { parsePanFields } from "./pan-parser";
 import { parseGstAddress } from "./gst-address";
+import { isValidPan, isValidGstin } from "./doc-validation";
 
 export type ChequeOcrResult =
   | {
@@ -91,10 +92,13 @@ export async function extractPan(file: File): Promise<PanOcrResult> {
     | { ok: false; error: string };
   if (!raw.ok) return raw;
   const parsed = parsePanFields(raw.raw_text || "");
+  // Accept the PAN only if it's a valid PAN (shape + holder-type char). A
+  // mis-read is blanked rather than shown as a real number.
+  const panCandidate = (raw.pan ?? parsed.pan)?.toUpperCase() ?? null;
   return {
     ok: true,
     raw_text:    raw.raw_text,
-    pan:         raw.pan ?? parsed.pan,
+    pan:         isValidPan(panCandidate) ? panCandidate : null,
     name:        parsed.name,
     father_name: parsed.father_name,
     dob:         parsed.dob,
@@ -128,11 +132,16 @@ export async function extractGstLegalName(file: File): Promise<GstLegalNameOcrRe
     body: JSON.stringify({ imageBase64: base64, mimeType: file.type }),
   });
   const data = (await res.json()) as GstLegalNameOcrResult;
-  // If the server didn't return an address, derive it from the OCR text so
-  // the onboarding form's GST address field auto-populates. Non-fatal: any
-  // parse miss just leaves the field for the user to fill manually.
-  if (data.ok && !data.address && data.raw_text) {
-    data.address = parseGstAddress(data.raw_text);
+  if (data.ok) {
+    // If the server didn't return an address, derive it from the OCR text so
+    // the onboarding form's GST address field auto-populates. Non-fatal: any
+    // parse miss just leaves the field for the user to fill manually.
+    if (!data.address && data.raw_text) {
+      data.address = parseGstAddress(data.raw_text);
+    }
+    // Reject a GSTIN that fails its mod-36 check-digit (mis-read) — blank it
+    // rather than show a wrong number.
+    if (data.gstin && !isValidGstin(data.gstin)) data.gstin = null;
   }
   return data;
 }

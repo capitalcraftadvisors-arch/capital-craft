@@ -9,8 +9,10 @@
 // legacy cards vs bank-issued reprints). Callers should render the
 // parsed fields for admin review, not treat them as ground truth.
 
+import { isValidPan } from "./doc-validation";
+
 export type PanFields = {
-  pan:         string | null;   // "AAAAA9999A" — validated by regex
+  pan:         string | null;   // "AAAAA9999A" — validated by regex + holder-type
   name:        string | null;
   father_name: string | null;
   dob:         string | null;   // freeform text; usually "DD/MM/YYYY"
@@ -28,7 +30,9 @@ export function parsePanFields(text: string): PanFields {
   const lines = trimmed.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 
   const panMatch = trimmed.match(PAN_RE);
-  const pan = panMatch ? panMatch[0] : null;
+  // Accept only a structurally valid PAN (shape + valid 4th holder-type char);
+  // a mis-read is blanked rather than returned as a real PAN.
+  const pan = panMatch && isValidPan(panMatch[0]) ? panMatch[0] : null;
 
   // ── DOB ─────────────────────────────────────────────────────────
   // Prefer a labelled hit; fall back to any DD/MM/YYYY on the card.

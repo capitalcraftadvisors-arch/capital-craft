@@ -8,6 +8,7 @@
 // Do NOT import this from client code.
 
 import { visionDocumentText } from "./vision-server";
+import { isValidIfsc } from "./doc-validation";
 
 export type BankStatementFields = {
   account_holder: string | null;
@@ -166,7 +167,9 @@ export function parseBankStatement(text: string): BankStatementFields {
     account_holder,
     bank_name,
     account_no,
-    ifsc,
+    // Blank a mis-read IFSC (must match the AAAA0###### shape) rather than
+    // save a wrong bank code.
+    ifsc: isValidIfsc(ifsc) ? ifsc : null,
     account_type,
     mobile,
     email,

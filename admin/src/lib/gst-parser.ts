@@ -11,6 +11,8 @@
 //   1. Per-label matchers (Legal Name of Business / …registered person / Legal Name).
 //   2. Columnar fallback anchored on the GSTIN value line.
 
+import { isValidGstin } from "./doc-validation";
+
 export type GstFields = {
   gstin: string | null;
   legal_name: string | null;
@@ -45,7 +47,9 @@ export function parseGstFields(text: string): GstFields {
     if (!trade_name || isLabelOrPrefix(trade_name)) trade_name = fb.trade_name;
   }
 
-  return { gstin, legal_name, trade_name };
+  // Reject a GSTIN that fails its mod-36 check-digit (mis-read) — the legal /
+  // trade names still return; only the number is blanked when it can't be real.
+  return { gstin: isValidGstin(gstin) ? gstin : null, legal_name, trade_name };
 }
 
 // ── Parsers (verbatim) ──────────────────────────────────────────────────────
