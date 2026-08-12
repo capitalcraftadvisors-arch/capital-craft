@@ -39,14 +39,16 @@ type Row = {
   updated_at: string;
 };
 
-// Exactly ONE of businessId / applicationId is expected:
+// Exactly ONE of businessId / applicationId / leadId is expected:
 //   businessId    → EPC profile comments   (epc_comments)
 //   applicationId → loan application notes (loan_comments)
-// Both tables are admin-only and permanent (no UPDATE policy), so the same
-// UI serves both — no styling fork.
+//   leadId        → lead notes             (lead_comments)
+// All three tables are admin-only and permanent (no UPDATE policy), so the
+// same UI serves them — no styling fork.
 type Props = {
   businessId?: string;
   applicationId?: string;
+  leadId?: string;
   epcName?: string | null;
   onChanged?: () => void;
   // Optional height cap for the scroll list.
@@ -54,7 +56,7 @@ type Props = {
 };
 
 export default function CommentsSection({
-  businessId, applicationId, onChanged, maxListHeight = 360,
+  businessId, applicationId, leadId, onChanged, maxListHeight = 360,
 }: Props) {
   // Every note is labelled simply "Admin" — this is the single admin (CEO)
   // console. We deliberately don't surface the individual admin's name
@@ -69,10 +71,10 @@ export default function CommentsSection({
   const me = getBusiness();
   const myId = me?.id ?? null;
 
-  const isLoan = !!applicationId;
-  const table  = isLoan ? "loan_comments" : "epc_comments";
-  const keyCol = isLoan ? "application_id" : "business_id";
-  const keyVal = (isLoan ? applicationId : businessId) ?? "";
+  const kind   = applicationId ? "loan" : leadId ? "lead" : "epc";
+  const table  = kind === "loan" ? "loan_comments" : kind === "lead" ? "lead_comments" : "epc_comments";
+  const keyCol = kind === "loan" ? "application_id" : kind === "lead" ? "lead_id" : "business_id";
+  const keyVal = (kind === "loan" ? applicationId : kind === "lead" ? leadId : businessId) ?? "";
 
   async function load() {
     if (!keyVal) { setRows([]); setLoading(false); return; }

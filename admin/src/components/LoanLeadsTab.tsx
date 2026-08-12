@@ -59,6 +59,7 @@ export default function LoanLeadsTab() {
       .from("loan_leads")
       .select("id, lead_display_id, name, mobile, dob, loan_amount, project_size, project_size_unit, email, lead_owner_name, created_by, epc_business_id, epc_name_custom, status, created_at, epc_business:epc_business_id(trade_name, legal_name, contact_name, epc_display_id)")
       .eq("status", "under_review")
+      .is("aborted_at", null)
       .order("created_at", { ascending: false });
     setRows((data ?? []) as unknown as LeadRow[]);
     setLoading(false);
