@@ -24,6 +24,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { uploadBuffer, getSignedReadUrl } from "@/lib/gcs";
 import { extractBankStatement, type BankStatementFields } from "@/lib/bank-statement";
+import { geminiExtractBankStatement } from "@/lib/doc-extractors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -97,21 +98,33 @@ export async function POST(
     const path = `applications/${appId}/bank_statement/${Date.now()}_${safeName(file.name, "bank_statement")}`;
     await uploadBuffer(path, output, mime);
 
-    // OCR — best-effort. Vision-error message flows through so we can
-    // diagnose from the client Network tab / Cloud Run logs.
+    // OCR — Gemini reads the statement faithfully (primary); on any failure
+    // it returns null and we fall back to the Vision + regex parser. Every
+    // field can still be null and the Step 4 UI lets admin fill in the rest.
+    // Vision-error message flows through so we can diagnose from the client
+    // Network tab / Cloud Run logs.
     let fields: BankStatementFields = {
       account_holder: null, bank_name: null, account_no: null,
       ifsc: null, account_type: null, mobile: null, email: null,
     };
     let rawText: string | null = null;
     let visionError: string | null = null;
-    try {
-      const r = await extractBankStatement(output, mime);
-      fields = r.fields;
-      rawText = r.raw_text;
-    } catch (e) {
-      visionError = e instanceof Error ? e.message : String(e);
-      console.error("[extract-bank-statement] vision error:", visionError);
+    let source: "gemini" | "vision" = "gemini";
+
+    const gemini = await geminiExtractBankStatement([{ buffer: output, mime }]);
+    if (gemini) {
+      fields = gemini;
+      rawText = JSON.stringify(gemini);
+    } else {
+      source = "vision";
+      try {
+        const r = await extractBankStatement(output, mime);
+        fields = r.fields;
+        rawText = r.raw_text;
+      } catch (e) {
+        visionError = e instanceof Error ? e.message : String(e);
+        console.error("[extract-bank-statement] vision error:", visionError);
+      }
     }
 
     let signed: string | null = null;
@@ -129,6 +142,7 @@ export async function POST(
       storage_path: path,
       signed_url:   signed,
       uploaded_at:  new Date().toISOString(),
+      debug_source:       source,
       debug_vision_error: visionError,
       debug_raw_text:     rawText,
     });

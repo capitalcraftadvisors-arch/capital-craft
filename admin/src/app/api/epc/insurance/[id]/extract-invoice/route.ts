@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { uploadBuffer } from "@/lib/gcs";
 import { visionDocumentText } from "@/lib/vision-server";
+import { geminiExtractInvoice } from "@/lib/doc-extractors";
 import { insuranceClient, compress, safeName, parseInvoiceAmount, UUID_RE, ACCEPTED } from "@/lib/insurance-server";
 
 export const runtime = "nodejs";
@@ -39,9 +40,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     await uploadBuffer(path, buf, mime);
 
     let rawText = "";
-    try { rawText = await visionDocumentText(buf, mime); }
-    catch (e) { console.warn("[insurance/extract-invoice] vision failed:", e); }
-    const amount = parseInvoiceAmount(rawText || "");
+    let amount: number | null = null;
+    const g = await geminiExtractInvoice([{ buffer: buf, mime }]);
+    if (g) {
+      amount = g.amount;
+      rawText = JSON.stringify(g);
+    } else {
+      try { rawText = await visionDocumentText(buf, mime); }
+      catch (e) { console.warn("[insurance/extract-invoice] vision failed:", e); }
+      amount = parseInvoiceAmount(rawText || "");
+    }
 
     const supabase = insuranceClient(token);
     const { error: updErr } = await supabase

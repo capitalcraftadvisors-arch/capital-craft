@@ -18,6 +18,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { uploadBuffer, getSignedReadUrl } from "@/lib/gcs";
 import { extractProforma, extractEbill, type ProformaFields, type EbillFields } from "@/lib/loan-docs";
+import { geminiExtractProforma, geminiExtractEbill } from "@/lib/doc-extractors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -124,13 +125,19 @@ export async function POST(
       const path = `applications/${appId}/loan_docs/proforma/${Date.now()}_${safeName(proformaFile.name, "proforma")}`;
       await uploadBuffer(path, buffer, mime);
       let fields: ProformaFields = { total_project_cost: null, project_size: null, project_size_unit: null };
-      try {
-        const r = await extractProforma(buffer, mime);
-        fields = r.fields;
-        proformaRaw = r.raw_text;
-      } catch (e) {
-        visionError = e instanceof Error ? e.message : String(e);
-        console.error("[extract-loan-docs] proforma vision error:", visionError);
+      const gProforma = await geminiExtractProforma([{ buffer, mime }]);
+      if (gProforma) {
+        fields = gProforma;
+        proformaRaw = JSON.stringify(gProforma);
+      } else {
+        try {
+          const r = await extractProforma(buffer, mime);
+          fields = r.fields;
+          proformaRaw = r.raw_text;
+        } catch (e) {
+          visionError = e instanceof Error ? e.message : String(e);
+          console.error("[extract-loan-docs] proforma vision error:", visionError);
+        }
       }
       let signed: string | null = null;
       try { signed = await getSignedReadUrl(path, 3600); } catch { /* non-fatal */ }
@@ -150,13 +157,19 @@ export async function POST(
         monthly_bill_amount: null, discom_name: null, ca_number: null,
         pincode: null, ebill_address_line: null, ebill_name: null,
       };
-      try {
-        const r = await extractEbill(buffer, mime);
-        fields = r.fields;
-        ebillRaw = r.raw_text;
-      } catch (e) {
-        visionError = e instanceof Error ? e.message : String(e);
-        console.error("[extract-loan-docs] ebill vision error:", visionError);
+      const gEbill = await geminiExtractEbill([{ buffer, mime }]);
+      if (gEbill) {
+        fields = gEbill;
+        ebillRaw = JSON.stringify(gEbill);
+      } else {
+        try {
+          const r = await extractEbill(buffer, mime);
+          fields = r.fields;
+          ebillRaw = r.raw_text;
+        } catch (e) {
+          visionError = e instanceof Error ? e.message : String(e);
+          console.error("[extract-loan-docs] ebill vision error:", visionError);
+        }
       }
       let signed: string | null = null;
       try { signed = await getSignedReadUrl(path, 3600); } catch { /* non-fatal */ }

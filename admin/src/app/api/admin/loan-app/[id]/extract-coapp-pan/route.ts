@@ -16,6 +16,7 @@ import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { uploadBuffer, getSignedReadUrl } from "@/lib/gcs";
 import { visionDocumentText } from "@/lib/vision-server";
 import { parsePanFields } from "@/lib/pan-parser";
+import { geminiExtractPan } from "@/lib/doc-extractors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -92,18 +93,29 @@ export async function POST(
     const path = `applications/${appId}/coapp_pan/${Date.now()}_${safeName(file.name, "coapp_pan")}`;
     await uploadBuffer(path, output, mime);
 
-    // OCR + parse. Vision-error message flows through to the client.
+    // OCR + parse. Gemini reads the PAN faithfully (primary); on any failure
+    // it returns null and we fall back to Vision + regex. Vision-error message
+    // flows through to the client.
     let fields: { pan: string | null; name: string | null; father_name: string | null; dob: string | null } = {
       pan: null, name: null, father_name: null, dob: null,
     };
     let rawText: string | null = null;
     let visionError: string | null = null;
-    try {
-      rawText = await visionDocumentText(output, mime);
-      fields = parsePanFields(rawText);
-    } catch (e) {
-      visionError = e instanceof Error ? e.message : String(e);
-      console.error("[extract-coapp-pan] vision error:", visionError);
+    let source: "gemini" | "vision" = "gemini";
+
+    const gemini = await geminiExtractPan([{ buffer: output, mime }]);
+    if (gemini) {
+      fields = gemini;
+      rawText = JSON.stringify(gemini);
+    } else {
+      source = "vision";
+      try {
+        rawText = await visionDocumentText(output, mime);
+        fields = parsePanFields(rawText);
+      } catch (e) {
+        visionError = e instanceof Error ? e.message : String(e);
+        console.error("[extract-coapp-pan] vision error:", visionError);
+      }
     }
 
     let signed: string | null = null;
@@ -120,6 +132,7 @@ export async function POST(
       storage_path: path,
       signed_url:   signed,
       uploaded_at:  new Date().toISOString(),
+      debug_source:       source,
       debug_vision_error: visionError,
       debug_raw_text:     rawText,
     });

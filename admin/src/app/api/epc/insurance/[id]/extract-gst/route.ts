@@ -11,6 +11,7 @@ import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { uploadBuffer } from "@/lib/gcs";
 import { visionDocumentText } from "@/lib/vision-server";
 import { parseGstFields } from "@/lib/gst-parser";
+import { geminiExtractGst } from "@/lib/doc-extractors";
 import { insuranceClient, compress, safeName, UUID_RE, ACCEPTED } from "@/lib/insurance-server";
 
 export const runtime = "nodejs";
@@ -39,11 +40,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     await uploadBuffer(path, buf, mime);
 
     let fields = { gstin: null as string | null, legal_name: null as string | null, trade_name: null as string | null };
-    try {
-      const rawText = await visionDocumentText(buf, mime);
-      fields = parseGstFields(rawText || "");
-    } catch (e) {
-      console.warn("[insurance/extract-gst] vision failed:", e);
+    const g = await geminiExtractGst([{ buffer: buf, mime }]);
+    if (g) {
+      fields = { gstin: g.gstin, legal_name: g.legal_name, trade_name: g.trade_name };
+    } else {
+      try {
+        const rawText = await visionDocumentText(buf, mime);
+        fields = parseGstFields(rawText || "");
+      } catch (e) {
+        console.warn("[insurance/extract-gst] vision failed:", e);
+      }
     }
 
     const supabase = insuranceClient(token);

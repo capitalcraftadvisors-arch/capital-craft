@@ -9,6 +9,7 @@ import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { uploadBuffer } from "@/lib/gcs";
 import { visionDocumentText } from "@/lib/vision-server";
 import { parsePanFields } from "@/lib/pan-parser";
+import { geminiExtractPan } from "@/lib/doc-extractors";
 import { insuranceClient, compress, safeName, UUID_RE, ACCEPTED } from "@/lib/insurance-server";
 
 export const runtime = "nodejs";
@@ -37,11 +38,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     await uploadBuffer(path, buf, mime);
 
     let fields = { pan: null as string | null, name: null as string | null, father_name: null as string | null, dob: null as string | null };
-    try {
-      const rawText = await visionDocumentText(buf, mime);
-      fields = parsePanFields(rawText || "");
-    } catch (e) {
-      console.warn("[insurance/extract-pan] vision failed:", e);
+    const g = await geminiExtractPan([{ buffer: buf, mime }]);
+    if (g) {
+      fields = g;
+    } else {
+      try {
+        const rawText = await visionDocumentText(buf, mime);
+        fields = parsePanFields(rawText || "");
+      } catch (e) {
+        console.warn("[insurance/extract-pan] vision failed:", e);
+      }
     }
 
     const supabase = insuranceClient(token);

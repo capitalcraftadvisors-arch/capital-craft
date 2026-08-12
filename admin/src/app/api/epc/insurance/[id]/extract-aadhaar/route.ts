@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { uploadBuffer } from "@/lib/gcs";
-import { extractAadhaar, cropAndUploadFace } from "@/lib/aadhaar";
+import { extractAadhaar, geminiExtractAadhaar, cropAndUploadFace, type AadhaarFields } from "@/lib/aadhaar";
 import { insuranceClient, compress, safeName, UUID_RE, ACCEPTED } from "@/lib/insurance-server";
 
 export const runtime = "nodejs";
@@ -41,18 +41,25 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       uploadBuffer(backPath,  b.buf, b.mime),
     ]);
 
-    // OCR each side separately (extractAadhaar takes one image); front is the
-    // canonical identity, the back fills care_of / address which live there.
-    const [fr, bk] = await Promise.all([extractAadhaar(f.buf, f.mime), extractAadhaar(b.buf, b.mime)]);
-    const fields = {
-      name:           fr.fields.name           ?? bk.fields.name,
-      dob:            fr.fields.dob            ?? bk.fields.dob,
-      gender:         fr.fields.gender         ?? bk.fields.gender,
-      aadhaar_number: fr.fields.aadhaar_number ?? bk.fields.aadhaar_number,
-      aadhaar_masked: fr.fields.aadhaar_masked ?? bk.fields.aadhaar_masked,
-      care_of:        bk.fields.care_of        ?? fr.fields.care_of,
-      address:        bk.fields.address        ?? fr.fields.address,
-    };
+    // PRIMARY: Gemini reads both sides faithfully. On any failure it returns
+    // null and we fall back to the Vision + regex parser (front = canonical
+    // identity, back fills care_of / address).
+    let fields: AadhaarFields | null = await geminiExtractAadhaar([
+      { buffer: f.buf, mime: f.mime },
+      { buffer: b.buf, mime: b.mime },
+    ]);
+    if (!fields) {
+      const [fr, bk] = await Promise.all([extractAadhaar(f.buf, f.mime), extractAadhaar(b.buf, b.mime)]);
+      fields = {
+        name:           fr.fields.name           ?? bk.fields.name,
+        dob:            fr.fields.dob            ?? bk.fields.dob,
+        gender:         fr.fields.gender         ?? bk.fields.gender,
+        aadhaar_number: fr.fields.aadhaar_number ?? bk.fields.aadhaar_number,
+        aadhaar_masked: fr.fields.aadhaar_masked ?? bk.fields.aadhaar_masked,
+        care_of:        bk.fields.care_of        ?? fr.fields.care_of,
+        address:        bk.fields.address        ?? fr.fields.address,
+      };
+    }
 
     let facePath: string | null = null;
     try {

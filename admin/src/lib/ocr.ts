@@ -1,8 +1,12 @@
 import { FUNCTIONS_URL } from "./supabase";
 import { getToken } from "./auth";
-import { parsePanFields } from "./pan-parser";
-import { parseGstAddress } from "./gst-address";
-import { isValidPan, isValidGstin } from "./doc-validation";
+
+// PAN / GST / GSTR-3B OCR now goes through the same-origin Node route
+// /api/ocr, which reads the document with Gemini (primary) and falls back to
+// the Vision Edge Function automatically. The route returns the SAME shapes
+// these callers already expect, so the client just forwards the file and
+// returns the JSON — the name/address/validation enrichment that used to live
+// here now runs server-side. (extractCheque still targets its Edge Function.)
 
 export type ChequeOcrResult =
   | {
@@ -50,13 +54,13 @@ export type GstR3bOcrResult =
 // endpoint) instead of images:annotate.
 export async function extractGstR3b(file: File): Promise<GstR3bOcrResult> {
   const base64 = await fileToBase64(file);
-  const res = await fetch(`${FUNCTIONS_URL}/extract-gst-r3b`, {
+  const res = await fetch(`/api/ocr`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${getToken() ?? ""}`,
     },
-    body: JSON.stringify({ imageBase64: base64, mimeType: file.type }),
+    body: JSON.stringify({ type: "gstr3b", imageBase64: base64, mimeType: file.type }),
   });
   return res.json();
 }
@@ -79,30 +83,17 @@ export type PanOcrResult =
 
 export async function extractPan(file: File): Promise<PanOcrResult> {
   const base64 = await fileToBase64(file);
-  const res = await fetch(`${FUNCTIONS_URL}/extract-pan`, {
+  const res = await fetch(`/api/ocr`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${getToken() ?? ""}`,
     },
-    body: JSON.stringify({ imageBase64: base64, mimeType: file.type }),
+    body: JSON.stringify({ type: "pan", imageBase64: base64, mimeType: file.type }),
   });
-  const raw = (await res.json()) as
-    | { ok: true; pan: string | null; raw_text: string }
-    | { ok: false; error: string };
-  if (!raw.ok) return raw;
-  const parsed = parsePanFields(raw.raw_text || "");
-  // Accept the PAN only if it's a valid PAN (shape + holder-type char). A
-  // mis-read is blanked rather than shown as a real number.
-  const panCandidate = (raw.pan ?? parsed.pan)?.toUpperCase() ?? null;
-  return {
-    ok: true,
-    raw_text:    raw.raw_text,
-    pan:         isValidPan(panCandidate) ? panCandidate : null,
-    name:        parsed.name,
-    father_name: parsed.father_name,
-    dob:         parsed.dob,
-  };
+  // The route already returns { ok, raw_text, pan, name, father_name, dob }
+  // with the PAN validated and the name/father/DOB parsed server-side.
+  return res.json();
 }
 
 export type GstLegalNameOcrResult =
@@ -123,27 +114,17 @@ export type GstLegalNameOcrResult =
 // the Edge Function's internal mimeType branching.
 export async function extractGstLegalName(file: File): Promise<GstLegalNameOcrResult> {
   const base64 = await fileToBase64(file);
-  const res = await fetch(`${FUNCTIONS_URL}/extract-gst-legalname`, {
+  const res = await fetch(`/api/ocr`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${getToken() ?? ""}`,
     },
-    body: JSON.stringify({ imageBase64: base64, mimeType: file.type }),
+    body: JSON.stringify({ type: "gst", imageBase64: base64, mimeType: file.type }),
   });
-  const data = (await res.json()) as GstLegalNameOcrResult;
-  if (data.ok) {
-    // If the server didn't return an address, derive it from the OCR text so
-    // the onboarding form's GST address field auto-populates. Non-fatal: any
-    // parse miss just leaves the field for the user to fill manually.
-    if (!data.address && data.raw_text) {
-      data.address = parseGstAddress(data.raw_text);
-    }
-    // Reject a GSTIN that fails its mod-36 check-digit (mis-read) — blank it
-    // rather than show a wrong number.
-    if (data.gstin && !isValidGstin(data.gstin)) data.gstin = null;
-  }
-  return data;
+  // The route returns { ok, gstin, legal_name, trade_name, address, raw_text }
+  // with the GSTIN validated and the address derived server-side.
+  return res.json();
 }
 
 function fileToBase64(file: File): Promise<string> {

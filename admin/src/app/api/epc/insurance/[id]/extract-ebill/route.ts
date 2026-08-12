@@ -11,6 +11,7 @@ import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { uploadBuffer } from "@/lib/gcs";
 import { visionDocumentText } from "@/lib/vision-server";
 import { parseEbill } from "@/lib/loan-docs";
+import { geminiExtractEbill } from "@/lib/doc-extractors";
 import { insuranceClient, compress, safeName, UUID_RE, ACCEPTED } from "@/lib/insurance-server";
 
 export const runtime = "nodejs";
@@ -42,11 +43,17 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     let rawText = "";
     let address: string | null = null;
-    try {
-      rawText = await visionDocumentText(buf, mime);
-      address = parseEbill(rawText || "").ebill_address_line;
-    } catch (e) {
-      console.warn("[insurance/extract-ebill] vision failed:", e);
+    const g = await geminiExtractEbill([{ buffer: buf, mime }]);
+    if (g) {
+      address = g.ebill_address_line;
+      rawText = JSON.stringify(g);
+    } else {
+      try {
+        rawText = await visionDocumentText(buf, mime);
+        address = parseEbill(rawText || "").ebill_address_line;
+      } catch (e) {
+        console.warn("[insurance/extract-ebill] vision failed:", e);
+      }
     }
 
     const supabase = insuranceClient(token);

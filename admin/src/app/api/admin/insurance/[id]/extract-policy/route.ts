@@ -11,6 +11,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { uploadBuffer } from "@/lib/gcs";
 import { visionDocumentText } from "@/lib/vision-server";
+import { geminiExtractPolicy } from "@/lib/doc-extractors";
 import {
   SUPABASE_URL, SUPABASE_ANON, compress, safeName, parsePolicyPeriod, UUID_RE, ACCEPTED,
 } from "@/lib/insurance-server";
@@ -46,12 +47,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     let rawText = "";
     let from: string | null = null;
     let to: string | null = null;
-    try {
-      rawText = await visionDocumentText(buf, mime);
-      const p = parsePolicyPeriod(rawText || "");
-      from = p.from; to = p.to;
-    } catch (e) {
-      console.warn("[insurance/extract-policy] vision failed:", e);
+    const g = await geminiExtractPolicy([{ buffer: buf, mime }]);
+    if (g) {
+      from = g.from; to = g.to;
+      rawText = JSON.stringify(g);
+    } else {
+      try {
+        rawText = await visionDocumentText(buf, mime);
+        const p = parsePolicyPeriod(rawText || "");
+        from = p.from; to = p.to;
+      } catch (e) {
+        console.warn("[insurance/extract-policy] vision failed:", e);
+      }
     }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
