@@ -26,7 +26,7 @@ import sharp from "sharp";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { uploadBuffer, getSignedReadUrl } from "@/lib/gcs";
-import { extractAadhaar, cropAndUploadFace, type AadhaarFields } from "@/lib/aadhaar";
+import { extractAadhaar, geminiExtractAadhaar, cropAndUploadFace, type AadhaarFields } from "@/lib/aadhaar";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -135,55 +135,53 @@ export async function POST(
       uploadBuffer(backPath,  backComp.output,  backComp.outputMime),
     ]);
 
-    // ── OCR both sides ───────────────────────────────────────
-    // Front carries most identity fields; back carries care_of/address.
-    // Merge with front-wins for the identity fields and back-fills for
-    // the address block. If Vision throws (bad key, API-not-enabled,
-    // quota) the error message flows straight through to the client
-    // response and to Cloud Run logs — no silent-swallow.
+    // ── Extract fields ───────────────────────────────────────
+    // PRIMARY: Gemini reads BOTH sides faithfully with a strict "copy only
+    // what's printed, else null" prompt. It never throws — any failure
+    // (billing, retired model, network) returns null and we fall back to the
+    // Vision + regex parser below. The face crop further down always uses
+    // Vision regardless.
+    let merged = await geminiExtractAadhaar([
+      { buffer: frontComp.output, mime: frontComp.outputMime },
+      { buffer: backComp.output,  mime: backComp.outputMime },
+    ]);
+    let source: "gemini" | "vision" = "gemini";
     let frontOut: { fields: AadhaarFields; raw_text: string } | null = null;
     let backOut:  { fields: AadhaarFields; raw_text: string } | null = null;
     let visionError: string | null = null;
-    try {
-      [frontOut, backOut] = await Promise.all([
-        extractAadhaar(frontComp.output, frontComp.outputMime),
-        extractAadhaar(backComp.output,  backComp.outputMime),
-      ]);
-    } catch (e) {
-      visionError = e instanceof Error ? e.message : String(e);
-      console.error("[extract-aadhaar] vision error:", visionError);
+
+    if (!merged) {
+      // FALLBACK — Vision DOCUMENT_TEXT_DETECTION + regex, front-wins for the
+      // identity fields and back-fills for the address block.
+      source = "vision";
+      try {
+        [frontOut, backOut] = await Promise.all([
+          extractAadhaar(frontComp.output, frontComp.outputMime),
+          extractAadhaar(backComp.output,  backComp.outputMime),
+        ]);
+      } catch (e) {
+        visionError = e instanceof Error ? e.message : String(e);
+        console.error("[extract-aadhaar] vision error:", visionError);
+      }
+      const frontFields = frontOut?.fields ?? null;
+      const backFields  = backOut?.fields  ?? null;
+      merged = {
+        name:           frontFields?.name           ?? backFields?.name           ?? null,
+        dob:            frontFields?.dob            ?? backFields?.dob            ?? null,
+        gender:         frontFields?.gender         ?? backFields?.gender         ?? null,
+        aadhaar_number: frontFields?.aadhaar_number ?? backFields?.aadhaar_number ?? null,
+        aadhaar_masked: frontFields?.aadhaar_masked ?? backFields?.aadhaar_masked ?? null,
+        care_of:        backFields?.care_of         ?? frontFields?.care_of       ?? null,
+        address:        backFields?.address         ?? frontFields?.address       ?? null,
+      };
     }
 
-    const frontFields = frontOut?.fields ?? null;
-    const backFields  = backOut?.fields  ?? null;
-
-    const merged: AadhaarFields = {
-      name:           frontFields?.name           ?? backFields?.name           ?? null,
-      dob:            frontFields?.dob            ?? backFields?.dob            ?? null,
-      gender:         frontFields?.gender         ?? backFields?.gender         ?? null,
-      aadhaar_number: frontFields?.aadhaar_number ?? backFields?.aadhaar_number ?? null,
-      aadhaar_masked: frontFields?.aadhaar_masked ?? backFields?.aadhaar_masked ?? null,
-      care_of:        backFields?.care_of         ?? frontFields?.care_of       ?? null,
-      address:        backFields?.address         ?? frontFields?.address       ?? null,
-    };
-
-    // Persist raw OCR text (both sides) so parser misses on real docs
-    // can be debugged without re-uploading. Two fire-and-forget RPCs
-    // for atomic jsonb || merge — see 0027_ocr_raw_text.sql.
-    if (frontOut) {
-      supabase.rpc("append_ocr_raw", {
-        app_id: appId,
-        key_name: "aadhaar_front",
-        raw_text: frontOut.raw_text,
-      }).then((r) => r.error && console.warn("[extract-aadhaar] raw-text save (front):", r.error.message));
-    }
-    if (backOut) {
-      supabase.rpc("append_ocr_raw", {
-        app_id: appId,
-        key_name: "aadhaar_back",
-        raw_text: backOut.raw_text,
-      }).then((r) => r.error && console.warn("[extract-aadhaar] raw-text save (back):", r.error.message));
-    }
+    // Audit trail (fire-and-forget): the Vision raw text on the fallback path,
+    // or the Gemini result when it was used — so misses can be debugged without
+    // re-uploading. See 0027_ocr_raw_text.sql.
+    if (frontOut) supabase.rpc("append_ocr_raw", { app_id: appId, key_name: "aadhaar_front", raw_text: frontOut.raw_text }).then((r) => r.error && console.warn("[extract-aadhaar] raw-text save (front):", r.error.message));
+    if (backOut)  supabase.rpc("append_ocr_raw", { app_id: appId, key_name: "aadhaar_back",  raw_text: backOut.raw_text  }).then((r) => r.error && console.warn("[extract-aadhaar] raw-text save (back):", r.error.message));
+    if (source === "gemini") supabase.rpc("append_ocr_raw", { app_id: appId, key_name: "aadhaar_gemini", raw_text: JSON.stringify(merged) }).then((r) => r.error && console.warn("[extract-aadhaar] gemini audit:", r.error.message));
 
     // ── face crop on front (image only) ──────────────────────
     let facePath: string | null = null;
@@ -221,6 +219,7 @@ export async function POST(
       // `debug_vision_error` means Vision itself broke — fields will
       // all be null; admin fills in manually. Raw text is included
       // for immediate parser tuning against real docs.
+      debug_source: source,
       debug_vision_error: visionError,
       debug_raw_text_front: frontOut?.raw_text ?? null,
       debug_raw_text_back:  backOut?.raw_text  ?? null,

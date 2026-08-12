@@ -24,6 +24,7 @@ import sharp from "sharp";
 import { uploadBuffer } from "@/lib/gcs";
 import { visionDocumentText, visionDetectFaceBox } from "@/lib/vision-server";
 import { isValidAadhaar, sanitizeIndianAddress } from "@/lib/doc-validation";
+import { geminiExtract, type GeminiImage } from "@/lib/gemini-extract";
 
 const AADHAAR_FILE_MAX = 6 * 1024 * 1024;   // safety cap on request bodies
 const FACE_PADDING_PCT = 0.15;
@@ -64,6 +65,55 @@ export async function extractAadhaar(
   }
   const text = await visionDocumentText(buffer, mimeType);
   return { fields: parseAadhaar(text), raw_text: text };
+}
+
+// ── Gemini (AI) extraction — the faithful primary reader ─────────────────────
+// Sends BOTH Aadhaar sides to Gemini with a strict "copy only what's printed,
+// else null" prompt. Returns validated fields, or null on any failure (caller
+// then falls back to the Vision+regex parseAadhaar above). Applies the same
+// Verhoeff / gender normalisation so the output stays trustworthy.
+const AADHAAR_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    name:           { type: "STRING", nullable: true },
+    dob:            { type: "STRING", nullable: true },
+    gender:         { type: "STRING", nullable: true },
+    aadhaar_number: { type: "STRING", nullable: true },
+    care_of:        { type: "STRING", nullable: true },
+    address:        { type: "STRING", nullable: true },
+  },
+};
+const AADHAAR_PROMPT =
+  "You are reading an Indian Aadhaar card (front and/or back images). Extract ONLY values literally printed and legible on the card. If a field is not clearly present, return null — never guess, infer, or invent, and never return a phone-camera watermark, app name, or 'Government of India' as the name. " +
+  "name = the person's full name. aadhaar_number = the 12-digit number. dob = date of birth exactly as printed. gender = Male, Female, or Transgender. care_of = the S/O, D/O, W/O or C/O name. address = the full postal address exactly as printed in English, ending with the 6-digit PIN code.";
+
+function normalizeGender(g: string | null | undefined): string | null {
+  if (!g) return null;
+  const s = g.toLowerCase();
+  if (s.includes("female") || s.includes("महिला")) return "Female";
+  if (s.includes("male") || s.includes("पुरुष")) return "Male";
+  if (s.includes("trans")) return "Transgender";
+  return null;
+}
+
+export async function geminiExtractAadhaar(images: GeminiImage[]): Promise<AadhaarFields | null> {
+  const g = await geminiExtract<Partial<AadhaarFields>>({
+    images, prompt: AADHAAR_PROMPT, schema: AADHAAR_SCHEMA, label: "aadhaar",
+  });
+  if (!g) return null;
+  const digits = (g.aadhaar_number || "").replace(/\D/g, "");
+  const validNum = digits.length === 12 && isValidAadhaar(digits) ? digits : null;
+  const fields: AadhaarFields = {
+    name:           g.name?.trim() || null,
+    dob:            g.dob?.trim() || null,
+    gender:         normalizeGender(g.gender),
+    aadhaar_number: validNum,
+    aadhaar_masked: validNum ? maskAadhaar(validNum) : null,
+    care_of:        g.care_of?.trim() || null,
+    address:        g.address?.trim() || null, // Gemini output is faithful — trust it
+  };
+  // Consider it a real result only if it got at least a name or a valid number.
+  return fields.name || fields.aadhaar_number ? fields : null;
 }
 
 // Attempts to detect a face on the FRONT-side buffer and, if one is
