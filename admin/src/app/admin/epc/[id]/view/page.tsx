@@ -27,6 +27,7 @@ import { Period, inPeriod } from "@/lib/period";
 import LenderCell, { LenderInfo, LenderMap } from "@/components/LenderCell";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import CommentsSection from "@/components/CommentsSection";
+import OwnershipCard from "@/components/OwnershipCard";
 import ActivityLogModal from "@/components/ActivityLogModal";
 import DeleteEpcModal from "@/components/DeleteEpcModal";
 import ProfileTabBar, { TabButton, DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
@@ -607,6 +608,12 @@ function Inner() {
 
           {/* COL 1 */}
           <div className="flex flex-col gap-2.5">
+            <OwnershipCard
+              module="epcs"
+              recordId={biz.id}
+              createdByUserId={biz.created_by_user_id ?? null}
+              assignedToUserId={biz.assigned_to_user_id ?? null}
+            />
             <SectionCard title="Contact & business" accent="blue" icon={I.user}>
               <KV k="POC" v={biz.contact_name} />
               <KV k="Mobile" v={biz.contact_mobile ? `+91 ${biz.contact_mobile}` : "—"} />

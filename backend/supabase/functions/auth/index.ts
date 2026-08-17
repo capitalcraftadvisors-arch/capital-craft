@@ -66,7 +66,7 @@ serve(async (req) => {
     // Find or create
     let { data: biz } = await supabase
       .from("epc_business")
-      .select("id, status, business_type, current_step, contact_name, loan_app_unlocked, service_type")
+      .select("id, status, business_type, current_step, contact_name, loan_app_unlocked, service_type, role, allowed_modules, parent_user_id")
       .eq("contact_mobile", mobile)
       .maybeSingle();
 
@@ -74,17 +74,26 @@ serve(async (req) => {
       const { data: created, error } = await supabase
         .from("epc_business")
         .insert({ contact_mobile: mobile })
-        .select("id, status, business_type, current_step, contact_name, loan_app_unlocked, service_type")
+        .select("id, status, business_type, current_step, contact_name, loan_app_unlocked, service_type, role, allowed_modules, parent_user_id")
         .single();
       if (error) return json({ ok: false, error: error.message }, 500);
       biz = created;
     }
 
+    // Stamp last login (fire-and-forget; never block auth on it). Powers the
+    // Team view's "Last login" without a separate tracking system.
+    supabase.from("epc_business").update({ last_login_at: new Date().toISOString() }).eq("id", biz.id)
+      .then(({ error }) => { if (error) console.warn("last_login_at update failed:", error.message); });
+
     const claims = {
       sub: biz.id,
-      role: "authenticated",
+      role: "authenticated",            // Supabase-standard claim — do NOT change
       business_id: biz.id,
       business_type: biz.business_type ?? null,
+      // Hierarchy: the app-level role + the authoritative module permission set.
+      // Named hierarchy_role so it never collides with the "authenticated" role.
+      hierarchy_role: biz.role ?? null,               // 'MAIN_ADMIN' | 'OPERATIONS_USER' | null
+      allowed_modules: biz.allowed_modules ?? null,   // e.g. ['epcs','apps',...]
     };
 
     let token: string;

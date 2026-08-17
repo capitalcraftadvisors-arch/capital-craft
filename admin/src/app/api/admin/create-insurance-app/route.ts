@@ -79,6 +79,10 @@ export async function POST(req: NextRequest) {
       .insert({
         epc_business_id: epcBusinessId,
         created_by: "admin",
+        // Hierarchy (0066): the admin/ops user who created this application.
+        created_by_user_id: claims.business_id,
+        assigned_to_user_id: claims.business_id,
+        last_updated_by_user_id: claims.business_id,
         status: "draft",
         current_step: 1,
       })

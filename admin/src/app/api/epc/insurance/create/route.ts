@@ -50,6 +50,11 @@ export async function POST(req: NextRequest) {
         status: "draft",
         current_step: 1,
         created_by: claims.business_type === "admin" ? "admin" : "epc",
+        // Hierarchy (0066): stamp the creating user. Admin-created rows are
+        // self-assigned; EPC-created rows start unassigned (admin picks up).
+        created_by_user_id: claims.business_id,
+        assigned_to_user_id: claims.business_type === "admin" ? claims.business_id : null,
+        last_updated_by_user_id: claims.business_id,
       })
       .select("id, status, current_step, insurance_display_id")
       .single();

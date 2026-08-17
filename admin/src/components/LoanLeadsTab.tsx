@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { getToken, getBusiness } from "@/lib/auth";
 
 type LeadRow = {
   id: string;
@@ -81,9 +81,12 @@ export default function LoanLeadsTab() {
   async function addLead() {
     if (adding) return;
     setAdding(true);
+    const meId = getBusiness()?.id ?? null;
     const { data, error } = await supabase()
       .from("loan_leads")
-      .insert({ status: "draft", current_step: 1 })
+      // Hierarchy (0066): stamp the admin/ops user who created this lead as
+      // both creator and initial owner.
+      .insert({ status: "draft", current_step: 1, created_by_user_id: meId, assigned_to_user_id: meId, last_updated_by_user_id: meId })
       .select("id")
       .single();
     setAdding(false);

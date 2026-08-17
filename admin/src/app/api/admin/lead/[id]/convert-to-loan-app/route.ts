@@ -72,6 +72,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       .insert({
         epc_business_id: lead.epc_business_id,
         created_by: "admin",
+        // Hierarchy (0066): the user performing the conversion owns the new app.
+        created_by_user_id: claims.business_id,
+        assigned_to_user_id: claims.business_id,
+        last_updated_by_user_id: claims.business_id,
         status: "draft",
         current_step: 1,
         borrower_name: lead.name ?? null,

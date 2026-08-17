@@ -74,6 +74,12 @@ export async function POST(req: NextRequest) {
       .insert({
         epc_business_id: epcBusinessId,
         created_by: "admin",
+        // Hierarchy (0066): stamp the authenticated user as creator + initial
+        // owner. created_by_user_id is never overwritten later; assigned_to can
+        // be reassigned by a Main Admin.
+        created_by_user_id: claims.business_id,
+        assigned_to_user_id: claims.business_id,
+        last_updated_by_user_id: claims.business_id,
         status: "draft",
         current_step: 1,
       })

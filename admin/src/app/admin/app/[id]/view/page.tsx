@@ -18,6 +18,7 @@ import { getToken, getBusiness } from "@/lib/auth";
 import { getDocumentUrl, deleteDocument } from "@/lib/storage";
 import DeleteLoanAppModal from "@/components/DeleteLoanAppModal";
 import CommentsSection from "@/components/CommentsSection";
+import OwnershipCard from "@/components/OwnershipCard";
 import LoanActivityLogModal from "@/components/LoanActivityLogModal";
 import { LENDER_LABEL, type ApprovalDetails } from "@/components/ApprovalDetailsTable";
 import LoanLenderPickerModal, { type PickerLender } from "@/components/LoanLenderPickerModal";
@@ -990,8 +991,14 @@ function Inner() {
         {/* ── DENSE GRID ────────────────────────────────────────────────── */}
         <div className="grid gap-3 lg:grid-cols-3 items-start">
 
-          {/* COL 1 — applicant, co-applicant, employment & bank */}
+          {/* COL 1 — ownership, applicant, co-applicant, employment & bank */}
           <div className="flex flex-col gap-3">
+            <OwnershipCard
+              module="apps"
+              recordId={loan.id}
+              createdByUserId={loan.created_by_user_id ?? null}
+              assignedToUserId={loan.assigned_to_user_id ?? null}
+            />
             <SectionCard title="Applicant identity" accent="blue" icon={I.user}>
               <KV k="Name" v={loan.aadhaar_name || loan.borrower_name} />
               <KV k="Father's name" v={loan.borrower_father_name} />

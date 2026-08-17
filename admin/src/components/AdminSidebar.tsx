@@ -19,10 +19,10 @@
 
 import { ReactNode, useState } from "react";
 import { useRouter } from "next/navigation";
-import { logout } from "@/lib/auth";
+import { logout, getBusiness, allowedModules, canAccessModule, type ModuleKey } from "@/lib/auth";
 
 export type ConsoleTab = "epcs" | "apps" | "loanleads" | "insurance" | "leads";
-export type SectionKey = ConsoleTab | "analytics";
+export type SectionKey = ConsoleTab | "analytics" | "board";
 
 // Per-console accent colors (C). Soft professional tints — accents only.
 export const ACCENTS: Record<SectionKey, { label: string; color: string; tint: string }> = {
@@ -32,6 +32,7 @@ export const ACCENTS: Record<SectionKey, { label: string; color: string; tint: s
   insurance: { label: "Insurance",         color: "#0e7490", tint: "#e0f2f4" },
   leads:     { label: "Leads (Non-EPC)",   color: "#b45309", tint: "#fbf0e0" },
   analytics: { label: "Analytics",         color: "#6d28d9", tint: "#efe9fb" },
+  board:     { label: "Task Manager",      color: "#0f766e", tint: "#dcf3ef" },
 };
 
 const ICONS: Record<SectionKey, ReactNode> = {
@@ -53,6 +54,9 @@ const ICONS: Record<SectionKey, ReactNode> = {
   analytics: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18" /><path d="M7 14l3-3 4 4 6-6" /></svg>
   ),
+  board: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="6" height="18" rx="1"/><rect x="10.5" y="3" width="6" height="12" rx="1"/><rect x="18" y="3" width="3" height="9" rx="1"/></svg>
+  ),
 };
 
 const ORDER: SectionKey[] = ["epcs", "apps", "loanleads", "insurance", "leads", "analytics"];
@@ -67,11 +71,30 @@ export default function AdminSidebar({
   const router = useRouter();
   const [open, setOpen] = useState(false); // mobile drawer
 
+  // The nav list is scoped to the current user's allowed modules (hierarchy).
+  // AuthGuard shows "Loading…" until it has re-fetched the row and called
+  // setBusiness, so by the time this sidebar mounts getBusiness() is populated
+  // and authoritative — a lazy init is safe (no SSR/hydration mismatch).
+  const [navKeys] = useState<SectionKey[]>(() => {
+    const biz = getBusiness();
+    const mods = allowedModules(biz);                      // e.g. ['epcs','apps',...]
+    const keys: SectionKey[] = ORDER.filter((k): k is ModuleKey => (mods as string[]).includes(k));
+    // Ops Board is the primary work view — available to EVERY admin-type user
+    // (MAIN_ADMIN sees all cases + RM tabs; an OPERATIONS_USER sees only their
+    // own, enforced by RLS). Pinned to the top.
+    if (biz?.business_type === "admin") keys.unshift("board");
+    return keys;
+  });
+
   function go(key: SectionKey) {
     setOpen(false);
     if (key === active) return;
     if (key === "analytics") {
       router.push("/admin/analytics");
+      return;
+    }
+    if (key === "board") {
+      router.push("/admin/board");
       return;
     }
     if (onSelectTab) {
@@ -107,7 +130,7 @@ export default function AdminSidebar({
 
         {/* Nav */}
         <nav className="flex flex-col gap-1">
-          {ORDER.map((key) => {
+          {navKeys.map((key) => {
             const on = active === key;
             const a = ACCENTS[key];
             return (

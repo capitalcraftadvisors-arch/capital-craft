@@ -26,7 +26,45 @@ export type Business = {
   // Admin-set service on an approved EPC. Governs the portal buttons:
   //   insurance needs NO lender approval; loan still needs loan_app_unlocked.
   service_type?: "loans" | "insurance" | "both" | null;
+  // Hierarchy (0066). Only meaningful for admin-type accounts.
+  //   role            — MAIN_ADMIN sees all 6 dashboards incl Analytics;
+  //                     OPERATIONS_USER sees only its allowed_modules.
+  //   allowed_modules — authoritative tab-key permission set for this user.
+  //   parent_user_id  — reporting manager (scalable org tree).
+  role?: "MAIN_ADMIN" | "MANAGER" | "OPERATIONS_USER" | null;
+  allowed_modules?: string[] | null;
+  parent_user_id?: string | null;
 };
+
+// The six admin console module keys (match AdminSidebar tab keys).
+export type ModuleKey = "epcs" | "apps" | "loanleads" | "insurance" | "leads" | "analytics";
+export const ALL_MODULES: ModuleKey[] = ["epcs", "apps", "loanleads", "insurance", "leads", "analytics"];
+
+// Resolve a user's allowed modules. MAIN_ADMIN (and any admin row without an
+// explicit list — e.g. legacy admins before this claim existed) get everything;
+// an OPERATIONS_USER gets exactly its stored list. Non-admins get nothing here
+// (their access is governed by portalAccess, not modules).
+export function allowedModules(b: Business | null | undefined): ModuleKey[] {
+  if (!b || b.business_type !== "admin") return [];
+  if (Array.isArray(b.allowed_modules) && b.allowed_modules.length > 0) {
+    return b.allowed_modules.filter((m): m is ModuleKey => (ALL_MODULES as string[]).includes(m));
+  }
+  // Admin with no explicit list → full access (safe default for legacy admins).
+  return ALL_MODULES;
+}
+export function canAccessModule(b: Business | null | undefined, key: ModuleKey): boolean {
+  return allowedModules(b).includes(key);
+}
+
+// Friendly greeting label for portal headings + the Namaste splash. The
+// MAIN_ADMIN console is a shared "Admin" portal, so it's greeted generically as
+// "Admin" (never the underlying account's personal contact_name); managers and
+// RMs are greeted by their own first name.
+export function greetingName(b: Business | null | undefined): string {
+  if (b?.role === "MAIN_ADMIN") return "Admin";
+  const full = (b?.contact_name || "").trim();
+  return full ? full.split(" ")[0] : "there";
+}
 
 // ── Portal access gating ──────────────────────────────────────────────
 // Insurance unlocks purely from the service selection. Loan keeps its
@@ -57,6 +95,9 @@ export async function login(mobile: string, otp: string): Promise<{ ok: true; bu
   localStorage.setItem(TOKEN_KEY, data.token);
   localStorage.setItem(BUSINESS_KEY, JSON.stringify(data.business));
   localStorage.removeItem(IMPERSONATE_KEY);
+  // Signal the dashboard to play the Namaste greeting once — set on EVERY
+  // login so it fires for whoever just signed in (not once per browser).
+  try { sessionStorage.setItem("cc_greet", "1"); } catch { /* ignore */ }
   return { ok: true, business: data.business };
 }
 

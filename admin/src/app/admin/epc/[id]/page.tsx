@@ -27,6 +27,7 @@ import EpcAdminInfoSection from "@/components/EpcAdminInfoSection";
 import CommentsSection from "@/components/CommentsSection";
 import EditableField from "@/components/EditableField";
 import AdminDocSlot from "@/components/AdminDocSlot";
+import { getToken } from "@/lib/auth";
 import FileUpload from "@/components/FileUpload";
 import { supabase } from "@/lib/supabase";
 import { logAudit } from "@/lib/auditLog";
@@ -444,6 +445,33 @@ function MembersEditor({
 
   const rule = memberRule(businessType);
 
+  // Auto-fill a stakeholder's KYC by reading their uploaded PAN / Aadhaar with
+  // Gemini. Fills only EMPTY fields (never overwrites what a human typed), then
+  // persists the stakeholders JSONB. Fully non-fatal — a miss just leaves the
+  // fields blank for manual entry.
+  async function ocrFill(s: Stakeholder, kind: "pan" | "aadhaar_front" | "aadhaar_back", file: File) {
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("kind", kind);
+      const res = await fetch(`/api/admin/epc/${businessId}/extract-stakeholder`, {
+        method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd,
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok || !j.fields) return;
+      const f = j.fields as Record<string, string>;
+      const cur = value.find((x) => x.id === s.id) ?? s;
+      const patch: Partial<Stakeholder> = {};
+      if (f.name && !cur.name) patch.name = f.name;
+      if (f.father_name && !cur.father_name) patch.father_name = f.father_name;
+      if (f.dob && !cur.dob) patch.dob = f.dob;
+      if (f.aadhaar_number && !cur.aadhaar_number) patch.aadhaar_number = f.aadhaar_number;
+      if (f.address && !cur.aadhaar_address) patch.aadhaar_address = f.address;
+      if (Object.keys(patch).length === 0) return;
+      await onSave(value.map((x) => (x.id === s.id ? { ...x, ...patch } : x)));
+    } catch { /* non-fatal */ }
+  }
+
   async function save() {
     // Minimum-count rule (LLP/Partnership = 2 partners, Pvt Ltd = 2 directors).
     if (draft.length < rule.min) {
@@ -492,20 +520,10 @@ function MembersEditor({
               {s.mobile ? `+91 ${s.mobile}` : "—"}
               {s.email ? ` · ${s.email}` : ""}
             </p>
-            {(s.father_name || s.dob || s.aadhaar_number || s.aadhaar_address) && (
-              <p className="text-[12px] text-text-muted mt-0.5">
-                {[
-                  s.father_name && `Father: ${s.father_name}`,
-                  s.dob && `DOB: ${s.dob}`,
-                  s.aadhaar_number && `Aadhaar: ${s.aadhaar_number}`,
-                  s.aadhaar_address,
-                ].filter(Boolean).join(" · ")}
-              </p>
-            )}
             <div className="grid sm:grid-cols-2 gap-3 mt-2">
-              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_pan"            label="Member PAN card" />
-              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_aadhaar_front"  label="Member Aadhaar card (front)" />
-              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_aadhaar_back"   label="Member Aadhaar card (back)" />
+              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_pan"            label="Member PAN card"            onUploadedFile={(file) => void ocrFill(s, "pan", file)} />
+              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_aadhaar_front"  label="Member Aadhaar card (front)" onUploadedFile={(file) => void ocrFill(s, "aadhaar_front", file)} />
+              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_aadhaar_back"   label="Member Aadhaar card (back)"  onUploadedFile={(file) => void ocrFill(s, "aadhaar_back", file)} />
               {/* Legacy category: shows only if a pre-split Aadhaar doc exists
                   for this member (40 legacy EPCs). Never renders an upload
                   affordance — admin can View / Replace / Remove only. */}

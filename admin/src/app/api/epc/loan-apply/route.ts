@@ -116,6 +116,10 @@ export async function POST(req: NextRequest) {
         .insert({
           epc_business_id: claims.business_id,   // auto-tag — never asked
           created_by: "epc",
+          // Hierarchy (0066): the EPC is the creator; leave assigned_to null so
+          // it surfaces as unassigned work for an admin to pick up/assign.
+          created_by_user_id: claims.business_id,
+          last_updated_by_user_id: claims.business_id,
           status: "draft",
           current_step: 2,
           borrower_name,

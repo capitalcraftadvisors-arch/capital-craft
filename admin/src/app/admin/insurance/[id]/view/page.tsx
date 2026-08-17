@@ -12,6 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
 import { I, SectionCard, KV, Pill, DocGrid, StatusBtn, type ViewDocSlot } from "@/components/view/ViewKit";
 import InsuranceUpload from "@/components/InsuranceUpload";
+import OwnershipCard from "@/components/OwnershipCard";
 import ProfileTabBar, { TabButton } from "@/components/ProfileTabBar";
 import DeleteInsuranceModal from "@/components/DeleteInsuranceModal";
 import { policyValidity } from "@/lib/insurance-validity";
@@ -299,6 +300,12 @@ function Inner() {
 
         <div className="grid gap-4 lg:grid-cols-3 mt-4">
           <div className="flex flex-col gap-2.5">
+            <OwnershipCard
+              module="insurance"
+              recordId={app.id}
+              createdByUserId={app.created_by_user_id ?? null}
+              assignedToUserId={app.assigned_to_user_id ?? null}
+            />
             <SectionCard title="Applicant" accent="blue" icon={I.user}>
               <KV k="Name" v={app.aadhaar_name} />
               <KV k="PAN" v={app.pan_number} />

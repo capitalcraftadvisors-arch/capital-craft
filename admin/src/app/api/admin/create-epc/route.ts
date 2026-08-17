@@ -79,6 +79,10 @@ export async function POST(req: NextRequest) {
         status: "draft",
         current_step: 1,
         source: "manual",
+        // Hierarchy (0066): the admin/ops user who added this EPC.
+        created_by_user_id: claims.business_id,
+        assigned_to_user_id: claims.business_id,
+        last_updated_by_user_id: claims.business_id,
       })
       .select("id, epc_display_id, status, current_step, contact_name, business_type")
       .single();

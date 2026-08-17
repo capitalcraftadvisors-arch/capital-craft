@@ -17,6 +17,7 @@ import AuthGuard from "@/components/AuthGuard";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import CommentsSection from "@/components/CommentsSection";
+import OwnershipCard from "@/components/OwnershipCard";
 import { I, SectionCard, KV } from "@/components/view/ViewKit";
 import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
@@ -39,6 +40,8 @@ type Lead = {
   aborted_at: string | null;
   abort_reason: string | null;
   created_at: string;
+  created_by_user_id: string | null;
+  assigned_to_user_id: string | null;
 };
 
 type EpcOpt = { value: string; label: string };
@@ -80,18 +83,6 @@ function Inner() {
       setLoading(false);
     })();
   }, [params.id]);
-
-  const dobDisplay = useMemo(() => {
-    if (!lead?.dob) return null;
-    const m = lead.dob.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    return m ? `${m[3]}/${m[2]}/${m[1]}` : lead.dob;
-  }, [lead?.dob]);
-
-  const epcLabel = useMemo(() => {
-    if (!lead) return "—";
-    if (lead.epc_business_id) return epcs.find((e) => e.value === lead.epc_business_id)?.label ?? "(EPC)";
-    return lead.epc_name_custom ? `${lead.epc_name_custom} (not in system)` : "—";
-  }, [lead, epcs]);
 
   async function assignEpc(id: string) {
     if (!lead) return;
@@ -224,8 +215,6 @@ function Inner() {
               <KV k="Borrower Name" v={lead.name} />
               <KV k="Phone no" v={lead.mobile ? `+91 ${lead.mobile}` : "—"} />
               <KV k="Email" v={lead.email} valueClass="text-[#185fa5]" />
-              <KV k="Address" v={lead.address} />
-              <KV k="Date of birth" v={dobDisplay} />
             </SectionCard>
           </div>
 
@@ -234,7 +223,6 @@ function Inner() {
             <SectionCard title="Project & loan" accent="blue" icon={I.money}>
               <KV k="Project Size" v={sizeStr} />
               <KV k="Project cost" v={money(lead.loan_amount)} />
-              <KV k="EPC Partner" v={epcLabel} />
               <KV k="Lead Owner Name" v={lead.lead_owner_name} />
             </SectionCard>
 
@@ -262,8 +250,14 @@ function Inner() {
             )}
           </div>
 
-          {/* COL 3 — comments */}
+          {/* COL 3 — ownership + comments */}
           <div className="flex flex-col gap-2.5">
+            <OwnershipCard
+              module="loanleads"
+              recordId={lead.id}
+              createdByUserId={lead.created_by_user_id}
+              assignedToUserId={lead.assigned_to_user_id}
+            />
             <SectionCard title="Comments" tint icon={I.lock} adminOnly>
               <CommentsSection leadId={lead.id} />
             </SectionCard>

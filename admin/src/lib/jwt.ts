@@ -38,6 +38,10 @@ export type JwtClaims = {
     | "admin"
     | null;
   role: string;
+  // Hierarchy (0066): app-level role + the module permission set. Optional so
+  // older tokens (minted before this claim existed) still verify cleanly.
+  hierarchy_role?: "MAIN_ADMIN" | "MANAGER" | "OPERATIONS_USER" | null;
+  allowed_modules?: string[] | null;
 };
 
 export function getBearerToken(req: Request): string | null {

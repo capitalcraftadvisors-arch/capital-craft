@@ -2,7 +2,7 @@
 
 import { ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Business, getBusiness, getToken, routeForBusiness, setBusiness, portalAccess } from "@/lib/auth";
+import { Business, ModuleKey, getBusiness, getToken, routeForBusiness, setBusiness, portalAccess, canAccessModule } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 
 type Allow = "any" | "draft" | "approved" | "admin" | "status" | "self_edit";
@@ -25,9 +25,15 @@ type Props = {
   //                on_hold / approved / rejected). Once the EPC uses the
   //                pass, the DB trigger locks further non-admin writes.
   allow: Allow[];
+  // Optional module gate (hierarchy). When set, an admin-type user must have
+  // this module in their allowed_modules or they are bounced back to /admin.
+  // This is what keeps an OPERATIONS_USER out of Analytics even by direct URL —
+  // the check runs against the FRESHLY re-fetched row, not localStorage, and a
+  // DB trigger prevents users from editing their own allowed_modules.
+  requireModule?: ModuleKey;
 };
 
-export default function AuthGuard({ children, allow }: Props) {
+export default function AuthGuard({ children, allow, requireModule }: Props) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
 
@@ -40,12 +46,12 @@ export default function AuthGuard({ children, allow }: Props) {
     }
 
     // Re-fetch the business row so we catch admin-side status changes,
-    // the self-edit lock flag, and — critically — the loan_app_unlocked
-    // gate. loan_app_unlocked is a stored generated column, always up to
-    // date with the parent flags.
+    // the self-edit lock flag, the loan_app_unlocked gate, and the hierarchy
+    // role/allowed_modules (authoritative — never trust localStorage for
+    // permission decisions).
     supabase()
       .from("epc_business")
-      .select("id, status, business_type, current_step, contact_name, epc_self_edited, epc_self_edited_at, loan_app_unlocked, service_type")
+      .select("id, status, business_type, current_step, contact_name, epc_self_edited, epc_self_edited_at, loan_app_unlocked, service_type, role, allowed_modules, parent_user_id")
       .eq("id", biz.id)
       .maybeSingle()
       .then(({ data }: { data: Business | null }) => {
@@ -55,9 +61,14 @@ export default function AuthGuard({ children, allow }: Props) {
           router.replace(routeForBusiness(latest) as any);
           return;
         }
+        // Module-level gate (e.g. Analytics is MAIN_ADMIN-only).
+        if (requireModule && !canAccessModule(latest, requireModule)) {
+          router.replace("/admin");
+          return;
+        }
         setReady(true);
       });
-  }, [router, allow]);
+  }, [router, allow, requireModule]);
 
   if (!ready) {
     return (

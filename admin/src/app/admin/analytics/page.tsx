@@ -587,7 +587,7 @@ function epcHealth(s: EpcSection): Health {
 // ============================================================================
 export default function AnalyticsPage() {
   return (
-    <AuthGuard allow={["admin"]}>
+    <AuthGuard allow={["admin"]} requireModule="analytics">
       <Inner />
     </AuthGuard>
   );

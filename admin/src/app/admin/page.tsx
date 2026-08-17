@@ -14,7 +14,9 @@ import DeleteLeadModal from "@/components/DeleteLeadModal";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import AdminSidebar, { ACCENTS } from "@/components/AdminSidebar";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { getToken, getBusiness, allowedModules, greetingName } from "@/lib/auth";
+import NamasteGreeting from "@/components/NamasteGreeting";
+import NotificationBell from "@/components/NotificationBell";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
 import {
   deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort,
@@ -36,8 +38,19 @@ export default function AdminHomePage() {
   );
 }
 
+const CONSOLE_TABS: Tab[] = ["epcs", "apps", "loanleads", "insurance", "leads"];
+
 function Inner() {
-  const [tab, setTab] = useState<Tab>("epcs");
+  // Console tabs are scoped to the user's allowed modules (hierarchy). Today
+  // every admin has all five; this keeps it correct for future users granted a
+  // narrower set. Analytics is gated separately (its own route). Lazy init is
+  // safe: AuthGuard has already set the fresh business before Inner mounts.
+  const [allowedTabs] = useState<Tab[]>(() => {
+    const mods = allowedModules(getBusiness()) as string[];
+    const t = CONSOLE_TABS.filter((k) => mods.includes(k));
+    return t.length ? t : CONSOLE_TABS;
+  });
+  const [tab, setTab] = useState<Tab>(() => allowedTabs[0]);
   // Summary period is owned here so the picker can sit in the section header
   // (top-right). Default is per-tab: EPCs = This Year, all others = This Month.
   const [period, setPeriod] = useState<Period>("year");
@@ -50,9 +63,9 @@ function Inner() {
   // doesn't set this key, so it correctly stays on the EPCs tab.)
   useEffect(() => {
     const t = sessionStorage.getItem("adminList.tab");
-    if (t === "apps" || t === "loanleads" || t === "insurance" || t === "leads") setTab(t);
+    if ((t === "apps" || t === "loanleads" || t === "insurance" || t === "leads") && allowedTabs.includes(t)) setTab(t);
     sessionStorage.removeItem("adminList.tab");
-  }, []);
+  }, [allowedTabs]);
 
   // Reset the period to the active tab's default whenever the tab changes.
   useEffect(() => {
@@ -67,9 +80,17 @@ function Inner() {
 
   return (
     <div className="min-h-screen bg-bg-soft md:flex">
+      <NamasteGreeting />
       <AdminSidebar active={tab} onSelectTab={setTab} />
       <div className="flex-1 min-w-0">
         <section className="w-full px-4 sm:px-6 py-8">
+          {/* Portal identity + notifications. */}
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <h1 className="font-display text-[22px] sm:text-[26px] font-bold text-text">
+              Hi <span className="text-[#178a5c]">{greetingName(getBusiness())}</span>
+            </h1>
+            <NotificationBell />
+          </div>
           {/* Section header with the console's accent bar; period picker on the
               right, aligned with the heading. */}
           <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
@@ -996,11 +1017,11 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
                 <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">
                   {(r.source || "website").toLowerCase() === "manual" ? "Admin" : "EPC"}
                 </td>
-                <td className="px-3 py-3 text-center">
+                <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <button
                     type="button"
                     disabled={!!downloading[r.id]}
-                    onClick={() => setZipPickerRow(r)}
+                    onClick={(e) => { e.stopPropagation(); setZipPickerRow(r); }}
                     className={[
                       "text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 transition-colors",
                       downloading[r.id]

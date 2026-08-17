@@ -28,6 +28,9 @@ type Props = {
   // Called whenever the slot's state changes (uploaded/replaced/removed) so
   // the parent can re-fetch the doc list. Optional.
   onChange?: () => void;
+  // Fires with the just-uploaded File after a successful upload/replace, so a
+  // parent can run OCR on it (e.g. auto-fill stakeholder KYC). Optional.
+  onUploadedFile?: (file: File) => void;
   // When true, the slot renders nothing when no doc exists (no upload
   // affordance). Used for legacy-only categories like stakeholder_aadhaar
   // where new uploads should go to the split front/back categories, but
@@ -43,7 +46,7 @@ type Doc = {
 };
 
 export default function AdminDocSlot({
-  businessId, stakeholderId, category, label, onChange, hideWhenEmpty,
+  businessId, stakeholderId, category, label, onChange, onUploadedFile, hideWhenEmpty,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [doc, setDoc] = useState<Doc | null>(null);
@@ -94,6 +97,7 @@ export default function AdminDocSlot({
       if (!r.ok) { setError(r.error); return; }
       await load();
       onChange?.();
+      onUploadedFile?.(file);
     } finally {
       setBusy(null);
       if (inputRef.current) inputRef.current.value = "";
