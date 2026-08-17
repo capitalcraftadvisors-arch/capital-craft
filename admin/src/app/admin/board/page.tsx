@@ -376,7 +376,7 @@ function Inner() {
 
           {/* Side panel */}
           {selCase && (
-            <aside className="w-[340px] shrink-0 border-l border-line bg-white p-5 flex flex-col gap-3 overflow-y-auto">
+            <aside className="w-[340px] shrink-0 border-l border-line bg-white p-5 flex flex-col gap-3 overflow-y-auto sticky top-0 self-start max-h-screen">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <h2 className="text-[18px] font-bold text-text truncate">{selCase.name}</h2>
