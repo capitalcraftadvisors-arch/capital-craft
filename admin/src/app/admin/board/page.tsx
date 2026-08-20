@@ -17,25 +17,48 @@ import { supabase } from "@/lib/supabase";
 import { getBusiness, getToken, greetingName } from "@/lib/auth";
 import { loadOpsCases, columnsFor, SOURCE_META, type OpsCase, type TeamUser, type CaseSource } from "@/lib/ops-board";
 
-// Columns that a drag-drop cannot set directly (need a lender action or an
-// amount) — per source column key.
+// ── Loan pipeline: forward-only stage locking (no going back, no skipping —
+// except a lender decision straight after Send to Lender). Moves into these
+// stages open the loan's own workflow screen (change #10). ──
+const LOAN_FORWARD: Record<string, string[]> = {
+  ready_login: ["send_lender", "abort"],
+  send_lender: ["docs_pending", "approved_rejected", "abort"],
+  docs_pending: ["approved_rejected", "abort"],
+  approved_rejected: ["phase1", "abort"],
+  phase1: ["abort"],
+  abort: [],
+};
+// Loan target columns whose drop opens the real loan screen instead of a plain
+// status write. (docs_pending is a simple "put on hold" status move.)
+const LOAN_OPENS_SCREEN = new Set(["send_lender", "approved_rejected", "phase1", "abort"]);
+
+// Non-loan columns a drag can't set directly.
 const UNDRAGGABLE: Record<string, string> = {
-  phase2: "Use “Record disb ₹” in the panel to enter the amount.",
-  send_lender: "Marking a case with the lender is done from the case’s own page.",
   rejected: "Reject a case from its own page (with a reason).",
   converted: "Convert a lead to a loan from the lead’s page.",
 };
-// Can a case be dragged into `target` (a key in the case's own source columns)?
+
+// Can a case be dragged into `target`? Loans are forward-only (locked); other
+// sources keep their simple status moves.
 function stageCheck(c: OpsCase, target: string, label: string): { ok: boolean; msg: string } {
   if (target === c.column) return { ok: false, msg: "Already in this stage." };
-  if (c.source === "loan" && UNDRAGGABLE[target]) return { ok: false, msg: UNDRAGGABLE[target] };
+  if (c.source === "loan") {
+    const allowed = LOAN_FORWARD[c.column ?? ""] ?? [];
+    if (!allowed.includes(target)) return { ok: false, msg: "Stages are locked — a loan can only move forward to its next stage (no going back or skipping ahead)." };
+    if (target === "phase1" && c.outcome === "rejected") return { ok: false, msg: "A rejected loan can’t move to disbursement." };
+    if (target === "send_lender") return { ok: true, msg: `Open ${c.name}’s page to send it to a lender?` };
+    if (target === "approved_rejected") return { ok: true, msg: `Record the lender’s decision for ${c.name} — approved or rejected?` };
+    if (target === "phase1") return { ok: true, msg: `Open ${c.name}’s disbursement screen (RFD + 1st-tranche docs)?` };
+    if (target === "abort") return { ok: true, msg: `Open ${c.name} to abort it (with a reason)?` };
+    return { ok: true, msg: `Move ${c.name} to “Docs Pending” (put on hold to collect documents)?` };
+  }
   if (c.source === "insurance" && target === "rejected") return { ok: false, msg: UNDRAGGABLE.rejected };
   if (c.source === "epc") {
     if (target === "send_lender" || target === "rejected") return { ok: false, msg: "Lender / rejection steps are done from the EPC profile." };
     if (target === "unseen" || target === "doc_uploaded") return { ok: false, msg: "This stage is set automatically as the EPC fills their profile." };
   }
   if (c.source === "lead" && target === "converted") return { ok: false, msg: UNDRAGGABLE.converted };
-  const forward = ["review_cc", "review", "send_lender", "approved", "approved_rejected", "phase1"].includes(target);
+  const forward = ["review_cc", "review", "approved"].includes(target);
   if (forward && c.blocker && /pend|await|missing|require|incomplete|\bdoc/i.test(c.blocker)) {
     return { ok: false, msg: `Can’t move to “${label}” — documents pending: “${c.blocker}”. Clear it first (mark “Doc received”).` };
   }
@@ -51,13 +74,31 @@ export default function OpsBoardPage() {
 }
 
 // Attention outline: green = up to date, yellow = watch (aging / on hold /
-// blocked), red = overdue (idle ≥ SLA). Rejected cases are neutral-red already.
+// blocked), red = overdue (idle ≥ SLA). Used for EPC / insurance / lead.
 function attention(c: OpsCase, sla: number): "green" | "yellow" | "red" {
   if (c.idleDays >= sla) return "red";
   if (c.idleDays >= Math.max(1, Math.ceil(sla / 2)) || c.onHold || !!c.blocker) return "yellow";
   return "green";
 }
-const OUTLINE: Record<"green" | "yellow" | "red", string> = { green: "#16a34a", yellow: "#eab308", red: "#dc2626" };
+// Loan per-stage outline thresholds, in HOURS: [yellow-from, red-from] measured
+// from when the loan entered its current stage (stageHours).
+const LOAN_OUTLINE: Record<string, [number, number]> = {
+  ready_login: [72, 168],       // >3d → yellow, >7d → red
+  send_lender: [24, 48],        // >24h → yellow, >48h → red
+  docs_pending: [24, 48],       // >24h → yellow, >48h → red
+  approved_rejected: [24, 48],  // approved cards: >24h → yellow, >48h → red
+  phase1: [600, 1080],          // >25d → yellow, ≥45d → red
+};
+function loanOutline(c: OpsCase): "green" | "yellow" | "red" | "neutral" {
+  if (c.column === "abort") return "neutral";
+  if (c.column === "approved_rejected" && c.outcome === "rejected") return "neutral"; // rejected: pale-red fill + sinks to bottom
+  const t = LOAN_OUTLINE[c.column ?? ""];
+  if (!t) return "green";
+  if (c.stageHours >= t[1]) return "red";
+  if (c.stageHours >= t[0]) return "yellow";
+  return "green";
+}
+const OUTLINE: Record<"green" | "yellow" | "red" | "neutral", string> = { green: "#16a34a", yellow: "#eab308", red: "#dc2626", neutral: "#cbd5e1" };
 
 function fmt(v: number): string {
   if (!v) return "₹0";
@@ -183,10 +224,24 @@ function Inner() {
     setDragId(null);
     if (c && c.column !== col) setDrop({ caseId: c.id, column: col });
   }
-  async function confirmDrop() {
+  async function confirmDrop(decision?: "approved" | "rejected") {
     if (!drop) return;
     const c = cases.find((x) => x.id === drop.caseId);
     if (!c) { setDrop(null); return; }
+    // Change #10 — loan stage moves open the loan's OWN workflow screen so the
+    // real popup/form (lender picker, approval details, disbursement, abort) is
+    // used, keeping the board in lock-step with the loan process.
+    if (c.source === "loan" && drop.column && LOAN_OPENS_SCREEN.has(drop.column)) {
+      let url = c.href;
+      if (drop.column === "send_lender") url = `/admin/app/${c.id}/view?do=docsent`;
+      else if (drop.column === "approved_rejected") url = decision === "rejected" ? `/admin/app/${c.id}/view?do=reject` : `/admin/app/${c.id}/approval`;
+      else if (drop.column === "phase1") url = `/admin/app/${c.id}/disbursement`;
+      else if (drop.column === "abort") url = `/admin/app/${c.id}/view?do=abort`;
+      setDrop(null);
+      router.push(url);
+      return;
+    }
+    // Simple status move (loan → Docs Pending / hold, or an EPC / insurance / lead stage).
     const ok = await runAction(c, "set_stage", { column: drop.column });
     if (ok) setSel(c.id); // open the panel so they can mark it
     setDrop(null);
@@ -339,9 +394,10 @@ function Inner() {
                       </div>
                       <div className="flex flex-col gap-2">
                         {items.map((c) => {
-                          const late = c.idleDays >= sla;
                           const sm = SOURCE_META[c.source];
-                          const lvl = attention(c, sla);
+                          // Loans use per-stage timing (change #2/3/5/7); other sources use idle-vs-SLA.
+                          const lvl = c.source === "loan" ? loanOutline(c) : attention(c, sla);
+                          const late = lvl === "red";
                           // Approved cards get a light-green wash, rejected a pale-red one.
                           const fill = c.outcome === "approved" ? "#eaf8f0" : c.outcome === "rejected" ? "#fbecec" : "#ffffff";
                           return (
@@ -394,7 +450,6 @@ function Inner() {
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <button className="btn-act primary" disabled={busy} onClick={() => act("log_call")}>📞 Log call</button>
                 <button className="btn-act" disabled={busy} onClick={() => act("doc_received")}>Doc received</button>
                 <button className="btn-act" disabled={busy} onClick={() => act("move_stage")}>Move stage →</button>
                 {selCase.source === "loan" && (
@@ -459,14 +514,27 @@ function Inner() {
         if (!c) return null;
         const dropLabel = columnsFor(c.source).find((x) => x.key === drop.column)?.label || drop.column;
         const chk = stageCheck(c, drop.column, dropLabel);
+        const isDecision = c.source === "loan" && drop.column === "approved_rejected";
+        const opensScreen = c.source === "loan" && !!drop.column && LOAN_OPENS_SCREEN.has(drop.column);
+        const title = !chk.ok ? "Can’t move there" : isDecision ? "Approved or rejected?" : opensScreen ? "Continue to the loan?" : "Move this case?";
         return (
           <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 px-4" onClick={() => !busy && setDrop(null)}>
             <div className="w-full max-w-sm rounded-[12px] bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-              <div className="text-[15px] font-semibold text-text">{chk.ok ? "Move this case?" : "Can’t move yet"}</div>
+              <div className="text-[15px] font-semibold text-text">{title}</div>
               <p className={"text-[13px] mt-2 " + (chk.ok ? "text-text-mid" : "text-red-700")}>{chk.msg}</p>
               <div className="mt-4 flex items-center justify-end gap-2">
                 <button className="btn-act ghost" onClick={() => setDrop(null)} disabled={busy}>{chk.ok ? "Cancel" : "OK"}</button>
-                {chk.ok && <button className="btn-act primary" onClick={() => void confirmDrop()} disabled={busy}>{busy ? "Moving…" : "Yes, move"}</button>}
+                {chk.ok && isDecision && (
+                  <>
+                    <button className="btn-act" onClick={() => void confirmDrop("rejected")} disabled={busy}>✕ Rejected</button>
+                    <button className="btn-act primary" onClick={() => void confirmDrop("approved")} disabled={busy}>✓ Approved</button>
+                  </>
+                )}
+                {chk.ok && !isDecision && (
+                  <button className="btn-act primary" onClick={() => void confirmDrop()} disabled={busy}>
+                    {busy ? "Working…" : opensScreen ? "Continue →" : "Yes, move"}
+                  </button>
+                )}
               </div>
             </div>
           </div>

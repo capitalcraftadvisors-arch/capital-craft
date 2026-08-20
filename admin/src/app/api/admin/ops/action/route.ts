@@ -160,7 +160,9 @@ export async function POST(req: NextRequest) {
     } else if (action === "set_stage") {
       // Drag-drop to a specific column.
       const col = typeof (body.payload as { column?: string })?.column === "string" ? (body.payload as { column: string }).column : "";
-      if (source === "loan" && col === "phase2") return err("Use 'Record disbursement' to enter the 2nd-phase amount.", 400);
+      // Loans are driven from their own screens now (change #10); the only direct
+      // board move is → Docs Pending (put on hold).
+      if (source === "loan" && col !== "docs_pending") return err("Update this loan stage from the loan’s own screen.", 400);
       const mapped = columnToStatus(source, col);
       if (!mapped) return err("This case can't move to that stage.", 400);
       patch = { ...touch, status: mapped.status, ...(mapped.stamp || {}) };

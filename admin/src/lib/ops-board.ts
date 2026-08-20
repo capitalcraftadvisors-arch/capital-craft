@@ -26,11 +26,11 @@ const EPC_COLS: ColumnDef[] = [
 ];
 const LOAN_COLS: ColumnDef[] = [
   { key: "ready_login", label: "Ready for Login" },
-  { key: "docs_pending", label: "Docs Pending" },
   { key: "send_lender", label: "Send to Lender" },
+  { key: "docs_pending", label: "Docs Pending" },
   { key: "approved_rejected", label: "Approved / Rejected" },
   { key: "phase1", label: "1st Phase" },
-  { key: "phase2", label: "2nd Phase" },
+  { key: "abort", label: "Abort" },
 ];
 const INSURANCE_COLS: ColumnDef[] = [
   { key: "docs", label: "Doc collection" },
@@ -78,6 +78,7 @@ export type OpsCase = {
   column: string | null;     // key within the source's own column set (null = off that board)
   allColumn: string | null;  // key within ALL_COLS (null = off the mixed board)
   outcome: "approved" | "rejected" | null; // for card tint + sinking rejected to the bottom
+  stageHours: number; // hours since the case entered its CURRENT stage (drives per-column outline)
   idleDays: number;
   onHold: boolean;
   blocker: string | null;
@@ -95,22 +96,47 @@ function daysSince(iso: string | null | undefined): number {
   if (!isFinite(t)) return 0;
   return Math.max(0, Math.floor((Date.now() - t) / DAY));
 }
+function hoursSince(iso: string | null | undefined): number {
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  if (!isFinite(t)) return 0;
+  return Math.max(0, (Date.now() - t) / 3600000);
+}
+// Is `iso` within the current calendar month? (rejected loans age out at month-end.)
+function inCurrentMonth(iso: string | null | undefined): boolean {
+  if (!iso) return false;
+  const d = new Date(iso), now = new Date();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+}
 const num = (v: unknown): number => (typeof v === "number" && isFinite(v) ? v : Number(v) || 0);
 
 // ── Per-source placement → the source's own column key ──
-function loanColumn(r: Record<string, any>, lenderMidDecision: boolean): { column: string | null; label: string } {
-  if (r.aborted_at) return { column: null, label: "Aborted" };
+// Columns: ready_login → send_lender → docs_pending → approved_rejected →
+// phase1 (1st disbursement) → abort. `stageSince` is when the case entered its
+// current stage (drives the per-column outline colour).
+function loanColumn(r: Record<string, any>, lenderMidDecision: boolean): { column: string | null; label: string; stageSince: string | null } {
   const s = r.status as string;
-  if (s === "rejected") return { column: "approved_rejected", label: "Rejected by lender" };
-  if (s === "draft" || s === "submitted" || s === "under_review") return { column: "ready_login", label: "Ready for login" };
-  if (s === "on_hold") return { column: "docs_pending", label: "Docs pending" };
-  if (s === "docs_sent") return { column: "send_lender", label: lenderMidDecision ? "With lender — deciding" : "Sent to lender" };
-  if (s === "rfd" || s === "approved" || s === "sent_to_nbfc" || s === "disbursed") {
-    if (r.first_disbursement_amount != null) return { column: "phase2", label: r.second_disbursement_amount != null ? "2nd disbursed" : "1st disbursed · 2nd pending" };
-    if (s === "rfd" || r.rfd_at != null) return { column: "phase1", label: "Ready for 1st disbursement" };
-    return { column: "approved_rejected", label: "Approved by lender" };
+  // Aborted files live in their own column.
+  if (r.aborted_at) return { column: "abort", label: "Aborted", stageSince: r.aborted_at };
+  // Rejected: shown only within the calendar month it was rejected, then it ages
+  // off the board automatically (approved files carry forward, rejected don't).
+  if (s === "rejected") {
+    const at = r.rejected_at || r.updated_at;
+    return inCurrentMonth(at) ? { column: "approved_rejected", label: "Rejected by lender", stageSince: at } : { column: null, label: "Rejected (aged out)", stageSince: at };
   }
-  return { column: "ready_login", label: "Ready for login" };
+  // Disbursement stage (1st Phase). Drops off once the 2nd tranche is filled.
+  if (s === "rfd" || s === "approved" || s === "sent_to_nbfc" || s === "disbursed") {
+    if (r.first_disbursement_amount != null) {
+      if (r.second_disbursement_amount != null) return { column: null, label: "Fully disbursed", stageSince: r.second_disbursement_date };
+      return { column: "phase1", label: "1st disbursed · 2nd pending", stageSince: r.first_disbursement_date || r.rfd_at };
+    }
+    if (s === "rfd" || r.rfd_at != null) return { column: "phase1", label: "Ready for 1st disbursement", stageSince: r.rfd_at || r.approved_at };
+    return { column: "approved_rejected", label: "Approved by lender", stageSince: r.approved_at || r.updated_at };
+  }
+  if (s === "docs_sent") return { column: "send_lender", label: lenderMidDecision ? "With lender — deciding" : "Sent to lender", stageSince: r.docs_sent_at || r.updated_at };
+  if (s === "on_hold") return { column: "docs_pending", label: "Docs pending", stageSince: r.hold_at || r.updated_at };
+  // draft / submitted / under_review → ready for login
+  return { column: "ready_login", label: "Ready for login", stageSince: r.submitted_at || r.created_at || r.updated_at };
 }
 
 function epcColumn(r: Record<string, any>, lender: { docs: boolean; approved: boolean; rejected: boolean }): { column: string | null; label: string } {
@@ -180,7 +206,7 @@ export async function loadOpsCases(): Promise<{ cases: OpsCase[]; users: TeamUse
   const myId = me?.id ?? null;
 
   const [loans, lenders, insurance, leads, epcs, epcLenders, team] = await Promise.all([
-    db.from("epc_applications").select("id, borrower_name, aadhaar_name, loan_amount, loan_amount_required, status, rfd_at, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, second_disbursement_date, aborted_at, updated_at, review_notes, assigned_to_user_id"),
+    db.from("epc_applications").select("id, borrower_name, aadhaar_name, loan_amount, loan_amount_required, status, created_at, submitted_at, docs_sent_at, hold_at, approved_at, rejected_at, rfd_at, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, second_disbursement_date, aborted_at, updated_at, review_notes, assigned_to_user_id"),
     db.from("loan_application_lenders").select("application_id, lender_key, lender_label, docs_sent_at, approved_at, rejected_at"),
     db.from("insurance_applications").select("id, aadhaar_name, sum_insured, invoice_confirmed_amount, invoice_amount, insurance_partner, status, updated_at, assigned_to_user_id"),
     db.from("loan_leads").select("id, name, loan_amount, status, created_at, reviewed_at, epc_name_custom, assigned_to_user_id"),
@@ -209,7 +235,7 @@ export async function loadOpsCases(): Promise<{ cases: OpsCase[]; users: TeamUse
   for (const r of (loans.data ?? []) as any[]) {
     const lrows = lenderByApp.get(r.id) ?? [];
     const midDecision = lrows.some((l) => l.docs_sent_at && !l.approved_at && !l.rejected_at);
-    const { column, label } = loanColumn(r, midDecision);
+    const { column, label, stageSince } = loanColumn(r, midDecision);
     cases.push({
       id: r.id, source: "loan",
       name: r.borrower_name || r.aadhaar_name || "—",
@@ -218,7 +244,8 @@ export async function loadOpsCases(): Promise<{ cases: OpsCase[]; users: TeamUse
       ownerName: r.assigned_to_user_id ? nameOf.get(r.assigned_to_user_id) ?? null : null,
       lender: loanLenderLabel(lrows),
       statusLabel: label, column, allColumn: allColumnFor("loan", column, r),
-      outcome: r.status === "rejected" ? "rejected" : (column === "approved_rejected" || column === "phase1" || column === "phase2") ? "approved" : null,
+      outcome: r.status === "rejected" ? "rejected" : (column === "approved_rejected" || column === "phase1") ? "approved" : null,
+      stageHours: hoursSince(stageSince || r.updated_at),
       idleDays: daysSince(r.updated_at), onHold: r.status === "on_hold",
       blocker: r.review_notes || null,
       disbursed: num(r.first_disbursement_amount) + num(r.second_disbursement_amount),
@@ -238,6 +265,7 @@ export async function loadOpsCases(): Promise<{ cases: OpsCase[]; users: TeamUse
       lender: r.insurance_partner || null,
       statusLabel: label, column, allColumn: allColumnFor("insurance", column, r),
       outcome: column === "issued" ? "approved" : column === "rejected" ? "rejected" : null,
+      stageHours: hoursSince(r.updated_at),
       idleDays: daysSince(r.updated_at), onHold: r.status === "hold", blocker: null,
       disbursed: 0, disbursedThisMonthAt: null,
       href: `/admin/insurance/${r.id}/view`,
@@ -254,6 +282,7 @@ export async function loadOpsCases(): Promise<{ cases: OpsCase[]; users: TeamUse
       lender: r.epc_name_custom || null,
       statusLabel: label, column, allColumn: allColumnFor("lead", column, r),
       outcome: column === "converted" ? "approved" : null,
+      stageHours: hoursSince(r.reviewed_at || r.created_at),
       idleDays: daysSince(r.reviewed_at || r.created_at), onHold: false, blocker: null,
       disbursed: 0, disbursedThisMonthAt: null,
       href: `/admin/lead/${r.id}/view`,
@@ -271,6 +300,7 @@ export async function loadOpsCases(): Promise<{ cases: OpsCase[]; users: TeamUse
       lender: null,
       statusLabel: label, column, allColumn: allColumnFor("epc", column, r),
       outcome: column === "approved" ? "approved" : column === "rejected" ? "rejected" : null,
+      stageHours: hoursSince(r.updated_at),
       idleDays: daysSince(r.updated_at), onHold: r.status === "on_hold", blocker: null,
       disbursed: 0, disbursedThisMonthAt: null,
       href: `/admin/epc/${r.id}/view`,

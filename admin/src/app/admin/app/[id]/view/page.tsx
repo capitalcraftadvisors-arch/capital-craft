@@ -10,8 +10,8 @@
 // Read-only summary — "Edit" jumps to /admin/app/[id]/step-1. Disbursement
 // entry stays on the dedicated /disbursement screen; this page only displays it.
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness } from "@/lib/auth";
@@ -248,6 +248,8 @@ export default function LoanAppViewPage() {
 function Inner() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const didAutoOpen = useRef(false);
   const [loan, setLoan] = useState<Loan | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [loading, setLoading] = useState(true);
@@ -301,6 +303,20 @@ function Inner() {
       }
     })();
   }, [params.id]);
+
+  // Deep-link from the Task Manager (change #10): dragging a loan into a stage
+  // opens the real workflow popup here (?do=docsent | reject | abort). Approve
+  // and disbursement go to their own pages, so they need no flag.
+  useEffect(() => {
+    if (loading || !loan || didAutoOpen.current) return;
+    const doParam = searchParams?.get("do");
+    if (!doParam) return;
+    didAutoOpen.current = true;
+    if (doParam === "docsent") setDocSentPickerOpen(true);
+    else if (doParam === "reject") setRejectOpen(true);
+    else if (doParam === "abort") setAbortOpen(true);
+    router.replace(`/admin/app/${params.id}/view` as any); // strip the flag so refresh/back won't reopen
+  }, [loading, loan, searchParams, router, params.id]);
 
   const applicantName = useMemo(
     () => loan?.borrower_name || loan?.aadhaar_name || "(unnamed applicant)",
@@ -568,6 +584,12 @@ function Inner() {
   const tApproved = ["approved", "rfd", "sent_to_nbfc", "disbursed"].includes(effStatus);
   const tRejected = effStatus === "rejected";
   const tDecided  = tApproved || tRejected;
+  // Progress % across the 5 report stages: Submitted → Docs Sent → Approved /
+  // Rejected → 1st Disbursement → 2nd Disbursement (RFD is an internal gate, not
+  // shown here). A rejection completes the decision stage but stops there.
+  const progressPct = Math.round(
+    ([appDocsComplete, tDocsSent, tDecided, firstDone, secondDone].filter(Boolean).length / 5) * 100,
+  );
 
   // Tranche ZIPs are offered in the Download menu only when that tranche's
   // documents actually exist (no empty-tranche ZIP).
@@ -932,6 +954,16 @@ function Inner() {
         {/* ── PROGRESS TRACKER — hidden once all stages are complete (2nd disbursement) ── */}
         {!secondDone && (
         <div className="rounded-[12px] border border-[#cdeadd] bg-white p-5 sm:p-6 mb-4">
+          {/* Progress % (change #12) — how far this application has come. */}
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[13px] font-bold text-[#0f3d2e]">Application progress</span>
+            <span className="text-[16px] font-bold" style={{ color: tRejected ? "#dc2626" : "#178a5c" }}>
+              {progressPct}%{tRejected ? " · Rejected" : ""}
+            </span>
+          </div>
+          <div className="h-2 rounded-full bg-[#e6f3ec] mb-5 overflow-hidden">
+            <div className="h-2 rounded-full transition-all" style={{ width: progressPct + "%", background: tRejected ? "#dc2626" : "#178a5c" }} />
+          </div>
           <div className="flex items-center gap-2 sm:gap-4">
             <BigProgressStep
               icon={I.send}
@@ -960,15 +992,6 @@ function Inner() {
               mutedIfPending
             />
             <BigConnector active={tApproved} />
-            <BigProgressStep
-              icon={I.circleCheck}
-              done={rfdReached}
-              inProgress={tApproved && !rfdReached && !onHold}
-              label="RFD"
-              sub={rfdReached ? "Ready for disbursement" : tApproved ? "Awaiting tranche-1 docs" : "Pending"}
-              mutedIfPending
-            />
-            <BigConnector active={rfdReached} />
             <BigProgressStep
               icon={I.money}
               done={firstDone}
