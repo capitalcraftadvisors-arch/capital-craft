@@ -12,10 +12,13 @@ import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import AdminSidebar from "@/components/AdminSidebar";
 import NotificationBell from "@/components/NotificationBell";
+import LoanLenderPickerModal, { type PickerLender } from "@/components/LoanLenderPickerModal";
 import Select from "@/components/ui/Select";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, getToken, greetingName } from "@/lib/auth";
 import { loadOpsCases, columnsFor, SOURCE_META, type OpsCase, type TeamUser, type CaseSource } from "@/lib/ops-board";
+import { DEFAULT_LOAN_LENDERS, LOAN_LENDER_COLS, lendersWithDocs, type LoanLenderRow } from "@/lib/loan-lenders";
+import { logLoanActivity } from "@/lib/loanAudit";
 
 // ── Loan pipeline: forward-only stage locking (no going back, no skipping —
 // except a lender decision straight after Send to Lender). Moves into these
@@ -46,7 +49,7 @@ function stageCheck(c: OpsCase, target: string, label: string): { ok: boolean; m
     const allowed = LOAN_FORWARD[c.column ?? ""] ?? [];
     if (!allowed.includes(target)) return { ok: false, msg: "Stages are locked — a loan can only move forward to its next stage (no going back or skipping ahead)." };
     if (target === "phase1" && c.outcome === "rejected") return { ok: false, msg: "A rejected loan can’t move to disbursement." };
-    if (target === "send_lender") return { ok: true, msg: `Open ${c.name}’s page to send it to a lender?` };
+    if (target === "send_lender") return { ok: true, msg: `Send ${c.name}’s documents to a lender — pick which one next.` };
     if (target === "approved_rejected") return { ok: true, msg: `Record the lender’s decision for ${c.name} — approved or rejected?` };
     if (target === "phase1") return { ok: true, msg: `Open ${c.name}’s disbursement screen (RFD + 1st-tranche docs)?` };
     if (target === "abort") return { ok: true, msg: `Open ${c.name} to abort it (with a reason)?` };
@@ -137,6 +140,9 @@ function Inner() {
   const [quick, setQuick] = useState<"none" | "myoverdue" | "unassigned" | "breaches">("none");
   const [dragId, setDragId] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ caseId: string; column: string } | null>(null);
+  // Inline lender picker (change: loan lender/decision popups render ON the board).
+  const [picker, setPicker] = useState<{ c: OpsCase; mode: "docsent" | "approve" | "reject"; rows: LoanLenderRow[] } | null>(null);
+  const [pickerBusy, setPickerBusy] = useState(false);
   const [bannerSeen, setBannerSeen] = useState(false);
 
   const reload = useCallback(async () => {
@@ -224,27 +230,71 @@ function Inner() {
     setDragId(null);
     if (c && c.column !== col) setDrop({ caseId: c.id, column: col });
   }
+  // Load a loan's lender rows, then open the matching picker ON the board.
+  async function openLenderPicker(c: OpsCase, mode: "docsent" | "approve" | "reject") {
+    const { data } = await supabase()
+      .from("loan_application_lenders").select(LOAN_LENDER_COLS)
+      .eq("application_id", c.id).order("docs_sent_at", { ascending: true });
+    setPicker({ c, mode, rows: (data ?? []) as unknown as LoanLenderRow[] });
+  }
+
   async function confirmDrop(decision?: "approved" | "rejected") {
     if (!drop) return;
     const c = cases.find((x) => x.id === drop.caseId);
     if (!c) { setDrop(null); return; }
-    // Change #10 — loan stage moves open the loan's OWN workflow screen so the
-    // real popup/form (lender picker, approval details, disbursement, abort) is
-    // used, keeping the board in lock-step with the loan process.
-    if (c.source === "loan" && drop.column && LOAN_OPENS_SCREEN.has(drop.column)) {
-      let url = c.href;
-      if (drop.column === "send_lender") url = `/admin/app/${c.id}/view?do=docsent`;
-      else if (drop.column === "approved_rejected") url = decision === "rejected" ? `/admin/app/${c.id}/view?do=reject` : `/admin/app/${c.id}/approval`;
-      else if (drop.column === "phase1") url = `/admin/app/${c.id}/disbursement`;
-      else if (drop.column === "abort") url = `/admin/app/${c.id}/view?do=abort`;
-      setDrop(null);
-      router.push(url);
-      return;
+    if (c.source === "loan") {
+      const col = drop.column;
+      // The lender picker + reject popup happen ON the board; only Approve then
+      // opens the approval-details page, and 1st-Phase opens disbursement.
+      if (col === "send_lender") { setDrop(null); await openLenderPicker(c, "docsent"); return; }
+      if (col === "approved_rejected") { setDrop(null); await openLenderPicker(c, decision === "rejected" ? "reject" : "approve"); return; }
+      if (col === "phase1") { sessionStorage.setItem("ccReturnTo", "/admin/board"); setDrop(null); router.push(`/admin/app/${c.id}/disbursement` as unknown as string); return; }
+      if (col === "abort") { sessionStorage.setItem("ccReturnTo", "/admin/board"); setDrop(null); router.push(`/admin/app/${c.id}/view?do=abort` as unknown as string); return; }
     }
     // Simple status move (loan → Docs Pending / hold, or an EPC / insurance / lead stage).
     const ok = await runAction(c, "set_stage", { column: drop.column });
     if (ok) setSel(c.id); // open the panel so they can mark it
     setDrop(null);
+  }
+
+  // Picker confirm handlers — mirror the loan view page's own write logic.
+  async function pickerDocsSent(lender: PickerLender) {
+    if (!picker) return;
+    const { c, rows } = picker;
+    setPickerBusy(true);
+    try {
+      const now = new Date().toISOString();
+      const existing = rows.find((r) => r.lender_key === lender.key);
+      if (existing) { if (!existing.docs_sent_at) await supabase().from("loan_application_lenders").update({ docs_sent_at: now }).eq("id", existing.id); }
+      else await supabase().from("loan_application_lenders").insert({ application_id: c.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: now });
+      await supabase().from("epc_applications").update({ status: "docs_sent", docs_sent_at: now, last_updated_by_user_id: me?.id ?? null }).eq("id", c.id);
+      await logLoanActivity(c.id, "status_change", { detail: `Docs sent to ${lender.label}` });
+      setPicker(null); setTouches((t) => t + 1); await reload();
+    } catch (e) { alert("Couldn’t record: " + (e as Error).message); }
+    finally { setPickerBusy(false); }
+  }
+  async function pickerReject(lender: PickerLender, reason?: string) {
+    if (!picker) return;
+    const { c, rows } = picker;
+    setPickerBusy(true);
+    try {
+      const now = new Date().toISOString();
+      const existing = rows.find((r) => r.lender_key === lender.key);
+      const lp = { rejected_at: now, rejection_reason: reason || null, approved_at: null, approval_details: null };
+      if (existing) await supabase().from("loan_application_lenders").update(lp).eq("id", existing.id);
+      else await supabase().from("loan_application_lenders").insert({ application_id: c.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: now, ...lp });
+      await supabase().from("epc_applications").update({ status: "rejected", rejected_at: now, rejected_lender: lender.key, rejection_reason: reason || null, last_updated_by_user_id: me?.id ?? null }).eq("id", c.id);
+      await logLoanActivity(c.id, "rejected", { detail: `Rejected by ${lender.label}${reason ? ` — ${reason}` : ""}` });
+      setPicker(null); setTouches((t) => t + 1); await reload();
+    } catch (e) { alert("Couldn’t record: " + (e as Error).message); }
+    finally { setPickerBusy(false); }
+  }
+  function pickerApprove(lender: PickerLender) {
+    if (!picker) return;
+    const id = picker.c.id;
+    sessionStorage.setItem("ccReturnTo", "/admin/board");
+    setPicker(null);
+    router.push(`/admin/app/${id}/approval?lender=${lender.key}&label=${encodeURIComponent(lender.label)}` as unknown as string);
   }
 
   // RMs an overseer manages: a MANAGER sees only their own RMs; MAIN_ADMIN all.
@@ -462,7 +512,7 @@ function Inner() {
                     void act("record_disbursement", { amount, tranche });
                   }}>Record disb ₹</button>
                 )}
-                <a className="btn-act ghost col-span-2 text-center" href={selCase.href}>Open full case ↗</a>
+                <button className="btn-act ghost col-span-2 text-center" onClick={() => { sessionStorage.setItem("ccReturnTo", "/admin/board"); router.push(selCase.href as unknown as string); }}>Open full case ↗</button>
                 {reassignOptions.length > 0 && (
                   <div className="col-span-2">
                     <div className="text-[11px] text-text-muted mb-1">{isMainAdmin || isManager ? "Reassign to" : "Send to senior ↑"}</div>
@@ -538,6 +588,31 @@ function Inner() {
               </div>
             </div>
           </div>
+        );
+      })()}
+
+      {/* Inline loan lender / decision popup — same modal the loan page uses. */}
+      {picker && (() => {
+        const rows = picker.rows;
+        const available: PickerLender[] = [
+          ...DEFAULT_LOAN_LENDERS,
+          ...rows.filter((r) => !DEFAULT_LOAN_LENDERS.some((d) => d.key === r.lender_key)).map((r) => ({ key: r.lender_key, label: r.lender_label })),
+        ].filter((l) => !rows.some((r) => r.lender_key === l.key && r.docs_sent_at));
+        const withDocsOpts: PickerLender[] = lendersWithDocs(rows).map((r) => ({ key: r.lender_key, label: r.lender_label }));
+        const m = picker.mode;
+        return (
+          <LoanLenderPickerModal
+            open
+            title={m === "docsent" ? "Send documents to a lender" : m === "approve" ? "Approve application" : "Reject application"}
+            subtitle={m === "docsent" ? `For ${picker.c.name}. Pick the lender you’re sending the documents to.` : m === "approve" ? `For ${picker.c.name}. Which lender approved? You’ll fill in the approval details next.` : `For ${picker.c.name}. Which lender rejected?`}
+            options={m === "docsent" ? available : withDocsOpts}
+            allowAdd={m === "docsent"}
+            needReason={m === "reject"}
+            confirmLabel={m === "docsent" ? "Mark docs sent" : m === "approve" ? "Continue to details" : "Mark rejected"}
+            tone={m === "docsent" ? "blue" : m === "approve" ? "green" : "red"}
+            onClose={() => { if (!pickerBusy) setPicker(null); }}
+            onConfirm={(l, reason) => (m === "docsent" ? pickerDocsSent(l) : m === "approve" ? pickerApprove(l) : pickerReject(l, reason))}
+          />
         );
       })()}
 

@@ -250,6 +250,15 @@ function Inner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const didAutoOpen = useRef(false);
+  // Where "Back" should go. When you arrive from the Task Manager, we stash
+  // "/admin/board" in sessionStorage so Back returns there, not the console.
+  const [returnTo, setReturnTo] = useState<string | null>(null);
+  useEffect(() => { if (typeof window !== "undefined") setReturnTo(sessionStorage.getItem("ccReturnTo")); }, []);
+  function goBack() {
+    const to = typeof window !== "undefined" ? sessionStorage.getItem("ccReturnTo") : null;
+    if (to) { sessionStorage.removeItem("ccReturnTo"); router.push(to as unknown as string); }
+    else router.push("/admin");
+  }
   const [loan, setLoan] = useState<Loan | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [loading, setLoading] = useState(true);
@@ -826,10 +835,10 @@ function Inner() {
         <div className="w-full px-5 sm:px-8 py-4 flex items-start justify-between gap-4 flex-wrap">
           <div className="flex items-start gap-4 min-w-0">
             <button
-              onClick={() => router.push("/admin")}
+              onClick={goBack}
               className="text-[13px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1 shrink-0 mt-1"
             >
-              ← Back to console
+              ← {returnTo === "/admin/board" ? "Back to Task Manager" : "Back to console"}
             </button>
             <div className="w-px h-14 bg-[#e2efe9] shrink-0" />
             <div
