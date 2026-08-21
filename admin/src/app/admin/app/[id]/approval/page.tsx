@@ -77,11 +77,11 @@ function Inner() {
         setDetails({
           approved_by: lender || data.approved_lender || null,
           applied_loan_amount:   data.loan_amount_required ?? null,
-          approved_loan_amount:  editing ? (existing?.approved_loan_amount ?? 0) : 0,
+          approved_loan_amount:  editing ? (existing?.approved_loan_amount ?? null) : null,
           applied_tenure_years:  data.selected_tenure_years ?? null,
-          approved_tenure_years: editing ? (existing?.approved_tenure_years ?? 0) : 0,
+          approved_tenure_years: editing ? (existing?.approved_tenure_years ?? null) : null,
           tentative_emi:         data.selected_monthly_emi ?? null,
-          approved_emi:          editing ? (existing?.approved_emi ?? 0) : 0,
+          approved_emi:          editing ? (existing?.approved_emi ?? null) : null,
         });
         if (data.sanction_letter_unavailable) setSanctionChoice("unavailable");
         if (data.credit_score != null) setCreditScore(String(data.credit_score));
