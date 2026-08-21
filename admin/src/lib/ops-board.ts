@@ -79,6 +79,7 @@ export type OpsCase = {
   allColumn: string | null;  // key within ALL_COLS (null = off the mixed board)
   outcome: "approved" | "rejected" | null; // for card tint + sinking rejected to the bottom
   stageHours: number; // hours since the case entered its CURRENT stage (drives per-column outline)
+  tatDays: number;    // total days worked on this case, from "ready for login" (creation)
   idleDays: number;
   onHold: boolean;
   blocker: string | null;
@@ -246,6 +247,7 @@ export async function loadOpsCases(): Promise<{ cases: OpsCase[]; users: TeamUse
       statusLabel: label, column, allColumn: allColumnFor("loan", column, r),
       outcome: r.status === "rejected" ? "rejected" : (column === "approved_rejected" || column === "phase1") ? "approved" : null,
       stageHours: hoursSince(stageSince || r.updated_at),
+      tatDays: daysSince(r.created_at || r.submitted_at || r.updated_at),
       idleDays: daysSince(r.updated_at), onHold: r.status === "on_hold",
       blocker: r.review_notes || null,
       disbursed: num(r.first_disbursement_amount) + num(r.second_disbursement_amount),
@@ -266,6 +268,7 @@ export async function loadOpsCases(): Promise<{ cases: OpsCase[]; users: TeamUse
       statusLabel: label, column, allColumn: allColumnFor("insurance", column, r),
       outcome: column === "issued" ? "approved" : column === "rejected" ? "rejected" : null,
       stageHours: hoursSince(r.updated_at),
+      tatDays: daysSince(r.updated_at),
       idleDays: daysSince(r.updated_at), onHold: r.status === "hold", blocker: null,
       disbursed: 0, disbursedThisMonthAt: null,
       href: `/admin/insurance/${r.id}/view`,
@@ -283,6 +286,7 @@ export async function loadOpsCases(): Promise<{ cases: OpsCase[]; users: TeamUse
       statusLabel: label, column, allColumn: allColumnFor("lead", column, r),
       outcome: column === "converted" ? "approved" : null,
       stageHours: hoursSince(r.reviewed_at || r.created_at),
+      tatDays: daysSince(r.created_at),
       idleDays: daysSince(r.reviewed_at || r.created_at), onHold: false, blocker: null,
       disbursed: 0, disbursedThisMonthAt: null,
       href: `/admin/lead/${r.id}/view`,
@@ -301,6 +305,7 @@ export async function loadOpsCases(): Promise<{ cases: OpsCase[]; users: TeamUse
       statusLabel: label, column, allColumn: allColumnFor("epc", column, r),
       outcome: column === "approved" ? "approved" : column === "rejected" ? "rejected" : null,
       stageHours: hoursSince(r.updated_at),
+      tatDays: daysSince(r.updated_at),
       idleDays: daysSince(r.updated_at), onHold: r.status === "on_hold", blocker: null,
       disbursed: 0, disbursedThisMonthAt: null,
       href: `/admin/epc/${r.id}/view`,

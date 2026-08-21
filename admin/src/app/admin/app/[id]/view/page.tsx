@@ -593,12 +593,6 @@ function Inner() {
   const tApproved = ["approved", "rfd", "sent_to_nbfc", "disbursed"].includes(effStatus);
   const tRejected = effStatus === "rejected";
   const tDecided  = tApproved || tRejected;
-  // Progress % across the 5 report stages: Submitted → Docs Sent → Approved /
-  // Rejected → 1st Disbursement → 2nd Disbursement (RFD is an internal gate, not
-  // shown here). A rejection completes the decision stage but stops there.
-  const progressPct = Math.round(
-    ([appDocsComplete, tDocsSent, tDecided, firstDone, secondDone].filter(Boolean).length / 5) * 100,
-  );
 
   // Tranche ZIPs are offered in the Download menu only when that tranche's
   // documents actually exist (no empty-tranche ZIP).
@@ -963,15 +957,9 @@ function Inner() {
         {/* ── PROGRESS TRACKER — hidden once all stages are complete (2nd disbursement) ── */}
         {!secondDone && (
         <div className="rounded-[12px] border border-[#cdeadd] bg-white p-5 sm:p-6 mb-4">
-          {/* Progress % (change #12) — how far this application has come. */}
-          <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center justify-between mb-4">
             <span className="text-[13px] font-bold text-[#0f3d2e]">Application progress</span>
-            <span className="text-[16px] font-bold" style={{ color: tRejected ? "#dc2626" : "#178a5c" }}>
-              {progressPct}%{tRejected ? " · Rejected" : ""}
-            </span>
-          </div>
-          <div className="h-2 rounded-full bg-[#e6f3ec] mb-5 overflow-hidden">
-            <div className="h-2 rounded-full transition-all" style={{ width: progressPct + "%", background: tRejected ? "#dc2626" : "#178a5c" }} />
+            {tRejected && <span className="text-[13px] font-bold text-[#dc2626]">Rejected</span>}
           </div>
           <div className="flex items-center gap-2 sm:gap-4">
             <BigProgressStep

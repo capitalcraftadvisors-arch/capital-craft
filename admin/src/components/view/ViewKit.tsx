@@ -162,12 +162,26 @@ export function SectionCard({
   );
 }
 
-export function KV({ k, v, valueClass }: { k: string; v: unknown; valueClass?: string }) {
+// GST addresses are stored with field labels ("Floor No.: 251/151, Building
+// No./Flat No.: ROOPPURA, …, PIN Code: 333033"). For display we strip the
+// labels and keep just the values → "251/151, ROOPPURA, …, 333033".
+export function formatGstAddress(raw?: string | null): string {
+  if (!raw) return "";
+  return raw
+    .split(/,\s*/)
+    .map((part) => { const i = part.indexOf(":"); return (i >= 0 ? part.slice(i + 1) : part).trim(); })
+    .filter(Boolean)
+    .join(", ");
+}
+
+export function KV({ k, v, valueClass, wrap }: { k: string; v: unknown; valueClass?: string; wrap?: boolean }) {
   const display = v === null || v === undefined || v === "" ? "—" : String(v);
+  // wrap: show the full value across as many rows as needed (e.g. a long address)
+  // instead of truncating it.
   return (
     <div className="flex justify-between text-[14px] py-[5px] gap-3">
       <span className="text-[#5a8a76] shrink-0">{k}</span>
-      <span className={["text-right min-w-0 truncate font-medium", valueClass ?? "text-[#0f3d2e]"].join(" ")}>{display}</span>
+      <span className={[wrap ? "text-right min-w-0 break-words font-medium" : "text-right min-w-0 truncate font-medium", valueClass ?? "text-[#0f3d2e]"].join(" ")}>{display}</span>
     </div>
   );
 }

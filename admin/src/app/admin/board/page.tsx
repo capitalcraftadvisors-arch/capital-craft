@@ -28,12 +28,20 @@ const LOAN_FORWARD: Record<string, string[]> = {
   send_lender: ["docs_pending", "approved_rejected", "abort"],
   docs_pending: ["approved_rejected", "abort"],
   approved_rejected: ["phase1", "abort"],
-  phase1: ["abort"],
+  phase1: [], // no abort once in 1st Phase (disbursement under way)
   abort: [],
 };
 // Loan target columns whose drop opens the real loan screen instead of a plain
 // status write. (docs_pending is a simple "put on hold" status move.)
 const LOAN_OPENS_SCREEN = new Set(["send_lender", "approved_rejected", "phase1", "abort"]);
+
+// Per-source comment table (insurance has none).
+const COMMENT_TBL: Record<CaseSource, { table: string; key: string } | null> = {
+  loan: { table: "loan_comments", key: "application_id" },
+  epc: { table: "epc_comments", key: "business_id" },
+  lead: { table: "lead_comments", key: "lead_id" },
+  insurance: null,
+};
 
 // Non-loan columns a drag can't set directly.
 const UNDRAGGABLE: Record<string, string> = {
@@ -134,7 +142,7 @@ function Inner() {
   const [activity, setActivity] = useState<Activity[]>([]);
   const [busy, setBusy] = useState(false);
   const [touches, setTouches] = useState(0);
-  const [sla, setSla] = useState<number>(() => (typeof window !== "undefined" ? Number(localStorage.getItem("opsboard.sla")) : 0) || 3);
+  const sla = 1; // fixed at ≤1 day (backend only — no UI control, per spec)
   const [target, setTarget] = useState<number>(() => (typeof window !== "undefined" ? Number(localStorage.getItem("opsboard.target")) : 0) || 65);
   const [q, setQ] = useState("");
   const [quick, setQuick] = useState<"none" | "myoverdue" | "unassigned" | "breaches">("none");
@@ -143,7 +151,12 @@ function Inner() {
   // Inline lender picker (change: loan lender/decision popups render ON the board).
   const [picker, setPicker] = useState<{ c: OpsCase; mode: "docsent" | "approve" | "reject"; rows: LoanLenderRow[] } | null>(null);
   const [pickerBusy, setPickerBusy] = useState(false);
-  const [bannerSeen, setBannerSeen] = useState(false);
+  // Side-panel comments + collapsible history for activity & comments.
+  const [comments, setComments] = useState<{ id: string; author_name: string | null; comment_text: string; created_at: string }[]>([]);
+  const [commentText, setCommentText] = useState("");
+  const [commentBusy, setCommentBusy] = useState(false);
+  const [showActHist, setShowActHist] = useState(false);
+  const [showCmtHist, setShowCmtHist] = useState(false);
 
   const reload = useCallback(async () => {
     const { cases, users } = await loadOpsCases();
@@ -153,7 +166,6 @@ function Inner() {
   }, []);
 
   useEffect(() => { void reload(); }, [reload]);
-  useEffect(() => { if (typeof window !== "undefined") localStorage.setItem("opsboard.sla", String(sla)); }, [sla]);
   useEffect(() => { if (typeof window !== "undefined") localStorage.setItem("opsboard.target", String(target)); }, [target]);
 
   // Load the selected case's activity trail.
@@ -169,6 +181,36 @@ function Inner() {
       setActivity((data ?? []) as unknown as Activity[]);
     })();
   }, [sel, touches]);
+
+  // Load the selected case's comments (per-source table).
+  useEffect(() => {
+    setShowActHist(false); setShowCmtHist(false); setCommentText("");
+    const c = cases.find((x) => x.id === sel);
+    const meta = c ? COMMENT_TBL[c.source] : null;
+    if (!sel || !meta) { setComments([]); return; }
+    void (async () => {
+      const { data } = await supabase().from(meta.table)
+        .select("id, author_name, comment_text, created_at").eq(meta.key, sel)
+        .order("created_at", { ascending: false }).limit(50);
+      setComments((data ?? []) as typeof comments);
+    })();
+  }, [sel, cases]);
+
+  async function addComment() {
+    const c = cases.find((x) => x.id === sel);
+    const meta = c ? COMMENT_TBL[c.source] : null;
+    if (!sel || !meta || !commentText.trim()) return;
+    setCommentBusy(true);
+    try {
+      await supabase().from(meta.table).insert({ [meta.key]: sel, author_id: me?.id ?? null, author_name: me?.contact_name ?? "Admin", comment_text: commentText.trim() });
+      setCommentText("");
+      const { data } = await supabase().from(meta.table)
+        .select("id, author_name, comment_text, created_at").eq(meta.key, sel)
+        .order("created_at", { ascending: false }).limit(50);
+      setComments((data ?? []) as typeof comments);
+    } catch (e) { alert("Couldn’t post comment: " + (e as Error).message); }
+    finally { setCommentBusy(false); }
+  }
 
   // Each source shows its OWN columns; the mixed "All" view maps onto ALL_COLS.
   const activeCols = columnsFor(srcFilter);
@@ -313,9 +355,11 @@ function Inner() {
   }, [users, isMainAdmin, isManager, me]);
 
   const ownerTabs = useMemo(
-    () => [{ id: "all", name: "All" }, ...boardPeople.map((u) => ({ id: u.id, name: u.name + (u.role === "MANAGER" ? " (Mgr)" : "") })), { id: "unassigned", name: "Unassigned" }],
+    () => [{ id: "all", name: "All" }, { id: "unassigned", name: "Unassigned" }, ...boardPeople.map((u) => ({ id: u.id, name: u.name + (u.role === "MANAGER" ? " (Mgr)" : "") }))],
     [boardPeople],
   );
+  // Resolve user-id values (e.g. reassignment targets) to names in the activity log.
+  const nameById = useMemo(() => new Map(users.map((u) => [u.id, u.name])), [users]);
 
   // Where can THIS user reassign a case? Admin→anyone; Manager→self or own RMs;
   // RM→up to their manager only.
@@ -328,11 +372,14 @@ function Inner() {
 
   // Per-RM workload for the overseer strip.
   const thisMonthKey = `${new Date().getFullYear()}-${new Date().getMonth()}`;
+  // Per-person, this month: WIP = in-pipeline cases, Done = disbursed this month,
+  // Total = WIP + Done, Oldest = longest TAT (days since Ready for Login) among WIP.
   const workload = useMemo(() => boardPeople.map((u) => {
-    const own = cases.filter((c) => c.column != null && c.ownerUserId === u.id);
+    const wipCases = cases.filter((c) => c.column != null && c.ownerUserId === u.id);
     const done = cases.filter((c) => c.ownerUserId === u.id && monthKey(c.disbursedThisMonthAt) === thisMonthKey).length;
-    return { id: u.id, name: u.name, active: own.length, breaches: own.filter((c) => c.idleDays >= sla).length, oldest: own.reduce((m, c) => Math.max(m, c.idleDays), 0), done };
-  }), [boardPeople, cases, sla, thisMonthKey]);
+    const wip = wipCases.length;
+    return { id: u.id, name: u.name, wip, done, total: wip + done, oldest: wipCases.reduce((m, c) => Math.max(m, c.tatDays), 0) };
+  }), [boardPeople, cases, thisMonthKey]);
 
   return (
     <div className="min-h-screen bg-bg-soft md:flex">
@@ -353,19 +400,18 @@ function Inner() {
             </div>
             <div className="flex items-center gap-3 flex-wrap">
               <NotificationBell />
-              <label className="text-[12px] text-text-muted flex items-center gap-1.5">SLA
-                <input type="number" min={1} max={60} value={sla} onChange={(e) => setSla(Math.max(1, Number(e.target.value) || 3))}
-                  className="w-14 border border-line rounded-md px-2 py-1 text-[13px]" /> d</label>
-              <label className="text-[12px] text-text-muted flex items-center gap-1.5">Target
-                <input type="number" min={1} max={999} value={target} onChange={(e) => setTarget(Math.max(1, Number(e.target.value) || 65))}
-                  className="w-16 border border-line rounded-md px-2 py-1 text-[13px]" /> L</label>
+              {isMainAdmin && (
+                <label className="text-[12px] text-text-muted flex items-center gap-1.5">Target
+                  <input type="number" min={1} max={999} value={target} onChange={(e) => setTarget(Math.max(1, Number(e.target.value) || 65))}
+                    className="w-16 border border-line rounded-md px-2 py-1 text-[13px]" /> L</label>
+              )}
             </div>
           </div>
           {/* Filters */}
           <div className="mt-3 flex items-center gap-2 flex-wrap">
             {/* Source filter */}
             <div className="inline-flex border border-line rounded-lg overflow-hidden">
-              {(["loan", "insurance", "lead", "epc"] as const).map((k) => (
+              {(["epc", "lead", "loan", "insurance"] as const).map((k) => (
                 <button key={k} type="button" onClick={() => setSrcFilter(k)}
                   className={["px-3 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", srcFilter === k ? "text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}
                   style={srcFilter === k ? { backgroundColor: SOURCE_META[k].color } : undefined}>
@@ -387,7 +433,9 @@ function Inner() {
             {/* Search + quick filters */}
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search cases…"
               className="border border-line rounded-lg px-3 py-1.5 text-[12px] w-40 ml-1" />
-            {([["myoverdue", "My overdue"], ["unassigned", "Unassigned"], ["breaches", "Breaches"]] as const).map(([k, lbl]) => (
+            {([["myoverdue", "My overdue", "all"], ["unassigned", "Unassigned", "admin"], ["breaches", "Breaches", "oversee"]] as const)
+              .filter(([, , vis]) => vis === "all" || (vis === "admin" && isMainAdmin) || (vis === "oversee" && canOversee))
+              .map(([k, lbl]) => (
               <button key={k} type="button" onClick={() => setQuick(quick === k ? "none" : k)}
                 className={["px-3 py-1.5 text-[12px] font-semibold rounded-lg border", quick === k ? "bg-[#b45309] text-white border-[#b45309]" : "bg-white text-text-mid border-line hover:bg-bg-tint"].join(" ")}>
                 {lbl}
@@ -399,16 +447,20 @@ function Inner() {
         <main className="flex-1 flex min-h-0">
           {/* Kanban */}
           <div className="flex-1 overflow-x-auto p-4 sm:p-6">
-            {!canOversee && !loading && !bannerSeen && (() => {
-              const mine = cases.filter((c) => c.column != null && c.ownerUserId === me?.id);
-              const b = mine.filter((c) => c.idleDays >= sla).length;
+            {!canOversee && !loading && (() => {
+              // The RM's own scorecard, this month: Total / WIP / Oldest / Done.
+              const wipCases = cases.filter((c) => c.column != null && c.ownerUserId === me?.id);
+              const done = cases.filter((c) => c.ownerUserId === me?.id && monthKey(c.disbursedThisMonthAt) === thisMonthKey).length;
+              const wip = wipCases.length;
+              const oldest = wipCases.reduce((m, c) => Math.max(m, c.tatDays), 0);
               return (
-                <div className="flex items-center justify-between gap-3 mb-4 rounded-lg border border-[#cdeadd] bg-[#f0faf5] px-4 py-2.5">
-                  <span className="text-[13px] text-[#0f3d2e]">
-                    👋 You have <strong>{mine.length}</strong> active {mine.length === 1 ? "case" : "cases"}
-                    {b > 0 && <> · <strong className="text-[#b45309]">{b} need attention</strong> (idle ≥ {sla}d)</>}
+                <div className="inline-flex flex-col mb-4 rounded-lg border border-[#cdeadd] bg-[#f0faf5] px-4 py-2.5">
+                  <span className="text-[12px] font-semibold text-[#0f3d2e]">Your cases <span className="text-[#5a8a76] font-normal">· this month</span></span>
+                  <span className="text-[12px] text-[#0f3d2e] mt-0.5">
+                    <strong>Total {wip + done}</strong> · WIP {wip}
+                    {oldest > 0 && <> · oldest {oldest}d</>}
+                    {done > 0 && <> · <strong className="text-[#178a5c]">{done} done</strong></>}
                   </span>
-                  <button type="button" onClick={() => setBannerSeen(true)} className="text-[#5a8a76] hover:text-[#0f3d2e] text-[16px] leading-none">✕</button>
                 </div>
               );
             })()}
@@ -416,10 +468,9 @@ function Inner() {
               <div className="flex gap-2 mb-4 flex-wrap">
                 {workload.map((w) => (
                   <div key={w.id} className="rounded-lg border border-line bg-white px-3 py-2 min-w-[132px]">
-                    <div className="text-[12px] font-semibold text-text">{w.name}</div>
+                    <div className="text-[12px] font-semibold text-text">{w.name} <span className="text-text-muted font-normal">· this month</span></div>
                     <div className="text-[11px] text-text-muted mt-0.5">
-                      {w.active} active
-                      {w.breaches > 0 && <> · <span className="text-[#b45309] font-semibold">{w.breaches} ⚠</span></>}
+                      <span className="font-semibold text-text">Total {w.total}</span> · WIP {w.wip}
                       {w.oldest > 0 && <> · oldest {w.oldest}d</>}
                       {w.done > 0 && <> · <span className="text-[#178a5c] font-semibold">{w.done} done</span></>}
                     </div>
@@ -462,11 +513,10 @@ function Inner() {
                               <div className="text-[11px] text-text-muted truncate mt-0.5">
                                 {[c.amount ? fmt(c.amount) : null, c.lender, c.onHold ? "⏸ Hold" : null].filter(Boolean).join(" · ") || c.statusLabel}
                               </div>
-                              {late && (
-                                <div className="text-[11px] font-bold mt-1" style={{ color: "#b45309" }}>
-                                  ⚠ {c.idleDays}d idle{c.blocker ? " · " + c.blocker.slice(0, 28) : ""}
-                                </div>
-                              )}
+                              {/* TAT — days worked on this profile since Ready for Login. */}
+                              <div className="text-[11px] font-semibold mt-1" style={{ color: late ? "#b45309" : "#5a8a76" }}>
+                                {late && "⚠ "}🕒 {c.tatDays}d working{c.blocker ? " · " + c.blocker.slice(0, 24) : ""}
+                              </div>
                               {isMainAdmin && c.ownerName && <div className="text-[10px] text-text-muted mt-0.5">{c.ownerName}</div>}
                             </button>
                           );
@@ -495,13 +545,28 @@ function Inner() {
                 <Row k="Amount" v={selCase.amount ? fmt(selCase.amount) : "—"} />
                 <Row k="Lender" v={selCase.lender || "—"} />
                 <Row k="Owner" v={selCase.ownerName || "Unassigned"} />
-                <Row k="Idle" v={selCase.idleDays + "d"} />
+                <Row k="Working (TAT)" v={selCase.tatDays + "d"} />
                 {selCase.blocker && <div><span className="text-text-muted">Blocker:</span> {selCase.blocker}</div>}
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <button className="btn-act" disabled={busy} onClick={() => act("doc_received")}>Doc received</button>
-                <button className="btn-act" disabled={busy} onClick={() => act("move_stage")}>Move stage →</button>
+                <button className="btn-act col-span-2" disabled={busy} onClick={() => act("doc_received")}>Mark doc received</button>
+                {/* Move stage — same flow as dragging: choose the next stage, then
+                    the confirmation + lender/decision/disbursement popup appears. */}
+                {(() => {
+                  const targets = selCase.source === "loan"
+                    ? (LOAN_FORWARD[selCase.column ?? ""] ?? [])
+                    : columnsFor(selCase.source).map((c) => c.key).filter((k) => k !== selCase.column);
+                  if (!targets.length) return <div className="col-span-2 text-[11px] text-text-muted">No further stage from here.</div>;
+                  return (
+                    <div className="col-span-2">
+                      <div className="text-[11px] text-text-muted mb-1">Move to stage →</div>
+                      <Select value="" disabled={busy} placeholder="Choose next stage…"
+                        onChange={(e) => { if (e.target.value) setDrop({ caseId: selCase.id, column: e.target.value }); }}
+                        options={targets.map((k) => ({ value: k, label: columnsFor(selCase.source).find((c) => c.key === k)?.label || k }))} />
+                    </div>
+                  );
+                })()}
                 {selCase.source === "loan" && (
                   <button className="btn-act" disabled={busy} onClick={() => {
                     const raw = window.prompt("Disbursement amount (₹):");
@@ -524,19 +589,65 @@ function Inner() {
                 )}
               </div>
 
-              <div className="border-t border-line pt-3 flex-1">
+              {/* Activity log — latest, with a dropdown for the full history. */}
+              <div className="border-t border-line pt-3">
                 <div className="text-[11px] font-bold uppercase tracking-wide text-text-mid mb-2">Activity log</div>
-                <div className="flex flex-col gap-1.5 text-[12px] text-text-mid">
-                  {activity.length === 0 ? (
-                    <div className="text-text-muted">No activity yet — actions log here with a timestamp.</div>
-                  ) : activity.map((a, i) => (
-                    <div key={i}>
-                      <span className="font-semibold text-text">{a.actor?.contact_name || "—"}</span>
-                      {" · "}<span>{prettyAction(a.action)}</span>{a.new_value ? " · " + a.new_value : ""}
-                      <span className="text-text-muted"> · {when(a.created_at)}</span>
+                {activity.length === 0 ? (
+                  <div className="text-text-muted text-[12px]">No activity yet.</div>
+                ) : (
+                  <div className="flex flex-col gap-1.5 text-[12px] text-text-mid">
+                    {(showActHist ? activity : activity.slice(0, 1)).map((a, i) => {
+                      const val = humanizeValue(a.new_value, nameById);
+                      return (
+                        <div key={i}>
+                          <span className="font-semibold text-text">{a.actor?.contact_name || "—"}</span>
+                          {" · "}<span>{prettyAction(a.action)}</span>{val ? " · " + val : ""}
+                          <span className="text-text-muted"> · {when(a.created_at)}</span>
+                        </div>
+                      );
+                    })}
+                    {activity.length > 1 && (
+                      <button type="button" className="text-[11px] font-semibold text-[#178a5c] hover:underline self-start" onClick={() => setShowActHist((v) => !v)}>
+                        {showActHist ? "Hide history ▲" : `Show history (${activity.length}) ▼`}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Comments — add one, see the latest, expand history. */}
+              <div className="border-t border-line pt-3 flex-1">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-text-mid mb-2">Comments</div>
+                {COMMENT_TBL[selCase.source] ? (
+                  <>
+                    <div className="flex gap-1.5 mb-2">
+                      <input value={commentText} onChange={(e) => setCommentText(e.target.value)} placeholder="Add a comment…"
+                        onKeyDown={(e) => { if (e.key === "Enter" && commentText.trim()) void addComment(); }}
+                        className="flex-1 min-w-0 border border-line rounded-md px-2 py-1.5 text-[12px]" />
+                      <button type="button" className="btn-act primary" disabled={commentBusy || !commentText.trim()} onClick={() => void addComment()}>Post</button>
                     </div>
-                  ))}
-                </div>
+                    {comments.length === 0 ? (
+                      <div className="text-text-muted text-[12px]">No comments yet.</div>
+                    ) : (
+                      <div className="flex flex-col gap-2 text-[12px] text-text-mid">
+                        {(showCmtHist ? comments : comments.slice(0, 1)).map((cm) => (
+                          <div key={cm.id}>
+                            <span className="font-semibold text-text">{cm.author_name || "Admin"}</span>
+                            <span className="text-text-muted"> · {when(cm.created_at)}</span>
+                            <div className="whitespace-pre-wrap break-words">{cm.comment_text}</div>
+                          </div>
+                        ))}
+                        {comments.length > 1 && (
+                          <button type="button" className="text-[11px] font-semibold text-[#178a5c] hover:underline self-start" onClick={() => setShowCmtHist((v) => !v)}>
+                            {showCmtHist ? "Hide history ▲" : `Show history (${comments.length}) ▼`}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div className="text-text-muted text-[12px]">Comments aren’t available for insurance cases.</div>
+                )}
               </div>
             </aside>
           )}
@@ -544,7 +655,7 @@ function Inner() {
 
         {/* Footer */}
         <footer className="border-t border-line bg-white px-4 sm:px-6 py-3 flex items-center gap-6 flex-wrap text-[13px]">
-          <span><strong style={{ color: "#b45309" }}>{breaches}</strong> SLA breach{breaches === 1 ? "" : "es"} (≥{sla}d)</span>
+          <span><strong style={{ color: "#b45309" }}>{breaches}</strong> need attention</span>
           <span><strong>{touches}</strong> action{touches === 1 ? "" : "s"} this session</span>
           <span className="flex items-center gap-2.5 text-[12px] text-text-muted">
             <span className="flex items-center gap-1"><i className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: "#16a34a" }} />up to date</span>
@@ -629,6 +740,14 @@ function Inner() {
 
 function Row({ k, v }: { k: string; v: string }) {
   return <div className="flex justify-between"><span className="text-text-muted">{k}</span><strong className="text-text">{v}</strong></div>;
+}
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Never surface raw user UUIDs in activity logs — resolve to a name (or a
+// generic label if the user is unknown/removed).
+function humanizeValue(v: string | null, nameById: Map<string, string>): string {
+  if (!v) return "";
+  if (UUID_RE.test(v.trim())) return nameById.get(v.trim()) ?? "a teammate";
+  return v;
 }
 function prettyAction(a: string): string {
   return ({ call: "logged a call", doc_received: "marked doc received", status_change: "moved stage", disbursement: "recorded disbursement", reassigned: "reassigned", assigned: "assigned", created: "created", updated: "updated" } as Record<string, string>)[a] || a;

@@ -12,6 +12,29 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { geminiExtract } from "@/lib/gemini-extract";
+
+// Fallback: India Post is often blocked from cloud egress, so when it fails we
+// ask Gemini (reachable from Cloud Run, same GOOGLE_VISION_API_KEY as the OCR)
+// to resolve the PIN → state/district/city.
+async function geminiPincode(pin: string): Promise<{ state: string; district: string; city: string } | null> {
+  const out = await geminiExtract<{ state: string | null; district: string | null; city: string | null }>({
+    images: [],
+    label: "pincode",
+    prompt: `Indian postal PIN code ${pin}. Return JSON with the official state, the district, and the main city/town/area for this PIN code. Use the correct official state name (e.g. "Rajasthan", "Delhi"). Give your best answer for the state even if unsure about the city.`,
+    schema: {
+      type: "OBJECT",
+      properties: {
+        state: { type: "STRING", nullable: true },
+        district: { type: "STRING", nullable: true },
+        city: { type: "STRING", nullable: true },
+      },
+    },
+  });
+  const state = (out?.state ?? "").trim();
+  if (!state) return null;
+  return { state, district: (out?.district ?? "").trim(), city: (out?.city ?? "").trim() };
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -67,6 +90,13 @@ export async function GET(req: NextRequest) {
       // Otherwise a transient upstream hiccup — try again.
     }
     if (!first || !first.PostOffice?.length) {
+      // India Post unreachable (common from cloud egress) → Gemini fallback.
+      const g = await geminiPincode(pin);
+      if (g) {
+        return NextResponse.json({ ok: true, ...g, source: "gemini" }, {
+          headers: { "Cache-Control": "s-maxage=86400, stale-while-revalidate=604800" },
+        });
+      }
       return err("Pincode lookup unavailable — enter state manually.", 502);
     }
 

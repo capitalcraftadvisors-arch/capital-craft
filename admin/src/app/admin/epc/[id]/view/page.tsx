@@ -34,7 +34,7 @@ import ProfileTabBar, { TabButton, DownloadMenu, KebabMenu } from "@/components/
 // Shared view chrome — the SAME kit the Loan Application View imports, so the
 // two dashboards can't drift apart. EPC-specific pieces stay in this file.
 import {
-  I, StatusBtn, Pill, BigProgressStep, BigConnector, SectionCard, KV,
+  I, StatusBtn, Pill, BigProgressStep, BigConnector, SectionCard, KV, formatGstAddress,
   StepBlock, DocGrid, type ViewDocSlot,
 } from "@/components/view/ViewKit";
 
@@ -634,7 +634,7 @@ function Inner() {
             <SectionCard title="Business details" accent="blue" icon={I.building}>
               <KV k="Trade Name" v={biz.trade_name} />
               <KV k="GSTIN" v={biz.gstin_number} />
-              <KV k="GST Address" v={biz.gst_address} />
+              <KV k="GST Address" v={formatGstAddress(biz.gst_address)} wrap />
               <KV k="Constitution Type" v={btLabel} />
             </SectionCard>
 
