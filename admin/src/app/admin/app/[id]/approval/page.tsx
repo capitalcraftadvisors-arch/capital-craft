@@ -113,8 +113,8 @@ function Inner() {
     const approvedEmi  = Number(details.approved_emi ?? 0);
     if (!(approvedAmt > 0)) { setError("Approved loan amount must be greater than 0."); return; }
     if (!(applied > 0))     { setError("The applied loan amount is missing on this application."); return; }
-    if (!(approvedAmt < applied)) {
-      setError(`Approved amount must be less than the applied amount (${fmtRs(applied)} — ${rupeesInWords(applied)}).`);
+    if (!(approvedAmt <= applied)) {
+      setError(`Approved amount can’t exceed the applied amount (${fmtRs(applied)} — ${rupeesInWords(applied)}).`);
       return;
     }
     if (!(approvedTen > 0)) { setError("Approved tenure (years) is required."); return; }
@@ -270,7 +270,7 @@ function Inner() {
 
             <p className="text-[12px] text-[#5a8a76] mt-3">
               All fields are required. The approved amount must be greater than 0 and
-              less than the applied amount. Saved once, then editable one more time
+              not more than the applied amount. Saved once, then editable one more time
               from the profile&rsquo;s Edit menu before it locks.
             </p>
           </SectionCard>

@@ -552,6 +552,24 @@ function Inner() {
           </div>
         </Card>
 
+        {/* Other supporting documents — any extra files, as many as needed. */}
+        <Card className="p-6 space-y-2">
+          <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">
+            Other documents <span className="text-text-muted font-normal text-[13px]">(optional)</span>
+          </h2>
+          <p className="text-[12px] text-text-muted">
+            Add any other supporting documents for this application — add as many as you need.
+          </p>
+          <FileUpload
+            applicationId={loan.id}
+            category="other"
+            table="user_application_docs"
+            uploadedBy="admin"
+            maxFiles={20}
+            uploadHint="PDF or image — add as many as needed"
+          />
+        </Card>
+
         {/* e. Retrieved Bank Information */}
         {bankDoc && (
           <Card className="p-6 bg-[#f0faf5] border-[#cdeadd] space-y-4">

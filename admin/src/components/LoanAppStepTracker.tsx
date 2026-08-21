@@ -36,7 +36,7 @@ const STEP_LABELS = [
   "KYC Verification",
   "Personal Details",
   "Employment & Income",
-  "Property & Loan",
+  "Loan",
   "Review & Submit",
 ];
 

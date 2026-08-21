@@ -20,6 +20,7 @@ import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
+import Select from "@/components/ui/Select";
 import Button from "@/components/ui/Button";
 import LoanAppStepTracker from "@/components/LoanAppStepTracker";
 import { supabase } from "@/lib/supabase";
@@ -71,6 +72,8 @@ function Inner() {
 
   // Inputs
   const [stateSubsidy, setStateSub]   = useState<string>("");
+  const [subsidyCase, setSubsidyCase] = useState<"subsidy" | "non_subsidy">("subsidy");
+  const [centralSub, setCentralSub]   = useState<string>(""); // editable central subsidy
   const [selectedTenure, setTenure]   = useState<number | null>(null);
 
   // Save
@@ -95,6 +98,17 @@ function Inner() {
       if (l) {
         if (l.state_subsidy != null) setStateSub(String(l.state_subsidy));
         if (l.selected_tenure_years != null) setTenure(l.selected_tenure_years);
+        // Subsidy case + central subsidy: use the stored value if any, else
+        // auto-suggest from PM Surya Ghar tiers. Non-subsidy ⇒ 0.
+        const kw = l.project_size ? (l.project_size_unit === "mw" ? l.project_size * 1000 : l.project_size) : null;
+        const auto = l.plant_use_type === "commercial" ? 0 : computeCentralSubsidy(kw);
+        if (l.central_subsidy != null) {
+          setCentralSub(String(l.central_subsidy));
+          setSubsidyCase(l.central_subsidy > 0 ? "subsidy" : "non_subsidy");
+        } else {
+          setCentralSub(String(auto));
+          setSubsidyCase(l.plant_use_type === "commercial" ? "non_subsidy" : "subsidy");
+        }
       }
       setLoading(false);
     })();
@@ -110,15 +124,17 @@ function Inner() {
       : loan.project_size;
   }, [loan]);
 
-  // Subsidy is RESIDENTIAL-ONLY — commercial (C&I) never gets a subsidy.
+  // Subsidy is admin-selectable now (Subsidy / Non-subsidy) and the central
+  // subsidy amount is editable — auto-suggested from PM Surya Ghar tiers.
   const isCommercial = loan?.plant_use_type === "commercial";
-  const centralSubsidy = useMemo(() => (isCommercial ? 0 : computeCentralSubsidy(sizeKw)), [sizeKw, isCommercial]);
+  const CENTRAL_SUBSIDY_CAP = 78000;
+  const centralSubsidy = subsidyCase === "non_subsidy" ? 0 : Math.max(0, Math.min(CENTRAL_SUBSIDY_CAP, Number(centralSub) || 0));
 
   // EMI is computed at a fixed backend rate (never shown). "Valid" now just
   // means there's a loan amount to compute against.
   const roiNum         = DEFAULT_INDICATIVE_ROI;
   const roiValid       = (loan?.loan_amount_required ?? 0) > 0;
-  const stateSubsidyN  = Math.max(0, Number(stateSubsidy) || 0);
+  const stateSubsidyN  = subsidyCase === "non_subsidy" ? 0 : Math.max(0, Number(stateSubsidy) || 0);
   const totalSubsidy   = centralSubsidy + stateSubsidyN;
 
   const loanAmount     = loan?.loan_amount_required ?? 0;
@@ -275,33 +291,45 @@ function Inner() {
           {/* ROI input removed — EMI is computed at a fixed backend rate that is
               never surfaced. Only subsidy inputs remain here. */}
           <div className="grid sm:grid-cols-2 gap-4">
-            {isCommercial ? (
-              <p className="text-[12px] text-text-muted italic">Subsidy is residential-only — not applicable to C&amp;I (commercial) cases.</p>
-            ) : (
-              <>
-                <div>
-                  <label className="block mb-1.5 text-[13px] font-medium text-text-mid">
-                    Central Subsidy (₹)
-                  </label>
-                  <div className="w-full rounded-input border-2 border-line bg-bg-tint px-3.5 py-2.5 text-[15px] text-[#0f3d2e] font-semibold">
-                    {formatRupees(centralSubsidy)}
-                  </div>
-                  <p className="mt-1.5 text-[11px] text-text-muted">
-                    Auto-computed from PM Surya Ghar tiers ({sizeKw ? `${sizeKw} kW` : "—"}).
-                  </p>
-                </div>
+            {/* Subsidy vs non-subsidy — admin's explicit choice. */}
+            <div>
+              <label className="block mb-1.5 text-[13px] font-medium text-text-mid">Subsidy case?</label>
+              <Select
+                value={subsidyCase}
+                onChange={(e) => {
+                  const v = e.target.value as "subsidy" | "non_subsidy";
+                  setSubsidyCase(v);
+                  if (v === "non_subsidy") setCentralSub("0");
+                  else if (!(Number(centralSub) > 0)) setCentralSub(String(isCommercial ? 0 : computeCentralSubsidy(sizeKw)));
+                }}
+                options={[{ value: "subsidy", label: "Subsidy case" }, { value: "non_subsidy", label: "Non-subsidy case" }]}
+              />
+              <p className="mt-1.5 text-[11px] text-text-muted">Whether PM Surya Ghar / state subsidy applies to this case.</p>
+            </div>
 
-                <Input
-                  label="State Subsidy (₹)"
-                  type="text"
-                  inputMode="numeric"
-                  value={stateSubsidy}
-                  onChange={(e) => setStateSub(e.target.value.replace(/[^\d.]/g, ""))}
-                  placeholder="0"
-                  hint="Enter applicable state subsidy if any; conditional per state/eligibility."
-                />
-              </>
-            )}
+            <Input
+              label="Central Subsidy (₹)"
+              type="text"
+              inputMode="numeric"
+              value={subsidyCase === "non_subsidy" ? "0" : centralSub}
+              disabled={subsidyCase === "non_subsidy"}
+              onChange={(e) => setCentralSub(e.target.value.replace(/[^\d.]/g, ""))}
+              placeholder="0"
+              hint={subsidyCase === "non_subsidy"
+                ? "Non-subsidy case — no central subsidy."
+                : `Editable · auto-suggested from PM Surya Ghar tiers (${sizeKw ? `${sizeKw} kW` : "—"}). Max ₹78,000.`}
+            />
+
+            <Input
+              label="State Subsidy (₹)"
+              type="text"
+              inputMode="numeric"
+              value={subsidyCase === "non_subsidy" ? "0" : stateSubsidy}
+              disabled={subsidyCase === "non_subsidy"}
+              onChange={(e) => setStateSub(e.target.value.replace(/[^\d.]/g, ""))}
+              placeholder="0"
+              hint="Enter applicable state subsidy if any; conditional per state/eligibility."
+            />
           </div>
         </Card>
 
