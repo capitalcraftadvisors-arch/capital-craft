@@ -375,11 +375,11 @@ function Inner() {
   // Per-person, this month: WIP = in-pipeline cases, Done = disbursed this month,
   // Total = WIP + Done, Oldest = longest TAT (days since Ready for Login) among WIP.
   const workload = useMemo(() => boardPeople.map((u) => {
-    const wipCases = cases.filter((c) => c.column != null && c.ownerUserId === u.id);
-    const done = cases.filter((c) => c.ownerUserId === u.id && monthKey(c.disbursedThisMonthAt) === thisMonthKey).length;
+    const wipCases = cases.filter((c) => c.source === srcFilter && c.column != null && c.ownerUserId === u.id);
+    const done = cases.filter((c) => c.source === srcFilter && c.ownerUserId === u.id && monthKey(c.disbursedThisMonthAt) === thisMonthKey).length;
     const wip = wipCases.length;
     return { id: u.id, name: u.name, wip, done, total: wip + done, oldest: wipCases.reduce((m, c) => Math.max(m, c.tatDays), 0) };
-  }), [boardPeople, cases, thisMonthKey]);
+  }), [boardPeople, cases, thisMonthKey, srcFilter]);
 
   return (
     <div className="min-h-screen bg-bg-soft md:flex">
@@ -396,7 +396,6 @@ function Inner() {
               <h1 className="font-display text-[22px] sm:text-[26px] font-bold text-text">
                 Task Manager <span className="text-text-muted font-medium text-[15px]">· {visible.length} active</span>
               </h1>
-              {!isMainAdmin && <span className="text-[12px] text-text-muted">(your cases)</span>}
             </div>
             <div className="flex items-center gap-3 flex-wrap">
               <NotificationBell />
@@ -449,13 +448,13 @@ function Inner() {
           <div className="flex-1 overflow-x-auto p-4 sm:p-6">
             {!canOversee && !loading && (() => {
               // The RM's own scorecard, this month: Total / WIP / Oldest / Done.
-              const wipCases = cases.filter((c) => c.column != null && c.ownerUserId === me?.id);
-              const done = cases.filter((c) => c.ownerUserId === me?.id && monthKey(c.disbursedThisMonthAt) === thisMonthKey).length;
+              const wipCases = cases.filter((c) => c.source === srcFilter && c.column != null && c.ownerUserId === me?.id);
+              const done = cases.filter((c) => c.source === srcFilter && c.ownerUserId === me?.id && monthKey(c.disbursedThisMonthAt) === thisMonthKey).length;
               const wip = wipCases.length;
               const oldest = wipCases.reduce((m, c) => Math.max(m, c.tatDays), 0);
               return (
                 <div className="inline-flex flex-col mb-4 rounded-lg border border-[#cdeadd] bg-[#f0faf5] px-4 py-2.5">
-                  <span className="text-[12px] font-semibold text-[#0f3d2e]">Your cases <span className="text-[#5a8a76] font-normal">· this month</span></span>
+                  <span className="text-[12px] font-semibold text-[#5a8a76]">This month</span>
                   <span className="text-[12px] text-[#0f3d2e] mt-0.5">
                     <strong>Total {wip + done}</strong> · WIP {wip}
                     {oldest > 0 && <> · oldest {oldest}d</>}
@@ -468,7 +467,7 @@ function Inner() {
               <div className="flex gap-2 mb-4 flex-wrap">
                 {workload.map((w) => (
                   <div key={w.id} className="rounded-lg border border-line bg-white px-3 py-2 min-w-[132px]">
-                    <div className="text-[12px] font-semibold text-text">{w.name} <span className="text-text-muted font-normal">· this month</span></div>
+                    <div className="text-[12px] font-semibold text-text">{w.name}</div>
                     <div className="text-[11px] text-text-muted mt-0.5">
                       <span className="font-semibold text-text">Total {w.total}</span> · WIP {w.wip}
                       {w.oldest > 0 && <> · oldest {w.oldest}d</>}

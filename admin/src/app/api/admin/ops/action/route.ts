@@ -44,13 +44,12 @@ function nextStage(source: string, status: string): { status: string; stamp?: Re
   const now = new Date().toISOString();
   const today = now.slice(0, 10);
   if (source === "loan") {
-    const map: Record<string, string> = { draft: "under_review", submitted: "under_review", on_hold: "docs_sent", under_review: "docs_sent", docs_sent: "approved", approved: "rfd", rfd: "rfd" };
+    const map: Record<string, string> = { draft: "under_review", submitted: "under_review", on_hold: "docs_sent", under_review: "docs_sent", docs_sent: "approved" };
     const to = map[status];
     if (!to || to === status) return null;
     const stamp: Record<string, unknown> = {};
     if (to === "docs_sent") stamp.docs_sent_at = now;
     if (to === "approved") stamp.approved_at = now;
-    if (to === "rfd") stamp.rfd_at = now;
     return { status: to, stamp };
   }
   if (source === "insurance") {
@@ -78,14 +77,13 @@ function nextStage(source: string, status: string): { status: string; stamp?: Re
 function columnToStatus(source: string, col: string): { status: string; stamp?: Record<string, unknown> } | null {
   const now = new Date().toISOString();
   if (source === "loan") {
-    // ready_login | docs_pending | send_lender | approved_rejected | phase1 | phase2
-    const m: Record<string, string> = { ready_login: "under_review", docs_pending: "on_hold", send_lender: "docs_sent", approved_rejected: "approved", phase1: "rfd" };
+    // Loans move via their own screens now; the only direct board move is → Docs Pending.
+    const m: Record<string, string> = { ready_login: "under_review", docs_pending: "on_hold", send_lender: "docs_sent", approved_rejected: "approved" };
     const s = m[col]; if (!s) return null;
     const stamp: Record<string, unknown> = {};
     if (s === "docs_sent") stamp.docs_sent_at = now;
     if (s === "on_hold") stamp.hold_at = now;
     if (s === "approved") stamp.approved_at = now;
-    if (s === "rfd") stamp.rfd_at = now;
     return { status: s, stamp };
   }
   if (source === "insurance") {

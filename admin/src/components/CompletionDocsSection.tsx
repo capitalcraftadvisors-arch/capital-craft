@@ -87,9 +87,14 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
       if (cancelled) return;
       const rows = (data ?? []) as DocRow[];
       setDocs(rows);
-      // The gate counts only the current set (not the legacy photo).
+      // The gate counts only the current set (not the legacy photo). In
+      // tranche-1 mode report the Tranche-1 docs; otherwise the completion set.
       const have = new Set(rows.map((r) => r.category));
-      onCountChange?.(COMPLETION_CATEGORIES.filter((c) => have.has(c)).length, COMPLETION_CATEGORIES.length);
+      if (mode === "tranche1") {
+        onCountChange?.(TRANCHE1_DOCS.filter((d) => have.has(d.category)).length, TRANCHE1_DOCS.length);
+      } else {
+        onCountChange?.(COMPLETION_CATEGORIES.filter((c) => have.has(c)).length, COMPLETION_CATEGORIES.length);
+      }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -601,14 +601,6 @@ function Inner() {
     ["completion_invoice", "completion_panel_photo", "completion_inverter_photo", "completion_meter_photo", "completion_report"].includes(d.category),
   );
 
-  // RFD gate — Ready for Disbursement becomes clickable only once approval
-  // details are filled AND both Tranche-1 docs (Feasibility + MMR/Advance
-  // receipt) are present. Clicking writes status='rfd' + rfd_at + activity log.
-  const tranche1Complete = hasCat("feasibility_report") && hasCat("mmr_advance_receipt");
-  const canRfd = approved && approvalFilled && tranche1Complete && !rfdReached;
-  const markRfd = () =>
-    void changeStatus("rfd", { rfd_at: new Date().toISOString() }, "Ready for disbursement");
-
   // Change review — undo the current lender decision (and any abort) and move
   // the application back to Docs Sent so the admin can Approve/Reject again.
   // Fixes cases mistakenly marked Approved/Rejected by lender.
@@ -628,11 +620,6 @@ function Inner() {
   // only appears once there's a decision/abort to undo.
   const canChangeReview = approvedPlus || rejected || aborted || anyLenderActivity;
   const kebabItems = [
-    ...(canRfd ? [{
-      label: "Mark RFD (ready for disbursement)",
-      icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M9 12l2 2 4-4" /></svg>),
-      onClick: markRfd,
-    }] : []),
     ...(!aborted ? [{
       label: "Abort application",
       icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M5.6 5.6l12.8 12.8" /></svg>),
@@ -938,9 +925,8 @@ function Inner() {
             ) : (
               <>
                 {statusActions}
-                {/* Disbursement page opens once approval details are filled — it
-                    hosts the Tranche-1 upload; the 1st-amount field there stays
-                    locked until RFD is marked. */}
+                {/* Disbursement page hosts the Tranche-1 upload; the 1st-amount
+                    field there opens once both Tranche-1 docs are uploaded. */}
                 {anyApprovedLender && (
                   <HAction variant="amber" icon={I.money} onClick={() => router.push(`/admin/app/${loan.id}/disbursement` as any)}>
                     Disbursement

@@ -125,13 +125,13 @@ function loanColumn(r: Record<string, any>, lenderMidDecision: boolean): { colum
     const at = r.rejected_at || r.updated_at;
     return inCurrentMonth(at) ? { column: "approved_rejected", label: "Rejected by lender", stageSince: at } : { column: null, label: "Rejected (aged out)", stageSince: at };
   }
-  // Disbursement stage (1st Phase). Drops off once the 2nd tranche is filled.
+  // Approved → stays in Approved/Rejected until the 1st disbursement is recorded
+  // (RFD removed). Once the 1st tranche is in → 1st Phase; drops off after the 2nd.
   if (s === "rfd" || s === "approved" || s === "sent_to_nbfc" || s === "disbursed") {
     if (r.first_disbursement_amount != null) {
       if (r.second_disbursement_amount != null) return { column: null, label: "Fully disbursed", stageSince: r.second_disbursement_date };
-      return { column: "phase1", label: "1st disbursed · 2nd pending", stageSince: r.first_disbursement_date || r.rfd_at };
+      return { column: "phase1", label: "1st disbursed · 2nd pending", stageSince: r.first_disbursement_date };
     }
-    if (s === "rfd" || r.rfd_at != null) return { column: "phase1", label: "Ready for 1st disbursement", stageSince: r.rfd_at || r.approved_at };
     return { column: "approved_rejected", label: "Approved by lender", stageSince: r.approved_at || r.updated_at };
   }
   if (s === "docs_sent") return { column: "send_lender", label: lenderMidDecision ? "With lender — deciding" : "Sent to lender", stageSince: r.docs_sent_at || r.updated_at };

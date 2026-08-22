@@ -66,6 +66,10 @@ function Inner() {
   // Completion set is now 5 (invoice + 3 geo photos + report); the component
   // reports the live total via onCountChange, this is just the pre-load default.
   const [docsTotal, setDocsTotal] = useState(5);
+  // Tranche-1 docs (Feasibility + MMR / Advance receipt) — gate the 1st
+  // disbursement (RFD step removed: docs done ⇒ disbursement opens).
+  const [t1Uploaded, setT1Uploaded] = useState(0);
+  const [t1Total, setT1Total] = useState(0);
 
   async function load() {
     const { data } = await supabase()
@@ -170,8 +174,9 @@ function Inner() {
   const dl = deadlineState(loan.first_disbursement_date);
   const sanctioned = loan.sanctioned_amount != null ? Number(loan.sanctioned_amount) : null;
   const firstSaved = loan.first_disbursement_amount != null;
-  // The 1st-disbursement amount entry stays locked until the case is marked RFD.
-  const rfdReached = loan.status === "rfd" || loan.rfd_at != null;
+  // The 1st-disbursement entry opens once both Tranche-1 documents are uploaded
+  // (or it was already recorded). RFD is no longer required.
+  const tranche1Complete = firstSaved || (t1Total > 0 && t1Uploaded >= t1Total);
   const remaining = remainingAmount(sanctioned, loan.first_disbursement_amount);
   const reviewState: string | null = loan.completion_docs_status ?? null;
   const allDocsIn = docsUploaded >= docsTotal;
@@ -236,23 +241,23 @@ function Inner() {
 
         {tab === "disbursement" && (
           <div className="space-y-4">
-            {/* 1st disbursement */}
-            {/* 1st Tranche documents — upload BEFORE marking RFD. Both are
-                required for the RFD gate (Feasibility + MMR / Advance receipt). */}
+            {/* 1st disbursement — opens once both Tranche-1 docs are uploaded. */}
             <SectionCard title="1st Tranche documents" accent="blue" icon={I.files}>
               <p className="text-[13px] text-[#5a8a76] mb-3">
-                Upload the Feasibility Report and MMR / Advance Receipt. Once both are in
-                and the approval details are filled, mark the case <strong>RFD</strong> on the
-                profile — that opens the 1st-disbursement entry below.
+                Upload the Feasibility Report and MMR / Advance Receipt. Once both are in, the 1st-disbursement entry below opens.
               </p>
-              <CompletionDocsSection applicationId={loan.id} uploadedBy="admin" mode="tranche1" />
+              <CompletionDocsSection
+                applicationId={loan.id}
+                uploadedBy="admin"
+                mode="tranche1"
+                onCountChange={(u, t) => { setT1Uploaded(u); setT1Total(t); }}
+              />
             </SectionCard>
 
             <SectionCard title="First disbursement" accent="green" icon={I.money}>
-              {!rfdReached ? (
+              {!tranche1Complete ? (
                 <p className="text-[13px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2">
-                  Locked until the case is marked <strong>RFD</strong> (Ready for Disbursement) on the profile.
-                  Upload the Tranche-1 documents above first.
+                  Upload both Tranche-1 documents above to open the 1st disbursement.
                 </p>
               ) : (
                 <>
