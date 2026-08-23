@@ -555,7 +555,7 @@ function Inner() {
         project_size_unit:     projectUnit,
         total_project_cost:    costN,
         loan_amount_required:  loanN,
-        monthly_bill_amount:   Number(monthlyBill) || null,
+        monthly_bill_amount:   monthlyBill.trim() === "" || !Number.isFinite(Number(monthlyBill)) ? null : Number(monthlyBill),
         discom_name:           discomName || null,
         ca_number:             caNumber || null,
         ebill_address_line:    addressLine,
@@ -774,7 +774,7 @@ function Inner() {
               type="text"
               inputMode="numeric"
               value={monthlyBill}
-              onChange={(e) => setMonthlyBill(e.target.value.replace(/[^\d.]/g, ""))}
+              onChange={(e) => setMonthlyBill(e.target.value.replace(/[^\d.-]/g, "").replace(/(?!^)-/g, ""))}
               placeholder="e.g. 3500"
             />
             <Input

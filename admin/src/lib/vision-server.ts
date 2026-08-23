@@ -115,7 +115,7 @@ export async function visionDocumentText(
 // returns null — face crop is best-effort and non-blocking.
 export async function visionDetectFaceBox(
   buffer: Buffer,
-): Promise<{ left: number; top: number; width: number; height: number } | null> {
+): Promise<{ left: number; top: number; width: number; height: number; rollAngle: number } | null> {
   if (!VISION_API_KEY) {
     // Fail loudly here too — quieter than throwing but visible in logs.
     console.warn("[visionDetectFaceBox] GOOGLE_VISION_API_KEY not configured");
@@ -158,6 +158,7 @@ export async function visionDetectFaceBox(
   const face = (first.faceAnnotations as Array<{
     fdBoundingPoly?: { vertices?: Array<{ x?: number; y?: number }> };
     boundingPoly?:   { vertices?: Array<{ x?: number; y?: number }> };
+    rollAngle?: number; // in-plane tilt of the face (degrees)
   }>)?.[0];
   const poly = face?.fdBoundingPoly ?? face?.boundingPoly;
   const verts = poly?.vertices ?? [];
@@ -172,5 +173,5 @@ export async function visionDetectFaceBox(
   const width  = right - left;
   const height = bottom - top;
   if (width <= 0 || height <= 0) return null;
-  return { left, top, width, height };
+  return { left, top, width, height, rollAngle: face?.rollAngle ?? 0 };
 }

@@ -149,8 +149,12 @@ export async function cropAndUploadFace(
   const height = Math.min(H - top,  (box.height ?? 0) + 2 * padY);
   if (width <= 0 || height <= 0) return { storage_path: null };
 
+  // Straighten a sideways/tilted face: rotate by the nearest 90° of -rollAngle
+  // (a clean, lossless rotation) so the applicant photo always sits upright.
+  const straighten = -Math.round((box.rollAngle || 0) / 90) * 90;
   const cropped = await sharp(normalized)
     .extract({ left, top, width, height })
+    .rotate(straighten)
     .jpeg({ quality: 82, mozjpeg: true })
     .toBuffer();
 

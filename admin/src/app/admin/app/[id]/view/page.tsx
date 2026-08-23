@@ -828,7 +828,7 @@ function Inner() {
             >
               {photoUrl ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
-                <img src={photoUrl} alt="" className="w-full h-full object-cover" />
+                <img src={photoUrl} alt="" className="w-full h-full object-cover" style={{ imageOrientation: "from-image" }} />
               ) : (
                 I.user
               )}
