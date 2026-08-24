@@ -130,37 +130,43 @@ export async function cropAndUploadFace(
   if (!mimeType.startsWith("image/")) {
     return { storage_path: null };
   }
-  const box = await visionDetectFaceBox(buffer);
-  if (!box) return { storage_path: null };
 
-  // Rotate first (EXIF-normalize) so our extract coordinates match the
-  // orientation Vision saw.
-  const normalized = await sharp(buffer).rotate().toBuffer();
-  const meta = await sharp(normalized).metadata();
-  const W = meta.width  ?? 0;
-  const H = meta.height ?? 0;
-  if (!W || !H) return { storage_path: null };
+  // EXIF-normalize once, then try each 90° orientation until Vision finds a
+  // face — this catches sideways / upside-down scans a single 0° pass misses.
+  // Vision runs on the SAME oriented buffer we crop from, so coordinates match.
+  const base = await sharp(buffer).rotate().toBuffer();
 
-  const padX = Math.round((box.width  ?? 0) * FACE_PADDING_PCT);
-  const padY = Math.round((box.height ?? 0) * FACE_PADDING_PCT);
-  const left   = Math.max(0, box.left  - padX);
-  const top    = Math.max(0, box.top   - padY);
-  const width  = Math.min(W - left, (box.width  ?? 0) + 2 * padX);
-  const height = Math.min(H - top,  (box.height ?? 0) + 2 * padY);
-  if (width <= 0 || height <= 0) return { storage_path: null };
+  for (const angle of [0, 90, 270, 180]) {
+    const img = angle === 0 ? base : await sharp(base).rotate(angle).toBuffer();
+    const box = await visionDetectFaceBox(img);
+    if (!box) continue;
 
-  // Straighten a sideways/tilted face: rotate by the nearest 90° of -rollAngle
-  // (a clean, lossless rotation) so the applicant photo always sits upright.
-  const straighten = -Math.round((box.rollAngle || 0) / 90) * 90;
-  const cropped = await sharp(normalized)
-    .extract({ left, top, width, height })
-    .rotate(straighten)
-    .jpeg({ quality: 82, mozjpeg: true })
-    .toBuffer();
+    const meta = await sharp(img).metadata();
+    const W = meta.width ?? 0;
+    const H = meta.height ?? 0;
+    if (!W || !H) continue;
 
-  const path = `applications/${applicationId}/aadhaar_face/${Date.now()}.jpg`;
-  await uploadBuffer(path, cropped, "image/jpeg");
-  return { storage_path: path };
+    const padX = Math.round((box.width  ?? 0) * FACE_PADDING_PCT);
+    const padY = Math.round((box.height ?? 0) * FACE_PADDING_PCT);
+    const left   = Math.max(0, box.left  - padX);
+    const top    = Math.max(0, box.top   - padY);
+    const width  = Math.min(W - left, (box.width  ?? 0) + 2 * padX);
+    const height = Math.min(H - top,  (box.height ?? 0) + 2 * padY);
+    if (width <= 0 || height <= 0) continue;
+
+    // Straighten any residual tilt (nearest 90° of -rollAngle) so the crop is upright.
+    const straighten = -Math.round((box.rollAngle || 0) / 90) * 90;
+    const cropped = await sharp(img)
+      .extract({ left, top, width, height })
+      .rotate(straighten)
+      .jpeg({ quality: 82, mozjpeg: true })
+      .toBuffer();
+
+    const path = `applications/${applicationId}/aadhaar_face/${Date.now()}.jpg`;
+    await uploadBuffer(path, cropped, "image/jpeg");
+    return { storage_path: path };
+  }
+  return { storage_path: null };
 }
 
 // Mask helper exposed for the route to use on raw candidate strings.
