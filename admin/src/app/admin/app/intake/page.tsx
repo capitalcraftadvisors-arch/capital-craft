@@ -1,20 +1,33 @@
 "use client";
 
-// AI intake — a premium guided chat that builds a FULL loan application (all 5
-// steps), then submits it as a complete profile. Documents do the data entry
-// (OCR via the existing extract-* routes); the chat collects everything else.
-// It writes through the SAME create + complete-step routes the wizard uses, so
-// the result is identical to a hand-entered profile. View/edit/wizard untouched.
+// AI intake — a premium, WhatsApp-style guided chat that builds a FULL loan
+// application (all 5 steps) and submits it as a complete profile. Documents do
+// the data entry (OCR via the existing extract-* routes); the chat collects
+// everything else. It writes through the SAME create + complete-step routes the
+// wizard uses, so the result is identical to a hand-entered profile.
+// View / edit / wizard are untouched — this lives at its own URL.
 //
-// Note: the document turns (KYC / e-bill / bank) call routes that store to
-// Google Cloud Storage — locally that needs ADC (`gcloud auth
-// application-default login`); on prod it's automatic.
+// Features (per RM request):
+//   • WhatsApp-style canvas: patterned background, chat header, date chip,
+//     timestamps, the RM's name under every message they send, read ticks.
+//   • Every typed answer is editable — tap the ✎ on a message to correct it;
+//     if its step was already saved, the correction is re-synced silently.
+//   • Documents can be attached by click, drag-drop, or paste (Ctrl+V), with
+//     live thumbnails.
+//   • After OCR the "Read from the document" card shows exactly what was found,
+//     flags anything it could NOT read, and always lets the RM continue.
+//   • Missing anything? "Don't have it — skip" continues the chat and the
+//     application is saved as a DRAFT (not submitted) with the pending items.
+//
+// Note: the document turns call routes that store to Google Cloud Storage —
+// locally that needs ADC (`gcloud auth application-default login`); on prod
+// it's automatic.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { getToken, getBusiness } from "@/lib/auth";
 import { computeCentralSubsidy, computeEmi, formatRupees, DEFAULT_INDICATIVE_ROI, TENURES } from "@/lib/emi";
 
 export default function IntakePage() {
@@ -33,7 +46,7 @@ type Form = Record<string, string>;
 type Turn = {
   id: string;
   bot: string;
-  kind: "epc" | "text" | "pincode" | "choice" | "consent" | "docs" | "save" | "loanconfig";
+  kind: "epc" | "text" | "pincode" | "choice" | "consent" | "docs" | "save" | "loanconfig" | "leadsave";
   field?: string;
   placeholder?: string;
   optional?: boolean;
@@ -44,6 +57,7 @@ type Turn = {
   uploads?: { name: string; label: string }[];
   extractRoute?: string;
   extraForm?: Record<string, string>;
+  docLabel?: string; // friendly name for the "skip / missing" note
   // save turn:
   step?: number;
   method?: "POST" | "PATCH";
@@ -52,14 +66,14 @@ type Turn = {
 
 const MOBILE_RE = /^[6-9]\d{9}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const isYes = (f: Form) => f.bill_on_applicant_name === "no"; // e-bill NOT in applicant name → co-applicant
+const hasCoapp = (f: Form) => f.bill_on_applicant_name === "no"; // e-bill NOT in applicant name → co-applicant
 
 const SCRIPT: Turn[] = [
   // ── Step 1 · Registration ──
   { id: "epc", bot: "Which EPC partner is this application for?", kind: "epc" },
-  { id: "borrower_name", bot: "Applicant's full name?", kind: "text", field: "borrower_name", placeholder: "Full name", validate: (v) => (v.trim().length < 2 ? "Enter the applicant's name." : null) },
-  { id: "borrower_mobile", bot: "Customer phone number?", kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile", validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile.") },
-  { id: "borrower_email", bot: "Email ID? (optional)", kind: "text", field: "borrower_email", placeholder: "name@example.com", optional: true, validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email or leave blank.") },
+  { id: "borrower_name", bot: "What's the applicant's full name?", kind: "text", field: "borrower_name", placeholder: "Full name", validate: (v) => (v.trim().length < 2 ? "Enter the applicant's name." : null) },
+  { id: "borrower_mobile", bot: "Customer's phone number?", kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile", validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile.") },
+  { id: "borrower_email", bot: "Email ID? (optional — you can skip this)", kind: "text", field: "borrower_email", placeholder: "name@example.com", optional: true, validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email or skip.") },
   { id: "install_pincode", bot: "Installation pincode?", kind: "pincode", field: "install_pincode" },
   { id: "system_type", bot: "Solar system preference?", kind: "choice", field: "system_type", choices: [
     { value: "on_grid", label: "On-Grid", sub: "Sells excess to grid" },
@@ -70,8 +84,8 @@ const SCRIPT: Turn[] = [
     { value: "residential", label: "Residential", sub: "Home / society" },
     { value: "commercial", label: "Commercial", sub: "Shop / office / factory" },
   ] },
-  { id: "consent", bot: "Does the customer consent to the Terms, Privacy & Cookie policies and allow credit information access?", kind: "consent", field: "consent" },
-  { id: "save1", bot: "Saving registration…", kind: "save", step: 1, method: "PATCH", payload: (f) => ({
+  { id: "consent", bot: "Does the customer consent to the Terms, Privacy & Cookie policies and allow credit-information access?", kind: "consent", field: "consent" },
+  { id: "save1", bot: "", kind: "save", step: 1, method: "PATCH", payload: (f) => ({
     borrower_name: f.borrower_name || "", borrower_mobile: f.borrower_mobile || "", borrower_email: f.borrower_email || "",
     install_pincode: f.install_pincode || "", install_state: f.install_state || "", install_district: f.install_district || "", install_city: f.install_city || "",
     system_type: f.system_type || "", plant_use_type: f.plant_use_type || "",
@@ -79,30 +93,30 @@ const SCRIPT: Turn[] = [
   }) },
 
   // ── Step 2 · KYC (Aadhaar) ──
-  { id: "aadhaar", bot: "Upload the applicant's Aadhaar (front & back) — I'll read the details.", kind: "docs",
+  { id: "aadhaar", bot: "Now the applicant's KYC. Attach the Aadhaar — front & back — and I'll read the details.", kind: "docs", docLabel: "Applicant Aadhaar",
     uploads: [{ name: "front", label: "Aadhaar front" }, { name: "back", label: "Aadhaar back" }], extractRoute: "extract-aadhaar" },
-  { id: "save2", bot: "Saving KYC…", kind: "save", step: 2, method: "POST", payload: (f) => ({
+  { id: "save2", bot: "", kind: "save", step: 2, method: "POST", payload: (f) => ({
     aadhaar_name: f.aadhaar_name || "", aadhaar_dob: f.aadhaar_dob || "", aadhaar_gender: f.aadhaar_gender || "",
     aadhaar_number: f.aadhaar_number || "", aadhaar_care_of: f.aadhaar_care_of || "", aadhaar_address: f.aadhaar_address || "",
     aadhaar_front_path: f.aadhaar_front_path || "", aadhaar_back_path: f.aadhaar_back_path || "", aadhaar_face_path: f.aadhaar_face_path || "",
   }) },
 
   // ── Step 3 · Loan requirement + installation ──
-  { id: "loandocs", bot: "Upload the quotation / proforma invoice and the latest electricity bill.", kind: "docs",
+  { id: "loandocs", bot: "Attach the quotation / proforma invoice and the latest electricity bill.", kind: "docs", docLabel: "Quotation & electricity bill",
     uploads: [{ name: "proforma", label: "Quotation / invoice" }, { name: "ebill", label: "Electricity bill" }], extractRoute: "extract-loan-docs" },
-  { id: "loan_amount_required", bot: "Loan amount required (₹)?", kind: "text", field: "loan_amount_required", placeholder: "e.g. 200000", validate: (v) => (Number(v) > 0 ? null : "Enter a valid amount.") },
-  { id: "rooftop", bot: "Upload the geo-tagged rooftop photo.", kind: "docs",
+  { id: "loan_amount_required", bot: "How much loan does the customer need (₹)?", kind: "text", field: "loan_amount_required", placeholder: "e.g. 200000", validate: (v) => (Number(v) > 0 ? null : "Enter a valid amount.") },
+  { id: "rooftop", bot: "Attach the geo-tagged rooftop photo.", kind: "docs", docLabel: "Rooftop photo",
     uploads: [{ name: "photo", label: "Rooftop photo" }], extractRoute: "" },
-  { id: "bill_on_applicant_name", bot: "Is the electricity bill in the applicant's name?", kind: "choice", field: "bill_on_applicant_name", choices: [
+  { id: "bill_on_applicant_name", bot: "Is the electricity bill in the applicant's own name?", kind: "choice", field: "bill_on_applicant_name", choices: [
     { value: "yes", label: "Yes" }, { value: "no", label: "No — there's a co-applicant" },
   ] },
   // Co-applicant (only when the e-bill is NOT in the applicant's name)
-  { id: "coapp_pan", bot: "Upload the co-applicant's PAN.", kind: "docs", when: isYes,
+  { id: "coapp_pan", bot: "Attach the co-applicant's PAN.", kind: "docs", when: hasCoapp, docLabel: "Co-applicant PAN",
     uploads: [{ name: "file", label: "Co-applicant PAN" }], extractRoute: "extract-coapp-pan" },
-  { id: "coapp_aadhaar", bot: "Upload the co-applicant's Aadhaar (front & back).", kind: "docs", when: isYes,
+  { id: "coapp_aadhaar", bot: "Attach the co-applicant's Aadhaar — front & back.", kind: "docs", when: hasCoapp, docLabel: "Co-applicant Aadhaar",
     uploads: [{ name: "front", label: "Aadhaar front" }, { name: "back", label: "Aadhaar back" }], extractRoute: "extract-aadhaar", extraForm: { _coapp: "1" } },
-  { id: "coapp_relation", bot: "Co-applicant's relation to the applicant?", kind: "text", field: "coapp_relation", placeholder: "e.g. Spouse, Father", when: isYes, optional: true },
-  { id: "save3", bot: "Saving loan & installation details…", kind: "save", step: 3, method: "POST", payload: (f) => ({
+  { id: "coapp_relation", bot: "Co-applicant's relation to the applicant?", kind: "text", field: "coapp_relation", placeholder: "e.g. Spouse, Father", when: hasCoapp, optional: true },
+  { id: "save3", bot: "", kind: "save", step: 3, method: "POST", payload: (f) => ({
     project_size: f.project_size || "", project_size_unit: f.project_size_unit || "kw",
     total_project_cost: f.total_project_cost || "", loan_amount_required: f.loan_amount_required || "",
     monthly_bill_amount: f.monthly_bill_amount || "", discom_name: f.discom_name || "", ca_number: f.ca_number || "",
@@ -123,12 +137,12 @@ const SCRIPT: Turn[] = [
   { id: "employment_type", bot: "Employment type?", kind: "choice", field: "employment_type", choices: [
     { value: "salaried", label: "Salaried" }, { value: "self_employed", label: "Self-employed" },
   ] },
-  { id: "profession", bot: "Profession?", kind: "text", field: "profession", placeholder: "e.g. Engineer", optional: true },
-  { id: "organization_name", bot: "Organization / business name?", kind: "text", field: "organization_name", placeholder: "Organization", optional: true },
-  { id: "annual_income", bot: "Annual income (₹)?", kind: "text", field: "annual_income", placeholder: "e.g. 600000", optional: true },
-  { id: "bank", bot: "Upload the bank statement.", kind: "docs",
+  { id: "profession", bot: "Profession? (optional)", kind: "text", field: "profession", placeholder: "e.g. Engineer", optional: true },
+  { id: "organization_name", bot: "Organization / business name? (optional)", kind: "text", field: "organization_name", placeholder: "Organization", optional: true },
+  { id: "annual_income", bot: "Annual income (₹)? (optional)", kind: "text", field: "annual_income", placeholder: "e.g. 600000", optional: true },
+  { id: "bank", bot: "Attach the bank statement.", kind: "docs", docLabel: "Bank statement",
     uploads: [{ name: "file", label: "Bank statement" }], extractRoute: "extract-bank-statement", extraForm: { method: "manual_epdf" } },
-  { id: "save4", bot: "Saving personal & bank details…", kind: "save", step: 4, method: "POST", payload: (f) => ({
+  { id: "save4", bot: "", kind: "save", step: 4, method: "POST", payload: (f) => ({
     employment_type: f.employment_type || "", profession: f.profession || "", profession_other: "", organization_name: f.organization_name || "", annual_income: f.annual_income || "",
     bank_statement_method: f.bank_statement_method || "manual_epdf", bank_statement_path: f.bank_statement_path || "", bank_statement_uploaded_at: f.bank_statement_uploaded_at || "",
     bank_account_holder: f.bank_account_holder || "", bank_name: f.bank_name || "", bank_account_no: f.bank_account_no || "",
@@ -136,13 +150,84 @@ const SCRIPT: Turn[] = [
   }) },
 
   // ── Step 5 · Loan configuration (subsidy + tenure w/ live EMI) ──
-  { id: "loanconfig", bot: "Last step — loan configuration.", kind: "loanconfig" },
+  { id: "loanconfig", bot: "Last step — let's set the loan configuration.", kind: "loanconfig" },
 ];
 
-type Msg = { from: "bot" | "user"; text: string };
+// step→save-turn, and field-turn-id→step (for editing an already-saved answer).
+const SAVE_TURNS: Record<number, Turn> = {};
+const TURN_STEP: Record<string, number> = {};
+{
+  let pending: string[] = [];
+  for (const t of SCRIPT) {
+    if (t.kind === "save" && t.step) { SAVE_TURNS[t.step] = t; for (const id of pending) TURN_STEP[id] = t.step; pending = []; }
+    else pending.push(t.id);
+  }
+}
+
+// Lead capture flow — used when the EPC isn't a registered, lender-approved
+// partner. A full application can't exist without a registered EPC (DB rule),
+// so we capture the customer + typed EPC name as a loan_leads row for the Lead
+// tab; it's converted to a full application once the EPC is approved.
+const LEAD_SCRIPT: Turn[] = [
+  { id: "lead_name", bot: "Customer's full name?", kind: "text", field: "lead_name", placeholder: "Full name", validate: (v) => (v.trim().length < 2 ? "Enter the customer's name." : null) },
+  { id: "lead_mobile", bot: "Customer's phone number?", kind: "text", field: "lead_mobile", placeholder: "10-digit mobile", validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile.") },
+  { id: "lead_email", bot: "Email? (optional)", kind: "text", field: "lead_email", placeholder: "name@example.com", optional: true, validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email or skip.") },
+  { id: "lead_address", bot: "City / installation area? (optional)", kind: "text", field: "lead_address", placeholder: "City or area", optional: true },
+  { id: "lead_loan_amount", bot: "Approximate loan amount (₹)? (optional)", kind: "text", field: "lead_loan_amount", placeholder: "e.g. 200000", optional: true },
+  { id: "lead_project_size", bot: "Approximate system size in kW? (optional)", kind: "text", field: "lead_project_size", placeholder: "e.g. 5", optional: true },
+  { id: "lead_save", bot: "", kind: "leadsave" },
+];
+
+type Fetched = { label: string; value: string; ok: boolean };
+type Msg = {
+  id: string;
+  from: "bot" | "user";
+  text?: string;
+  time: string;
+  turnId?: string;
+  field?: string;
+  editable?: boolean;
+  edited?: boolean;
+  files?: { name: string; thumb: string | null }[]; // user document receipt
+  typing?: boolean; // bot "…" indicator
+};
+
+// Subtle branded doodle canvas (WhatsApp-style texture, but in our green).
+const DOODLE = encodeURIComponent(
+  `<svg xmlns='http://www.w3.org/2000/svg' width='104' height='104' viewBox='0 0 104 104'>
+     <g fill='none' stroke='#0f3d2e' stroke-opacity='0.045' stroke-width='1.4'>
+       <circle cx='22' cy='24' r='7'/>
+       <circle cx='78' cy='66' r='10'/>
+       <path d='M74 18 v9 M69.5 22.5 h9'/>
+       <path d='M14 78 q8 -10 16 0'/>
+       <rect x='58' y='16' width='10' height='10' rx='2'/>
+     </g>
+     <g fill='#0f3d2e' fill-opacity='0.045'>
+       <circle cx='48' cy='50' r='1.8'/>
+       <circle cx='92' cy='30' r='1.8'/>
+       <circle cx='30' cy='96' r='1.8'/>
+     </g>
+   </svg>`,
+);
+const CANVAS_STYLE: React.CSSProperties = {
+  backgroundColor: "#e7f0ea",
+  backgroundImage: `url("data:image/svg+xml,${DOODLE}")`,
+};
+
+function nowLabel(): string {
+  return new Date().toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }).toLowerCase();
+}
+function todayLabel(): string {
+  return "Today · " + new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
+}
 
 function Inner() {
   const router = useRouter();
+  const rmName = useMemo(() => {
+    const full = (getBusiness()?.contact_name || "").trim();
+    return full ? full.split(" ")[0] : "You";
+  }, []);
+
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [idx, setIdx] = useState(0);
   const [form, setForm] = useState<Form>({});
@@ -152,18 +237,47 @@ function Inner() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [files, setFiles] = useState<Record<string, File>>({});
-  const [pinInfo, setPinInfo] = useState<{ district: string; city: string } | null>(null);
-  const [confirmLines, setConfirmLines] = useState<string[] | null>(null);
+  const [thumbs, setThumbs] = useState<Record<string, string | null>>({});
+  const [confirm, setConfirm] = useState<{ fields: Fetched[]; note: string; thumbs: (string | null)[]; edit?: boolean } | null>(null);
   const [donId, setDonId] = useState<string | null>(null);
+  const [donDraft, setDonDraft] = useState(false);
+  const [savedSteps, setSavedSteps] = useState<Set<number>>(new Set());
+  const [missing, setMissing] = useState<string[]>([]);
+  const [editing, setEditing] = useState<{ index: number; turnId: string } | null>(null);
+  const [mode, setMode] = useState<"create" | "edit">("create");
+  const [editMode, setEditMode] = useState(false);
+  const [leadMode, setLeadMode] = useState(false);
+  const [leadDoneId, setLeadDoneId] = useState<string | null>(null);
+  const [epcSearch, setEpcSearch] = useState("");
+  const [epcOpen, setEpcOpen] = useState(false);
+  const [resuming, setResuming] = useState(false);
+  const [undoStack, setUndoStack] = useState<{ msgs: Msg[]; form: Form; idx: number; leadMode: boolean }[]>([]);
+
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const idRef = useRef(0);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const uid = () => "m" + ++idRef.current;
+
+  // The turn whose controls the dock is showing: the edit target if editing,
+  // else the current script turn.
+  const script = leadMode ? LEAD_SCRIPT : SCRIPT;
+  const turn = script[idx] ?? null;
+  const editTurn = editing ? script.find((t) => t.id === editing.turnId) ?? null : null;
+  const active = editTurn ?? turn;
+  const filteredEpcs = useMemo(() => {
+    const q = epcSearch.trim().toLowerCase();
+    if (!q) return epcs;
+    return epcs.filter((e) => e.label.toLowerCase().includes(q) || (e.sub ?? "").toLowerCase().includes(q));
+  }, [epcs, epcSearch]);
+
+  const loanAmt = Number(form.loan_amount_required) || 0;
 
   // Loan-config (step 5) local inputs
   const [subsidyCase, setSubsidyCase] = useState<"subsidy" | "non_subsidy">("subsidy");
   const [centralSub, setCentralSub] = useState("");
   const [stateSub, setStateSub] = useState("");
   const [tenure, setTenure] = useState<number | null>(null);
-
-  const turn = SCRIPT[idx] ?? null;
 
   useEffect(() => {
     void (async () => {
@@ -175,27 +289,146 @@ function Inner() {
     })();
   }, []);
 
-  // Skip turns whose `when` predicate is false.
+  // Opened with ?app=<id> → resume a saved chat, or (with &edit=1) start a fresh
+  // edit session that loads the profile and asks only for what's still missing.
   useEffect(() => {
-    if (turn && turn.when && !turn.when(form)) { setIdx((i) => i + 1); return; }
-    if (turn && turn.kind === "save") { void doSave(turn); return; }
-    if (turn) setMsgs((m) => (m.length && m[m.length - 1].text === turn.bot ? m : [...m, { from: "bot", text: turn.bot }]));
-    setInput(""); setError(null); setPinInfo(null); setConfirmLines(null); setFiles({});
-    if (turn?.kind === "loanconfig") setCentralSub(String(form.plant_use_type === "commercial" ? 0 : computeCentralSubsidy(kwOf(form))));
+    const params = new URLSearchParams(window.location.search);
+    const appParam = params.get("app");
+    const editFlag = params.get("edit") === "1";
+    if (!appParam) return;
+    setResuming(true);
+    void (async () => {
+      try {
+        // 1) Restore a previously-saved chat (create OR edit) if one exists.
+        const res = await fetch(`/api/admin/loan-app/${appParam}/intake-chat`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+        const j = await res.json().catch(() => ({}));
+        const chat = j?.chat;
+        if (chat && Array.isArray(chat.transcript) && chat.transcript.length) {
+          idRef.current = chat.transcript.length + 1000; // avoid key collisions with restored ids
+          setAppId(appParam);
+          setForm((chat.form_state as Form) || {});
+          setMsgs(chat.transcript as Msg[]);
+          setMode(chat.mode === "edit" ? "edit" : "create");
+          setEditMode(chat.mode === "edit");
+          setIdx(Number(chat.cursor) || 0);
+          return;
+        }
+        // 2) Fresh EDIT session — prefill from the profile, ask only what's missing.
+        if (editFlag) {
+          const app = await loadApp(appParam);
+          if (!app) { router.replace(`/admin/app/${appParam}/step-1` as any); return; }
+          const pf = prefillFromApp(app);
+          setForm(pf);
+          setAppId(appParam);
+          setEditMode(true);
+          setMode("edit");
+          if (pf.central_subsidy) setCentralSub(pf.central_subsidy);
+          if (pf.state_subsidy) setStateSub(pf.state_subsidy);
+          if (pf.selected_tenure_years) setTenure(Number(pf.selected_tenure_years));
+          const nm = pf.borrower_name || "this applicant";
+          setMsgs([{ id: uid(), from: "bot", text: `Let's finish ${nm}'s profile — I'll only ask for what's still missing.`, time: nowLabel(), turnId: "edit_intro" }]);
+          setIdx(1); // skip the EPC turn; the filled-skip handles the rest
+          return;
+        }
+        // 3) ?app but nothing saved and not an edit → fall back to the classic wizard.
+        router.replace(`/admin/app/${appParam}/step-1` as any);
+      } finally {
+        setResuming(false);
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idx]);
+  }, []);
 
-  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }, [msgs, confirmLines, idx, pinInfo]);
+  async function loadApp(id: string): Promise<Record<string, any> | null> {
+    const { data } = await supabase().from("epc_applications").select("*").eq("id", id).maybeSingle();
+    return (data as Record<string, any>) ?? null;
+  }
 
-  const say = useCallback((from: "bot" | "user", text: string) => setMsgs((m) => [...m, { from, text }]), []);
+  // Autosave the transcript + form + cursor (debounced) so a close/refresh never
+  // loses progress. Silent no-op until migration 0070 exists (route fails soft).
+  useEffect(() => {
+    if (resuming || !appId || donId) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => { void saveChat(); }, 700);
+    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [msgs, form, idx, appId, donId, resuming]);
+
+  const pushBot = useCallback((text: string, turnId: string) => {
+    setMsgs((m) => (m.some((x) => x.from === "bot" && x.turnId === turnId) ? m : [...m, { id: uid(), from: "bot", text, time: nowLabel(), turnId }]));
+  }, []);
+
+  // Advance the script, running `when` skips and `save` boundaries.
+  useEffect(() => {
+    if (!turn) return;
+    if (turn.when && !turn.when(form)) { setIdx((i) => i + 1); return; }
+    // In edit mode, skip anything the profile already has — ask only what's missing.
+    if (editMode && turn.kind !== "save" && isTurnFilled(turn, form)) { setIdx((i) => i + 1); return; }
+    if (turn.kind === "save") { void doSave(turn); return; }
+    if (turn.kind === "leadsave") { void createLead(); return; }
+    pushBot(turn.bot, turn.id);
+    setInput(""); setError(null); setFiles({}); setThumbs({}); setConfirm(null); setEditing(null);
+    if (turn.kind === "loanconfig") setCentralSub(String(form.plant_use_type === "commercial" ? 0 : computeCentralSubsidy(kwOf(form))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idx, leadMode]);
+
+  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }, [msgs, confirm, idx, busy]);
+  useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
+
+  // Paste-to-attach while on a document turn (RM copies an image, hits Ctrl+V).
+  useEffect(() => {
+    if (!active || active.kind !== "docs" || confirm) return;
+    const h = (e: ClipboardEvent) => {
+      const f = e.clipboardData?.files?.[0];
+      if (f) { e.preventDefault(); fillNextSlot(f); }
+    };
+    window.addEventListener("paste", h);
+    return () => window.removeEventListener("paste", h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, files, confirm]);
+
   const advance = () => setIdx((i) => i + 1);
   const merge = (patch: Form) => setForm((f) => ({ ...f, ...patch }));
+  function hdr() { return { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` }; }
 
-  async function answer(value: string, label?: string, extra?: Form) {
+  // Undo — snapshot before each entry so the RM can step any action back.
+  function pushUndo() { setUndoStack((s) => [...s.slice(-29), { msgs, form, idx, leadMode }]); }
+  function undo() {
+    setUndoStack((s) => {
+      if (!s.length) return s;
+      const snap = s[s.length - 1];
+      setMsgs(snap.msgs); setForm(snap.form); setLeadMode(snap.leadMode);
+      setEditing(null); setError(null); setConfirm(null);
+      setIdx(snap.idx); // re-renders that turn fresh (question re-appears)
+      return s.slice(0, -1);
+    });
+  }
+
+  function pushUser(text: string, meta: Partial<Msg> = {}) {
+    setMsgs((m) => [...m, { id: uid(), from: "user", text, time: nowLabel(), ...meta }]);
+  }
+
+  function setFileFor(name: string, file: File) {
+    setFiles((s) => ({ ...s, [name]: file }));
+    const thumb = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+    setThumbs((s) => ({ ...s, [name]: thumb }));
+  }
+  function clearFileFor(name: string) {
+    setFiles((s) => { const n = { ...s }; delete n[name]; return n; });
+    setThumbs((s) => { const n = { ...s }; delete n[name]; return n; });
+  }
+  function fillNextSlot(file: File) {
+    const slots = active?.uploads ?? [];
+    const empty = slots.find((u) => !files[u.name]);
+    if (empty) setFileFor(empty.name, file);
+  }
+
+  // ── Answer the current (or edited) turn ──
+  async function answer(value: string, label: string, opts: { extra?: Form; editable?: boolean; createApp?: boolean } = {}) {
+    if (editing) return applyEdit(value, label, opts.extra);
     if (!turn) return;
-    say("user", label ?? value);
-    merge({ ...(turn.field ? { [turn.field]: value } : {}), ...(extra ?? {}) });
-    if (turn.kind === "epc") {
+    if (turn.kind !== "epc") pushUndo();
+    if (opts.createApp) {
       setBusy(true);
       try {
         const res = await fetch("/api/admin/create-loan-app", { method: "POST", headers: hdr(), body: JSON.stringify({ epc_business_id: value }) });
@@ -204,17 +437,50 @@ function Inner() {
         setAppId(j.application.id);
       } finally { setBusy(false); }
     }
+    pushUser(label, { turnId: turn.id, field: turn.field, editable: opts.editable });
+    merge({ ...(turn.field ? { [turn.field]: value } : {}), ...(opts.extra ?? {}) });
     advance();
   }
 
-  function hdr() { return { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` }; }
-
   async function submitText() {
-    if (!turn) return;
+    const t = active; if (!t) return;
     const v = input.trim();
-    if (turn.validate) { const e = turn.validate(v); if (e) { setError(e); return; } }
-    if (!v && !turn.optional) { setError("This field is required."); return; }
-    await answer(v);
+    if (t.validate) { const e = t.validate(v); if (e) { setError(e); return; } }
+    if (!v && !t.optional) { setError("This field is required."); return; }
+    await answer(v, v || "—", { editable: true });
+  }
+  async function skipText() {
+    const t = active; if (!t) return;
+    pushUndo();
+    // Required fields can be skipped too (e.g. "no mobile right now") — but we
+    // record them so the application finishes as an incomplete draft, not a
+    // full submission.
+    if (!t.optional && t.field) setMissing((s) => (s.includes(fieldLabel(t)) ? s : [...s, fieldLabel(t)]));
+    await answer("", "— skipped —", { editable: true });
+  }
+
+  // Persist the chat transcript + form + cursor. Blob thumbnails aren't
+  // serializable across a reload, so document receipts are saved by name only.
+  async function saveChat(opts: { markUnderReview?: boolean } = {}) {
+    if (!appId) return;
+    const transcript = msgs.map((m) => (m.files ? { ...m, files: m.files.map((f) => ({ name: f.name, thumb: null })) } : m));
+    try {
+      await fetch(`/api/admin/loan-app/${appId}/intake-chat`, {
+        method: "POST", headers: hdr(),
+        body: JSON.stringify({ transcript, form_state: form, cursor: idx, mode, mark_under_review: !!opts.markUnderReview }),
+      });
+    } catch { /* best-effort */ }
+  }
+
+  // Close the chat mid-way. Completed steps are already saved on the server; we
+  // also persist the transcript and — for a half-finished NEW application —
+  // bump it to "under review" so it's visible on the dashboard for follow-up.
+  async function closeChat() {
+    if (donId) { router.push("/admin"); return; }
+    const started = !!appId;
+    if (started && !window.confirm("Close this chat? Your progress is saved — you can reopen this application to continue.")) return;
+    if (started) await saveChat({ markUnderReview: mode === "create" });
+    router.push("/admin");
   }
 
   async function submitPincode() {
@@ -224,195 +490,610 @@ function Inner() {
     try {
       const res = await fetch(`/api/admin/pincode-lookup?pin=${pin}`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
       const j = await res.json().catch(() => ({}));
-      if (j?.ok) { setPinInfo({ district: j.district, city: j.city }); await answer(pin, `${pin} — ${j.state}`, { install_state: j.state, install_district: j.district || "", install_city: j.city || "" }); }
-      else await answer(pin, pin, {});
+      if (j?.ok) {
+        await answer(pin, `${pin} · ${j.city ? j.city + ", " : ""}${j.state}`, { editable: true, extra: { install_state: j.state, install_district: j.district || "", install_city: j.city || "" } });
+      } else {
+        await answer(pin, pin, { editable: true });
+      }
     } finally { setBusy(false); }
   }
 
-  // Upload the turn's files → extract route → merge OCR fields + paths → confirm.
+  // ── Editing a previous answer ──
+  function startEdit(m: Msg) {
+    if (!m.turnId || !m.editable) return;
+    const t = script.find((x) => x.id === m.turnId);
+    if (!t) return;
+    setEditing({ index: msgs.findIndex((x) => x.id === m.id), turnId: m.turnId });
+    setError(null);
+    if (t.kind === "text" || t.kind === "pincode") setInput((t.field && form[t.field]) || "");
+    if (t.kind === "docs") { setFiles({}); setThumbs({}); setConfirm(null); } // re-attach fresh
+  }
+  async function applyEdit(value: string, label: string, extra?: Form) {
+    if (!editing) return;
+    pushUndo();
+    const { index, turnId } = editing;
+    const t = script.find((x) => x.id === turnId);
+    const field = t?.field;
+    const nextForm: Form = { ...form, ...(field ? { [field]: value } : {}), ...(extra ?? {}) };
+    setForm(nextForm);
+    setMsgs((m) => m.map((x, i) => (i === index ? { ...x, text: label, edited: true } : x)));
+    setEditing(null); setInput("");
+    const step = TURN_STEP[turnId];
+    if (step && savedSteps.has(step)) await persistStep(step, nextForm);
+  }
+  function cancelEdit() { setEditing(null); setInput(""); setError(null); }
+
+  // ── Documents ──
   async function runDocs() {
-    if (!turn || !appId) return;
-    const needed = turn.uploads ?? [];
-    for (const u of needed) if (!files[u.name]) { setError(`Please upload: ${u.label}.`); return; }
+    const t = active; if (!t || !appId) return;
+    const isDocEdit = !!editing && editTurn?.id === t.id; // replacing an already-uploaded doc
+    const needed = t.uploads ?? [];
+    for (const u of needed) if (!files[u.name]) { setError(`Please attach: ${u.label}.`); return; }
+    pushUndo();
     setBusy(true); setError(null);
+    const receipt = needed.map((u) => ({ name: files[u.name]?.name || u.label, thumb: thumbs[u.name] ?? null }));
     try {
-      say("user", needed.map((u) => u.label).join(", ") + " uploaded");
-      if (!turn.extractRoute) {
-        // e.g. rooftop photo — store via generic upload (path only). For now, mark path pending.
+      if (isDocEdit) {
+        setMsgs((m) => m.map((x, i) => (i === editing!.index ? { ...x, files: receipt, edited: true } : x)));
+      } else {
+        pushUser(needed.map((u) => u.label).join(" · "), { files: receipt, turnId: t.id, editable: true });
+      }
+      if (!t.extractRoute) {
+        // e.g. rooftop photo — no OCR; record it and move on.
         merge({ rooftop_photo_path: "pending", rooftop_photo_uploaded_at: new Date().toISOString() });
-        advance(); return;
+        if (isDocEdit) setEditing(null); else advance();
+        return;
       }
       const fd = new FormData();
       for (const u of needed) fd.append(u.name, files[u.name]);
-      for (const [k, v] of Object.entries(turn.extraForm ?? {})) fd.append(k, v);
-      const res = await fetch(`/api/admin/loan-app/${appId}/${turn.extractRoute}`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
+      for (const [k, v] of Object.entries(t.extraForm ?? {})) fd.append(k, v);
+      const res = await fetch(`/api/admin/loan-app/${appId}/${t.extractRoute}`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't read the document(s). You can still continue and fix it in the application."); setBusy(false); return; }
-      const { patch, lines } = mapExtract(turn, j);
+      if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't read the document. Attach a clearer copy, or skip and fill it in later."); setBusy(false); return; }
+      const { patch, fields } = mapExtract(t, j);
       merge(patch);
-      setConfirmLines(lines);
+      if (isDocEdit && appId) await patchFields(patch); // persist a replaced doc immediately
+      const gaps = fields.filter((f) => !f.ok).map((f) => f.label);
+      const note = gaps.length === 0
+        ? "All details read cleanly."
+        : `Couldn't read: ${gaps.join(", ")}. You can continue and add these later in the profile, or re-attach a clearer copy.`;
+      setConfirm({ fields, note, thumbs: receipt.map((r) => r.thumb), edit: isDocEdit });
     } finally { setBusy(false); }
   }
+  function retryDocs() { setConfirm(null); setFiles({}); setThumbs({}); setError(null); }
+  function skipDoc() {
+    const t = active; if (!t) return;
+    pushUndo();
+    setMissing((s) => (s.includes(t.docLabel || t.id) ? s : [...s, t.docLabel || t.id]));
+    pushUser(`Skipped — ${t.docLabel || "document"} not available yet`, {});
+    setConfirm(null);
+    advance();
+  }
 
-  async function doSave(t: Turn) {
-    if (!appId || !t.step || !t.payload) { advance(); return; }
+  // ── Step saves ──
+  async function persistStep(step: number, f: Form): Promise<boolean> {
+    const t = SAVE_TURNS[step];
+    if (!t || !appId || !t.payload) return true;
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/loan-app/${appId}/complete-step-${t.step}`, { method: t.method || "POST", headers: hdr(), body: JSON.stringify(t.payload(form)) });
+      const res = await fetch(`/api/admin/loan-app/${appId}/complete-step-${step}`, { method: t.method || "POST", headers: hdr(), body: JSON.stringify(t.payload(f)) });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j?.ok) { setError(j?.error || `Couldn't save step ${t.step}.`); setBusy(false); return; }
-      advance();
+      if (!res.ok || !j?.ok) { setError(j?.error || `Couldn't save step ${step}.`); return false; }
+      setSavedSteps((s) => new Set(s).add(step));
+      return true;
+    } finally { setBusy(false); }
+  }
+  async function doSave(t: Turn) {
+    if (!appId || !t.step) { advance(); return; }
+    if (editMode) {
+      // Edit mode persists each step's fields directly (no step advance / no
+      // status change) so the profile reflects every change immediately.
+      const ok = t.payload ? await patchFields(t.payload(form)) : true;
+      if (ok) advance();
+      return;
+    }
+    const ok = await persistStep(t.step, form);
+    if (ok) advance();
+  }
+
+  // Direct column write used by edit mode. Returns false on error (keeps the RM
+  // on the same turn so nothing is silently lost).
+  async function patchFields(obj: Record<string, unknown>): Promise<boolean> {
+    if (!appId) return true;
+    setBusy(true); setError(null);
+    try {
+      const res = await fetch(`/api/admin/loan-app/${appId}/update-fields`, { method: "PATCH", headers: hdr(), body: JSON.stringify(obj) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't save the change."); return false; }
+      return true;
     } finally { setBusy(false); }
   }
 
-  // Step 5 → save config → submit (step 6) → done.
+  // Step 5 → save config → submit (step 6) unless something's missing → draft.
   async function finishLoanConfig() {
     if (!appId || tenure == null) { setError("Pick a tenure to continue."); return; }
     setBusy(true); setError(null);
     try {
       const central = subsidyCase === "non_subsidy" ? 0 : Math.max(0, Math.min(78000, Number(centralSub) || 0));
       const stateS = subsidyCase === "non_subsidy" ? 0 : Math.max(0, Number(stateSub) || 0);
-      const loanAmt = Number(form.loan_amount_required) || 0;
-      const principal = Math.max(0, loanAmt - central - stateS);
-      const monthly = computeEmi(loanAmt, DEFAULT_INDICATIVE_ROI, tenure);
+      const loan = Number(form.loan_amount_required) || 0;
+      const principal = Math.max(0, loan - central - stateS);
+      const monthly = computeEmi(loan, DEFAULT_INDICATIVE_ROI, tenure);
       const subEmi = computeEmi(principal, DEFAULT_INDICATIVE_ROI, tenure);
+      if (editMode) {
+        const ok = await patchFields({ roi_percent: DEFAULT_INDICATIVE_ROI, central_subsidy: central, state_subsidy: stateS, selected_tenure_years: tenure, selected_monthly_emi: monthly, selected_subsidy_emi: subEmi });
+        if (!ok) { setBusy(false); return; }
+        pushUser("Save changes", {});
+        say("bot", "Changes saved — the profile is up to date.");
+        setDonId(appId); setBusy(false); return;
+      }
       const r5 = await fetch(`/api/admin/loan-app/${appId}/complete-step-5`, { method: "POST", headers: hdr(), body: JSON.stringify({
         roi_percent: DEFAULT_INDICATIVE_ROI, central_subsidy: central, state_subsidy: stateS,
         selected_tenure_years: tenure, selected_monthly_emi: monthly, selected_subsidy_emi: subEmi,
       }) });
       const j5 = await r5.json().catch(() => ({}));
       if (!r5.ok || !j5?.ok) { setError(j5?.error || "Couldn't save loan configuration."); setBusy(false); return; }
+
+      if (missing.length > 0) {
+        // Something required was skipped → keep it as a draft to finish later.
+        pushUser("Create the application", {});
+        say("bot", `Saved to your applications table as a draft — still pending: ${missing.join(", ")}. Open it anytime from the table to add what's left.`);
+        setDonDraft(true); setDonId(appId); setBusy(false); return;
+      }
       const r6 = await fetch(`/api/admin/loan-app/${appId}/complete-step-6`, { method: "POST", headers: hdr(), body: JSON.stringify({}) });
       const j6 = await r6.json().catch(() => ({}));
       if (!r6.ok || !j6?.ok) { setError(j6?.error || "Couldn't submit the application."); setBusy(false); return; }
-      say("bot", "Done — the complete loan application has been created and submitted. You can open it to review or edit anytime.");
+      pushUser("Create the application", {});
+      say("bot", "All done — the profile is ready and now in your applications table. You can open it to review or edit anytime.");
       setDonId(appId);
     } finally { setBusy(false); }
   }
+  function say(from: "bot" | "user", text: string) { setMsgs((m) => [...m, { id: uid(), from, text, time: nowLabel() }]); }
 
-  const progress = Math.min(100, Math.round((idx / SCRIPT.length) * 100));
-  const loanAmt = Number(form.loan_amount_required) || 0;
+  // Unregistered EPC → switch to lead capture. A full application needs a
+  // registered, lender-approved EPC, so we collect a short lead instead.
+  function startLead(name: string) {
+    pushUndo();
+    pushUser(name, {});
+    merge({ epc_name_custom: name });
+    say("bot", `“${name}” isn't a registered partner yet, so I'll save this as a lead — just a few quick details. It'll be in your Lead tab to convert into a full application once they're approved.`);
+    setLeadMode(true);
+    setIdx(0);
+  }
+
+  async function createLead() {
+    if (leadDoneId) return;
+    setBusy(true); setError(null);
+    try {
+      const meId = getBusiness()?.id ?? null;
+      const num = (v: string) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : null; };
+      const row: Record<string, unknown> = {
+        status: "under_review",
+        current_step: 2,
+        name: form.lead_name || null,
+        mobile: form.lead_mobile || null,
+        email: form.lead_email || null,
+        address: form.lead_address || null,
+        loan_amount: form.lead_loan_amount ? num(form.lead_loan_amount) : null,
+        project_size: form.lead_project_size ? num(form.lead_project_size) : null,
+        project_size_unit: "kw",
+        epc_name_custom: form.epc_name_custom || null,
+        ...(meId ? { created_by_user_id: meId, assigned_to_user_id: meId, last_updated_by_user_id: meId } : {}),
+      };
+      const { data, error } = await supabase().from("loan_leads").insert(row).select("id").single();
+      if (error) { setError(error.message); setBusy(false); return; }
+      say("bot", `Saved to your Leads. Once ${form.epc_name_custom || "this EPC"} is registered and approved by a lender, open the lead and convert it into a full application.`);
+      setLeadDoneId((data as { id: string }).id);
+    } finally { setBusy(false); }
+  }
+
+  const progress = Math.min(100, Math.round((idx / script.length) * 100));
+  const showDock = !donId && !leadDoneId && active && !confirm && active.kind !== "save" && active.kind !== "leadsave" && (editing ? true : turn === active);
+
+  if (resuming) {
+    return (
+      <div className="h-screen grid place-items-center" style={CANVAS_STYLE}>
+        <div className="flex flex-col items-center gap-3 text-[#0f3d2e]">
+          <div className="w-10 h-10 rounded-full border-2 border-[#178a5c]/30 border-t-[#178a5c] animate-spin" />
+          <div className="text-[13px]">Restoring your chat…</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-bg-soft flex flex-col">
-      <header className="px-5 sm:px-8 py-4 border-b border-line bg-white flex items-center justify-between">
-        <button onClick={() => router.push("/admin")} className="text-[13px] text-text-muted hover:text-text">← Console</button>
-        <span className="font-display font-bold text-[16px] text-[#0f3d2e]">New loan application</span>
-        <span className="text-[12px] text-text-muted w-16 text-right">{progress}%</span>
+    <div className="h-screen flex flex-col overflow-hidden" style={CANVAS_STYLE}>
+      {/* Chat header */}
+      <header className="shrink-0 px-3 sm:px-5 py-2.5 bg-[#0f3d2e] text-white flex items-center gap-3 shadow-sm">
+        <button onClick={() => router.push("/admin")} className="p-1 -ml-1 text-white/80 hover:text-white text-[20px] leading-none">←</button>
+        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#2fbd82] to-[#0f3d2e] ring-2 ring-white/15 flex items-center justify-center font-display font-bold text-[15px]">CC</div>
+        <div className="min-w-0 flex-1">
+          <div className="font-display font-bold text-[15px] leading-tight truncate">Capital Craft · {leadMode ? "New lead" : editMode ? "Edit profile" : "New application"}</div>
+          <div className="text-[11.5px] text-white/70 flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-[#5df2ad]" /> {leadMode ? "capturing a lead" : editMode ? "completing the profile" : "building the profile"}
+          </div>
+        </div>
+        <span className="text-[11px] text-white/60 tabular-nums">{progress}%</span>
+        <button onClick={undo} disabled={!undoStack.length || !!donId || !!leadDoneId} className="w-8 h-8 rounded-full hover:bg-white/10 grid place-items-center text-white/80 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent text-[17px] leading-none" aria-label="Undo last" title="Undo last">↶</button>
+        <button onClick={() => void closeChat()} className="w-8 h-8 -mr-1 rounded-full hover:bg-white/10 grid place-items-center text-white/80 hover:text-white text-[18px] leading-none" aria-label="Close chat" title="Close">✕</button>
       </header>
-      <div className="h-1 bg-[#e6f3ec]"><div className="h-1 bg-[#178a5c] transition-all" style={{ width: progress + "%" }} /></div>
+      <div className="h-0.5 bg-black/10 shrink-0"><div className="h-0.5 bg-[#5df2ad] transition-all duration-500" style={{ width: progress + "%" }} /></div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 sm:px-0">
-        <div className="max-w-xl mx-auto py-6 flex flex-col gap-3">
-          {msgs.map((m, i) => (
-            <div key={i} className={m.from === "bot" ? "self-start" : "self-end"}>
-              {m.text && <div className={["px-4 py-2.5 rounded-2xl text-[14px] max-w-[85%]", m.from === "bot" ? "bg-white border border-line text-text rounded-tl-sm" : "bg-[#178a5c] text-white rounded-tr-sm ml-auto"].join(" ")}>{m.text}</div>}
-            </div>
+      {/* Messages */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-4">
+        <div className="max-w-xl mx-auto py-4 flex flex-col gap-1.5">
+          <DateChip label={todayLabel()} />
+
+          {msgs.map((m) => (
+            <MessageRow key={m.id} m={m} rmName={rmName} onEdit={() => startEdit(m)} editingId={editing ? msgs[editing.index]?.id : null} />
           ))}
-          {pinInfo && <div className="self-start text-[12px] text-text-muted px-1">District: <b>{pinInfo.district}</b> · Area: <b>{pinInfo.city}</b></div>}
 
-          {/* Confirm card after an OCR read */}
-          {confirmLines && (
-            <div className="self-start w-full max-w-[85%] rounded-xl border border-[#cdeadd] bg-[#f0faf5] p-3">
-              <div className="text-[12px] font-semibold text-[#0f3d2e] mb-1">Read from the document</div>
-              <div className="text-[13px] text-text-mid flex flex-col gap-0.5">{confirmLines.map((l, i) => <div key={i}>{l}</div>)}</div>
-              <button onClick={() => { setConfirmLines(null); advance(); }} className="mt-2 px-3 py-1.5 rounded-lg bg-[#178a5c] text-white text-[12px] font-semibold">Looks good →</button>
-              <span className="text-[11px] text-text-muted ml-2">You can fine-tune anything later in the application.</span>
+          {busy && <TypingBubble />}
+
+          {/* Read-from-document card */}
+          {confirm && (
+            <div className="self-start w-full max-w-[88%] rounded-2xl rounded-tl-md border border-[#cdeadd] bg-white shadow-sm overflow-hidden">
+              <div className="px-3.5 py-2 bg-[#f0faf5] border-b border-[#e0f0e8] flex items-center gap-2">
+                <span className="text-[12px]">📄</span>
+                <span className="text-[12.5px] font-semibold text-[#0f3d2e]">Read from the document</span>
+              </div>
+              {confirm.thumbs.some(Boolean) && (
+                <div className="px-3.5 pt-3 flex gap-2">
+                  {confirm.thumbs.filter(Boolean).map((t, i) => (
+                    <img key={i} src={t as string} alt="" className="w-14 h-14 rounded-lg object-cover border border-line" />
+                  ))}
+                </div>
+              )}
+              <div className="p-3.5 flex flex-col gap-1.5">
+                {confirm.fields.map((f, i) => (
+                  <div key={i} className="flex items-baseline justify-between gap-3 text-[13px]">
+                    <span className="text-text-muted shrink-0">{f.label}</span>
+                    {f.ok
+                      ? <span className="text-text font-medium text-right break-words">{f.value}</span>
+                      : <span className="text-amber-600 text-[12px] italic">not found</span>}
+                  </div>
+                ))}
+                <p className="text-[11.5px] text-text-muted mt-1.5 leading-snug">{confirm.note}</p>
+                <div className="flex flex-wrap gap-2 mt-1.5">
+                  <button onClick={() => { const wasEdit = confirm?.edit; setConfirm(null); if (wasEdit) setEditing(null); else advance(); }} className="px-3.5 py-1.5 rounded-lg bg-[#178a5c] text-white text-[12.5px] font-semibold hover:bg-[#12734c]">Looks good →</button>
+                  <button onClick={retryDocs} className="px-3 py-1.5 rounded-lg border border-line text-[12.5px] text-text-mid hover:bg-bg-soft">Re-attach</button>
+                </div>
+              </div>
             </div>
           )}
 
-          {/* Input widget */}
-          {!donId && turn && !busy && !confirmLines && (
-            <div className="self-stretch mt-1">
-              {turn.kind === "epc" && (
-                <div className="grid gap-2">
-                  {epcs.length === 0 ? <div className="text-[13px] text-text-muted">Loading partners…</div> : epcs.map((e) => (
-                    <button key={e.value} onClick={() => void answer(e.value, e.label)} className="text-left px-4 py-3 rounded-xl border border-line bg-white hover:border-[#178a5c]">
-                      <div className="text-[14px] font-semibold text-text">{e.label}</div>{e.sub && <div className="text-[12px] text-text-muted font-mono">{e.sub}</div>}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {turn.kind === "choice" && (
-                <div className="grid sm:grid-cols-2 gap-2">
-                  {turn.choices!.map((c) => (
-                    <button key={c.value} onClick={() => void answer(c.value, c.label)} className="text-left px-4 py-3 rounded-xl border border-line bg-white hover:border-[#178a5c]">
-                      <div className="text-[14px] font-semibold text-text">{c.label}</div>{c.sub && <div className="text-[12px] text-text-muted">{c.sub}</div>}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {(turn.kind === "text" || turn.kind === "pincode") && (
-                <div className="flex gap-2">
-                  <input autoFocus value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void (turn.kind === "pincode" ? submitPincode() : submitText()); }}
-                    placeholder={turn.placeholder || "Type…"} className="flex-1 border border-line rounded-xl px-4 py-2.5 text-[14px] bg-white" />
-                  <button onClick={() => void (turn.kind === "pincode" ? submitPincode() : submitText())} className="px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold">Send</button>
-                  {turn.optional && <button onClick={() => void answer("")} className="px-3 py-2.5 rounded-xl border border-line text-[13px]">Skip</button>}
-                </div>
-              )}
-              {turn.kind === "consent" && (
-                <div className="flex gap-2">
-                  <button onClick={() => void answer("yes", "Yes, consent given")} className="flex-1 px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold">Yes, consent given</button>
-                  <button onClick={() => router.push("/admin")} className="px-4 py-2.5 rounded-xl border border-line text-[14px]">Cancel</button>
-                </div>
-              )}
-              {turn.kind === "docs" && (
-                <div className="flex flex-col gap-2 rounded-xl border border-line bg-white p-3">
-                  {turn.uploads!.map((u) => (
-                    <label key={u.name} className="flex items-center justify-between gap-3 text-[13px]">
-                      <span className="text-text-mid">{u.label}{files[u.name] ? " ✓" : ""}</span>
-                      <input type="file" accept="image/*,application/pdf" onChange={(e) => { const f = e.target.files?.[0]; if (f) setFiles((s) => ({ ...s, [u.name]: f })); }} className="text-[12px]" />
-                    </label>
-                  ))}
-                  <button onClick={() => void runDocs()} className="mt-1 px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold self-start">Read documents</button>
-                </div>
-              )}
-              {turn.kind === "loanconfig" && (
-                <div className="flex flex-col gap-3 rounded-xl border border-line bg-white p-4">
-                  <div>
-                    <div className="text-[12px] text-text-muted mb-1">Subsidy case?</div>
-                    <div className="flex gap-2">
-                      {(["subsidy", "non_subsidy"] as const).map((s) => (
-                        <button key={s} onClick={() => setSubsidyCase(s)} className={["px-3 py-1.5 rounded-lg text-[13px] font-semibold border", subsidyCase === s ? "bg-[#178a5c] text-white border-[#178a5c]" : "bg-white border-line"].join(" ")}>{s === "subsidy" ? "Subsidy" : "Non-subsidy"}</button>
-                      ))}
+          {error && <div className="self-center text-[12px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5 my-1">{error}</div>}
+
+          {editMode && !donId && !turn && !resuming && (
+            <div className="self-stretch mt-3 flex flex-col items-center gap-2">
+              <div className="text-[13px] text-text-mid text-center">All set — the profile is up to date.</div>
+              <button onClick={() => router.push(`/admin/app/${appId}/view`)} className="px-5 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold shadow-sm hover:bg-[#12734c]">Open the profile →</button>
+            </div>
+          )}
+
+          {leadDoneId && (
+            <div className="self-stretch mt-3 flex flex-col items-center gap-2">
+              <div className="text-[13px] text-text-mid text-center">✓ Lead saved — it's in your Lead tab.</div>
+              <button onClick={() => router.push(`/admin/lead/${leadDoneId}/view`)} className="px-5 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold shadow-sm hover:bg-[#12734c]">Open the lead →</button>
+              <button onClick={() => router.push("/admin")} className="text-[12px] text-text-muted hover:text-text">Go to console</button>
+            </div>
+          )}
+
+          {donId && (
+            <div className="self-stretch mt-3 flex flex-col items-center gap-2">
+              <div className="text-[13px] text-text-mid text-center">{donDraft ? "Draft saved — the profile is in your applications table." : "✓ Profile is ready — it's in your applications table."}</div>
+              <button onClick={() => router.push(`/admin/app/${donId}/view`)} className="px-5 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold shadow-sm hover:bg-[#12734c]">Open the profile →</button>
+              <button onClick={() => router.push("/admin")} className="text-[12px] text-text-muted hover:text-text">Go to applications table</button>
+            </div>
+          )}
+          <div className="h-2" />
+        </div>
+      </div>
+
+      {/* Dock — the controls for the active question */}
+      {showDock && active && (
+        <div className="shrink-0 bg-white/85 backdrop-blur border-t border-line">
+          <div className="max-w-xl mx-auto px-3 sm:px-4 py-3">
+            {editing && (
+              <div className="flex items-center justify-between mb-2 text-[12px]">
+                <span className="text-[#178a5c] font-semibold">Editing your answer</span>
+                <button onClick={cancelEdit} className="text-text-muted hover:text-text">Cancel</button>
+              </div>
+            )}
+
+            {active.kind === "epc" && (
+              <div className="flex flex-col gap-2">
+                {/* The list is hidden behind the "EPCs list" button and opens
+                    UPWARD (dropup). Inside: a search that also lets you type a
+                    brand-new EPC name (→ captured as a lead). */}
+                {epcOpen && (
+                  <div className="rounded-2xl border border-line bg-white shadow-lg overflow-hidden">
+                    <div className="p-2 border-b border-line">
+                      <input autoFocus value={epcSearch} onChange={(e) => setEpcSearch(e.target.value)} placeholder="Search, or type a new EPC name…" className="w-full border border-line rounded-lg px-3 py-2 text-[14px] bg-white focus:outline-none focus:border-[#178a5c]" />
                     </div>
-                  </div>
-                  {subsidyCase === "subsidy" && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <label className="text-[12px] text-text-muted">Central subsidy (₹)
-                        <input value={centralSub} onChange={(e) => setCentralSub(e.target.value.replace(/[^\d]/g, ""))} className="mt-1 w-full border border-line rounded-lg px-2 py-1.5 text-[13px]" /></label>
-                      <label className="text-[12px] text-text-muted">State subsidy (₹)
-                        <input value={stateSub} onChange={(e) => setStateSub(e.target.value.replace(/[^\d]/g, ""))} placeholder="0" className="mt-1 w-full border border-line rounded-lg px-2 py-1.5 text-[13px]" /></label>
-                    </div>
-                  )}
-                  <div>
-                    <div className="text-[12px] text-text-muted mb-1">Tenure (live EMI on ₹{loanAmt.toLocaleString("en-IN")})</div>
-                    <div className="grid grid-cols-5 gap-1.5">
-                      {TENURES.map((t) => (
-                        <button key={t} onClick={() => setTenure(t)} className={["px-1 py-2 rounded-lg text-center border", tenure === t ? "bg-[#178a5c] text-white border-[#178a5c]" : "bg-white border-line"].join(" ")}>
-                          <div className="text-[13px] font-bold">{t}y</div>
-                          <div className="text-[10px] opacity-80">{loanAmt > 0 ? formatRupees(computeEmi(loanAmt, DEFAULT_INDICATIVE_ROI, t)) : "—"}</div>
+                    <div className="max-h-[38vh] overflow-y-auto flex flex-col">
+                      {epcs.length === 0 ? (
+                        <div className="text-[13px] text-text-muted px-3 py-3">Loading partners…</div>
+                      ) : filteredEpcs.length === 0 ? (
+                        <div className="text-[13px] text-text-muted px-3 py-3">No approved EPC matches “{epcSearch.trim()}”.</div>
+                      ) : filteredEpcs.map((e) => (
+                        <button key={e.value} onClick={() => void answer(e.value, e.label, { createApp: true })} className="text-left px-4 py-2.5 border-b border-line/60 last:border-0 hover:bg-[#f7fcf9] transition">
+                          <div className="text-[14px] font-semibold text-text">{e.label}</div>{e.sub && <div className="text-[12px] text-text-muted font-mono">{e.sub}</div>}
                         </button>
                       ))}
+                      {epcSearch.trim() && (
+                        <button onClick={() => startLead(epcSearch.trim())} className="text-left px-4 py-2.5 bg-[#f7fcf9] hover:bg-[#eef8f2] transition border-t border-line">
+                          <span className="text-[13px] font-semibold text-[#0f3d2e]">+ Use “{epcSearch.trim()}”</span>
+                          <span className="block text-[11px] text-text-muted">Not a registered partner — saved to your Leads to convert later.</span>
+                        </button>
+                      )}
                     </div>
                   </div>
-                  <button onClick={() => void finishLoanConfig()} disabled={tenure == null} className="mt-1 px-4 py-2.5 rounded-lg bg-[#178a5c] text-white text-[14px] font-semibold disabled:opacity-60 self-start">Create application →</button>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+                {/* Dropup trigger */}
+                <button onClick={() => setEpcOpen((o) => !o)} className="flex items-center justify-between px-4 py-3 rounded-full border border-[#178a5c] bg-white text-[14px] font-semibold text-[#0f3d2e] hover:bg-[#f7fcf9] transition">
+                  <span>EPCs list</span>
+                  <span className="text-[12px] text-[#178a5c]">{epcOpen ? "▾" : "▴"}</span>
+                </button>
+                {/* Locked composer — the chat opens only after an EPC is chosen. */}
+                <div className="rounded-full border border-line bg-bg-soft px-4 py-2.5 text-[13px] text-text-muted select-none">Please select an EPC first</div>
+              </div>
+            )}
 
-          {busy && <div className="self-start text-[13px] text-text-muted px-1">Working…</div>}
-          {error && <div className="self-stretch text-[13px] text-red-600 px-1">{error}</div>}
-          {donId && (
-            <div className="self-stretch mt-2">
-              <button onClick={() => router.push(`/admin/app/${donId}/view`)} className="w-full px-4 py-3 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold">Open the application →</button>
-            </div>
-          )}
+            {active.kind === "choice" && (
+              <div className="grid sm:grid-cols-2 gap-2">
+                {active.choices!.map((c) => (
+                  <button key={c.value} onClick={() => void answer(c.value, c.label, { editable: true })} className="text-left px-4 py-3 rounded-xl border border-line bg-white hover:border-[#178a5c] hover:bg-[#f7fcf9] transition">
+                    <div className="text-[14px] font-semibold text-text">{c.label}</div>{c.sub && <div className="text-[12px] text-text-muted">{c.sub}</div>}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {(active.kind === "text" || active.kind === "pincode") && (
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <input ref={inputRef} autoFocus value={input} onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") void (active.kind === "pincode" ? submitPincode() : submitText()); if (e.key === "Escape" && editing) cancelEdit(); }}
+                    placeholder={active.placeholder || "Type a message…"} className="flex-1 border border-line rounded-full px-4 py-2.5 text-[14px] bg-white focus:outline-none focus:border-[#178a5c] focus:ring-2 focus:ring-[#178a5c]/15" />
+                  {!editing && <button onClick={() => void skipText()} className="px-3 py-2.5 text-[13px] text-text-muted hover:text-text whitespace-nowrap" title="Continue without this — you can add it later">{active.optional ? "Skip" : "Don't have it"}</button>}
+                  <button onClick={() => void (active.kind === "pincode" ? submitPincode() : submitText())} className="w-11 h-11 shrink-0 rounded-full bg-[#178a5c] text-white grid place-items-center hover:bg-[#12734c] shadow-sm" aria-label="Send">
+                    {editing ? "✓" : <SendIcon />}
+                  </button>
+                </div>
+                {active.field && AMOUNT_FIELDS.has(active.field) && amountInWords(Number(input)) && (
+                  <div className="text-[11.5px] text-[#0f3d2e] px-3">₹{Number(input).toLocaleString("en-IN")} — <span className="font-medium">{amountInWords(Number(input))} rupees</span></div>
+                )}
+              </div>
+            )}
+
+            {active.kind === "consent" && (
+              <div className="flex gap-2">
+                <button onClick={() => void answer("yes", "Yes, consent given")} className="flex-1 px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c]">Yes, consent given</button>
+                <button onClick={() => router.push("/admin")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid">Cancel</button>
+              </div>
+            )}
+
+            {active.kind === "docs" && (
+              <DocDock active={active} files={files} thumbs={thumbs} onPick={setFileFor} onDrop={fillNextSlot} onClear={clearFileFor} onRun={() => void runDocs()} onSkip={skipDoc} replacing={!!editing} />
+            )}
+
+            {active.kind === "loanconfig" && (
+              <LoanConfigDock loanAmt={loanAmt} subsidyCase={subsidyCase} setSubsidyCase={setSubsidyCase}
+                centralSub={centralSub} setCentralSub={setCentralSub} stateSub={stateSub} setStateSub={setStateSub}
+                tenure={tenure} setTenure={setTenure} onFinish={() => void finishLoanConfig()} finishLabel={editMode ? "Save changes" : "Create application →"} />
+            )}
+          </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ── Presentational pieces ──
+
+function DateChip({ label }: { label: string }) {
+  return (
+    <div className="self-center my-2">
+      <span className="text-[11px] text-[#0f3d2e]/70 bg-white/70 rounded-full px-3 py-1 shadow-sm">{label}</span>
+    </div>
+  );
+}
+
+function MessageRow({ m, rmName, onEdit, editingId }: { m: Msg; rmName: string; onEdit: () => void; editingId: string | null }) {
+  const isUser = m.from === "user";
+  const beingEdited = editingId === m.id;
+  return (
+    <div className={["group flex flex-col max-w-[82%]", isUser ? "self-end items-end" : "self-start items-start"].join(" ")}>
+      <div className={["relative px-3.5 py-2 rounded-2xl text-[14px] leading-snug shadow-sm break-words whitespace-pre-wrap w-fit max-w-full",
+        isUser ? "bg-[#178a5c] text-white rounded-br-md" : "bg-white text-[#12271f] rounded-bl-md border border-black/5",
+        beingEdited ? "ring-2 ring-[#5df2ad]" : ""].join(" ")}>
+        {/* document receipt */}
+        {m.files ? (
+          <div className="flex flex-col gap-1.5">
+            {m.files.map((f, i) => (
+              <div key={i} className="flex items-center gap-2">
+                {f.thumb ? <img src={f.thumb} alt="" className="w-10 h-10 rounded-md object-cover" />
+                  : <span className="w-10 h-10 rounded-md bg-white/20 grid place-items-center text-[16px]">📎</span>}
+                <span className="text-[13px] break-all">{f.name}</span>
+              </div>
+            ))}
+          </div>
+        ) : m.text}
+      </div>
+      <div className={["flex items-center gap-1.5 mt-0.5 px-1 text-[10.5px]", isUser ? "text-[#0f3d2e]/60 flex-row-reverse" : "text-text-muted"].join(" ")}>
+        <span className="font-medium">{isUser ? rmName : "Capital Craft"}</span>
+        <span>· {m.time}</span>
+        {m.edited && <span>· edited</span>}
+        {isUser && !m.files && <span className="text-[#178a5c]">✓✓</span>}
+        {isUser && m.editable && (
+          <button onClick={onEdit} className="opacity-0 group-hover:opacity-100 transition text-[#178a5c] hover:underline" aria-label="Edit">{m.files ? "↺ replace" : "✎ edit"}</button>
+        )}
       </div>
     </div>
   );
+}
+
+function TypingBubble() {
+  return (
+    <div className="self-start">
+      <div className="px-4 py-3 rounded-2xl rounded-bl-md bg-white border border-black/5 shadow-sm inline-flex gap-1">
+        <Dot d="0" /><Dot d="150" /><Dot d="300" />
+      </div>
+    </div>
+  );
+}
+function Dot({ d }: { d: string }) {
+  return <span className="w-1.5 h-1.5 rounded-full bg-text-muted/60 animate-bounce" style={{ animationDelay: d + "ms" }} />;
+}
+function SendIcon() {
+  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 12l16-8-6 16-2.5-6.5L4 12z" fill="currentColor" /></svg>;
+}
+
+function DocDock({ active, files, thumbs, onPick, onDrop, onClear, onRun, onSkip, replacing }: {
+  active: Turn; files: Record<string, File>; thumbs: Record<string, string | null>;
+  onPick: (name: string, f: File) => void; onDrop: (f: File) => void; onClear: (name: string) => void; onRun: () => void; onSkip: () => void; replacing?: boolean;
+}) {
+  const [drag, setDrag] = useState(false);
+  return (
+    <div className="flex flex-col gap-2">
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files?.[0]; if (f) onDrop(f); }}
+        className={["rounded-xl border-2 border-dashed p-2.5 transition", drag ? "border-[#178a5c] bg-[#f0faf5]" : "border-line bg-white"].join(" ")}
+      >
+        <div className="grid gap-2" style={{ gridTemplateColumns: (active.uploads?.length || 1) > 1 ? "1fr 1fr" : "1fr" }}>
+          {active.uploads!.map((u) => {
+            const has = !!files[u.name];
+            return (
+              <label key={u.name} className={["relative flex items-center gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition", has ? "border-[#178a5c] bg-[#f7fcf9]" : "border-line bg-white hover:border-[#178a5c]/50"].join(" ")}>
+                {has && thumbs[u.name]
+                  ? <img src={thumbs[u.name] as string} alt="" className="w-9 h-9 rounded-md object-cover" />
+                  : <span className="w-9 h-9 rounded-md bg-bg-soft grid place-items-center text-[15px]">{has ? "📄" : "＋"}</span>}
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-medium text-text truncate">{u.label}</span>
+                  <span className="block text-[11px] text-text-muted truncate">{has ? files[u.name].name : "Tap, drop, or paste"}</span>
+                </span>
+                {has
+                  ? <button type="button" onClick={(e) => { e.preventDefault(); onClear(u.name); }} className="text-text-muted hover:text-red-500 text-[15px] leading-none px-1">×</button>
+                  : <span className="text-[#178a5c] text-[12px] font-semibold">Add</span>}
+                <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(u.name, f); }} />
+              </label>
+            );
+          })}
+        </div>
+        <div className="text-[11px] text-text-muted mt-2 px-0.5">Attach by tapping, dragging a file in, or pasting a copied image (Ctrl+V).</div>
+      </div>
+      <div className="flex items-center gap-2">
+        <button onClick={onRun} className="px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c]">{replacing ? "Re-read & replace" : `Read ${active.extractRoute ? "document" : "& attach"}`}</button>
+        {!replacing && <button onClick={onSkip} className="px-3 py-2 rounded-lg text-[12.5px] text-text-muted hover:text-text hover:bg-bg-soft">Don't have it — skip</button>}
+      </div>
+    </div>
+  );
+}
+
+function LoanConfigDock({ loanAmt, subsidyCase, setSubsidyCase, centralSub, setCentralSub, stateSub, setStateSub, tenure, setTenure, onFinish, finishLabel }: {
+  loanAmt: number; subsidyCase: "subsidy" | "non_subsidy"; setSubsidyCase: (s: "subsidy" | "non_subsidy") => void;
+  centralSub: string; setCentralSub: (s: string) => void; stateSub: string; setStateSub: (s: string) => void;
+  tenure: number | null; setTenure: (n: number) => void; onFinish: () => void; finishLabel: string;
+}) {
+  return (
+    <div className="flex flex-col gap-3 max-h-[52vh] overflow-y-auto pr-0.5">
+      <div>
+        <div className="text-[12px] text-text-muted mb-1">Subsidy case</div>
+        <div className="flex gap-2">
+          {(["subsidy", "non_subsidy"] as const).map((s) => (
+            <button key={s} onClick={() => setSubsidyCase(s)} className={["px-3 py-1.5 rounded-lg text-[13px] font-semibold border", subsidyCase === s ? "bg-[#178a5c] text-white border-[#178a5c]" : "bg-white border-line text-text-mid"].join(" ")}>{s === "subsidy" ? "Subsidy" : "Non-subsidy"}</button>
+          ))}
+        </div>
+      </div>
+      {subsidyCase === "subsidy" && (
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-[12px] text-text-muted">Central subsidy (₹)
+            <input value={centralSub} onChange={(e) => setCentralSub(e.target.value.replace(/[^\d]/g, ""))} className="mt-1 w-full border border-line rounded-lg px-2 py-1.5 text-[13px]" /></label>
+          <label className="text-[12px] text-text-muted">State subsidy (₹)
+            <input value={stateSub} onChange={(e) => setStateSub(e.target.value.replace(/[^\d]/g, ""))} placeholder="0" className="mt-1 w-full border border-line rounded-lg px-2 py-1.5 text-[13px]" /></label>
+        </div>
+      )}
+      <div>
+        <div className="text-[12px] text-text-muted mb-1">Tenure — live EMI on ₹{loanAmt.toLocaleString("en-IN")}</div>
+        <div className="grid grid-cols-5 gap-1.5">
+          {TENURES.map((t) => (
+            <button key={t} onClick={() => setTenure(t)} className={["px-1 py-2 rounded-lg text-center border", tenure === t ? "bg-[#178a5c] text-white border-[#178a5c]" : "bg-white border-line text-text-mid"].join(" ")}>
+              <div className="text-[13px] font-bold">{t}y</div>
+              <div className="text-[10px] opacity-80">{loanAmt > 0 ? formatRupees(computeEmi(loanAmt, DEFAULT_INDICATIVE_ROI, t)) : "—"}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+      <button onClick={onFinish} disabled={tenure == null} className="mt-1 px-4 py-2.5 rounded-lg bg-[#178a5c] text-white text-[14px] font-semibold disabled:opacity-60 hover:bg-[#12734c]">{finishLabel}</button>
+    </div>
+  );
+}
+
+function fieldLabel(t: Turn): string {
+  return t.placeholder || t.field || "detail";
+}
+
+// Fields where we show the typed amount in words (Indian format) for confirmation.
+const AMOUNT_FIELDS = new Set(["loan_amount_required", "annual_income", "total_project_cost", "monthly_bill_amount", "lead_loan_amount"]);
+
+// Integer → Indian words (lakh / crore). Empty for non-positive / invalid.
+function amountInWords(num: number): string {
+  if (!Number.isFinite(num) || num <= 0) return "";
+  num = Math.floor(num);
+  const a = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+  const b = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  const two = (n: number): string => (n < 20 ? a[n] : b[Math.floor(n / 10)] + (n % 10 ? " " + a[n % 10] : ""));
+  const three = (n: number): string => { const h = Math.floor(n / 100), r = n % 100; return (h ? a[h] + " Hundred" + (r ? " " : "") : "") + (r ? two(r) : ""); };
+  let res = "";
+  const crore = Math.floor(num / 10000000); num %= 10000000;
+  const lakh = Math.floor(num / 100000); num %= 100000;
+  const thousand = Math.floor(num / 1000); num %= 1000;
+  if (crore) res += three(crore) + " Crore ";
+  if (lakh) res += two(lakh) + " Lakh ";
+  if (thousand) res += two(thousand) + " Thousand ";
+  if (num) res += three(num);
+  return res.trim();
+}
+
+// The path column(s) that make a document turn "already present" in edit mode.
+const DOC_PATHS: Record<string, string[]> = {
+  aadhaar: ["aadhaar_front_path", "aadhaar_back_path"],
+  loandocs: ["proforma_invoice_path", "ebill_path"],
+  rooftop: ["rooftop_photo_path"],
+  coapp_pan: ["coapp_pan_path"],
+  coapp_aadhaar: ["coapp_aadhaar_front_path", "coapp_aadhaar_back_path"],
+  bank: ["bank_statement_path"],
+};
+
+// Is this turn's data already on the profile? Drives edit mode's "ask only
+// what's missing" — filled turns are skipped.
+function isTurnFilled(t: Turn, f: Form): boolean {
+  if (t.kind === "epc" || t.kind === "consent") return true; // never re-ask in edit
+  if (t.kind === "docs") { const keys = DOC_PATHS[t.id] || []; return keys.length > 0 && keys.every((k) => !!(f[k] && String(f[k]).trim())); }
+  if (t.kind === "loanconfig") return !!(f.selected_tenure_years && String(f.selected_tenure_years).trim());
+  if (t.field) return !!(f[t.field] && String(f[t.field]).trim());
+  return false;
+}
+
+// Map an existing application row → the chat's form field map (all strings;
+// the boolean e-bill flag becomes "yes"/"no").
+const PREFILL_KEYS = [
+  "borrower_name", "borrower_mobile", "borrower_email", "install_pincode", "install_state", "install_district", "install_city", "system_type", "plant_use_type",
+  "aadhaar_name", "aadhaar_dob", "aadhaar_gender", "aadhaar_number", "aadhaar_care_of", "aadhaar_address", "aadhaar_front_path", "aadhaar_back_path", "aadhaar_face_path",
+  "project_size", "project_size_unit", "total_project_cost", "loan_amount_required", "monthly_bill_amount", "discom_name", "ca_number", "ebill_address_line", "ebill_name", "ebill_path", "ebill_uploaded_at", "proforma_invoice_path", "proforma_uploaded_at", "rooftop_photo_path", "rooftop_photo_uploaded_at",
+  "coapp_name", "coapp_father_name", "coapp_dob", "coapp_pan", "coapp_pan_path", "coapp_relation", "coapp_aadhaar_name", "coapp_aadhaar_dob", "coapp_aadhaar_gender", "coapp_aadhaar_number", "coapp_aadhaar_care_of", "coapp_aadhaar_address", "coapp_aadhaar_front_path", "coapp_aadhaar_back_path", "coapp_aadhaar_face_path",
+  "employment_type", "profession", "profession_other", "organization_name", "annual_income", "bank_statement_method", "bank_statement_path", "bank_statement_uploaded_at", "bank_account_holder", "bank_name", "bank_account_no", "bank_ifsc", "bank_account_type", "bank_mobile", "bank_email",
+  "central_subsidy", "state_subsidy", "roi_percent", "selected_tenure_years", "selected_monthly_emi", "selected_subsidy_emi",
+];
+function prefillFromApp(a: Record<string, any>): Form {
+  const f: Form = {};
+  for (const k of PREFILL_KEYS) if (a[k] != null && a[k] !== "") f[k] = String(a[k]);
+  if (a.bill_on_applicant_name === true) f.bill_on_applicant_name = "yes";
+  else if (a.bill_on_applicant_name === false) f.bill_on_applicant_name = "no";
+  return f;
 }
 
 function kwOf(f: Form): number | null {
@@ -421,9 +1102,13 @@ function kwOf(f: Form): number | null {
   return f.project_size_unit === "mw" ? s * 1000 : s;
 }
 
-// Map an extract route's JSON response → { form patch, confirm lines }.
-function mapExtract(turn: Turn, j: Record<string, any>): { patch: Form; lines: string[] } {
+// Map an extract route's JSON response → { form patch, fetched-field list }.
+function mapExtract(turn: Turn, j: Record<string, any>): { patch: Form; fields: Fetched[] } {
   const coapp = turn.extraForm?._coapp === "1";
+  const row = (label: string, value: any): Fetched => {
+    const v = value == null || value === "" ? "" : String(value);
+    return { label, value: v, ok: !!v };
+  };
   if (turn.extractRoute === "extract-aadhaar") {
     const f = j.fields ?? {}, p = j.storage_paths ?? {};
     if (coapp) return { patch: {
@@ -431,17 +1116,17 @@ function mapExtract(turn: Turn, j: Record<string, any>): { patch: Form; lines: s
       coapp_aadhaar_care_of: f.care_of ?? "", coapp_aadhaar_address: f.address ?? "",
       coapp_aadhaar_front_path: p.front ?? "", coapp_aadhaar_back_path: p.back ?? "", coapp_aadhaar_face_path: p.face ?? "",
       coapp_name: f.name ?? "", coapp_dob: f.dob ?? "",
-    }, lines: [`Name: ${f.name ?? "—"}`, `DOB: ${f.dob ?? "—"}`, `Aadhaar: ${f.aadhaar_masked ?? f.aadhaar_number ?? "—"}`] };
+    }, fields: [row("Name", f.name), row("DOB", f.dob), row("Aadhaar", f.aadhaar_masked ?? f.aadhaar_number)] };
     return { patch: {
       aadhaar_name: f.name ?? "", aadhaar_dob: f.dob ?? "", aadhaar_gender: f.gender ?? "", aadhaar_number: f.aadhaar_number ?? "",
       aadhaar_care_of: f.care_of ?? "", aadhaar_address: f.address ?? "",
       aadhaar_front_path: p.front ?? "", aadhaar_back_path: p.back ?? "", aadhaar_face_path: p.face ?? "",
-    }, lines: [`Name: ${f.name ?? "—"}`, `DOB: ${f.dob ?? "—"}`, `Gender: ${f.gender ?? "—"}`, `Aadhaar: ${f.aadhaar_masked ?? f.aadhaar_number ?? "—"}`] };
+    }, fields: [row("Name", f.name), row("DOB", f.dob), row("Gender", f.gender), row("Aadhaar", f.aadhaar_masked ?? f.aadhaar_number), row("Address", f.address)] };
   }
   if (turn.extractRoute === "extract-coapp-pan") {
     const f = j.fields ?? {};
     return { patch: { coapp_pan: f.pan ?? "", coapp_name: f.name ?? "", coapp_father_name: f.father_name ?? "", coapp_dob: f.dob ?? "", coapp_pan_path: j.storage_path ?? "" },
-      lines: [`PAN: ${f.pan ?? "—"}`, `Name: ${f.name ?? "—"}`, `Father: ${f.father_name ?? "—"}`] };
+      fields: [row("PAN", f.pan), row("Name", f.name), row("Father", f.father_name)] };
   }
   if (turn.extractRoute === "extract-loan-docs") {
     const pf = j.proforma?.fields ?? {}, eb = j.ebill?.fields ?? {};
@@ -450,14 +1135,20 @@ function mapExtract(turn: Turn, j: Record<string, any>): { patch: Form; lines: s
       proforma_invoice_path: j.proforma?.storage_path ?? "", proforma_uploaded_at: j.proforma?.uploaded_at ?? "",
       monthly_bill_amount: eb.monthly_bill_amount != null ? String(eb.monthly_bill_amount) : "", discom_name: eb.discom_name ?? "", ca_number: eb.ca_number ?? "",
       ebill_address_line: eb.ebill_address_line ?? "", ebill_name: eb.ebill_name ?? "", ebill_path: j.ebill?.storage_path ?? "", ebill_uploaded_at: j.ebill?.uploaded_at ?? "",
-    }, lines: [`Project: ${pf.project_size ?? "—"} ${pf.project_size_unit ?? "kW"} · ₹${pf.total_project_cost ?? "—"}`, `Bill: ₹${eb.monthly_bill_amount ?? "—"} · ${eb.discom_name ?? "—"}`] };
+    }, fields: [
+      row("System size", pf.project_size != null ? `${pf.project_size} ${pf.project_size_unit ?? "kW"}` : ""),
+      row("Project cost", pf.total_project_cost != null ? `₹${Number(pf.total_project_cost).toLocaleString("en-IN")}` : ""),
+      row("Monthly bill", eb.monthly_bill_amount != null ? `₹${eb.monthly_bill_amount}` : ""),
+      row("DISCOM", eb.discom_name),
+      row("Bill name", eb.ebill_name),
+    ] };
   }
   if (turn.extractRoute === "extract-bank-statement") {
     const f = j.fields ?? {};
     return { patch: {
       bank_statement_method: j.method ?? "manual_epdf", bank_statement_path: j.storage_path ?? "", bank_statement_uploaded_at: new Date().toISOString(),
       bank_account_holder: f.account_holder ?? "", bank_name: f.bank_name ?? "", bank_account_no: f.account_no ?? "", bank_ifsc: f.ifsc ?? "", bank_account_type: f.account_type ?? "", bank_mobile: f.mobile ?? "", bank_email: f.email ?? "",
-    }, lines: [`Holder: ${f.account_holder ?? "—"}`, `Bank: ${f.bank_name ?? "—"}`, `A/C: ${f.account_no ?? "—"} · IFSC ${f.ifsc ?? "—"}`] };
+    }, fields: [row("Holder", f.account_holder), row("Bank", f.bank_name), row("A/C no.", f.account_no), row("IFSC", f.ifsc)] };
   }
-  return { patch: {}, lines: [] };
+  return { patch: {}, fields: [] };
 }

@@ -138,7 +138,7 @@ function Inner() {
   const [sel, setSel] = useState<string | null>(null);
   // No mixed "All" view — everyone works one source at a time (default: loans).
   const [srcFilter, setSrcFilter] = useState<"all" | CaseSource>("loan");
-  const [ownerFilter, setOwnerFilter] = useState<string>("all"); // 'all' | userId | 'unassigned'
+  const [ownerFilter, setOwnerFilter] = useState<string>(isMainAdmin ? "all" : "me"); // 'me' | 'all' | userId | 'unassigned'
   const [activity, setActivity] = useState<Activity[]>([]);
   const [busy, setBusy] = useState(false);
   const [touches, setTouches] = useState(0);
@@ -224,6 +224,7 @@ function Inner() {
       if ((srcFilter === "all" ? c.allColumn : c.column) == null) return false; // off this board
       if (canOversee && ownerFilter !== "all") {
         if (ownerFilter === "unassigned") { if (c.ownerUserId) return false; }
+        else if (ownerFilter === "me") { if (c.ownerUserId !== me?.id) return false; }
         else if (c.ownerUserId !== ownerFilter) return false;
       }
       if (quick === "myoverdue" && !(c.ownerUserId === me?.id && c.idleDays >= sla)) return false;
@@ -355,8 +356,15 @@ function Inner() {
   }, [users, isMainAdmin, isManager, me]);
 
   const ownerTabs = useMemo(
-    () => [{ id: "all", name: "All" }, { id: "unassigned", name: "Unassigned" }, ...boardPeople.map((u) => ({ id: u.id, name: u.name + (u.role === "MANAGER" ? " (Mgr)" : "") }))],
-    [boardPeople],
+    () => [
+      // The Main Admin has no cases of their own, so no "Me" tab — they default
+      // to "All" and oversee everyone. Managers/RMs get a "Me" tab (their own work).
+      ...(isMainAdmin ? [] : [{ id: "me", name: "Me" }]),
+      { id: "all", name: "All" },
+      { id: "unassigned", name: "Unassigned" },
+      ...boardPeople.map((u) => ({ id: u.id, name: u.name + (u.role === "MANAGER" ? " (Mgr)" : "") })),
+    ],
+    [boardPeople, isMainAdmin],
   );
   // Resolve user-id values (e.g. reassignment targets) to names in the activity log.
   const nameById = useMemo(() => new Map(users.map((u) => [u.id, u.name])), [users]);
@@ -370,16 +378,27 @@ function Inner() {
     return mgr ? [{ value: mgr.id, label: mgr.name + " · send up ↑" }] : [];
   }, [users, isMainAdmin, isManager, myRms, me]);
 
-  // Per-RM workload for the overseer strip.
+  // Per-person workload for the overseer strip.
   const thisMonthKey = `${new Date().getFullYear()}-${new Date().getMonth()}`;
-  // Per-person, this month: WIP = in-pipeline cases, Done = disbursed this month,
-  // Total = WIP + Done, Oldest = longest TAT (days since Ready for Login) among WIP.
-  const workload = useMemo(() => boardPeople.map((u) => {
+  // The strip FOLLOWS the selected owner tab so the cards and the columns always
+  // agree: "all" → every person in scope; "me" → the viewer; a person tab → just
+  // that person; "unassigned" → none.
+  const workloadPeople = useMemo(() => {
+    if (ownerFilter === "unassigned") return [] as { id: string; name: string }[];
+    if (ownerFilter === "me") return me?.id ? [{ id: me.id, name: "Me" }] : [];
+    if (ownerFilter === "all") return boardPeople.map((u) => ({ id: u.id, name: u.name }));
+    const p = boardPeople.find((u) => u.id === ownerFilter);
+    return p ? [{ id: p.id, name: p.name }] : [];
+  }, [ownerFilter, boardPeople, me]);
+  // Per person, this month: WIP = in-pipeline cases, Done = disbursed this month,
+  // Oldest = longest TAT among WIP. (No summed "Total" — it conflated open work
+  // with completed-this-month and read as an inflated, misleading number.)
+  const workload = useMemo(() => workloadPeople.map((u) => {
     const wipCases = cases.filter((c) => c.source === srcFilter && c.column != null && c.ownerUserId === u.id);
     const done = cases.filter((c) => c.source === srcFilter && c.ownerUserId === u.id && monthKey(c.disbursedThisMonthAt) === thisMonthKey).length;
     const wip = wipCases.length;
-    return { id: u.id, name: u.name, wip, done, total: wip + done, oldest: wipCases.reduce((m, c) => Math.max(m, c.tatDays), 0) };
-  }), [boardPeople, cases, thisMonthKey, srcFilter]);
+    return { id: u.id, name: u.name, wip, done, oldest: wipCases.reduce((m, c) => Math.max(m, c.tatDays), 0) };
+  }), [workloadPeople, cases, thisMonthKey, srcFilter]);
 
   return (
     <div className="min-h-screen bg-bg-soft md:flex">
@@ -456,7 +475,7 @@ function Inner() {
                 <div className="inline-flex flex-col mb-4 rounded-lg border border-[#cdeadd] bg-[#f0faf5] px-4 py-2.5">
                   <span className="text-[12px] font-semibold text-[#5a8a76]">This month</span>
                   <span className="text-[12px] text-[#0f3d2e] mt-0.5">
-                    <strong>Total {wip + done}</strong> · WIP {wip}
+                    <strong>WIP {wip}</strong>
                     {oldest > 0 && <> · oldest {oldest}d</>}
                     {done > 0 && <> · <strong className="text-[#178a5c]">{done} done</strong></>}
                   </span>
@@ -469,7 +488,7 @@ function Inner() {
                   <div key={w.id} className="rounded-lg border border-line bg-white px-3 py-2 min-w-[132px]">
                     <div className="text-[12px] font-semibold text-text">{w.name}</div>
                     <div className="text-[11px] text-text-muted mt-0.5">
-                      <span className="font-semibold text-text">Total {w.total}</span> · WIP {w.wip}
+                      <span className="font-semibold text-text">WIP {w.wip}</span>
                       {w.oldest > 0 && <> · oldest {w.oldest}d</>}
                       {w.done > 0 && <> · <span className="text-[#178a5c] font-semibold">{w.done} done</span></>}
                     </div>

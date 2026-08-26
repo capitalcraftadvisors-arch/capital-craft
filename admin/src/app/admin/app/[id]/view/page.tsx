@@ -879,8 +879,13 @@ function Inner() {
                   icon={I.edit}
                   items={[
                     {
-                      // Full profile/step edit — available after approval too.
-                      label: "Edit",
+                      // AI concierge — resumes the chat and asks only what's missing.
+                      label: "Continue in chat",
+                      onClick: () => router.push(`/admin/app/intake?app=${loan.id}&edit=1` as any),
+                    },
+                    {
+                      // Full profile/step edit — the classic wizard.
+                      label: "Edit in form",
                       onClick: () => router.push(`/admin/app/${loan.id}/step-1` as any),
                     },
                     {
@@ -897,13 +902,24 @@ function Inner() {
                     },
                   ]}
                 />
+              ) : aborted ? (
+                <TabButton label="Edit" icon={I.edit} disabled title="Aborted — cannot edit" />
               ) : (
-                <TabButton
+                <DownloadMenu
                   label="Edit"
                   icon={I.edit}
-                  disabled={aborted}
-                  title={aborted ? "Aborted — cannot edit" : undefined}
-                  onClick={() => router.push(`/admin/app/${loan.id}/step-1` as any)}
+                  items={[
+                    {
+                      // AI concierge — asks only for what's still missing.
+                      label: "Continue in chat",
+                      onClick: () => router.push(`/admin/app/intake?app=${loan.id}&edit=1` as any),
+                    },
+                    {
+                      // The classic step-by-step wizard (unchanged).
+                      label: "Classic form",
+                      onClick: () => router.push(`/admin/app/${loan.id}/step-1` as any),
+                    },
+                  ]}
                 />
               )}
               <TabButton label="Activity Log" icon={I.eye} onClick={() => setActivityOpen(true)} />

@@ -74,14 +74,20 @@ function Inner() {
         // so a pre-filled value can never be saved by accident.
         const existing = (data.approval_details ?? null) as ApprovalDetails | null;
         const editing = editMode != null;
+        const today = new Date().toISOString().slice(0, 10);
         setDetails({
-          approved_by: lender || data.approved_lender || null,
-          applied_loan_amount:   data.loan_amount_required ?? null,
+          // On EDIT, restore EVERY previously-saved field (roi, approval_date,
+          // approved_* …) so nothing has to be re-entered; only the "applied"
+          // snapshots refresh from the live application.
+          ...(editing && existing ? existing : {}),
+          approved_by: lender || data.approved_lender || existing?.approved_by || null,
+          applied_loan_amount:   data.loan_amount_required ?? existing?.applied_loan_amount ?? null,
           approved_loan_amount:  editing ? (existing?.approved_loan_amount ?? null) : null,
-          applied_tenure_years:  data.selected_tenure_years ?? null,
+          applied_tenure_years:  data.selected_tenure_years ?? existing?.applied_tenure_years ?? null,
           approved_tenure_years: editing ? (existing?.approved_tenure_years ?? null) : null,
-          tentative_emi:         data.selected_monthly_emi ?? null,
+          tentative_emi:         data.selected_monthly_emi ?? existing?.tentative_emi ?? null,
           approved_emi:          editing ? (existing?.approved_emi ?? null) : null,
+          approval_date:         (editing ? existing?.approval_date : null) ?? today,
         });
         if (data.sanction_letter_unavailable) setSanctionChoice("unavailable");
         if (data.credit_score != null) setCreditScore(String(data.credit_score));
@@ -120,11 +126,8 @@ function Inner() {
     if (!(approvedTen > 0)) { setError("Approved tenure (years) is required."); return; }
     if (!(approvedEmi > 0)) { setError("Approved EMI is required."); return; }
 
-    // Credit score is required on approval — a positive integer or "None".
-    if (!creditNone && !(Number(creditScore) > 0)) {
-      setError("Enter a credit score (a positive number) or tick “None”.");
-      return;
-    }
+    // Credit score is OPTIONAL — if it isn't available yet, leave it blank (or
+    // tick "None") and fill it in later via Edit → Approval details.
 
     setSaving(true);
     setError(null);
@@ -155,6 +158,12 @@ function Inner() {
       patch.rejected_at = null;
       const entry = { from: loan.status ?? "", to: "approved", by, at: now, note: `Approved by ${LENDER_LABEL[String(details.approved_by)] ?? details.approved_by}` };
       patch.status_history = Array.isArray(loan.status_history) ? [...loan.status_history, entry] : [entry];
+    }
+
+    // The captured approval date is authoritative for approved_at (TAT / sort),
+    // for both a fresh approval and a later edit.
+    if (details.approval_date) {
+      patch.approved_at = new Date(details.approval_date + "T00:00:00").toISOString();
     }
 
     const { error: err } = await supabase().from("epc_applications").update(patch).eq("id", loan.id);
@@ -245,7 +254,7 @@ function Inner() {
 
             {/* Credit score — required: a positive integer or "None". */}
             <div className="mt-4 pt-4 border-t border-[#eef1f4]">
-              <label className="block text-[13px] font-medium text-[#0f3d2e] mb-1.5">Credit score</label>
+              <label className="block text-[13px] font-medium text-[#0f3d2e] mb-1.5">Credit score <span className="text-[#5a8a76] font-normal">(optional)</span></label>
               <div className="flex items-center gap-4 flex-wrap">
                 <input
                   type="text"
@@ -269,9 +278,9 @@ function Inner() {
             </div>
 
             <p className="text-[12px] text-[#5a8a76] mt-3">
-              All fields are required. The approved amount must be greater than 0 and
-              not more than the applied amount. Saved once, then editable one more time
-              from the profile&rsquo;s Edit menu before it locks.
+              The approved amount must be greater than 0 and not more than the applied
+              amount. Credit score is optional. Everything you save here is restored when
+              you edit approval details later — you won&rsquo;t need to re-enter it.
             </p>
           </SectionCard>
         )}

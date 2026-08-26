@@ -14,7 +14,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
-import { isMainAdmin } from "@/lib/hierarchy";
 import { logUserActivity } from "@/lib/user-activity-server";
 
 export const runtime = "nodejs";
@@ -25,7 +24,6 @@ const SUPABASE_URL =
 const SUPABASE_ANON =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SRC: Record<string, { table: string; module: string }> = {
@@ -185,45 +183,12 @@ export async function POST(req: NextRequest) {
     } else if (action === "reassign") {
       const to = p.assigned_to_user_id ?? null;
       if (to !== null && !UUID_RE.test(String(to))) return err("invalid assignee", 400);
-      if (!SERVICE_KEY) return err("reassign unavailable (service key not set)", 500);
-      // Reassignment changes the owner AWAY from the actor, which their own RLS
-      // policy would block — so we use an elevated client and enforce tier
-      // permissions here in code.
-      const svc = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
-      const role = claims.hierarchy_role || (isMainAdmin(claims) ? "MAIN_ADMIN" : "");
-
-      // Actor + current owner + target relationships.
-      const [{ data: actor }, { data: before }, { data: target }] = await Promise.all([
-        svc.from("epc_business").select("id, role, parent_user_id").eq("id", me).maybeSingle(),
-        svc.from(meta.table).select("assigned_to_user_id").eq("id", id).maybeSingle(),
-        to ? svc.from("epc_business").select("id, role, parent_user_id").eq("id", to).maybeSingle() : Promise.resolve({ data: null }),
-      ]);
-      if (!before) return err("case not found", 404);
-      const prev = (before as { assigned_to_user_id: string | null }).assigned_to_user_id ?? null;
-      const actorParent = (actor as { parent_user_id: string | null } | null)?.parent_user_id ?? null;
-      const targetParent = (target as { parent_user_id: string | null } | null)?.parent_user_id ?? null;
-
-      // Can the actor TOUCH this case? (must currently own it, or be over the owner)
-      let canTouch = isMainAdmin(claims);
-      if (!canTouch && role === "MANAGER") {
-        canTouch = prev === me;
-        if (!canTouch && prev) {
-          const { data: po } = await svc.from("epc_business").select("parent_user_id").eq("id", prev).maybeSingle();
-          canTouch = (po as { parent_user_id: string | null } | null)?.parent_user_id === me;
-        }
-      }
-      if (!canTouch && role === "OPERATIONS_USER") canTouch = prev === me;
-      if (!canTouch) return err("You can only reassign your own cases.", 403);
-
-      // Is the TARGET allowed for this actor?
-      let targetOk = isMainAdmin(claims) || to === null;
-      if (!targetOk && role === "MANAGER") targetOk = to === me || targetParent === me;         // self or own RM
-      if (!targetOk && role === "OPERATIONS_USER") targetOk = to === actorParent || to === me;   // send up to manager, or self
-      if (!targetOk) return err("You can only assign within your team.", 403);
-
-      const { error: uErr } = await svc.from(meta.table).update({ assigned_to_user_id: to, last_updated_by_user_id: me }).eq("id", id);
-      if (uErr) return err(uErr.message, 500);
-      await logUserActivity(svc, { actor_user_id: me, subject_user_id: to, module: meta.module, record_id: id, action: prev ? "reassigned" : "assigned", previous_value: prev, new_value: to });
+      // Delegate to the SECURITY DEFINER reassign_case() (migration 0071): it
+      // runs under the caller's JWT, re-enforces the tier rules, and does the
+      // owner update + activity log with RLS bypassed — so no service key and
+      // no RLS with_check to fight.
+      const { error: rErr } = await supabase.rpc("reassign_case", { p_module: meta.module, p_id: id, p_to: to });
+      if (rErr) return err(rErr.message || "Couldn't reassign this case.", 500);
       return NextResponse.json({ ok: true });
     } else {
       return err("unknown action", 400);

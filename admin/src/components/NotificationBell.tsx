@@ -14,14 +14,15 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getBusiness } from "@/lib/auth";
 
-type Source = "loan" | "epc" | "lead";
-type Notif = { id: string; source: Source; caseName: string; author: string; text: string; at: string; href: string };
+type Source = "loan" | "epc" | "lead" | "insurance";
+type Notif = { id: string; kind: "comment" | "assign"; source: Source; caseName: string; author: string; text: string; at: string; href: string };
 
-const SRC_LABEL: Record<Source, string> = { loan: "Loan", epc: "EPC", lead: "Lead" };
+const SRC_LABEL: Record<Source, string> = { loan: "Loan", epc: "EPC", lead: "Lead", insurance: "Insurance" };
 const SRC_TINT: Record<Source, { bg: string; fg: string }> = {
   loan: { bg: "#e7f5ee", fg: "#178a5c" },
   epc: { bg: "#e8f1fb", fg: "#185fa5" },
   lead: { bg: "#e8e7fb", fg: "#4338ca" },
+  insurance: { bg: "#fdf0e3", fg: "#b45309" },
 };
 const SEEN_KEY = "cc_notif_seen";
 
@@ -69,26 +70,47 @@ export default function NotificationBell() {
   const load = useCallback(async () => {
     if (!me?.id) return;
     const db = supabase();
-    const [loans, epcs, leads] = await Promise.all([
+    const [loans, epcs, leads, ins] = await Promise.all([
       db.from("epc_applications").select("id, borrower_name, aadhaar_name").eq("assigned_to_user_id", me.id),
       db.from("epc_business").select("id, trade_name, legal_name, contact_name").eq("assigned_to_user_id", me.id).neq("business_type", "admin"),
       db.from("loan_leads").select("id, name").eq("assigned_to_user_id", me.id),
+      db.from("insurance_applications").select("id, aadhaar_name").eq("assigned_to_user_id", me.id),
     ]);
     const loanName = new Map<string, string>(((loans.data ?? []) as Record<string, string>[]).map((r) => [r.id, r.borrower_name || r.aadhaar_name || "—"]));
     const epcName = new Map<string, string>(((epcs.data ?? []) as Record<string, string>[]).map((r) => [r.id, r.trade_name || r.legal_name || r.contact_name || "—"]));
     const leadName = new Map<string, string>(((leads.data ?? []) as Record<string, string>[]).map((r) => [r.id, r.name || "—"]));
+    const insName = new Map<string, string>(((ins.data ?? []) as Record<string, string>[]).map((r) => [r.id, r.aadhaar_name || "—"]));
     const loanIds = [...loanName.keys()], epcIds = [...epcName.keys()], leadIds = [...leadName.keys()];
 
     const empty = Promise.resolve({ data: [] as Record<string, string>[] });
-    const [lc, ec, dc] = await Promise.all([
+    const [lc, ec, dc, act] = await Promise.all([
       loanIds.length ? db.from("loan_comments").select("id, application_id, author_id, author_name, comment_text, created_at").in("application_id", loanIds).neq("author_id", me.id).order("created_at", { ascending: false }).limit(20) : empty,
       epcIds.length ? db.from("epc_comments").select("id, business_id, author_id, author_name, comment_text, created_at").in("business_id", epcIds).neq("author_id", me.id).order("created_at", { ascending: false }).limit(20) : empty,
       leadIds.length ? db.from("lead_comments").select("id, lead_id, author_id, author_name, comment_text, created_at").in("lead_id", leadIds).neq("author_id", me.id).order("created_at", { ascending: false }).limit(20) : empty,
+      // Cases someone ELSE assigned/reassigned TO me (e.g. Malvika → Manish).
+      db.from("user_activity_log")
+        .select("id, module, record_id, action, created_at, actor:actor_user_id(contact_name)")
+        .eq("subject_user_id", me.id).in("action", ["assigned", "reassigned"]).neq("actor_user_id", me.id)
+        .order("created_at", { ascending: false }).limit(20),
     ]);
+
+    // module → { display source, name lookup, view href }
+    const MOD: Record<string, { source: Source; names: Map<string, string>; href: (id: string) => string }> = {
+      apps: { source: "loan", names: loanName, href: (id) => `/admin/app/${id}/view` },
+      epcs: { source: "epc", names: epcName, href: (id) => `/admin/epc/${id}/view` },
+      loanleads: { source: "lead", names: leadName, href: (id) => `/admin/lead/${id}/view` },
+      insurance: { source: "insurance", names: insName, href: (id) => `/admin/insurance/${id}/view` },
+    };
+
     const merged: Notif[] = [
-      ...((lc.data ?? []) as Record<string, string>[]).map((r) => ({ id: "l" + r.id, source: "loan" as const, caseName: loanName.get(r.application_id) || "—", author: r.author_name || "Someone", text: r.comment_text, at: r.created_at, href: `/admin/app/${r.application_id}/view` })),
-      ...((ec.data ?? []) as Record<string, string>[]).map((r) => ({ id: "e" + r.id, source: "epc" as const, caseName: epcName.get(r.business_id) || "—", author: r.author_name || "Someone", text: r.comment_text, at: r.created_at, href: `/admin/epc/${r.business_id}/view` })),
-      ...((dc.data ?? []) as Record<string, string>[]).map((r) => ({ id: "d" + r.id, source: "lead" as const, caseName: leadName.get(r.lead_id) || "—", author: r.author_name || "Someone", text: r.comment_text, at: r.created_at, href: `/admin/lead/${r.lead_id}/view` })),
+      ...((lc.data ?? []) as Record<string, string>[]).map((r) => ({ id: "l" + r.id, kind: "comment" as const, source: "loan" as const, caseName: loanName.get(r.application_id) || "—", author: r.author_name || "Someone", text: r.comment_text, at: r.created_at, href: `/admin/app/${r.application_id}/view` })),
+      ...((ec.data ?? []) as Record<string, string>[]).map((r) => ({ id: "e" + r.id, kind: "comment" as const, source: "epc" as const, caseName: epcName.get(r.business_id) || "—", author: r.author_name || "Someone", text: r.comment_text, at: r.created_at, href: `/admin/epc/${r.business_id}/view` })),
+      ...((dc.data ?? []) as Record<string, string>[]).map((r) => ({ id: "d" + r.id, kind: "comment" as const, source: "lead" as const, caseName: leadName.get(r.lead_id) || "—", author: r.author_name || "Someone", text: r.comment_text, at: r.created_at, href: `/admin/lead/${r.lead_id}/view` })),
+      ...((act.data ?? []) as Record<string, any>[]).filter((r) => MOD[r.module]).map((r) => {
+        const m = MOD[r.module];
+        const author = (r.actor as { contact_name?: string } | null)?.contact_name || "Someone";
+        return { id: "a" + r.id, kind: "assign" as const, source: m.source, caseName: m.names.get(r.record_id) || "a case", author, text: r.action === "reassigned" ? "assigned you this case" : "assigned you a new case", at: r.created_at, href: m.href(r.record_id) };
+      }),
     ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 30);
 
     setItems(merged);
@@ -138,7 +160,7 @@ export default function NotificationBell() {
               : <span className="text-[11px] text-text-muted">You're all caught up</span>}
           </div>
           {items.length === 0 ? (
-            <div className="px-4 py-6 text-[12px] text-text-muted text-center">No comments on your cases yet.<br />When your team comments, it shows here.</div>
+            <div className="px-4 py-6 text-[12px] text-text-muted text-center">Nothing yet.<br />When your team assigns you a case or comments on your work, it shows here.</div>
           ) : (
             <ul className="divide-y divide-line">
               {items.map((n) => {
@@ -151,11 +173,13 @@ export default function NotificationBell() {
                       <div className="flex items-center gap-1.5 mb-0.5">
                         {isNew && <span className="w-2 h-2 rounded-full bg-[#178a5c] shrink-0" />}
                         <span className="text-[12px] font-bold text-text truncate">{n.author}</span>
-                        <span className="text-[11px] text-text-muted">commented on</span>
+                        <span className="text-[11px] text-text-muted">{n.kind === "assign" ? "assigned you" : "commented on"}</span>
                         <span className="text-[9px] font-bold px-1.5 py-0.5 rounded ml-auto shrink-0" style={{ backgroundColor: tint.bg, color: tint.fg }}>{SRC_LABEL[n.source]}</span>
                       </div>
                       <div className="text-[12px] font-semibold text-text truncate">{n.caseName}</div>
-                      <div className="text-[12px] text-text-mid line-clamp-2 mt-0.5">{n.text}</div>
+                      {n.kind === "comment"
+                        ? <div className="text-[12px] text-text-mid line-clamp-2 mt-0.5">{n.text}</div>
+                        : <div className="text-[11px] text-[#178a5c] font-medium mt-0.5">New assignment — tap to open</div>}
                       <div className="text-[10px] text-text-muted mt-1">{ago(n.at)}</div>
                     </button>
                   </li>

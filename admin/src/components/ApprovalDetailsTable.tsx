@@ -42,7 +42,23 @@ export type ApprovalDetails = {
   approved_tenure_years?: number | null;
   tentative_emi?: number | null;
   approved_emi?: number | null;
+  // Captured at approval: the date the lender approved, and the ROI. ROI is a
+  // FLAT rate for Credit Fair and a REDUCING rate for Solfin (label switches by
+  // lender). jsonb — no migration.
+  approval_date?: string | null; // YYYY-MM-DD
+  roi?: number | null;
 };
+
+function fmtDate(s: string | null | undefined): string {
+  if (!s) return "—";
+  const d = new Date(s.length <= 10 ? s + "T00:00:00" : s);
+  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
+export function roiLabelFor(lender: string | null | undefined): string {
+  if (lender === "creditfair") return "Flat ROI (%)";
+  if (lender === "solfin") return "Reducing ROI (%)";
+  return "ROI (%)";
+}
 
 // The editable rows: left = the applied/tentative snapshot, right = what the
 // lender actually approved. Add/remove entries here to change the table.
@@ -163,6 +179,45 @@ export default function ApprovalDetailsTable({ value, onChange, readOnly }: Prop
               </td>
             </tr>
           ))}
+
+          {/* Date of Approval — the date the lender approved (captured at approval). */}
+          <tr className="border-b border-[#e0f0e8]">
+            <td className="py-5 pr-4 text-[14px] text-[#5a8a76] font-medium w-[26%]">Date of Approval</td>
+            <td className="py-5 px-3" colSpan={3}>
+              {ro ? (
+                <span className="text-[15px] font-semibold text-[#0f3d2e]">{fmtDate(value.approval_date)}</span>
+              ) : (
+                <input
+                  type="date"
+                  value={value.approval_date ?? ""}
+                  onChange={(e) => onChange?.({ ...value, approval_date: e.target.value || null })}
+                  className="w-48 border border-[#cdeadd] rounded-[8px] px-3 py-2 text-[14px] focus:border-[#185fa5] outline-none bg-white"
+                />
+              )}
+            </td>
+          </tr>
+
+          {/* ROI — Flat for Credit Fair, Reducing for Solfin (label switches by lender). */}
+          <tr className="border-b border-[#e0f0e8]">
+            <td className="py-5 pr-4 text-[14px] text-[#5a8a76] font-medium w-[26%]">{roiLabelFor(value.approved_by as string)}</td>
+            <td className="py-5 px-3" colSpan={3}>
+              {ro ? (
+                <span className="text-[15px] font-semibold text-[#0f3d2e]">{value.roi != null ? `${value.roi}%` : "—"}</span>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={value.roi == null ? "" : String(value.roi)}
+                    onChange={(e) => { const c = e.target.value.replace(/[^\d.]/g, ""); onChange?.({ ...value, roi: c === "" ? null : Number(c) }); }}
+                    placeholder="0"
+                    className="w-32 border border-[#cdeadd] rounded-[8px] px-3 py-2 text-[14px] text-right focus:border-[#185fa5] outline-none bg-white"
+                  />
+                  <span className="text-[14px] text-[#5a8a76]">%</span>
+                </div>
+              )}
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>

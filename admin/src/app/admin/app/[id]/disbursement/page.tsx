@@ -244,12 +244,15 @@ function Inner() {
             {/* 1st disbursement — opens once both Tranche-1 docs are uploaded. */}
             <SectionCard title="1st Tranche documents" accent="blue" icon={I.files}>
               <p className="text-[13px] text-[#5a8a76] mb-3">
-                Upload the Feasibility Report and MMR / Advance Receipt. Once both are in, the 1st-disbursement entry below opens.
+                {loan.approved_lender === "solfin"
+                  ? "Upload the Feasibility Report. The MMR / Advance Receipt is optional for Solfin. Once the required document is in, the 1st-disbursement entry below opens."
+                  : "Upload the Feasibility Report and MMR / Advance Receipt. Once both are in, the 1st-disbursement entry below opens."}
               </p>
               <CompletionDocsSection
                 applicationId={loan.id}
                 uploadedBy="admin"
                 mode="tranche1"
+                advanceReceiptOptional={loan.approved_lender === "solfin"}
                 onCountChange={(u, t) => { setT1Uploaded(u); setT1Total(t); }}
               />
             </SectionCard>
