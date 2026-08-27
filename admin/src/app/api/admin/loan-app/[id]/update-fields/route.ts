@@ -30,6 +30,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 // Columns the concierge is allowed to write, grouped by coercion type.
 const TEXT_COLS = new Set([
   "borrower_name", "borrower_mobile", "borrower_email",
+  "borrower_pan", "borrower_father_name", "customer_photo_path",
   "install_pincode", "install_state", "install_district", "install_city",
   "system_type", "plant_use_type",
   "aadhaar_name", "aadhaar_gender", "aadhaar_number", "aadhaar_care_of", "aadhaar_address",
@@ -48,7 +49,7 @@ const NUM_COLS = new Set([
   "roi_percent", "central_subsidy", "state_subsidy", "selected_tenure_years", "selected_monthly_emi", "selected_subsidy_emi",
 ]);
 const DATE_COLS = new Set([
-  "aadhaar_dob", "coapp_dob",
+  "borrower_dob", "aadhaar_dob", "coapp_dob",
   "ebill_uploaded_at", "proforma_uploaded_at", "rooftop_photo_uploaded_at", "bank_statement_uploaded_at",
 ]);
 const BOOL_COLS = new Set(["bill_on_applicant_name"]);

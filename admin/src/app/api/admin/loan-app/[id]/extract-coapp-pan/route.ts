@@ -75,7 +75,7 @@ export async function POST(
     }
     // Gate relaxed to step 2 — the EPC apply flow captures co-applicant
     // docs on its Page 2 (application is at current_step=2 then).
-    if ((app.current_step ?? 1) < 2) return err("Complete registration before uploads.", 409);
+    if (claims.business_type !== "admin" && (app.current_step ?? 1) < 2) return err("Complete registration before uploads.", 409);
 
     // Compress + upload.
     const ab = await file.arrayBuffer();

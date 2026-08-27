@@ -120,7 +120,9 @@ export async function POST(
     if (claims.business_type !== "admin" && app.epc_business_id !== claims.business_id) {
       return err("forbidden", 403);
     }
-    if ((app.current_step ?? 1) < 2) {
+    // Admin (incl. the AI intake chat) may upload documents before step 1 is
+    // formally completed; the EPC-facing flow still follows the step order.
+    if (claims.business_type !== "admin" && (app.current_step ?? 1) < 2) {
       return err("Complete Step 1 before uploading Aadhaar.", 409);
     }
 

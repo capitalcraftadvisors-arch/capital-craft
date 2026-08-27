@@ -80,7 +80,7 @@ export async function POST(
       .maybeSingle();
     if (loadErr) return err(loadErr.message, 500);
     if (!app)    return err("Loan application not found.", 404);
-    if ((app.current_step ?? 1) < 4) return err("Complete Step 3 before Step 4 uploads.", 409);
+    if (claims.business_type !== "admin" && (app.current_step ?? 1) < 4) return err("Complete Step 3 before Step 4 uploads.", 409);
 
     // Compress (images only) + upload.
     const ab = await file.arrayBuffer();
