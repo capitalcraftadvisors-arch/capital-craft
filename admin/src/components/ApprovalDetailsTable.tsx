@@ -46,7 +46,7 @@ export type ApprovalDetails = {
   // FLAT rate for Credit Fair and a REDUCING rate for Solfin (label switches by
   // lender). jsonb — no migration.
   approval_date?: string | null; // YYYY-MM-DD
-  roi?: number | null;
+  roi?: number | string | null;  // string while typing (e.g. "9.75") so decimals aren't stripped
 };
 
 function fmtDate(s: string | null | undefined): string {
@@ -209,7 +209,7 @@ export default function ApprovalDetailsTable({ value, onChange, readOnly }: Prop
                     type="text"
                     inputMode="decimal"
                     value={value.roi == null ? "" : String(value.roi)}
-                    onChange={(e) => { const c = e.target.value.replace(/[^\d.]/g, ""); onChange?.({ ...value, roi: c === "" ? null : Number(c) }); }}
+                    onChange={(e) => { let c = e.target.value.replace(/[^\d.]/g, ""); const i = c.indexOf("."); if (i !== -1) c = c.slice(0, i + 1) + c.slice(i + 1).replace(/\./g, ""); onChange?.({ ...value, roi: c === "" ? null : c }); }}
                     placeholder="0"
                     className="w-32 border border-[#cdeadd] rounded-[8px] px-3 py-2 text-[14px] text-right focus:border-[#185fa5] outline-none bg-white"
                   />
