@@ -92,7 +92,7 @@ const SCRIPT: Turn[] = [
   { id: "loandocs", bot: "Upload the latest electricity bill and the quotation / proforma invoice.", kind: "docs", docLabel: "E-bill & quotation",
     uploads: [{ name: "ebill", label: "Electricity bill" }, { name: "proforma", label: "Quotation / invoice" }], extractRoute: "extract-loan-docs" },
   { id: "rooftop", bot: "Upload the geo-tagged rooftop photo.", kind: "docs", docLabel: "Rooftop photo",
-    uploads: [{ name: "photo", label: "Rooftop photo" }], uploadCategory: "rooftop_photo", pathField: "rooftop_photo_path" },
+    uploads: [{ name: "photo", label: "Rooftop photo" }], uploadCategory: "other", pathField: "rooftop_photo_path" },
   { id: "bank", bot: "Upload the bank statement.", kind: "docs", docLabel: "Bank statement",
     uploads: [{ name: "file", label: "Bank statement" }], extractRoute: "extract-bank-statement", extraForm: { method: "manual_epdf" } },
 
@@ -121,7 +121,7 @@ const SCRIPT: Turn[] = [
 
   // ── Additional documents (optional) ──
   { id: "additional_docs", bot: "Any other documents to add? (optional — skip if none)", kind: "docs", docLabel: "Additional documents", optional: true,
-    uploads: [{ name: "file", label: "Additional document" }], uploadCategory: "other_documents" },
+    uploads: [{ name: "file", label: "Additional document" }], uploadCategory: "other" },
 
   // ── Loan information ──
   { id: "system_type", bot: "Solar system preference?", kind: "choice", field: "system_type", choices: [
