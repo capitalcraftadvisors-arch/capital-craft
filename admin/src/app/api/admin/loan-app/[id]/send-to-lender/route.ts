@@ -38,7 +38,7 @@ const GMAIL_PASS = process.env.GMAIL_APP_PASSWORD || "";
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const LENDER_KEYS: LenderKey[] = ["creditfair", "aerem", "solfin"];
-const LINK_TTL = 14 * 24 * 3600; // 14 days
+const LINK_TTL = 7 * 24 * 3600; // 7 days — GCS V4 signed-URL max (604800s)
 
 function err(message: string, status: number) {
   return NextResponse.json({ ok: false, error: message }, { status });
