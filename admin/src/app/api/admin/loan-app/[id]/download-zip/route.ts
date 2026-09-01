@@ -27,6 +27,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import archiver from "archiver";
+import { summaryRows } from "@/lib/lender-summary";
 import ExcelJS from "exceljs";
 import { Readable } from "node:stream";
 import { downloadBuffer } from "@/lib/gcs";
@@ -117,52 +118,9 @@ export async function GET(
     const title = ws.addRow(["Capital Craft — Loan Application", ""]);
     title.font = { bold: true, size: 14 };
     ws.addRow([]);
-    const rows: Array<[string, string]> = [
-      ["Application ID",     displayId],
-      ["Submitted to",       LENDER_LABEL[lender]],
-      ["Status",             String(loan.status ?? "—")],
-      ["Submitted",          loan.submitted_at ? new Date(loan.submitted_at).toLocaleString("en-IN") : "—"],
-      ["EPC Partner",        `${epcName}${loan.epc_business?.epc_display_id ? ` (${loan.epc_business.epc_display_id})` : ""}`],
-      ["", ""],
-      ["Applicant",          borrowerName],
-      ["Mobile",             loan.borrower_mobile ? `+91 ${loan.borrower_mobile}` : "—"],
-      ["Email",              loan.borrower_email ?? "—"],
-      ["PAN",                loan.borrower_pan ?? "—"],
-      ["Aadhaar",            loan.aadhaar_number ?? loan.aadhaar_number_masked ?? "—"],
-      ["DOB",                loan.aadhaar_dob ?? "—"],
-      ["Gender",             loan.aadhaar_gender ?? "—"],
-      ["Address (Aadhaar)",  loan.aadhaar_address ?? "—"],
-      ["", ""],
-      ["Install address",    [loan.ebill_address_line, loan.install_city, loan.install_state, loan.install_pincode].filter(Boolean).join(", ") || "—"],
-      ["System type",        loan.system_type ?? "—"],
-      ["Project size",       loan.project_size ? `${loan.project_size} ${(loan.project_size_unit ?? "kw").toUpperCase()}` : "—"],
-      ["Project cost",       rupees(loan.total_project_cost)],
-      ["Loan required",      rupees(loan.loan_amount_required)],
-      ["Monthly bill",       rupees(loan.monthly_bill_amount)],
-      ["DISCOM",             loan.discom_name ?? "—"],
-      ["CA number",          loan.ca_number ?? "—"],
-      ["", ""],
-      ["Employment",         loan.employment_type ?? "—"],
-      ["Profession",         loan.profession === "Other" && loan.profession_other ? `Other — ${loan.profession_other}` : (loan.profession ?? "—")],
-      ["Organization",       loan.organization_name ?? "—"],
-      ["Annual income",      rupees(loan.annual_income)],
-      ["Bank",               loan.bank_name ?? "—"],
-      ["Account holder",     loan.bank_account_holder ?? "—"],
-      ["Account no.",        loan.bank_account_no ?? "—"],
-      ["IFSC",               loan.bank_ifsc ?? "—"],
-      ["", ""],
-      // ROI / Central subsidy / State subsidy / Monthly EMI / Subsidy EMI are
-      // deliberately NOT in the lender pack — the lender sets its own terms.
-      ["Tenure",             loan.selected_tenure_years ? `${loan.selected_tenure_years} years` : "—"],
-    ];
-    if (loan.bill_on_applicant_name === false) {
-      rows.push(["", ""]);
-      rows.push(["Co-applicant",       loan.coapp_name ?? "—"]);
-      rows.push(["Co-app relation",    loan.coapp_relation ?? "—"]);
-      rows.push(["Co-app PAN",         loan.coapp_pan ?? "—"]);
-      rows.push(["Co-app Aadhaar",     loan.coapp_aadhaar_number ?? loan.coapp_aadhaar_number_masked ?? "—"]);
-      rows.push(["Co-app mobile",      loan.coapp_mobile ? `+91 ${loan.coapp_mobile}` : "—"]);
-    }
+    // Rows come from the shared builder: Credit Fair gets its dedicated field
+    // layout; Solfin / Aerem keep the general layout.
+    const rows = summaryRows(loan, { displayId, epcName, epcDisplayId: loan.epc_business?.epc_display_id }, lender);
     for (const [k, v] of rows) {
       const r = ws.addRow([k, v]);
       r.getCell(1).font = { bold: true, color: { argb: "FF0F3D2E" } };

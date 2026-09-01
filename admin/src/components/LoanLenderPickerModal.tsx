@@ -3,7 +3,7 @@
 // Flexible lender picker for the loan View page:
 //   - Doc Sent  → pick a lender not yet sent docs, or type-to-add a new one.
 //   - Approve   → pick which lender approved (from those already sent docs).
-//   - Reject    → pick which lender rejected + capture a reason.
+//   - Reject    → pick which lender rejected + capture the date + a reason.
 
 import { useState } from "react";
 import Button from "@/components/ui/Button";
@@ -13,8 +13,16 @@ import { slugifyLender } from "@/lib/loan-lenders";
 export type PickerLender = { key: string; label: string };
 const CUSTOM = "__custom__";
 
+// Local YYYY-MM-DD for the native date input's default (today, in the admin's
+// timezone). The <input type="date"> renders DD/MM/YYYY under lang="en-GB".
+function todayLocal(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 export default function LoanLenderPickerModal({
-  open, title, subtitle, options, allowAdd, needReason, confirmLabel, tone = "blue", onClose, onConfirm,
+  open, title, subtitle, options, allowAdd, needReason, needDate, confirmLabel, tone = "blue", onClose, onConfirm,
 }: {
   open: boolean;
   title: string;
@@ -22,14 +30,16 @@ export default function LoanLenderPickerModal({
   options: PickerLender[];
   allowAdd?: boolean;
   needReason?: boolean;
+  needDate?: boolean;   // reject flow: capture the date the lender rejected
   confirmLabel?: string;
   tone?: "blue" | "green" | "red";
   onClose: () => void;
-  onConfirm: (lender: PickerLender, reason?: string) => void | Promise<void>;
+  onConfirm: (lender: PickerLender, reason?: string, date?: string) => void | Promise<void>;
 }) {
   const [sel, setSel] = useState("");
   const [custom, setCustom] = useState("");
   const [reason, setReason] = useState("");
+  const [date, setDate] = useState<string>(todayLocal);
   const [busy, setBusy] = useState(false);
 
   if (!open) return null;
@@ -40,13 +50,15 @@ export default function LoanLenderPickerModal({
     ...(allowAdd ? [{ value: CUSTOM, label: "+ Add a lender…" }] : []),
   ];
   const canConfirm =
-    (isCustom ? custom.trim().length > 0 : !!sel) && (!needReason || reason.trim().length > 0);
+    (isCustom ? custom.trim().length > 0 : !!sel) &&
+    (!needReason || reason.trim().length > 0) &&
+    (!needDate || !!date);
 
   const btnVariant = tone === "red" ? "primary" : tone === "green" ? "grad" : "primary";
 
   function close() {
     if (busy) return;
-    setSel(""); setCustom(""); setReason("");
+    setSel(""); setCustom(""); setReason(""); setDate(todayLocal());
     onClose();
   }
 
@@ -57,8 +69,8 @@ export default function LoanLenderPickerModal({
       const lender: PickerLender = isCustom
         ? { key: slugifyLender(custom), label: custom.trim() }
         : options.find((o) => o.key === sel) || { key: sel, label: sel };
-      await onConfirm(lender, needReason ? reason.trim() : undefined);
-      setSel(""); setCustom(""); setReason("");
+      await onConfirm(lender, needReason ? reason.trim() : undefined, needDate ? date : undefined);
+      setSel(""); setCustom(""); setReason(""); setDate(todayLocal());
       onClose();
     } finally {
       setBusy(false);
@@ -98,6 +110,21 @@ export default function LoanLenderPickerModal({
               onChange={(e) => setCustom(e.target.value)}
               placeholder="e.g. HDFC"
               className="w-full rounded-input border border-line bg-white px-3 py-2 text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-[#185fa5]/30"
+            />
+          </div>
+        )}
+
+        {needDate && (
+          <div className="mt-4">
+            <label className="block text-[13px] font-medium text-text mb-1">
+              Date of rejection <span className="text-red-600">*</span>
+            </label>
+            <input
+              type="date"
+              value={date}
+              max={todayLocal()}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full rounded-input border border-line bg-white px-3 py-2 text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-red-200"
             />
           </div>
         )}

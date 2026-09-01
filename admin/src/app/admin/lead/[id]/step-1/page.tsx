@@ -5,8 +5,8 @@
 // submits (status='under_review'), landing on the lead profile.
 //
 // Fields: Borrower Name, Phone no, EPC partner (approved EPCs only, or a typed
-// name), Project Size (kW/MW), Project Cost (₹ — stored in loan_amount), Lead
-// Owner Name.
+// name), Project Size (kW/MW), Project cost (₹ — total_project_cost), Loan
+// amount required (₹ — loan_amount), Lead Owner Name. Only the name is required.
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -38,7 +38,8 @@ function Inner() {
   const [mobile, setMobile] = useState("");
   const [projectSize, setProjectSize] = useState("");
   const [projectUnit, setProjectUnit] = useState("kw");
-  const [projectCost, setProjectCost] = useState("");
+  const [projectCost, setProjectCost] = useState("");   // total_project_cost
+  const [loanAmount, setLoanAmount] = useState("");      // loan_amount (→ loan_amount_required)
   const [leadOwner, setLeadOwner] = useState("");
   const [epcId, setEpcId] = useState("");        // real EPC id, "__custom__", or ""
   const [epcCustom, setEpcCustom] = useState("");
@@ -50,7 +51,7 @@ function Inner() {
     void (async () => {
       const [{ data: lead }, { data: epcRows }] = await Promise.all([
         supabase().from("loan_leads")
-          .select("lead_display_id, name, mobile, project_size, project_size_unit, loan_amount, lead_owner_name, epc_business_id, epc_name_custom")
+          .select("lead_display_id, name, mobile, project_size, project_size_unit, total_project_cost, loan_amount, lead_owner_name, epc_business_id, epc_name_custom")
           .eq("id", params.id).maybeSingle(),
         // Only APPROVED, onboarded EPCs are selectable (rejected / in-progress
         // EPCs are excluded).
@@ -73,7 +74,8 @@ function Inner() {
         setMobile((d.mobile as string) ?? "");
         setProjectSize(d.project_size != null ? String(d.project_size) : "");
         setProjectUnit((d.project_size_unit as string) || "kw");
-        setProjectCost(d.loan_amount != null ? String(d.loan_amount) : "");
+        setProjectCost(d.total_project_cost != null ? String(d.total_project_cost) : "");
+        setLoanAmount(d.loan_amount != null ? String(d.loan_amount) : "");
         setLeadOwner((d.lead_owner_name as string) ?? "");
         if (d.epc_business_id) setEpcId(d.epc_business_id as string);
         else if (d.epc_name_custom) { setEpcId(CUSTOM); setEpcCustom(d.epc_name_custom as string); }
@@ -89,22 +91,24 @@ function Inner() {
 
   async function submit() {
     setErr(null);
+    // Only the borrower name is required now; everything else is optional. A
+    // mobile, if entered, must still be a valid 10 digits.
     if (!name.trim()) { setErr("Please enter the borrower's name."); return; }
-    if (!/^\d{10}$/.test(mobile)) { setErr("Enter a valid 10-digit phone number."); return; }
-    if (!epcId) { setErr("Select the EPC partner (or choose “type a name”)."); return; }
-    if (epcId === CUSTOM && !epcCustom.trim()) { setErr("Type the EPC name."); return; }
+    if (mobile && !/^\d{10}$/.test(mobile)) { setErr("Enter a valid 10-digit phone number, or leave it blank."); return; }
     setSaving(true);
+    const isRealEpc = !!epcId && epcId !== CUSTOM;
     const { error } = await supabase()
       .from("loan_leads")
       .update({
         name: name.trim(),
-        mobile: mobile.trim(),
+        mobile: mobile.trim() || null,
         project_size: projectSize ? Number(projectSize) : null,
         project_size_unit: projectUnit,
-        loan_amount: projectCost ? Number(projectCost) : null,
+        total_project_cost: projectCost ? Number(projectCost) : null,
+        loan_amount: loanAmount ? Number(loanAmount) : null,
         lead_owner_name: leadOwner.trim() || null,
-        epc_business_id: epcId === CUSTOM ? null : epcId,
-        epc_name_custom: epcId === CUSTOM ? epcCustom.trim() : null,
+        epc_business_id: isRealEpc ? epcId : null,
+        epc_name_custom: epcId === CUSTOM ? (epcCustom.trim() || null) : null,
         status: "under_review",
         current_step: 1,
       })
@@ -189,6 +193,13 @@ function Inner() {
             inputMode="numeric"
             value={projectCost}
             onChange={(e) => setProjectCost(e.target.value.replace(/[^\d.]/g, ""))}
+          />
+          <Input
+            label="Loan amount required (₹)"
+            placeholder="e.g. 200000"
+            inputMode="numeric"
+            value={loanAmount}
+            onChange={(e) => setLoanAmount(e.target.value.replace(/[^\d.]/g, ""))}
           />
           <Input label="Lead owner name" placeholder="Who owns this lead" value={leadOwner} onChange={(e) => setLeadOwner(e.target.value)} />
         </Card>

@@ -5,7 +5,7 @@
 // tinted header card, and a responsive column grid.
 //
 // Shows: Borrower Name, Phone no, EPC Partner, Project Size, Project cost,
-// Lead Owner Name, and a threaded admin-only Comments box (lead_comments,
+// Loan amount required, Lead Owner Name, and a threaded admin-only Comments box (lead_comments,
 // migration 0065). Primary action: "Ready for loan application" → converts
 // the lead into an epc_applications DRAFT (needs a real EPC assigned first).
 // Secondary: Abort (drops the lead off the dashboard, kept for the record).
@@ -29,6 +29,7 @@ type Lead = {
   mobile: string | null;
   address: string | null;
   dob: string | null;
+  total_project_cost: number | null;
   loan_amount: number | null;
   project_size: number | null;
   project_size_unit: string | null;
@@ -222,7 +223,8 @@ function Inner() {
           <div className="flex flex-col gap-2.5">
             <SectionCard title="Project & loan" accent="blue" icon={I.money}>
               <KV k="Project Size" v={sizeStr} />
-              <KV k="Project cost" v={money(lead.loan_amount)} />
+              <KV k="Project cost" v={money(lead.total_project_cost)} />
+              <KV k="Loan amount required" v={money(lead.loan_amount)} />
               <KV k="Lead Owner Name" v={lead.lead_owner_name} />
             </SectionCard>
 

@@ -60,6 +60,46 @@ export function roiLabelFor(lender: string | null | undefined): string {
   return "ROI (%)";
 }
 
+// Which rate the lender's ENTERED ROI represents; the other side is derived.
+// Credit Fair enters FLAT; Solfin / Aerem (and anything else) enter REDUCING.
+export function roiKind(lender: string | null | undefined): "flat" | "reducing" {
+  return lender === "creditfair" ? "flat" : "reducing";
+}
+
+// Flat annual % → equivalent reducing-balance annual %, for principal P over
+// `years` (solve the EMI equation numerically).
+function flatToReducing(flatAnnual: number, P: number, years: number): number | null {
+  if (!(flatAnnual > 0) || !(P > 0) || !(years > 0)) return null;
+  const n = Math.round(years * 12);
+  const emi = (P + P * (flatAnnual / 100) * years) / n;
+  let lo = 0, hi = 1; // monthly rate bounds
+  for (let i = 0; i < 100; i++) {
+    const r = (lo + hi) / 2;
+    const emiR = r === 0 ? P / n : (P * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+    if (emiR > emi) hi = r; else lo = r;
+  }
+  return ((lo + hi) / 2) * 12 * 100;
+}
+// Reducing-balance annual % → equivalent flat annual %.
+function reducingToFlat(reducingAnnual: number, P: number, years: number): number | null {
+  if (!(reducingAnnual > 0) || !(P > 0) || !(years > 0)) return null;
+  const n = Math.round(years * 12);
+  const r = reducingAnnual / 100 / 12;
+  const emi = r === 0 ? P / n : (P * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+  return ((emi * n - P) / (P * years)) * 100;
+}
+// The counterpart rate to show on the right, from the entered ROI + lender +
+// approved amount/tenure. Null until those are present.
+export function roiCounterpart(value: ApprovalDetails): number | null {
+  const entered = value.roi == null || value.roi === "" ? null : Number(value.roi);
+  if (entered == null || !Number.isFinite(entered)) return null;
+  const P = Number(value.approved_loan_amount) || 0;
+  const years = Number(value.approved_tenure_years) || 0;
+  return roiKind(value.approved_by as string) === "flat"
+    ? flatToReducing(entered, P, years)
+    : reducingToFlat(entered, P, years);
+}
+
 // The editable rows: left = the applied/tentative snapshot, right = what the
 // lender actually approved. Add/remove entries here to change the table.
 type RowDef = {
@@ -197,25 +237,37 @@ export default function ApprovalDetailsTable({ value, onChange, readOnly }: Prop
             </td>
           </tr>
 
-          {/* ROI — Flat for Credit Fair, Reducing for Solfin (label switches by lender). */}
+          {/* ROI — the lender enters one basis (Flat for Credit Fair, Reducing
+              for Solfin/Aerem); the counterpart is auto-calculated on the right. */}
           <tr className="border-b border-[#e0f0e8]">
-            <td className="py-5 pr-4 text-[14px] text-[#5a8a76] font-medium w-[26%]">{roiLabelFor(value.approved_by as string)}</td>
-            <td className="py-5 px-3" colSpan={3}>
+            <td className="py-5 pr-4 text-[14px] text-[#5a8a76] font-medium w-[26%]">
+              {roiKind(value.approved_by as string) === "flat" ? "Flat ROI (%)" : "Reducing Balance ROI (%)"}
+            </td>
+            <td className="py-5 px-3 w-[24%]">
               {ro ? (
-                <span className="text-[15px] font-semibold text-[#0f3d2e]">{value.roi != null ? `${value.roi}%` : "—"}</span>
+                <div className="text-right font-semibold text-[#0f3d2e]">{value.roi != null && value.roi !== "" ? `${value.roi}%` : "—"}</div>
               ) : (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center justify-end gap-1.5">
                   <input
                     type="text"
                     inputMode="decimal"
                     value={value.roi == null ? "" : String(value.roi)}
                     onChange={(e) => { let c = e.target.value.replace(/[^\d.]/g, ""); const i = c.indexOf("."); if (i !== -1) c = c.slice(0, i + 1) + c.slice(i + 1).replace(/\./g, ""); onChange?.({ ...value, roi: c === "" ? null : c }); }}
                     placeholder="0"
-                    className="w-32 border border-[#cdeadd] rounded-[8px] px-3 py-2 text-[14px] text-right focus:border-[#185fa5] outline-none bg-white"
+                    className="w-24 border border-[#cdeadd] rounded-[8px] px-3 py-2 text-[14px] text-right focus:border-[#185fa5] outline-none bg-white"
                   />
                   <span className="text-[14px] text-[#5a8a76]">%</span>
                 </div>
               )}
+            </td>
+            <td className="py-5 pl-6 pr-4 text-[14px] text-[#5a8a76] font-medium w-[26%]">
+              {roiKind(value.approved_by as string) === "flat" ? "Reducing Balance (%)" : "Flat ROI (%)"}
+              <span className="block text-[11px] text-[#93a7b8] font-normal">auto-calculated</span>
+            </td>
+            <td className="py-5 px-3 w-[24%]">
+              <div className="text-right font-semibold text-[#178a5c]">
+                {(() => { const c = roiCounterpart(value); return c != null ? `${c.toFixed(2)}%` : "—"; })()}
+              </div>
             </td>
           </tr>
         </tbody>

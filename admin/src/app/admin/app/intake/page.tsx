@@ -89,8 +89,10 @@ const SCRIPT: Turn[] = [
     uploads: [{ name: "front", label: "Aadhaar front" }, { name: "back", label: "Aadhaar back" }], extractRoute: "extract-aadhaar" },
   { id: "selfie", bot: "Upload the applicant's photo / selfie.", kind: "docs", docLabel: "Applicant photo",
     uploads: [{ name: "file", label: "Applicant photo" }], uploadCategory: "customer_photo", pathField: "customer_photo_path" },
-  { id: "loandocs", bot: "Upload the latest electricity bill and the quotation / proforma invoice.", kind: "docs", docLabel: "E-bill & quotation",
-    uploads: [{ name: "ebill", label: "Electricity bill" }, { name: "proforma", label: "Quotation / invoice" }], extractRoute: "extract-loan-docs" },
+  { id: "ebill", bot: "Upload the latest electricity bill.", kind: "docs", docLabel: "Electricity bill",
+    uploads: [{ name: "ebill", label: "Electricity bill" }], extractRoute: "extract-loan-docs" },
+  { id: "quotation", bot: "Upload the quotation / proforma invoice.", kind: "docs", docLabel: "Quotation / invoice",
+    uploads: [{ name: "proforma", label: "Quotation / invoice" }], extractRoute: "extract-loan-docs" },
   { id: "rooftop", bot: "Upload the geo-tagged rooftop photo.", kind: "docs", docLabel: "Rooftop photo",
     uploads: [{ name: "photo", label: "Rooftop photo" }], uploadCategory: "other", pathField: "rooftop_photo_path" },
   { id: "bank", bot: "Upload the bank statement.", kind: "docs", docLabel: "Bank statement",
@@ -1263,7 +1265,8 @@ const DOC_PATHS: Record<string, string[]> = {
   pan: ["borrower_pan"],
   aadhaar: ["aadhaar_front_path", "aadhaar_back_path"],
   selfie: ["customer_photo_path"],
-  loandocs: ["proforma_invoice_path", "ebill_path"],
+  ebill: ["ebill_path"],
+  quotation: ["proforma_invoice_path"],
   rooftop: ["rooftop_photo_path"],
   coapp_pan: ["coapp_pan_path"],
   coapp_aadhaar: ["coapp_aadhaar_front_path", "coapp_aadhaar_back_path"],
@@ -1332,19 +1335,21 @@ function mapExtract(turn: Turn, j: Record<string, any>): { patch: Form; fields: 
   if (turn.extractRoute === "extract-aadhaar") {
     const f = j.fields ?? {}, p = j.storage_paths ?? {};
     if (coapp) return { patch: {
-      coapp_aadhaar_name: f.name ?? "", coapp_aadhaar_dob: f.dob ?? "", coapp_aadhaar_gender: f.gender ?? "", coapp_aadhaar_number: f.aadhaar_number ?? "",
+      // Stored data stays MASKED (xxxxxxxx####); the chat displays the full number above for RM verification.
+      coapp_aadhaar_name: f.name ?? "", coapp_aadhaar_dob: f.dob ?? "", coapp_aadhaar_gender: f.gender ?? "", coapp_aadhaar_number: f.aadhaar_masked ?? f.aadhaar_number ?? "",
       coapp_aadhaar_care_of: f.care_of ?? "", coapp_aadhaar_address: f.address ?? "",
       coapp_aadhaar_front_path: p.front ?? "", coapp_aadhaar_back_path: p.back ?? "", coapp_aadhaar_face_path: p.face ?? "",
       coapp_name: f.name ?? "", coapp_dob: f.dob ?? "",
-    }, fields: [row("Name", f.name, "coapp_aadhaar_name"), row("DOB", f.dob, "coapp_aadhaar_dob"), row("Aadhaar", f.aadhaar_masked ?? f.aadhaar_number)] };
+    }, fields: [row("Name", f.name, "coapp_aadhaar_name"), row("DOB", f.dob, "coapp_aadhaar_dob"), row("Aadhaar", f.aadhaar_number ?? f.aadhaar_masked)] };
     return { patch: {
-      aadhaar_name: f.name ?? "", aadhaar_dob: f.dob ?? "", aadhaar_gender: f.gender ?? "", aadhaar_number: f.aadhaar_number ?? "",
+      // Stored data stays MASKED (xxxxxxxx####); the chat displays the full number above for RM verification.
+      aadhaar_name: f.name ?? "", aadhaar_dob: f.dob ?? "", aadhaar_gender: f.gender ?? "", aadhaar_number: f.aadhaar_masked ?? f.aadhaar_number ?? "",
       aadhaar_care_of: f.care_of ?? "", aadhaar_address: f.address ?? "",
       aadhaar_front_path: p.front ?? "", aadhaar_back_path: p.back ?? "", aadhaar_face_path: p.face ?? "",
       // Auto-fill the applicant identity so the RM doesn't type it (only when read).
       ...(f.name ? { borrower_name: f.name } : {}),
       ...(f.dob ? { borrower_dob: f.dob } : {}),
-    }, fields: [row("Name", f.name, "borrower_name"), row("DOB", f.dob, "aadhaar_dob"), row("Gender", f.gender, "aadhaar_gender"), row("Aadhaar", f.aadhaar_masked ?? f.aadhaar_number), row("Address", f.address, "aadhaar_address")] };
+    }, fields: [row("Name", f.name, "borrower_name"), row("DOB", f.dob, "aadhaar_dob"), row("Gender", f.gender, "aadhaar_gender"), row("Aadhaar", f.aadhaar_number ?? f.aadhaar_masked), row("Address", f.address, "aadhaar_address")] };
   }
   if (turn.extractRoute === "extract-coapp-pan") {
     const f = j.fields ?? {};
@@ -1361,19 +1366,36 @@ function mapExtract(turn: Turn, j: Record<string, any>): { patch: Form; fields: 
       fields: [row("PAN", f.pan, "coapp_pan"), row("Name", f.name, "coapp_name"), row("Father", f.father_name, "coapp_father_name")] };
   }
   if (turn.extractRoute === "extract-loan-docs") {
+    // The e-bill and the quotation are now separate turns, each calling this
+    // route with a single file — so only map the part that was uploaded, never
+    // overwriting the other's already-read values with blanks.
     const pf = j.proforma?.fields ?? {}, eb = j.ebill?.fields ?? {};
-    return { patch: {
-      project_size: pf.project_size != null ? String(pf.project_size) : "", project_size_unit: pf.project_size_unit ?? "kw", total_project_cost: pf.total_project_cost != null ? String(pf.total_project_cost) : "",
-      proforma_invoice_path: j.proforma?.storage_path ?? "", proforma_uploaded_at: j.proforma?.uploaded_at ?? "",
-      monthly_bill_amount: eb.monthly_bill_amount != null ? String(eb.monthly_bill_amount) : "", discom_name: eb.discom_name ?? "", ca_number: eb.ca_number ?? "",
-      ebill_address_line: eb.ebill_address_line ?? "", ebill_name: eb.ebill_name ?? "", ebill_path: j.ebill?.storage_path ?? "", ebill_uploaded_at: j.ebill?.uploaded_at ?? "",
-    }, fields: [
-      row("System size", pf.project_size != null ? `${pf.project_size} ${pf.project_size_unit ?? "kW"}` : "", "project_size"),
-      row("Project cost", pf.total_project_cost != null ? `₹${Number(pf.total_project_cost).toLocaleString("en-IN")}` : "", "total_project_cost"),
-      row("Monthly bill", eb.monthly_bill_amount != null ? `₹${eb.monthly_bill_amount}` : "", "monthly_bill_amount"),
-      row("DISCOM", eb.discom_name, "discom_name"),
-      row("Bill name", eb.ebill_name, "ebill_name"),
-    ] };
+    const hasP = !!(j.proforma && (j.proforma.fields || j.proforma.storage_path));
+    const hasE = !!(j.ebill && (j.ebill.fields || j.ebill.storage_path));
+    const patch: Form = {};
+    const fields: Fetched[] = [];
+    if (hasP) {
+      patch.project_size = pf.project_size != null ? String(pf.project_size) : "";
+      patch.project_size_unit = pf.project_size_unit ?? "kw";
+      patch.total_project_cost = pf.total_project_cost != null ? String(pf.total_project_cost) : "";
+      patch.proforma_invoice_path = j.proforma?.storage_path ?? "";
+      patch.proforma_uploaded_at = j.proforma?.uploaded_at ?? "";
+      fields.push(row("System size", pf.project_size != null ? `${pf.project_size} ${pf.project_size_unit ?? "kW"}` : "", "project_size"));
+      fields.push(row("Project cost", pf.total_project_cost != null ? `₹${Number(pf.total_project_cost).toLocaleString("en-IN")}` : "", "total_project_cost"));
+    }
+    if (hasE) {
+      patch.monthly_bill_amount = eb.monthly_bill_amount != null ? String(eb.monthly_bill_amount) : "";
+      patch.discom_name = eb.discom_name ?? "";
+      patch.ca_number = eb.ca_number ?? "";
+      patch.ebill_address_line = eb.ebill_address_line ?? "";
+      patch.ebill_name = eb.ebill_name ?? "";
+      patch.ebill_path = j.ebill?.storage_path ?? "";
+      patch.ebill_uploaded_at = j.ebill?.uploaded_at ?? "";
+      fields.push(row("Monthly bill", eb.monthly_bill_amount != null ? `₹${eb.monthly_bill_amount}` : "", "monthly_bill_amount"));
+      fields.push(row("DISCOM", eb.discom_name, "discom_name"));
+      fields.push(row("Bill name", eb.ebill_name, "ebill_name"));
+    }
+    return { patch, fields };
   }
   if (turn.extractRoute === "extract-bank-statement") {
     const f = j.fields ?? {};

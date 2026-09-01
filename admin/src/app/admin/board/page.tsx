@@ -316,17 +316,19 @@ function Inner() {
     } catch (e) { alert("Couldn’t record: " + (e as Error).message); }
     finally { setPickerBusy(false); }
   }
-  async function pickerReject(lender: PickerLender, reason?: string) {
+  async function pickerReject(lender: PickerLender, reason?: string, date?: string) {
     if (!picker) return;
     const { c, rows } = picker;
     setPickerBusy(true);
     try {
       const now = new Date().toISOString();
+      // Admin-entered rejection date (local midnight) when provided; else now.
+      const rejectedAt = date ? new Date(`${date}T00:00:00`).toISOString() : now;
       const existing = rows.find((r) => r.lender_key === lender.key);
-      const lp = { rejected_at: now, rejection_reason: reason || null, approved_at: null, approval_details: null };
+      const lp = { rejected_at: rejectedAt, rejection_reason: reason || null, approved_at: null, approval_details: null };
       if (existing) await supabase().from("loan_application_lenders").update(lp).eq("id", existing.id);
       else await supabase().from("loan_application_lenders").insert({ application_id: c.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: now, ...lp });
-      await supabase().from("epc_applications").update({ status: "rejected", rejected_at: now, rejected_lender: lender.key, rejection_reason: reason || null, last_updated_by_user_id: me?.id ?? null }).eq("id", c.id);
+      await supabase().from("epc_applications").update({ status: "rejected", rejected_at: rejectedAt, rejected_lender: lender.key, rejection_reason: reason || null, last_updated_by_user_id: me?.id ?? null }).eq("id", c.id);
       await logLoanActivity(c.id, "rejected", { detail: `Rejected by ${lender.label}${reason ? ` — ${reason}` : ""}` });
       setPicker(null); setTouches((t) => t + 1); await reload();
     } catch (e) { alert("Couldn’t record: " + (e as Error).message); }
@@ -737,10 +739,11 @@ function Inner() {
             options={m === "docsent" ? available : withDocsOpts}
             allowAdd={m === "docsent"}
             needReason={m === "reject"}
+            needDate={m === "reject"}
             confirmLabel={m === "docsent" ? "Mark docs sent" : m === "approve" ? "Continue to details" : "Mark rejected"}
             tone={m === "docsent" ? "blue" : m === "approve" ? "green" : "red"}
             onClose={() => { if (!pickerBusy) setPicker(null); }}
-            onConfirm={(l, reason) => (m === "docsent" ? pickerDocsSent(l) : m === "approve" ? pickerApprove(l) : pickerReject(l, reason))}
+            onConfirm={(l, reason, date) => (m === "docsent" ? pickerDocsSent(l) : m === "approve" ? pickerApprove(l) : pickerReject(l, reason, date))}
           />
         );
       })()}

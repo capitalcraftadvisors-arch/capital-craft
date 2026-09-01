@@ -28,10 +28,22 @@ function isValid(r: Ref) {
   return !!r.name.trim() && MOBILE_RE.test(r.mobile);
 }
 
+const REFERRAL_OPTIONS = [
+  { value: "facebook", label: "Facebook" },
+  { value: "instagram", label: "Instagram" },
+  { value: "website", label: "Website" },
+  { value: "linkedin", label: "LinkedIn" },
+  { value: "friend", label: "Friend" },
+  { value: "epc_partner", label: "EPC Partner" },
+  { value: "others", label: "Others (Please specify)" },
+];
+
 export default function Step6Page() {
   const router = useRouter();
   const [customers, setCustomers] = useState<Ref[]>([]);
   const [suppliers, setSuppliers] = useState<Ref[]>([]);
+  const [referralSource, setReferralSource] = useState("");
+  const [referralOther, setReferralOther] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,9 +53,11 @@ export default function Step6Page() {
     (async () => {
       const { data } = await supabase()
         .from("epc_business")
-        .select("business_references")
+        .select("business_references, referral_source, referral_source_other")
         .eq("id", biz.id)
         .maybeSingle();
+      if (data?.referral_source) setReferralSource(data.referral_source as string);
+      if (data?.referral_source_other) setReferralOther(data.referral_source_other as string);
       const arr = (data?.business_references as Ref[] | null) ?? [];
       const c = arr.filter((r) => r.type === "customer");
       const s = arr.filter((r) => r.type === "supplier");
@@ -118,7 +132,12 @@ export default function Step6Page() {
     setSaving(true);
     await supabase()
       .from("epc_business")
-      .update({ business_references: out, current_step: 7 })
+      .update({
+        business_references: out,
+        referral_source: referralSource || null,
+        referral_source_other: referralSource === "others" ? (referralOther.trim() || null) : null,
+        current_step: 7,
+      })
       .eq("id", biz.id);
     setSaving(false);
     setBusiness({ ...biz, current_step: 7 });
@@ -165,6 +184,27 @@ export default function Step6Page() {
           onAdd={() => add("supplier")}
           onRemove={(i) => remove("supplier", i)}
         />
+      </div>
+
+      <div className="mt-5">
+        <Card className="p-6 sm:p-7">
+          <h3 className="font-display font-semibold text-[18px] mb-4">How did you know about us?</h3>
+          <select
+            value={referralSource}
+            onChange={(e) => setReferralSource(e.target.value)}
+            className="w-full rounded-input border border-line bg-white pl-3.5 pr-9 py-3 text-[15px] outline-none focus:border-blue appearance-none bg-[url('data:image/svg+xml;utf8,<svg fill=%22%236B8294%22 viewBox=%220 0 20 20%22 xmlns=%22http://www.w3.org/2000/svg%22><path d=%22M5 8l5 5 5-5z%22/></svg>')] bg-no-repeat bg-[length:20px] bg-[right_12px_center]"
+          >
+            <option value="">Select…</option>
+            {REFERRAL_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          {referralSource === "others" && (
+            <div className="mt-3">
+              <Input label="Please specify" value={referralOther} onChange={(e) => setReferralOther(e.target.value)} />
+            </div>
+          )}
+        </Card>
       </div>
 
       {error && <p className="mt-4 text-[13px] text-red-500">{error}</p>}

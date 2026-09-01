@@ -73,7 +73,12 @@ function Inner() {
         // columns from what was saved; on a fresh approval they start at ZERO
         // so a pre-filled value can never be saved by accident.
         const existing = (data.approval_details ?? null) as ApprovalDetails | null;
-        const editing = editMode != null;
+        // Prefill from what was saved whenever this application ALREADY has
+        // approval details — arrived via Edit, or just re-opened — so nothing
+        // has to be re-typed (e.g. only adding the credit score later). Only a
+        // genuinely fresh, first-time approval (no saved details) starts blank.
+        const hasSaved = !!(existing && (existing.approved_loan_amount != null || existing.approved_tenure_years != null || existing.approved_emi != null));
+        const editing = editMode != null || hasSaved;
         const today = new Date().toISOString().slice(0, 10);
         setDetails({
           // On EDIT, restore EVERY previously-saved field (roi, approval_date,

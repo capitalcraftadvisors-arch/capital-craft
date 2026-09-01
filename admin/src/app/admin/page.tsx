@@ -662,6 +662,7 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
     const base = rows.filter((r) => {
+      if (!inPeriod(r.created_at, period, pFrom, pTo)) return false; // period drives the list too, not just the cards
       if (categoryFilter && !catMatch(r, categoryFilter)) return false;
       // Text search across name / id / POC / mobile / email.
       if (ql) {
@@ -723,7 +724,7 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
     });
     return sorted;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, q, categoryFilter, sourceFilter, lenderFilter, lenderStateFilter, dateFrom, dateTo, lenderState, sortKey, sortDir]);
+  }, [rows, q, categoryFilter, sourceFilter, lenderFilter, lenderStateFilter, dateFrom, dateTo, lenderState, sortKey, sortDir, period, pFrom, pTo]);
 
   function toggleSort(k: SortKey) {
     if (sortKey === k) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -877,7 +878,7 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
         <Select
           placeholder="Stage"
           options={[
-            { value: "docs_pending",    label: "Docs Pending" },
+            { value: "unseen",          label: "Application Unseen" },
             { value: "under_review",    label: "Under Review" },
             { value: "updated",         label: "Updated" },
             { value: "approved",        label: "Approved" },
@@ -1345,6 +1346,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     const toT   = dateTo ? Date.parse(dateTo + "T23:59:59.999") : null;
 
     const out = rows.filter((r) => {
+      if (!inPeriod(r.created_at, period, pFrom, pTo)) return false; // period drives the list too
       if (categoryFilter && !catMatch(r, categoryFilter)) return false;
       if (statusFilter && !statusMatch(r, statusFilter)) return false;
       if (needle &&
@@ -1375,7 +1377,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     }
     return out.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, q, categoryFilter, statusFilter, epcFilter, lenderFilter, dateFrom, dateTo, sortKey]);
+  }, [rows, q, categoryFilter, statusFilter, epcFilter, lenderFilter, dateFrom, dateTo, sortKey, period, pFrom, pTo]);
 
   const fyRows = useMemo(() => rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo)), [rows, period, pFrom, pTo]);
   const cards: SummaryCard[] = [
@@ -1867,6 +1869,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
       policyValidityParts(r.policy_from_date, r.policy_to_date)?.daysLeft ?? null;
 
     const out = rows.filter((r) => {
+      if (!inPeriod(r.created_at, period, pFrom, pTo)) return false; // period drives the list too
       if (categoryFilter && !catMatch(r, categoryFilter)) return false;
       if (needle &&
           !(applicant(r).toLowerCase().includes(needle) ||
@@ -1896,7 +1899,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, q, categoryFilter, statusFilter, epcFilter, expiryFilter, dateFrom, dateTo]);
+  }, [rows, q, categoryFilter, statusFilter, epcFilter, expiryFilter, dateFrom, dateTo, period, pFrom, pTo]);
 
   // Issued / Rejected / Hold / Draft / Under Review (migration 0047).
   const STATUS_LABEL: Record<string, string> = {
@@ -2140,6 +2143,7 @@ function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
   const fromT = dateFrom ? Date.parse(dateFrom + "T00:00:00") : null;
   const toT   = dateTo ? Date.parse(dateTo + "T23:59:59.999") : null;
   const filtered = rows.filter((r) => {
+    if (!inPeriod(r.created_at, period, pFrom, pTo)) return false; // period drives the list too
     if (categoryFilter && !catMatch(r, categoryFilter)) return false;
     const needle = q.trim().toLowerCase();
     if (needle && !((r.name ?? "").toLowerCase().includes(needle) || r.mobile.includes(needle) || (r.city ?? "").toLowerCase().includes(needle))) return false;

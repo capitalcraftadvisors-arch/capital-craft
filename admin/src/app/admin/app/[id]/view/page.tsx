@@ -28,6 +28,7 @@ import {
   latestLenderStatus, lendersWithDocs, approvedLenders,
 } from "@/lib/loan-lenders";
 import LenderPickerModal, { type LenderKey } from "@/components/LenderPickerModal";
+import SendToLenderModal from "@/components/SendToLenderModal";
 import ProfileTabBar, { TabButton, DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
@@ -273,6 +274,7 @@ function Inner() {
   const [rejectOpen, setRejectOpen] = useState(false);
   const [docSentPickerOpen, setDocSentPickerOpen] = useState(false);
   const [zipPickerOpen, setZipPickerOpen] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
   const [abortOpen, setAbortOpen] = useState(false);
   const [abortReason, setAbortReason] = useState("");
   const [lenderRows, setLenderRows] = useState<LoanLenderRow[]>([]);
@@ -697,18 +699,20 @@ function Inner() {
     router.push(`/admin/app/${loan.id}/approval?lender=${lender.key}&label=${encodeURIComponent(lender.label)}` as any);
   }
 
-  async function rejectLenderNow(lender: PickerLender, reason?: string) {
+  async function rejectLenderNow(lender: PickerLender, reason?: string, date?: string) {
     if (!loan || statusBusy) return;
     setStatusBusy(true); setStatusMsg(null);
     try {
+      // Use the admin-entered rejection date (local midnight) when provided; else now.
+      const rejectedAt = date ? new Date(`${date}T00:00:00`).toISOString() : new Date().toISOString();
       const existing = lenderRows.find((r) => r.lender_key === lender.key);
-      const patch = { rejected_at: new Date().toISOString(), rejection_reason: reason || null, approved_at: null, approval_details: null };
+      const patch = { rejected_at: rejectedAt, rejection_reason: reason || null, approved_at: null, approval_details: null };
       if (existing) await supabase().from("loan_application_lenders").update(patch).eq("id", existing.id);
       else await supabase().from("loan_application_lenders").insert({ application_id: loan.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: new Date().toISOString(), ...patch });
       const rows = await reloadLenders();
       await logLoanActivity(loan.id, "rejected", { detail: `Rejected by ${lender.label}${reason ? ` — ${reason}` : ""}` });
       await syncHeadline(rows);
-      setStatusMsg(`Rejected by ${lender.label}.`);
+      setStatusMsg(`Rejected by ${lender.label}${reason ? ` — ${reason}` : ""}.`);
     } catch (e) { setStatusMsg("Couldn't record: " + (e as Error).message); }
     finally { setStatusBusy(false); }
   }
@@ -861,6 +865,19 @@ function Inner() {
         {rejected && loan.rejection_reason && (
           <div className="px-5 sm:px-8 pb-2 text-[12px] font-medium text-red-700">Rejection reason: {loan.rejection_reason}</div>
         )}
+        {/* Per-lender rejection reason(s). The full-case Reject writes the reason
+            onto the lender row (loan_application_lenders), and syncHeadline may keep
+            the app at docs_sent — so the app-level line above never fires for it.
+            Surface each lender's reason here so it reads the same as an app-level
+            reject. Hidden once a lender approves (the approval is then the headline). */}
+        {loan.status !== "approved" &&
+          lenderRows
+            .filter((r) => r.rejected_at && (r.rejection_reason ?? "").trim())
+            .map((r) => (
+              <div key={r.id} className="px-5 sm:px-8 pb-2 text-[12px] font-medium text-red-700">
+                Rejection reason{r.lender_label ? ` (${r.lender_label})` : ""}: {r.rejection_reason}
+              </div>
+            ))}
       </header>
 
       <div className="w-full px-5 sm:px-8 py-4" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
@@ -929,6 +946,7 @@ function Inner() {
                 busyLabel={downloading ? "Preparing…" : null}
                 items={[
                   { label: "Download ZIP", onClick: () => setZipPickerOpen(true) },
+                  { label: "Send to Lender (email)", onClick: () => setSendOpen(true) },
                   ...(tranche1Exists ? [{ label: "Download Tranche 1", onClick: () => void downloadTranche("1"), disabled: trancheBusy === "1" }] : []),
                   ...(tranche2Exists ? [{ label: "Download Tranche 2", onClick: () => void downloadTranche("2"), disabled: trancheBusy === "2" }] : []),
                 ]}
@@ -1298,6 +1316,13 @@ function Inner() {
         epcName={applicantName}
         onConfirm={(lender) => downloadZip(lender)}
       />
+
+      <SendToLenderModal
+        appId={loan.id}
+        open={sendOpen}
+        onClose={() => setSendOpen(false)}
+        defaultLender={loan.approved_lender}
+      />
       <LoanLenderPickerModal
         open={docSentPickerOpen}
         title="Send documents to a lender"
@@ -1325,10 +1350,11 @@ function Inner() {
         subtitle={`For ${applicantName}. Which lender rejected?`}
         options={withDocsOptions}
         needReason
+        needDate
         confirmLabel="Mark rejected"
         tone="red"
         onClose={() => setRejectOpen(false)}
-        onConfirm={(l, reason) => rejectLenderNow(l, reason)}
+        onConfirm={(l, reason, date) => rejectLenderNow(l, reason, date)}
       />
       {abortOpen && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => { if (!statusBusy) setAbortOpen(false); }}>

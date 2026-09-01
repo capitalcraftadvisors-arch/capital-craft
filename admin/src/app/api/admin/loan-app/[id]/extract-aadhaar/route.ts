@@ -18,8 +18,11 @@
 //      The Step 2 page shows fields for admin review, then calls
 //      complete-step-2 to persist.
 //
-// PRIVACY: full 12-digit Aadhaar number NEVER leaves this route's memory
-// (see lib/aadhaar.ts). The response contains only the masked form.
+// PRIVACY: the response carries BOTH the full number (`aadhaar_number`) and
+// the masked form (`aadhaar_masked`). The RM-facing intake chat DISPLAYS the
+// full number for identity verification but PERSISTS only the masked form to
+// epc_applications (see intake/page.tsx mapExtract). Do not mask the response
+// here — that would blank the number the RM needs to verify against the card.
 
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
