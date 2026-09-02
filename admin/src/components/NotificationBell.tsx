@@ -120,7 +120,16 @@ export default function NotificationBell() {
     lastMax.current = maxTs;
   }, [me, seen]);
 
-  useEffect(() => { void load(); const t = setInterval(() => void load(), 25000); return () => clearInterval(t); }, [load]);
+  useEffect(() => {
+    void load();
+    // Poll every 90s (was 25s) and only while the tab is visible. This bell runs
+    // for every signed-in user around the clock and was a major share of
+    // Supabase egress; a hidden tab now costs nothing and refreshes on return.
+    const tick = () => { if (document.visibilityState === "visible") void load(); };
+    const t = setInterval(tick, 90_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", tick); };
+  }, [load]);
 
   // Close on outside click.
   useEffect(() => {
