@@ -105,6 +105,7 @@ function Inner() {
 
   const [phone, setPhone]             = useState("");
   const [email, setEmail]             = useState("");
+  const [leadOwner, setLeadOwner]     = useState("");   // lead_owner_name (migration 0074)
   const [systemType, setSystemType]   = useState<"off_grid" | "on_grid" | "hybrid" | "">("");
   const [plantUse, setPlantUse]       = useState<"residential" | "commercial" | "">("");
   const [panUploaded, setPanUploaded] = useState(false);
@@ -121,6 +122,14 @@ function Inner() {
   const [sending, setSending]         = useState(false);
   const [sendError, setSendError]     = useState<string | null>(null);
 
+  // Change EPC — an in-place picker over APPROVED EPCs. Re-points the
+  // application's epc_business_id without leaving the form (previously the
+  // button just bounced to the console list).
+  const [epcPickOpen, setEpcPickOpen] = useState(false);
+  const [epcList, setEpcList]         = useState<Epc[]>([]);
+  const [epcSearch, setEpcSearch]     = useState("");
+  const [epcBusy, setEpcBusy]         = useState(false);
+
   // Initial load. Prefills saved values so revisiting/editing this
   // step (via the Step-6 review's Edit links) shows the existing data
   // instead of blanks. No forward-redirect — every step is freely
@@ -132,7 +141,7 @@ function Inner() {
         .select(
           "id, epc_business_id, status, current_step, " +
           "install_pincode, install_state, install_district, install_city, " +
-          "borrower_mobile, borrower_email, borrower_pan, borrower_father_name, system_type, plant_use_type, consent_at, customer_photo_path, created_at, aadhaar_face_path",
+          "borrower_mobile, borrower_email, lead_owner_name, borrower_pan, borrower_father_name, system_type, plant_use_type, consent_at, customer_photo_path, created_at, aadhaar_face_path",
         )
         .eq("id", params.id)
         .maybeSingle();
@@ -146,6 +155,7 @@ function Inner() {
       if (row.install_city)     setCity(row.install_city);
       if (row.borrower_mobile)  setPhone(row.borrower_mobile);
       if (row.borrower_email)   setEmail(row.borrower_email);
+      if (row.lead_owner_name)  setLeadOwner(row.lead_owner_name);
       if (row.borrower_pan)     { setPanNumber(row.borrower_pan); setPanUploaded(true); }
       if (row.borrower_father_name) setPanFatherName(row.borrower_father_name);
       if (row.customer_photo_path) { setPhotoPath(row.customer_photo_path); setPhotoUploaded(true); }
@@ -165,6 +175,30 @@ function Inner() {
       setLoading(false);
     })();
   }, [params.id]);
+
+  async function openEpcPicker() {
+    setEpcSearch(""); setEpcPickOpen(true);
+    if (epcList.length) return; // already loaded
+    const { data } = await supabase()
+      .from("epc_business")
+      .select("id, epc_display_id, contact_name, trade_name, legal_name")
+      .neq("business_type", "admin")
+      .eq("status", "approved")
+      .order("trade_name", { ascending: true, nullsFirst: false })
+      .order("legal_name", { ascending: true, nullsFirst: false });
+    setEpcList((data ?? []) as Epc[]);
+  }
+  async function chooseEpc(next: Epc) {
+    if (!loan || epcBusy) return;
+    setEpcBusy(true); setSendError(null);
+    try {
+      const { error } = await supabase().from("epc_applications").update({ epc_business_id: next.id }).eq("id", loan.id);
+      if (error) { setSendError(error.message); return; }
+      setLoan({ ...loan, epc_business_id: next.id });
+      setEpc(next);
+      setEpcPickOpen(false);
+    } finally { setEpcBusy(false); }
+  }
 
   async function lookupPincode(next: string) {
     setPinError(null);
@@ -250,6 +284,7 @@ function Inner() {
           borrower_email:   email,
           borrower_pan:     panNumber.trim().toUpperCase(),
           borrower_father_name: panFatherName.trim() || null,
+          lead_owner_name:  leadOwner.trim() || null,
           customer_photo_path: photoPath,
           system_type:      systemType,
           plant_use_type:   plantUse,
@@ -333,12 +368,46 @@ function Inner() {
           </div>
           <button
             type="button"
-            onClick={() => router.push("/admin")}
+            onClick={() => void openEpcPicker()}
             className="text-[12px] text-[#178a5c] hover:underline"
           >
             Change EPC
           </button>
         </Card>
+
+        {epcPickOpen && (
+          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => { if (!epcBusy) setEpcPickOpen(false); }}>
+            <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-white rounded-lg shadow-lg p-5">
+              <div className="flex items-start justify-between mb-3">
+                <h3 className="font-display font-semibold text-[18px] text-text">Change EPC</h3>
+                <button type="button" onClick={() => setEpcPickOpen(false)} disabled={epcBusy} aria-label="Close"
+                  className="text-[18px] text-text-muted hover:text-text leading-none disabled:opacity-40">×</button>
+              </div>
+              <input
+                autoFocus
+                value={epcSearch}
+                onChange={(e) => setEpcSearch(e.target.value)}
+                placeholder="Search approved EPCs…"
+                className="w-full rounded-input border border-line bg-white px-3 py-2 text-[14px] outline-none focus:border-blue mb-2"
+              />
+              <div className="max-h-[50vh] overflow-y-auto flex flex-col border border-line rounded-input">
+                {(() => {
+                  if (!epcList.length) return <div className="text-[13px] text-text-muted px-3 py-3">Loading partners…</div>;
+                  const q = epcSearch.trim().toLowerCase();
+                  const rows = epcList.filter((e) => !q || `${e.trade_name ?? ""} ${e.legal_name ?? ""} ${e.contact_name ?? ""} ${e.epc_display_id ?? ""}`.toLowerCase().includes(q));
+                  if (!rows.length) return <div className="text-[13px] text-text-muted px-3 py-3">No approved EPC matches.</div>;
+                  return rows.map((e) => (
+                    <button key={e.id} type="button" disabled={epcBusy} onClick={() => void chooseEpc(e)}
+                      className={["text-left px-3 py-2.5 border-b border-line/60 last:border-0 hover:bg-[#f7fcf9] transition disabled:opacity-60", e.id === loan?.epc_business_id ? "bg-[#f0faf5]" : ""].join(" ")}>
+                      <div className="text-[14px] font-semibold text-text">{e.trade_name || e.legal_name || e.contact_name || "(unnamed EPC)"}</div>
+                      {e.epc_display_id && <div className="text-[12px] text-text-muted font-mono">{e.epc_display_id}</div>}
+                    </button>
+                  ));
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Section: installation location */}
         <Card className="p-6 space-y-4">
@@ -400,6 +469,12 @@ function Inner() {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="customer@example.com"
               hint="No email verification at this step."
+            />
+            <Input
+              label="Lead owner name"
+              value={leadOwner}
+              onChange={(e) => setLeadOwner(e.target.value)}
+              placeholder="Who owns this lead"
             />
           </div>
         </Card>

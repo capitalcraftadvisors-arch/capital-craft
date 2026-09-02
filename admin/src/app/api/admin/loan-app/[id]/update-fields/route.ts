@@ -29,7 +29,8 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 // Columns the concierge is allowed to write, grouped by coercion type.
 const TEXT_COLS = new Set([
-  "borrower_name", "borrower_mobile", "borrower_email",
+  "borrower_name", "borrower_mobile", "borrower_email", "lead_owner_name",
+  "epc_business_id", // chat "change EPC partner" re-points the application in place
   "borrower_pan", "borrower_father_name", "customer_photo_path",
   "install_pincode", "install_state", "install_district", "install_city",
   "system_type", "plant_use_type",

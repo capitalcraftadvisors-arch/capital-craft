@@ -1041,6 +1041,7 @@ function Inner() {
             />
             <SectionCard title="Applicant identity" accent="blue" icon={I.user}>
               <KV k="Name" v={loan.aadhaar_name || loan.borrower_name} />
+              <KV k="Lead owner" v={loan.lead_owner_name} />
               <KV k="Father's name" v={loan.borrower_father_name} />
               <KV k="Gender" v={loan.aadhaar_gender} />
               <KV k="Date of birth" v={loan.aadhaar_dob} />

@@ -5,7 +5,7 @@
 // "who owns what and what's stuck". A MAIN_ADMIN sees all cases + owner tabs;
 // an OPERATIONS_USER (RM) sees only their own (RLS-enforced, 0067). Clicking a
 // card opens a side panel with the case details, actions that persist + log,
-// and the case's activity. Footer surfaces SLA breaches + monthly disbursement.
+// and the case's comments. Footer surfaces SLA breaches + monthly disbursement.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -117,13 +117,16 @@ function fmt(v: number): string {
   if (v >= 1e5) return "₹" + (v / 1e5).toFixed(1) + " L";
   return "₹" + v.toLocaleString("en-IN");
 }
+// Full Indian-grouped rupees for the side panel (₹1,80,000 — never "1.8 L").
+function fmtFull(v: number): string {
+  return "₹" + Math.round(v).toLocaleString("en-IN");
+}
 function monthKey(iso: string | null): string | null {
   if (!iso) return null;
   const d = new Date(iso);
   return `${d.getFullYear()}-${d.getMonth()}`;
 }
 
-type Activity = { action: string; new_value: string | null; created_at: string; actor: { contact_name: string | null } | null };
 
 function Inner() {
   const router = useRouter();
@@ -139,7 +142,6 @@ function Inner() {
   // No mixed "All" view — everyone works one source at a time (default: loans).
   const [srcFilter, setSrcFilter] = useState<"all" | CaseSource>("loan");
   const [ownerFilter, setOwnerFilter] = useState<string>(isMainAdmin ? "all" : "me"); // 'me' | 'all' | userId | 'unassigned'
-  const [activity, setActivity] = useState<Activity[]>([]);
   const [busy, setBusy] = useState(false);
   const [touches, setTouches] = useState(0);
   const sla = 1; // fixed at ≤1 day (backend only — no UI control, per spec)
@@ -151,11 +153,10 @@ function Inner() {
   // Inline lender picker (change: loan lender/decision popups render ON the board).
   const [picker, setPicker] = useState<{ c: OpsCase; mode: "docsent" | "approve" | "reject"; rows: LoanLenderRow[] } | null>(null);
   const [pickerBusy, setPickerBusy] = useState(false);
-  // Side-panel comments + collapsible history for activity & comments.
+  // Side-panel comments + collapsible comment history.
   const [comments, setComments] = useState<{ id: string; author_name: string | null; comment_text: string; created_at: string }[]>([]);
   const [commentText, setCommentText] = useState("");
   const [commentBusy, setCommentBusy] = useState(false);
-  const [showActHist, setShowActHist] = useState(false);
   const [showCmtHist, setShowCmtHist] = useState(false);
 
   const reload = useCallback(async () => {
@@ -168,23 +169,9 @@ function Inner() {
   useEffect(() => { void reload(); }, [reload]);
   useEffect(() => { if (typeof window !== "undefined") localStorage.setItem("opsboard.target", String(target)); }, [target]);
 
-  // Load the selected case's activity trail.
-  useEffect(() => {
-    if (!sel) { setActivity([]); return; }
-    void (async () => {
-      const { data } = await supabase()
-        .from("user_activity_log")
-        .select("action, new_value, created_at, actor:actor_user_id(contact_name)")
-        .eq("record_id", sel)
-        .order("created_at", { ascending: false })
-        .limit(40);
-      setActivity((data ?? []) as unknown as Activity[]);
-    })();
-  }, [sel, touches]);
-
   // Load the selected case's comments (per-source table).
   useEffect(() => {
-    setShowActHist(false); setShowCmtHist(false); setCommentText("");
+    setShowCmtHist(false); setCommentText("");
     const c = cases.find((x) => x.id === sel);
     const meta = c ? COMMENT_TBL[c.source] : null;
     if (!sel || !meta) { setComments([]); return; }
@@ -368,8 +355,6 @@ function Inner() {
     ],
     [boardPeople, isMainAdmin],
   );
-  // Resolve user-id values (e.g. reassignment targets) to names in the activity log.
-  const nameById = useMemo(() => new Map(users.map((u) => [u.id, u.name])), [users]);
 
   // Where can THIS user reassign a case? Admin→anyone; Manager→self or own RMs;
   // RM→up to their manager only.
@@ -562,15 +547,15 @@ function Inner() {
               </div>
 
               <div className="text-[13px] flex flex-col gap-1.5 border-t border-line pt-3">
-                <Row k="Amount" v={selCase.amount ? fmt(selCase.amount) : "—"} />
+                <Row k="Amount" v={selCase.amount ? fmtFull(selCase.amount) : "—"} />
                 <Row k="Lender" v={selCase.lender || "—"} />
                 <Row k="Owner" v={selCase.ownerName || "Unassigned"} />
+                <Row k="Lead owner" v={selCase.leadOwnerName || "—"} />
                 <Row k="Working (TAT)" v={selCase.tatDays + "d"} />
                 {selCase.blocker && <div><span className="text-text-muted">Blocker:</span> {selCase.blocker}</div>}
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <button className="btn-act col-span-2" disabled={busy} onClick={() => act("doc_received")}>Mark doc received</button>
                 {/* Move stage — same flow as dragging: choose the next stage, then
                     the confirmation + lender/decision/disbursement popup appears. */}
                 {(() => {
@@ -587,52 +572,23 @@ function Inner() {
                     </div>
                   );
                 })()}
-                {selCase.source === "loan" && (
-                  <button className="btn-act" disabled={busy} onClick={() => {
-                    const raw = window.prompt("Disbursement amount (₹):");
-                    if (!raw) return;
-                    const amount = Number(raw.replace(/[^\d.]/g, ""));
-                    if (!amount) return;
-                    const tranche = window.confirm("OK = 1st tranche · Cancel = 2nd tranche") ? 1 : 2;
-                    void act("record_disbursement", { amount, tranche });
-                  }}>Record disb ₹</button>
-                )}
-                <button className="btn-act ghost col-span-2 text-center" onClick={() => { sessionStorage.setItem("ccReturnTo", "/admin/board"); router.push(selCase.href as unknown as string); }}>Open full case ↗</button>
-                {reassignOptions.length > 0 && (
-                  <div className="col-span-2">
+                {/* Reassign + View profile, side by side. */}
+                {reassignOptions.length > 0 ? (
+                  <div>
                     <div className="text-[11px] text-text-muted mb-1">{isMainAdmin || isManager ? "Reassign to" : "Send to senior ↑"}</div>
                     <Select value={selCase.ownerUserId ?? ""} disabled={busy}
                       onChange={(e) => void act("reassign", { assigned_to_user_id: e.target.value || null })}
                       placeholder="Select…"
                       options={[...(isMainAdmin ? [{ value: "", label: "Unassigned" }] : []), ...reassignOptions]} />
                   </div>
-                )}
-              </div>
-
-              {/* Activity log — latest, with a dropdown for the full history. */}
-              <div className="border-t border-line pt-3">
-                <div className="text-[11px] font-bold uppercase tracking-wide text-text-mid mb-2">Activity log</div>
-                {activity.length === 0 ? (
-                  <div className="text-text-muted text-[12px]">No activity yet.</div>
-                ) : (
-                  <div className="flex flex-col gap-1.5 text-[12px] text-text-mid">
-                    {(showActHist ? activity : activity.slice(0, 1)).map((a, i) => {
-                      const val = humanizeValue(a.new_value, nameById);
-                      return (
-                        <div key={i}>
-                          <span className="font-semibold text-text">{a.actor?.contact_name || "—"}</span>
-                          {" · "}<span>{prettyAction(a.action)}</span>{val ? " · " + val : ""}
-                          <span className="text-text-muted"> · {when(a.created_at)}</span>
-                        </div>
-                      );
-                    })}
-                    {activity.length > 1 && (
-                      <button type="button" className="text-[11px] font-semibold text-[#178a5c] hover:underline self-start" onClick={() => setShowActHist((v) => !v)}>
-                        {showActHist ? "Hide history ▲" : `Show history (${activity.length}) ▼`}
-                      </button>
-                    )}
-                  </div>
-                )}
+                ) : <div />}
+                <div className="flex flex-col justify-end">
+                  <button type="button" className="btn-act ghost text-center inline-flex items-center justify-center gap-1.5"
+                    onClick={() => { sessionStorage.setItem("ccReturnTo", "/admin/board"); router.push(selCase.href as unknown as string); }}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M1.5 12s3.5-7 10.5-7 10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                    View profile
+                  </button>
+                </div>
               </div>
 
               {/* Comments — add one, see the latest, expand history. */}
@@ -761,17 +717,6 @@ function Inner() {
 
 function Row({ k, v }: { k: string; v: string }) {
   return <div className="flex justify-between"><span className="text-text-muted">{k}</span><strong className="text-text">{v}</strong></div>;
-}
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// Never surface raw user UUIDs in activity logs — resolve to a name (or a
-// generic label if the user is unknown/removed).
-function humanizeValue(v: string | null, nameById: Map<string, string>): string {
-  if (!v) return "";
-  if (UUID_RE.test(v.trim())) return nameById.get(v.trim()) ?? "a teammate";
-  return v;
-}
-function prettyAction(a: string): string {
-  return ({ call: "logged a call", doc_received: "marked doc received", status_change: "moved stage", disbursement: "recorded disbursement", reassigned: "reassigned", assigned: "assigned", created: "created", updated: "updated" } as Record<string, string>)[a] || a;
 }
 function when(iso: string): string {
   const d = new Date(iso), diff = Date.now() - d.getTime();

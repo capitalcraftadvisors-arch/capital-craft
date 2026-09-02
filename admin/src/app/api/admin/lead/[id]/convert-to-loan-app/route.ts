@@ -46,7 +46,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // Load the lead.
     const { data: lead, error: leadErr } = await supabase
       .from("loan_leads")
-      .select("id, status, name, mobile, email, dob, address, total_project_cost, loan_amount, project_size, project_size_unit, epc_business_id, converted_application_id")
+      .select("id, status, name, mobile, email, dob, address, lead_owner_name, total_project_cost, loan_amount, project_size, project_size_unit, epc_business_id, converted_application_id")
       .eq("id", leadId)
       .maybeSingle();
     if (leadErr) return err(leadErr.message, 500);
@@ -84,6 +84,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         borrower_dob: lead.dob ?? null,
         borrower_address: lead.address ?? null,
         install_address: lead.address ?? null,
+        lead_owner_name: lead.lead_owner_name ?? null,
         total_project_cost: lead.total_project_cost ?? null,
         loan_amount_required: lead.loan_amount ?? null,
         project_size: lead.project_size ?? null,

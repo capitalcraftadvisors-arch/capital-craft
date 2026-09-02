@@ -77,6 +77,7 @@ const SCRIPT: Turn[] = [
   { id: "install_pincode", bot: "Installation pincode?", kind: "pincode", field: "install_pincode" },
   { id: "borrower_mobile", bot: "Customer's phone number?", kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile", validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile.") },
   { id: "borrower_email", bot: "Email ID? (optional)", kind: "text", field: "borrower_email", placeholder: "name@example.com", optional: true, validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email or skip.") },
+  { id: "lead_owner_name", bot: "Lead owner's name? (optional)", kind: "text", field: "lead_owner_name", placeholder: "Who owns this lead", optional: true },
   { id: "plant_use_type", bot: "Residential or commercial use?", kind: "choice", field: "plant_use_type", choices: [
     { value: "residential", label: "Residential", sub: "Home / society" },
     { value: "commercial", label: "Commercial", sub: "Shop / office / factory" },
@@ -141,7 +142,7 @@ const SCRIPT: Turn[] = [
 // current_step 1→6, record consent, and submit.
 const STEP_PAYLOAD: Record<number, (f: Form) => Record<string, unknown>> = {
   1: (f) => ({
-    borrower_name: f.borrower_name || "", borrower_mobile: f.borrower_mobile || "", borrower_email: f.borrower_email || "",
+    borrower_name: f.borrower_name || "", borrower_mobile: f.borrower_mobile || "", borrower_email: f.borrower_email || "", lead_owner_name: f.lead_owner_name || "",
     install_pincode: f.install_pincode || "", install_state: f.install_state || "", install_district: f.install_district || "", install_city: f.install_city || "",
     system_type: f.system_type || "", plant_use_type: f.plant_use_type || "",
     consent_policies: ["terms_conditions", "privacy_policy", "cookie_policy"],
@@ -541,12 +542,13 @@ function Inner() {
 
   // ── Editing a previous answer ──
   function startEdit(m: Msg) {
-    if (!m.turnId || !m.editable) return;
+    if (!m.turnId || (!m.editable && m.turnId !== "epc")) return; // the EPC answer is always changeable
     const t = script.find((x) => x.id === m.turnId);
     if (!t) return;
     setEditing({ index: msgs.findIndex((x) => x.id === m.id), turnId: m.turnId });
     setError(null);
     if (t.kind === "text" || t.kind === "pincode") setInput((t.field && form[t.field]) || "");
+    if (t.kind === "epc") { setEpcSearch(""); setEpcOpen(true); } // re-open the partner list to pick another EPC
     if (t.kind === "docs") { setFiles({}); setThumbs({}); setConfirm(null); } // re-attach fresh
   }
   async function applyEdit(value: string, label: string, extra?: Form) {
@@ -555,10 +557,13 @@ function Inner() {
     const { index, turnId } = editing;
     const t = script.find((x) => x.id === turnId);
     const field = t?.field;
-    const nextForm: Form = { ...form, ...(field ? { [field]: value } : {}), ...(extra ?? {}) };
+    // Changing the EPC partner re-points this application (epc_business_id) —
+    // it never creates a new one.
+    const nextForm: Form = { ...form, ...(field ? { [field]: value } : {}), ...(t?.kind === "epc" ? { epc_business_id: value } : {}), ...(extra ?? {}) };
     setForm(nextForm);
     setMsgs((m) => m.map((x, i) => (i === index ? { ...x, text: label, edited: true } : x)));
     setEditing(null); setInput("");
+    if (t?.kind === "epc") setEpcOpen(false);
     if (appId) await persistForm(nextForm); // reflect the edit on the profile immediately
   }
   function cancelEdit() { setEditing(null); setInput(""); setError(null); }
@@ -979,7 +984,7 @@ function Inner() {
                       ) : filteredEpcs.length === 0 ? (
                         <div className="text-[13px] text-text-muted px-3 py-3">No approved EPC matches “{epcSearch.trim()}”.</div>
                       ) : filteredEpcs.map((e) => (
-                        <button key={e.value} onClick={() => void answer(e.value, e.label, { createApp: true })} className="text-left px-4 py-2.5 border-b border-line/60 last:border-0 hover:bg-[#f7fcf9] transition">
+                        <button key={e.value} onClick={() => void answer(e.value, e.label, { createApp: true, editable: true })} className="text-left px-4 py-2.5 border-b border-line/60 last:border-0 hover:bg-[#f7fcf9] transition">
                           <div className="text-[14px] font-semibold text-text">{e.label}</div>{e.sub && <div className="text-[12px] text-text-muted font-mono">{e.sub}</div>}
                         </button>
                       ))}
@@ -1128,7 +1133,7 @@ function MessageRow({ m, rmName, onEdit, editingId }: { m: Msg; rmName: string; 
         <span>· {m.time}</span>
         {m.edited && <span>· edited</span>}
         {isUser && !m.files && <span className="text-[#178a5c]">✓✓</span>}
-        {isUser && m.editable && (
+        {isUser && (m.editable || m.turnId === "epc") && (
           <button onClick={onEdit} className="opacity-0 group-hover:opacity-100 transition text-[#178a5c] hover:underline" aria-label="Edit">{m.files ? "↺ replace" : "✎ edit"}</button>
         )}
       </div>
@@ -1304,7 +1309,7 @@ function editableFilled(f: Form): { id: string; label: string }[] {
 // Map an existing application row → the chat's form field map (all strings;
 // the boolean e-bill flag becomes "yes"/"no").
 const PREFILL_KEYS = [
-  "borrower_name", "borrower_mobile", "borrower_email", "install_pincode", "install_state", "install_district", "install_city", "system_type", "plant_use_type",
+  "borrower_name", "borrower_mobile", "borrower_email", "lead_owner_name", "install_pincode", "install_state", "install_district", "install_city", "system_type", "plant_use_type",
   "aadhaar_name", "aadhaar_dob", "aadhaar_gender", "aadhaar_number", "aadhaar_care_of", "aadhaar_address", "aadhaar_front_path", "aadhaar_back_path", "aadhaar_face_path",
   "project_size", "project_size_unit", "total_project_cost", "loan_amount_required", "monthly_bill_amount", "discom_name", "ca_number", "ebill_address_line", "ebill_name", "ebill_path", "ebill_uploaded_at", "proforma_invoice_path", "proforma_uploaded_at", "rooftop_photo_path", "rooftop_photo_uploaded_at",
   "coapp_name", "coapp_father_name", "coapp_dob", "coapp_pan", "coapp_pan_path", "coapp_relation", "coapp_aadhaar_name", "coapp_aadhaar_dob", "coapp_aadhaar_gender", "coapp_aadhaar_number", "coapp_aadhaar_care_of", "coapp_aadhaar_address", "coapp_aadhaar_front_path", "coapp_aadhaar_back_path", "coapp_aadhaar_face_path",
