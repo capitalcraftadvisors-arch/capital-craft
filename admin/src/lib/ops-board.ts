@@ -10,6 +10,7 @@
 
 import { supabase } from "./supabase";
 import { getBusiness } from "./auth";
+import { isUndefinedColumn } from "./optional-column";
 
 export type CaseSource = "loan" | "insurance" | "lead" | "epc";
 export type ColumnDef = { key: string; label: string };
@@ -208,7 +209,14 @@ export async function loadOpsCases(): Promise<{ cases: OpsCase[]; users: TeamUse
   const myId = me?.id ?? null;
 
   const [loans, lenders, insurance, leads, epcs, epcLenders, team] = await Promise.all([
-    db.from("epc_applications").select("id, borrower_name, aadhaar_name, loan_amount, loan_amount_required, status, created_at, submitted_at, docs_sent_at, hold_at, approved_at, rejected_at, rfd_at, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, second_disbursement_date, aborted_at, updated_at, review_notes, assigned_to_user_id, lead_owner_name"),
+    // lead_owner_name arrives with migration 0074. Until it exists in prod the
+    // select must not fail (42703 = undefined column) — retry without it.
+    (async () => {
+      const LOAN_COLS = "id, borrower_name, aadhaar_name, loan_amount, loan_amount_required, status, created_at, submitted_at, docs_sent_at, hold_at, approved_at, rejected_at, rfd_at, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, second_disbursement_date, aborted_at, updated_at, review_notes, assigned_to_user_id";
+      const withCol = await db.from("epc_applications").select(`${LOAN_COLS}, lead_owner_name`);
+      if (isUndefinedColumn(withCol.error, "lead_owner_name")) return await db.from("epc_applications").select(LOAN_COLS);
+      return withCol;
+    })(),
     db.from("loan_application_lenders").select("application_id, lender_key, lender_label, docs_sent_at, approved_at, rejected_at"),
     db.from("insurance_applications").select("id, aadhaar_name, sum_insured, invoice_confirmed_amount, invoice_amount, insurance_partner, status, updated_at, assigned_to_user_id"),
     db.from("loan_leads").select("id, name, loan_amount, status, created_at, reviewed_at, epc_name_custom, assigned_to_user_id, lead_owner_name"),

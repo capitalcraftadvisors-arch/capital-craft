@@ -67,31 +67,35 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // Create the draft loan application, seeded from the lead. status='draft'
     // + current_step=1 matches a normal new draft; the seeded fields just
     // pre-fill the wizard.
-    const { data: app, error: insErr } = await supabase
-      .from("epc_applications")
-      .insert({
-        epc_business_id: lead.epc_business_id,
-        created_by: "admin",
-        // Hierarchy (0066): the user performing the conversion owns the new app.
-        created_by_user_id: claims.business_id,
-        assigned_to_user_id: claims.business_id,
-        last_updated_by_user_id: claims.business_id,
-        status: "draft",
-        current_step: 1,
-        borrower_name: lead.name ?? null,
-        borrower_mobile: lead.mobile ?? null,
-        borrower_email: lead.email ?? null,
-        borrower_dob: lead.dob ?? null,
-        borrower_address: lead.address ?? null,
-        install_address: lead.address ?? null,
-        lead_owner_name: lead.lead_owner_name ?? null,
-        total_project_cost: lead.total_project_cost ?? null,
-        loan_amount_required: lead.loan_amount ?? null,
-        project_size: lead.project_size ?? null,
-        project_size_unit: lead.project_size_unit ?? null,
-      })
-      .select("id")
-      .single();
+    const seed: Record<string, unknown> = {
+      epc_business_id: lead.epc_business_id,
+      created_by: "admin",
+      // Hierarchy (0066): the user performing the conversion owns the new app.
+      created_by_user_id: claims.business_id,
+      assigned_to_user_id: claims.business_id,
+      last_updated_by_user_id: claims.business_id,
+      status: "draft",
+      current_step: 1,
+      borrower_name: lead.name ?? null,
+      borrower_mobile: lead.mobile ?? null,
+      borrower_email: lead.email ?? null,
+      borrower_dob: lead.dob ?? null,
+      borrower_address: lead.address ?? null,
+      install_address: lead.address ?? null,
+      lead_owner_name: lead.lead_owner_name ?? null,
+      total_project_cost: lead.total_project_cost ?? null,
+      loan_amount_required: lead.loan_amount ?? null,
+      project_size: lead.project_size ?? null,
+      project_size_unit: lead.project_size_unit ?? null,
+    };
+    let { data: app, error: insErr } = await supabase.from("epc_applications").insert(seed).select("id").single();
+    // lead_owner_name lands with migration 0074. Until the column exists in
+    // prod (42703 = undefined column), convert without it — self-heals once
+    // the migration runs.
+    if (insErr?.code === "42703" && /lead_owner_name/.test(insErr.message ?? "")) {
+      const { lead_owner_name: _dropped, ...rest } = seed; void _dropped;
+      ({ data: app, error: insErr } = await supabase.from("epc_applications").insert(rest).select("id").single());
+    }
     if (insErr || !app) return err(insErr?.message || "Could not create the loan application.", 500);
 
     // Mark the lead converted so it leaves the dashboard.

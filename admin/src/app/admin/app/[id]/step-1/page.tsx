@@ -136,15 +136,16 @@ function Inner() {
   // editable from anywhere in the flow.
   useEffect(() => {
     void (async () => {
-      const { data: la } = await supabase()
-        .from("epc_applications")
-        .select(
-          "id, epc_business_id, status, current_step, " +
-          "install_pincode, install_state, install_district, install_city, " +
-          "borrower_mobile, borrower_email, lead_owner_name, borrower_pan, borrower_father_name, system_type, plant_use_type, consent_at, customer_photo_path, created_at, aadhaar_face_path",
-        )
-        .eq("id", params.id)
-        .maybeSingle();
+      const STEP1_COLS =
+        "id, epc_business_id, status, current_step, " +
+        "install_pincode, install_state, install_district, install_city, " +
+        "borrower_mobile, borrower_email, borrower_pan, borrower_father_name, system_type, plant_use_type, consent_at, customer_photo_path, created_at, aadhaar_face_path";
+      const q = (cols: string) => supabase().from("epc_applications").select(cols).eq("id", params.id).maybeSingle();
+      // lead_owner_name lands with migration 0074 — until the column exists in
+      // prod (42703 = undefined column), load the step without it.
+      let res = await q(`${STEP1_COLS}, lead_owner_name`);
+      if (res.error?.code === "42703") res = await q(STEP1_COLS);
+      const la = res.data;
       if (!la) { setLoading(false); return; }
       const row = la as unknown as Loan & Record<string, any>;
       setLoan(row);

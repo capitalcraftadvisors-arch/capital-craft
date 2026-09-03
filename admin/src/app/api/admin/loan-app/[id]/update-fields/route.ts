@@ -112,10 +112,17 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    const { error: updErr } = await supabase
+    let { error: updErr } = await supabase
       .from("epc_applications")
       .update(patch)
       .eq("id", appId);
+    // lead_owner_name lands with migration 0074. Until the column exists in
+    // prod (42703 = undefined column), persist everything else rather than
+    // silently losing the chat's whole save — self-heals once the migration runs.
+    if (updErr?.code === "42703" && /lead_owner_name/.test(updErr.message ?? "")) {
+      const { lead_owner_name: _dropped, ...rest } = patch; void _dropped;
+      ({ error: updErr } = await supabase.from("epc_applications").update(rest).eq("id", appId));
+    }
     if (updErr) return err(`Save failed: ${updErr.message}`, 500);
 
     // Best-effort edit trail.
