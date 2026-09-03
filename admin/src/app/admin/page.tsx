@@ -18,6 +18,7 @@ import { getToken, getBusiness, allowedModules, greetingName } from "@/lib/auth"
 import NamasteGreeting from "@/components/NamasteGreeting";
 import NotificationBell from "@/components/NotificationBell";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
+import { getCached, setCached, invalidate } from "@/lib/list-cache";
 import {
   deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort,
   displayAmount as amountFor,
@@ -563,7 +564,13 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
     router.push(`/admin/epc/${row.id}/view` as any);
   }
 
-  async function load() {
+  async function load(force = false) {
+    // Short per-tab cache (45s). `force` skips it after an in-tab mutation.
+    const CK = "dash.epcs";
+    if (!force) {
+      const cached = getCached<{ rows: Row[]; lenderState: Record<string, LenderMap> }>(CK, 45000);
+      if (cached) { setRows(cached.rows); setLenderState(cached.lenderState); return; }
+    }
     let query = supabase().from("epc_business")
       .select("id, epc_display_id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, source, created_at, submitted_at, epc_self_edited, reviewed_at")
       .neq("business_type", "admin");
@@ -571,13 +578,13 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
     const rs = (data ?? []) as Row[];
     setRows(rs);
 
+    let map: Record<string, LenderMap> = {};
     if (rs.length > 0) {
       const ids = rs.map((r) => r.id);
       const { data: lenderRows } = await supabase()
         .from("epc_lender_status")
         .select("business_id, lender, docs_given, approved, rejected")
         .in("business_id", ids);
-      const map: Record<string, LenderMap> = {};
       for (const lr of (lenderRows ?? []) as { business_id: string; lender: Lender; docs_given: boolean; approved: boolean; rejected: boolean }[]) {
         if (!map[lr.business_id]) map[lr.business_id] = {};
         map[lr.business_id][lr.lender] = { docs_given: lr.docs_given, approved: lr.approved, rejected: !!lr.rejected };
@@ -586,6 +593,7 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
     } else {
       setLenderState({});
     }
+    setCached(CK, { rows: rs, lenderState: map });
   }
 
   // Load once; stage filtering (cards + panel dropdown) is entirely client-side.
@@ -764,6 +772,7 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
       } else {
         await supabase().from("epc_lender_status").insert({ business_id: epcId, lender, ...dbPatch });
       }
+      invalidate("dash.epcs"); // local state already updated; refresh cache on next mount
     } catch (e) {
       setLenderState(prevState);
       alert("Couldn't save lender state: " + (e as Error).message);
@@ -1194,6 +1203,11 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
 
   useEffect(() => {
     (async () => {
+      // Short per-tab cache (45s) so switching tabs / returning to the console
+      // reuses the last result instead of re-querying — cuts Supabase egress.
+      const CK = "dash.apps";
+      const cached = getCached<{ rows: Row[]; lenderLatest: Record<string, string> }>(CK, 45000);
+      if (cached) { setRows(cached.rows); setLenderLatest(cached.lenderLatest); return; }
       const { data } = await supabase()
         .from("epc_applications")
         .select(
@@ -1210,7 +1224,8 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .order("created_at", { ascending: false });
-      setRows((data ?? []) as unknown as Row[]);
+      const rows = (data ?? []) as unknown as Row[];
+      setRows(rows);
 
       // Per-lender latest status (6h) — group loan_application_lenders by app,
       // then the most-recent event across each app's lenders becomes its label.
@@ -1223,6 +1238,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         if (label) map[appId] = label;
       }
       setLenderLatest(map);
+      setCached("dash.apps", { rows, lenderLatest: map });
     })();
   }, []);
 
@@ -1734,6 +1750,9 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
 
   useEffect(() => {
     (async () => {
+      const CK = "dash.insurance";
+      const cached = getCached<Row[]>(CK, 45000);
+      if (cached) { setRows(cached); return; }
       const { data } = await supabase()
         .from("insurance_applications")
         .select(
@@ -1743,7 +1762,9 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .order("created_at", { ascending: false });
-      setRows((data ?? []) as unknown as Row[]);
+      const rows = (data ?? []) as unknown as Row[];
+      setRows(rows);
+      setCached("dash.insurance", rows);
     })();
   }, []);
 
@@ -2121,11 +2142,16 @@ function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
 
   useEffect(() => {
     (async () => {
+      const CK = "dash.leads";
+      const cached = getCached<Lead[]>(CK, 45000);
+      if (cached) { setRows(cached); return; }
       const { data } = await supabase()
         .from("customer_leads")
         .select("id, created_at, lead_type, name, mobile, city, pincode, pan, aadhaar, project_cost, loan_amount, plant_value, gstin, status")
         .order("created_at", { ascending: false });
-      setRows((data ?? []) as unknown as Lead[]);
+      const rows = (data ?? []) as unknown as Lead[];
+      setRows(rows);
+      setCached(CK, rows);
     })();
   }, []);
 
@@ -2133,7 +2159,7 @@ function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
     setBusy(r.id);
     const { error } = await supabase().from("customer_leads").update({ status }).eq("id", r.id);
     if (error) alert("Couldn't update status: " + error.message);
-    else setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, status } : x)));
+    else { setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, status } : x))); invalidate("dash.leads"); }
     setBusy(null);
   }
   const maskAadhaar = (a: string | null) => (a ? "XXXX XXXX " + a.slice(-4) : "—");
@@ -2298,6 +2324,7 @@ function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
         onClose={() => setDelLead(null)}
         onDeleted={(p) => {
           setRows((rs) => rs.filter((x) => x.id !== p.id));
+          invalidate("dash.leads");
           setDelLead(null);
           setViewLead(null);
         }}

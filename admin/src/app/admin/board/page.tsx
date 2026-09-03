@@ -159,8 +159,10 @@ function Inner() {
   const [commentBusy, setCommentBusy] = useState(false);
   const [showCmtHist, setShowCmtHist] = useState(false);
 
-  const reload = useCallback(async () => {
-    const { cases, users } = await loadOpsCases();
+  // force=true after any action so the board reflects the change immediately;
+  // plain mount/navigation reuses the short (20s) cache to cut egress.
+  const reload = useCallback(async (force = false) => {
+    const { cases, users } = await loadOpsCases({ force });
     setCases(cases);
     setUsers(users);
     setLoading(false);
@@ -245,7 +247,7 @@ function Inner() {
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) { alert(j?.error || "Action failed."); return false; }
       setTouches((t) => t + 1);
-      await reload();
+      await reload(true);
       return true;
     } finally { setBusy(false); }
   }
@@ -299,7 +301,7 @@ function Inner() {
       else await supabase().from("loan_application_lenders").insert({ application_id: c.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: now });
       await supabase().from("epc_applications").update({ status: "docs_sent", docs_sent_at: now, last_updated_by_user_id: me?.id ?? null }).eq("id", c.id);
       await logLoanActivity(c.id, "status_change", { detail: `Docs sent to ${lender.label}` });
-      setPicker(null); setTouches((t) => t + 1); await reload();
+      setPicker(null); setTouches((t) => t + 1); await reload(true);
     } catch (e) { alert("Couldn’t record: " + (e as Error).message); }
     finally { setPickerBusy(false); }
   }
@@ -317,7 +319,7 @@ function Inner() {
       else await supabase().from("loan_application_lenders").insert({ application_id: c.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: now, ...lp });
       await supabase().from("epc_applications").update({ status: "rejected", rejected_at: rejectedAt, rejected_lender: lender.key, rejection_reason: reason || null, last_updated_by_user_id: me?.id ?? null }).eq("id", c.id);
       await logLoanActivity(c.id, "rejected", { detail: `Rejected by ${lender.label}${reason ? ` — ${reason}` : ""}` });
-      setPicker(null); setTouches((t) => t + 1); await reload();
+      setPicker(null); setTouches((t) => t + 1); await reload(true);
     } catch (e) { alert("Couldn’t record: " + (e as Error).message); }
     finally { setPickerBusy(false); }
   }

@@ -11,6 +11,7 @@
 import { supabase } from "./supabase";
 import { getBusiness } from "./auth";
 import { isUndefinedColumn } from "./optional-column";
+import { getCached, setCached } from "./list-cache";
 
 export type CaseSource = "loan" | "insurance" | "lead" | "epc";
 export type ColumnDef = { key: string; label: string };
@@ -202,11 +203,20 @@ function loanLenderLabel(rows: Record<string, any>[]): string | null {
   return (pick.lender_label || pick.lender_key || null) as string | null;
 }
 
-export async function loadOpsCases(): Promise<{ cases: OpsCase[]; users: TeamUser[] }> {
+// `force` bypasses the short cache — the board passes it after every action so
+// the user sees fresh data immediately; plain navigation to the board reuses a
+// result up to 20s old to cut egress.
+export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ cases: OpsCase[]; users: TeamUser[] }> {
   const db = supabase();
   const me = getBusiness();
   const isRm = me?.role === "OPERATIONS_USER";
   const myId = me?.id ?? null;
+
+  const cacheKey = `opscases.${myId ?? "anon"}`;
+  if (!opts.force) {
+    const cached = getCached<{ cases: OpsCase[]; users: TeamUser[] }>(cacheKey, 20000);
+    if (cached) return cached;
+  }
 
   const [loans, lenders, insurance, leads, epcs, epcLenders, team] = await Promise.all([
     // lead_owner_name arrives with migration 0074. Until it exists in prod the
@@ -325,5 +335,7 @@ export async function loadOpsCases(): Promise<{ cases: OpsCase[]; users: TeamUse
     });
   }
 
-  return { cases, users };
+  const result = { cases, users };
+  setCached(cacheKey, result);
+  return result;
 }

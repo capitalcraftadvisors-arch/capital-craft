@@ -66,20 +66,32 @@ export default function NotificationBell() {
   const lastMax = useRef(0);
   const first = useRef(true);
   const boxRef = useRef<HTMLDivElement>(null);
+  // The "cases assigned to me" name maps change rarely (only on reassignment),
+  // so cache them for 5 min and reuse across polls — halves the bell's queries.
+  const caseMaps = useRef<{ at: number; loanName: Map<string, string>; epcName: Map<string, string>; leadName: Map<string, string>; insName: Map<string, string> } | null>(null);
 
   const load = useCallback(async () => {
     if (!me?.id) return;
     const db = supabase();
-    const [loans, epcs, leads, ins] = await Promise.all([
-      db.from("epc_applications").select("id, borrower_name, aadhaar_name").eq("assigned_to_user_id", me.id),
-      db.from("epc_business").select("id, trade_name, legal_name, contact_name").eq("assigned_to_user_id", me.id).neq("business_type", "admin"),
-      db.from("loan_leads").select("id, name").eq("assigned_to_user_id", me.id),
-      db.from("insurance_applications").select("id, aadhaar_name").eq("assigned_to_user_id", me.id),
-    ]);
-    const loanName = new Map<string, string>(((loans.data ?? []) as Record<string, string>[]).map((r) => [r.id, r.borrower_name || r.aadhaar_name || "—"]));
-    const epcName = new Map<string, string>(((epcs.data ?? []) as Record<string, string>[]).map((r) => [r.id, r.trade_name || r.legal_name || r.contact_name || "—"]));
-    const leadName = new Map<string, string>(((leads.data ?? []) as Record<string, string>[]).map((r) => [r.id, r.name || "—"]));
-    const insName = new Map<string, string>(((ins.data ?? []) as Record<string, string>[]).map((r) => [r.id, r.aadhaar_name || "—"]));
+    // Refresh the assigned-case name maps at most every 5 min; reuse otherwise.
+    let maps = caseMaps.current;
+    if (!maps || Date.now() - maps.at > 300000) {
+      const [loans, epcs, leads, ins] = await Promise.all([
+        db.from("epc_applications").select("id, borrower_name, aadhaar_name").eq("assigned_to_user_id", me.id),
+        db.from("epc_business").select("id, trade_name, legal_name, contact_name").eq("assigned_to_user_id", me.id).neq("business_type", "admin"),
+        db.from("loan_leads").select("id, name").eq("assigned_to_user_id", me.id),
+        db.from("insurance_applications").select("id, aadhaar_name").eq("assigned_to_user_id", me.id),
+      ]);
+      maps = {
+        at: Date.now(),
+        loanName: new Map<string, string>(((loans.data ?? []) as Record<string, string>[]).map((r) => [r.id, r.borrower_name || r.aadhaar_name || "—"])),
+        epcName: new Map<string, string>(((epcs.data ?? []) as Record<string, string>[]).map((r) => [r.id, r.trade_name || r.legal_name || r.contact_name || "—"])),
+        leadName: new Map<string, string>(((leads.data ?? []) as Record<string, string>[]).map((r) => [r.id, r.name || "—"])),
+        insName: new Map<string, string>(((ins.data ?? []) as Record<string, string>[]).map((r) => [r.id, r.aadhaar_name || "—"])),
+      };
+      caseMaps.current = maps;
+    }
+    const { loanName, epcName, leadName, insName } = maps;
     const loanIds = [...loanName.keys()], epcIds = [...epcName.keys()], leadIds = [...leadName.keys()];
 
     const empty = Promise.resolve({ data: [] as Record<string, string>[] });
