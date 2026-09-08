@@ -90,8 +90,26 @@ export async function POST(
         .toBuffer();
       mime = "image/jpeg";
     }
-    const path = `applications/${appId}/coapp_pan/${Date.now()}_${safeName(file.name, "coapp_pan")}`;
+    // The chatbot reuses this route for the APPLICANT's PAN (applicant=1). File
+    // it under a matching folder and, below, register a borrower_pan doc row.
+    const isApplicant = String(form.get("applicant") ?? "") === "1";
+    const folder = isApplicant ? "borrower_pan" : "coapp_pan";
+    const path = `applications/${appId}/${folder}/${Date.now()}_${safeName(file.name, folder)}`;
     await uploadBuffer(path, output, mime);
+
+    // Applicant PAN has no path column on epc_applications — the profile shows
+    // it from a user_application_docs row (category "borrower_pan"), exactly as
+    // the classic Step-1 upload does. Mirror that here so chatbot-built profiles
+    // aren't missing the Applicant PAN card. (Co-applicant PAN uses the
+    // coapp_pan_path column instead, so it needs no row.) Best-effort.
+    if (isApplicant) {
+      await supabase.from("user_application_docs").delete().eq("application_id", appId).eq("category", "borrower_pan");
+      const { error: docErr } = await supabase.from("user_application_docs").insert({
+        application_id: appId, category: "borrower_pan", storage_path: path,
+        file_name: file.name, mime_type: mime, uploaded_by: "admin",
+      });
+      if (docErr) console.warn("[extract-coapp-pan] applicant PAN doc row:", docErr.message);
+    }
 
     // OCR + parse. Gemini reads the PAN faithfully (primary); on any failure
     // it returns null and we fall back to Vision + regex. Vision-error message

@@ -104,9 +104,11 @@ const SCRIPT: Turn[] = [
 
   // ── Co-applicant, driven by the name check (PAN=Aadhaar, then vs e-bill owner) ──
   { id: "namecheck", bot: "", kind: "namecheck" },
-  { id: "add_coapp", bot: "The applicant and the electricity-bill owner are the same person, so a co-applicant is optional. Add one?", kind: "choice", field: "_has_coapp", when: (f) => f._coapp_mode === "optional", choices: [
+  // A co-applicant is NEVER forced — we always ask. The name check above just
+  // advises (recommends one when the e-bill owner differs from the applicant).
+  { id: "add_coapp", bot: "Is there a co-applicant for this case?", kind: "choice", field: "_has_coapp", choices: [
+    { value: "1", label: "Yes — add co-applicant" },
     { value: "", label: "No co-applicant" },
-    { value: "1", label: "Yes, add a co-applicant" },
   ] },
   { id: "coapp_pan", bot: "Upload the co-applicant's PAN.", kind: "docs", when: hasCoapp, docLabel: "Co-applicant PAN",
     uploads: [{ name: "file", label: "Co-applicant PAN" }], extractRoute: "extract-coapp-pan" },
@@ -161,7 +163,10 @@ const STEP_PAYLOAD: Record<number, (f: Form) => Record<string, unknown>> = {
     proforma_invoice_path: f.proforma_invoice_path || "", proforma_uploaded_at: f.proforma_uploaded_at || "",
     rooftop_photo_path: f.rooftop_photo_path || "", rooftop_photo_uploaded_at: f.rooftop_photo_uploaded_at || "",
     install_pincode: f.install_pincode || "", install_state: f.install_state || "", install_city: f.install_city || "",
-    bill_on_applicant_name: f.bill_on_applicant_name === "yes",
+    // Derive from the co-applicant decision: co-applicant present ⇒ bill not on
+    // the applicant alone. Keeps the profile's co-applicant section in sync with
+    // the explicit Yes/No answer (a co-applicant is optional, never forced).
+    bill_on_applicant_name: f._has_coapp !== "1",
     coapp_name: f.coapp_name || "", coapp_father_name: f.coapp_father_name || "", coapp_dob: f.coapp_dob || "",
     coapp_pan: f.coapp_pan || "", coapp_pan_path: f.coapp_pan_path || "", coapp_relation: f.coapp_relation || "",
     coapp_aadhaar_name: f.coapp_aadhaar_name || "", coapp_aadhaar_dob: f.coapp_aadhaar_dob || "", coapp_aadhaar_gender: f.coapp_aadhaar_gender || "",
@@ -610,6 +615,9 @@ function Inner() {
       const fd = new FormData();
       for (const u of needed) fd.append(u.name, files[u.name]);
       for (const [k, v] of Object.entries(t.extraForm ?? {})) fd.append(k, v);
+      // Applicant PAN reuses extract-coapp-pan — tell the route so it also files
+      // the doc under category "borrower_pan" (the profile's Applicant-PAN slot).
+      if (t.applicantPan) fd.append("applicant", "1");
       const res = await fetch(`/api/admin/loan-app/${appId}/${t.extractRoute}`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't read the document. Attach a clearer copy, or skip and fill it in later."); setBusy(false); return; }
@@ -729,12 +737,13 @@ function Inner() {
       say("bot", `✓ “${idName}” matches the electricity-bill owner — a co-applicant is optional.`);
     } else {
       mode = "mandatory";
-      say("bot", `The electricity bill is in a different name (“${ebillName}”) than the applicant (“${idName}”), so a co-applicant is required.`);
+      say("bot", `Note: the electricity bill is in a different name (“${ebillName}”) than the applicant (“${idName}”) — a co-applicant is recommended. I'll ask next.`);
     }
 
-    const patch: Form = { _coapp_mode: mode, bill_on_applicant_name: mode === "optional" ? "yes" : "no", ...(mode === "mandatory" ? { _has_coapp: "1" } : {}) };
-    setForm((f) => ({ ...f, ...patch }));
-    void persistForm({ ...form, ...patch });
+    // Only record the advisory mode. Whether there's actually a co-applicant is
+    // decided by the explicit "Is there a co-applicant?" question — never forced.
+    setForm((f) => ({ ...f, _coapp_mode: mode }));
+    void persistForm({ ...form, _coapp_mode: mode });
     advance();
   }
 

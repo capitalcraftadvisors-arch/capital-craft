@@ -38,6 +38,7 @@ type Lead = {
   epc_name_custom: string | null;
   lead_owner_name: string | null;
   status: string;
+  dead_at: string | null;
   aborted_at: string | null;
   abort_reason: string | null;
   created_at: string;
@@ -66,6 +67,7 @@ function Inner() {
   const [abortOpen, setAbortOpen] = useState(false);
   const [abortReason, setAbortReason] = useState("");
   const [aborting, setAborting] = useState(false);
+  const [deadBusy, setDeadBusy] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -96,8 +98,22 @@ function Inner() {
     setLead({ ...lead, epc_business_id: id || null });
   }
 
+  // Mark the lead dead (written off) or revive it. A dead lead can't be
+  // converted until revived.
+  async function setDead(dead: boolean) {
+    if (!lead) return;
+    if (dead && !window.confirm("Mark this lead as dead? It stays on the dashboard (shown as Dead) but can't be moved to a loan application until revived.")) return;
+    setDeadBusy(true);
+    const dead_at = dead ? new Date().toISOString() : null;
+    const { error } = await supabase().from("loan_leads").update({ dead_at }).eq("id", lead.id);
+    setDeadBusy(false);
+    if (error) { alert("Couldn't update: " + error.message); return; }
+    setLead({ ...lead, dead_at });
+  }
+
   async function convert() {
     if (!lead) return;
+    if (lead.dead_at) { alert("This lead is marked dead. Revive it before converting."); return; }
     if (!lead.epc_business_id) { alert("Assign a real EPC (dropdown below) before converting."); return; }
     if (!window.confirm("Move this lead to Loan Applications as a new draft? It will disappear from the Lead dashboard.")) return;
     setConverting(true);
@@ -192,7 +208,7 @@ function Inner() {
             <div className="text-[13px] text-[#5a8a76]">
               When ready, move this lead into <span className="font-semibold text-[#0f3d2e]">Loan Applications</span> as a draft.
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <Button variant="outline" onClick={() => router.push(`/admin/lead/${lead.id}/step-1`)} className="!px-4 !py-2 !text-[13px]">Edit</Button>
               <button
                 type="button"
@@ -201,9 +217,25 @@ function Inner() {
               >
                 Abort
               </button>
-              <Button onClick={() => void convert()} loading={converting} variant="grad" className="!px-4 !py-2 !text-[13px]">
-                Ready for loan application
-              </Button>
+              {lead.dead_at ? (
+                <>
+                  <span className="inline-flex items-center rounded-full px-3 py-1.5 text-[12px] font-semibold bg-[#fbe0e0] text-[#b42318] border border-[#f2c4c4]">Dead lead</span>
+                  <button type="button" onClick={() => void setDead(false)} disabled={deadBusy}
+                    className="px-4 py-2 rounded-btn text-[13px] font-semibold text-[#0f3d2e] border-[1.5px] border-[#cdeadd] hover:bg-[#f0faf5] disabled:opacity-60">
+                    {deadBusy ? "…" : "Revive lead"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button type="button" onClick={() => void setDead(true)} disabled={deadBusy}
+                    className="px-4 py-2 rounded-btn text-[13px] font-semibold text-red-700 border-[1.5px] border-red-200 hover:bg-red-50 disabled:opacity-60">
+                    {deadBusy ? "…" : "Mark as dead lead"}
+                  </button>
+                  <Button onClick={() => void convert()} loading={converting} variant="grad" className="!px-4 !py-2 !text-[13px]">
+                    Ready for loan application
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         )}

@@ -86,6 +86,7 @@ export type OpsCase = {
   idleDays: number;
   onHold: boolean;
   blocker: string | null;
+  createdAt: string | null; // for the board's period filter
   disbursed: number;
   disbursedThisMonthAt: string | null;
   href: string;
@@ -228,9 +229,9 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       return withCol;
     })(),
     db.from("loan_application_lenders").select("application_id, lender_key, lender_label, docs_sent_at, approved_at, rejected_at"),
-    db.from("insurance_applications").select("id, aadhaar_name, sum_insured, invoice_confirmed_amount, invoice_amount, insurance_partner, status, updated_at, assigned_to_user_id"),
+    db.from("insurance_applications").select("id, aadhaar_name, sum_insured, invoice_confirmed_amount, invoice_amount, insurance_partner, status, created_at, updated_at, assigned_to_user_id"),
     db.from("loan_leads").select("id, name, loan_amount, status, created_at, reviewed_at, epc_name_custom, assigned_to_user_id, lead_owner_name"),
-    db.from("epc_business").select("id, trade_name, legal_name, contact_name, status, current_step, updated_at, business_type, assigned_to_user_id").neq("business_type", "admin").in("status", ["draft", "under_review", "on_hold", "approved", "rejected"]),
+    db.from("epc_business").select("id, trade_name, legal_name, contact_name, status, current_step, created_at, updated_at, business_type, assigned_to_user_id").neq("business_type", "admin").in("status", ["draft", "under_review", "on_hold", "approved", "rejected"]),
     db.from("epc_lender_status").select("business_id, docs_given, approved, rejected"),
     db.from("epc_business").select("id, contact_name, role, parent_user_id").eq("business_type", "admin").order("contact_name", { ascending: true }),
   ]);
@@ -270,6 +271,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       tatDays: daysSince(r.created_at || r.submitted_at || r.updated_at),
       idleDays: daysSince(r.updated_at), onHold: r.status === "on_hold",
       blocker: r.review_notes || null,
+      createdAt: r.created_at ?? null,
       disbursed: num(r.first_disbursement_amount) + num(r.second_disbursement_amount),
       disbursedThisMonthAt: r.first_disbursement_date || r.second_disbursement_date || null,
       href: `/admin/app/${r.id}/view`,
@@ -291,6 +293,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       stageHours: hoursSince(r.updated_at),
       tatDays: daysSince(r.updated_at),
       idleDays: daysSince(r.updated_at), onHold: r.status === "hold", blocker: null,
+      createdAt: r.created_at ?? r.updated_at ?? null,
       disbursed: 0, disbursedThisMonthAt: null,
       href: `/admin/insurance/${r.id}/view`,
     });
@@ -310,6 +313,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       stageHours: hoursSince(r.reviewed_at || r.created_at),
       tatDays: daysSince(r.created_at),
       idleDays: daysSince(r.reviewed_at || r.created_at), onHold: false, blocker: null,
+      createdAt: r.created_at ?? null,
       disbursed: 0, disbursedThisMonthAt: null,
       href: `/admin/lead/${r.id}/view`,
     });
@@ -330,6 +334,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       stageHours: hoursSince(r.updated_at),
       tatDays: daysSince(r.updated_at),
       idleDays: daysSince(r.updated_at), onHold: r.status === "on_hold", blocker: null,
+      createdAt: r.created_at ?? r.updated_at ?? null,
       disbursed: 0, disbursedThisMonthAt: null,
       href: `/admin/epc/${r.id}/view`,
     });

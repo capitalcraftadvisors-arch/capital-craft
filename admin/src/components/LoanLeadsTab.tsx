@@ -27,6 +27,7 @@ type LeadRow = {
   epc_business_id: string | null;
   epc_name_custom: string | null;
   status: string;
+  dead_at: string | null;
   created_at: string;
   epc_business: { trade_name: string | null; legal_name: string | null; contact_name: string | null; epc_display_id: string | null } | null;
 };
@@ -57,7 +58,7 @@ export default function LoanLeadsTab() {
     setLoading(true);
     const { data } = await supabase()
       .from("loan_leads")
-      .select("id, lead_display_id, name, mobile, dob, loan_amount, project_size, project_size_unit, email, lead_owner_name, created_by, epc_business_id, epc_name_custom, status, created_at, epc_business:epc_business_id(trade_name, legal_name, contact_name, epc_display_id)")
+      .select("id, lead_display_id, name, mobile, dob, loan_amount, project_size, project_size_unit, email, lead_owner_name, created_by, epc_business_id, epc_name_custom, status, dead_at, created_at, epc_business:epc_business_id(trade_name, legal_name, contact_name, epc_display_id)")
       .eq("status", "under_review")
       .is("aborted_at", null)
       .order("created_at", { ascending: false });
@@ -157,7 +158,7 @@ export default function LoanLeadsTab() {
                 <th className="text-center font-semibold px-4 py-3">Loan amount</th>
                 <th className="text-center font-semibold px-4 py-3">Created on</th>
                 <th className="text-center font-semibold px-4 py-3">Created by</th>
-                <th className="text-center font-semibold px-4 py-3">Action</th>
+                <th className="text-center font-semibold px-4 py-3">Status / Action</th>
               </tr>
             </thead>
             <tbody>
@@ -170,7 +171,7 @@ export default function LoanLeadsTab() {
                   <tr
                     key={r.id}
                     onClick={() => router.push(`/admin/lead/${r.id}/view`)}
-                    className="border-b border-[#f0f4f2] last:border-0 hover:bg-[#f7f7fd] cursor-pointer"
+                    className={"border-b border-[#f0f4f2] last:border-0 cursor-pointer " + (r.dead_at ? "bg-[#fdf0f0] hover:bg-[#fbe6e6]" : "hover:bg-[#f7f7fd]")}
                   >
                     <td className="px-4 py-3">
                       <div className="font-semibold text-[#0f3d2e]">{r.name || "—"}</div>
@@ -194,17 +195,26 @@ export default function LoanLeadsTab() {
                       {new Date(r.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
                     </td>
                     <td className="px-4 py-3 text-center text-[13px] text-[#5a8a76]">{createdByLabel(r.created_by)}</td>
-                    <td className="px-4 py-3 text-center">
-                      <button
-                        type="button"
-                        onClick={(e) => { e.stopPropagation(); void readyForLoan(r); }}
-                        disabled={converting === r.id}
-                        className="inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-60"
-                        style={{ backgroundColor: "#178a5c" }}
-                        title="Move this lead to Loan Applications"
-                      >
-                        {converting === r.id ? "Moving…" : "Ready for Loan"}
-                      </button>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-center gap-2 flex-wrap">
+                        {r.dead_at ? (
+                          <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#fbe0e0] text-[#b42318] border border-[#f2c4c4]">Dead lead</span>
+                        ) : (
+                          <>
+                            <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#e7f5ee] text-[#0f7a52] border border-[#cdeadd]">New</span>
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); void readyForLoan(r); }}
+                              disabled={converting === r.id}
+                              className="inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-60"
+                              style={{ backgroundColor: "#178a5c" }}
+                              title="Move this lead to Loan Applications"
+                            >
+                              {converting === r.id ? "Moving…" : "Ready for Loan"}
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))

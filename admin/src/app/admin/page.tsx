@@ -68,11 +68,29 @@ function Inner() {
     sessionStorage.removeItem("adminList.tab");
   }, [allowedTabs]);
 
-  // Reset the period to the active tab's default whenever the tab changes.
+  // Restore the saved period for this tab (persists the user's choice across
+  // navigation — opening a case and returning keeps it, until they change it),
+  // else fall back to the tab default (EPCs = This Year, others = This Month).
   useEffect(() => {
-    setPeriod(tab === "epcs" ? "year" : "month");
-    setPFrom(""); setPTo("");
+    const def: Period = tab === "epcs" ? "year" : "month";
+    try {
+      const raw = localStorage.getItem(`adminPeriod.${tab}`);
+      if (raw) {
+        const s = JSON.parse(raw) as { period?: Period; from?: string; to?: string };
+        setPeriod(s.period ?? def); setPFrom(s.from ?? ""); setPTo(s.to ?? "");
+        return;
+      }
+    } catch { /* ignore */ }
+    setPeriod(def); setPFrom(""); setPTo("");
   }, [tab]);
+
+  // Persist the picker choice so it sticks per tab until changed again.
+  const persistPeriod = (p: Period, from: string, to: string) => {
+    try { localStorage.setItem(`adminPeriod.${tab}`, JSON.stringify({ period: p, from, to })); } catch { /* ignore */ }
+  };
+  const changePeriod = (p: Period) => { setPeriod(p); persistPeriod(p, pFrom, pTo); };
+  const changeFrom = (v: string) => { setPFrom(v); persistPeriod(period, v, pTo); };
+  const changeTo = (v: string) => { setPTo(v); persistPeriod(period, pFrom, v); };
 
   const section = ACCENTS[tab];
   // Tabs that carry summary cards + a period picker (loanleads/analytics don't).
@@ -100,7 +118,7 @@ function Inner() {
               <h1 className="font-display text-[24px] sm:text-[28px] font-bold">{section.label}</h1>
             </div>
             {showPeriod && (
-              <PeriodPicker period={period} onPeriod={setPeriod} from={pFrom} onFrom={setPFrom} to={pTo} onTo={setPTo} />
+              <PeriodPicker period={period} onPeriod={changePeriod} from={pFrom} onFrom={changeFrom} to={pTo} onTo={changeTo} />
             )}
           </div>
 

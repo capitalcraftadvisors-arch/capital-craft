@@ -17,6 +17,7 @@ import Select from "@/components/ui/Select";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, getToken, greetingName } from "@/lib/auth";
 import { loadOpsCases, columnsFor, SOURCE_META, type OpsCase, type TeamUser, type CaseSource } from "@/lib/ops-board";
+import { PERIOD_OPTIONS, inPeriod, type Period } from "@/lib/period";
 import { DEFAULT_LOAN_LENDERS, LOAN_LENDER_COLS, lendersWithDocs, type LoanLenderRow } from "@/lib/loan-lenders";
 import { logLoanActivity } from "@/lib/loanAudit";
 
@@ -147,6 +148,9 @@ function Inner() {
   const sla = 1; // fixed at ≤1 day (backend only — no UI control, per spec)
   const [target, setTarget] = useState<number>(() => (typeof window !== "undefined" ? Number(localStorage.getItem("opsboard.target")) : 0) || 65);
   const [q, setQ] = useState("");
+  // Period filter (by case creation date). Default "all" so no active case ever
+  // disappears; persisted so the choice sticks until changed. See changeBoardPeriod.
+  const [boardPeriod, setBoardPeriod] = useState<Period>("all");
   const [quick, setQuick] = useState<"none" | "myoverdue" | "unassigned" | "breaches">("none");
   const [dragId, setDragId] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ caseId: string; column: string } | null>(null);
@@ -170,6 +174,9 @@ function Inner() {
 
   useEffect(() => { void reload(); }, [reload]);
   useEffect(() => { if (typeof window !== "undefined") localStorage.setItem("opsboard.target", String(target)); }, [target]);
+  // Restore + persist the period choice (sticks until changed).
+  useEffect(() => { try { const p = localStorage.getItem("boardPeriod") as Period | null; if (p) setBoardPeriod(p); } catch { /* ignore */ } }, []);
+  const changeBoardPeriod = (p: Period) => { setBoardPeriod(p); try { localStorage.setItem("boardPeriod", p); } catch { /* ignore */ } };
 
   // Load the selected case's comments (per-source table).
   useEffect(() => {
@@ -219,10 +226,11 @@ function Inner() {
       if (quick === "myoverdue" && !(c.ownerUserId === me?.id && c.idleDays >= sla)) return false;
       if (quick === "unassigned" && c.ownerUserId) return false;
       if (quick === "breaches" && c.idleDays < sla) return false;
+      if (boardPeriod !== "all" && !inPeriod(c.createdAt, boardPeriod)) return false;
       if (ql && !`${c.name} ${c.lender ?? ""} ${c.blocker ?? ""} ${c.ownerName ?? ""}`.toLowerCase().includes(ql)) return false;
       return true;
     });
-  }, [cases, srcFilter, ownerFilter, canOversee, quick, sla, q, me]);
+  }, [cases, srcFilter, ownerFilter, canOversee, quick, sla, q, me, boardPeriod]);
 
   const byCol = (k: string) => visible.filter((c) => colOf(c) === k).sort((a, b) => {
     // Rejected cases sink to the bottom of the column; otherwise oldest-first.
@@ -426,20 +434,18 @@ function Inner() {
                 </button>
               ))}
             </div>
-            {/* Owner tabs — overseers (Admin sees all RMs, Manager sees own team) */}
-            {canOversee && (
-              <div className="inline-flex border border-line rounded-lg overflow-hidden ml-1">
-                {ownerTabs.map((o) => (
-                  <button key={o.id} type="button" onClick={() => setOwnerFilter(o.id)}
-                    className={["px-3 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", ownerFilter === o.id ? "bg-[#178a5c] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
-                    {o.name}
-                  </button>
-                ))}
-              </div>
-            )}
-            {/* Search + quick filters */}
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search cases…"
-              className="border border-line rounded-lg px-3 py-1.5 text-[12px] w-40 ml-1" />
+            {/* Prominent search */}
+            <div className="relative">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search cases…"
+                className="w-64 sm:w-80 border-2 border-line rounded-lg pl-9 pr-3 py-2 text-[13px] outline-none focus:border-[#0f766e] transition-colors" />
+            </div>
+            {/* Period filter (by creation date; Previous Month / All time / …) */}
+            <select value={boardPeriod} onChange={(e) => changeBoardPeriod(e.target.value as Period)}
+              className="rounded-lg border border-line bg-white px-3 py-2 text-[12px] font-medium text-text outline-none focus:border-[#0f766e] cursor-pointer">
+              {PERIOD_OPTIONS.filter((o) => o.value !== "custom").map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            {/* Quick filters */}
             {([["myoverdue", "My overdue", "all"], ["unassigned", "Unassigned", "admin"], ["breaches", "Breaches", "oversee"]] as const)
               .filter(([, , vis]) => vis === "all" || (vis === "admin" && isMainAdmin) || (vis === "oversee" && canOversee))
               .map(([k, lbl]) => (
@@ -448,6 +454,17 @@ function Inner() {
                 {lbl}
               </button>
             ))}
+            {/* Owner tabs — pushed to the RIGHT (Admin sees all RMs, Manager sees own team) */}
+            {canOversee && (
+              <div className="inline-flex border border-line rounded-lg overflow-hidden ml-auto">
+                {ownerTabs.map((o) => (
+                  <button key={o.id} type="button" onClick={() => setOwnerFilter(o.id)}
+                    className={["px-3 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", ownerFilter === o.id ? "bg-[#178a5c] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
+                    {o.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </header>
 
@@ -506,13 +523,17 @@ function Inner() {
                           // Loans use per-stage timing (change #2/3/5/7); other sources use idle-vs-SLA.
                           const lvl = c.source === "loan" ? loanOutline(c) : attention(c, sla);
                           const late = lvl === "red";
-                          // Approved cards get a light-green wash, rejected a pale-red one.
-                          const fill = c.outcome === "approved" ? "#eaf8f0" : c.outcome === "rejected" ? "#fbecec" : "#ffffff";
+                          // Approved cards get a green wash, rejected a red one (slightly deeper
+                          // than before, per request).
+                          const fill = c.outcome === "approved" ? "#d1efdf" : c.outcome === "rejected" ? "#f7d9d9" : "#ffffff";
+                          const picked = sel === c.id;
                           return (
                             <button key={c.source + c.id} type="button" onClick={() => setSel(c.id)}
                               draggable={canDrag} onDragStart={(e) => { if (!canDrag) { e.preventDefault(); return; } setDragId(c.id); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", c.id); } catch { /* ignore */ } }}
-                              className={"text-left rounded-lg border-2 p-2.5 transition-shadow" + (canDrag ? " cursor-grab active:cursor-grabbing" : " cursor-pointer")}
-                              style={{ borderColor: OUTLINE[lvl], backgroundColor: fill, boxShadow: sel === c.id ? "0 0 0 2px #178a5c" : undefined }}>
+                              className={"text-left rounded-lg border-2 p-2.5 transition-all duration-150 will-change-transform" + (canDrag ? " cursor-grab active:cursor-grabbing" : " cursor-pointer")}
+                              // Selection is shown by LIFTING the card (shadow + raise), not by a
+                              // coloured ring — that used to clash with the red/green status border.
+                              style={{ borderColor: OUTLINE[lvl], backgroundColor: fill, transform: picked ? "translateY(-3px)" : undefined, boxShadow: picked ? "0 12px 26px -8px rgba(15,23,42,0.45)" : "0 1px 2px rgba(15,23,42,0.06)", position: picked ? "relative" : undefined, zIndex: picked ? 1 : undefined }}>
                               <div className="flex items-center justify-between gap-1.5">
                                 <strong className="text-[13px] text-text truncate">{c.name}</strong>
                                 <span className="text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0" style={{ backgroundColor: sm.tint, color: sm.color }}>{sm.label}</span>

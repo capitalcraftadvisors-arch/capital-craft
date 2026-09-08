@@ -1,15 +1,17 @@
 // ── Summary-card time period (Today / Week / Month / Quarter / Year / Custom) ──
 // IST-aware boundary logic, shared between the admin dashboards and profile
 // pages (e.g. EPC Health) so they filter counts identically.
-export type Period = "today" | "week" | "month" | "quarter" | "year" | "custom";
+export type Period = "today" | "week" | "month" | "prev_month" | "quarter" | "year" | "all" | "custom";
 
 export const PERIOD_OPTIONS: Array<{ value: Period; label: string }> = [
-  { value: "today",   label: "Today" },
-  { value: "week",    label: "This Week" },
-  { value: "month",   label: "This Month" },
-  { value: "quarter", label: "This Quarter" },
-  { value: "year",    label: "This Year" },
-  { value: "custom",  label: "Custom range" },
+  { value: "today",      label: "Today" },
+  { value: "week",       label: "This Week" },
+  { value: "month",      label: "This Month" },
+  { value: "prev_month", label: "Previous Month" },
+  { value: "quarter",    label: "This Quarter" },
+  { value: "year",       label: "This Year" },
+  { value: "all",        label: "All time" },
+  { value: "custom",     label: "Custom range" },
 ];
 
 export function periodBounds(period: Period, from?: string, to?: string): { start: number; end: number } {
@@ -36,6 +38,8 @@ export function periodBounds(period: Period, from?: string, to?: string): { star
       return { start, end: start + 7 * DAY };
     }
     case "month":   return { start: mid(y, m, 1), end: m === 12 ? mid(y + 1, 1, 1) : mid(y, m + 1, 1) };
+    case "prev_month": return { start: m === 1 ? mid(y - 1, 12, 1) : mid(y, m - 1, 1), end: mid(y, m, 1) };
+    case "all":     return { start: -Infinity, end: Infinity };
     case "quarter": {
       const qs = m - ((m - 1) % 3);
       const qe = qs + 3;
@@ -47,6 +51,7 @@ export function periodBounds(period: Period, from?: string, to?: string): { star
 }
 
 export function inPeriod(dateStr: string | null | undefined, period: Period, from?: string, to?: string): boolean {
+  if (period === "all") return true; // no date filter — keeps rows with null dates too
   if (!dateStr) return false;
   const t = Date.parse(dateStr);
   if (isNaN(t)) return false;
