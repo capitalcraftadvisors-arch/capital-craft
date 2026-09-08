@@ -107,12 +107,6 @@ function hoursSince(iso: string | null | undefined): number {
   if (!isFinite(t)) return 0;
   return Math.max(0, (Date.now() - t) / 3600000);
 }
-// Is `iso` within the current calendar month? (rejected loans age out at month-end.)
-function inCurrentMonth(iso: string | null | undefined): boolean {
-  if (!iso) return false;
-  const d = new Date(iso), now = new Date();
-  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-}
 const num = (v: unknown): number => (typeof v === "number" && isFinite(v) ? v : Number(v) || 0);
 
 // ── Per-source placement → the source's own column key ──
@@ -123,11 +117,12 @@ function loanColumn(r: Record<string, any>, lenderMidDecision: boolean): { colum
   const s = r.status as string;
   // Aborted files live in their own column.
   if (r.aborted_at) return { column: "abort", label: "Aborted", stageSince: r.aborted_at };
-  // Rejected: shown only within the calendar month it was rejected, then it ages
-  // off the board automatically (approved files carry forward, rejected don't).
+  // Rejected cases STAY on the board (Approved/Rejected column). How far back
+  // you see them is governed by the board's period dropdown (default All time),
+  // not by hard month-aging — so a case rejected in a prior month is still
+  // reachable by choosing that period instead of silently vanishing.
   if (s === "rejected") {
-    const at = r.rejected_at || r.updated_at;
-    return inCurrentMonth(at) ? { column: "approved_rejected", label: "Rejected by lender", stageSince: at } : { column: null, label: "Rejected (aged out)", stageSince: at };
+    return { column: "approved_rejected", label: "Rejected by lender", stageSince: r.rejected_at || r.updated_at };
   }
   // Approved → stays in Approved/Rejected until the 1st disbursement is recorded
   // (RFD removed). Once the 1st tranche is in → 1st Phase; drops off after the 2nd.
