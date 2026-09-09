@@ -123,6 +123,88 @@ function fmt(v: number): string {
 function fmtFull(v: number): string {
   return "₹" + Math.round(v).toLocaleString("en-IN");
 }
+// The next action a case needs, derived from its stage. null = nothing to do
+// (rejected / aborted / fully disbursed / off-board) — excluded from My Day.
+function nextAction(c: OpsCase): { text: string; cta: string } | null {
+  if (c.outcome === "rejected" || c.column === "abort" || c.column == null) return null;
+  if (c.source === "loan") {
+    switch (c.column) {
+      case "ready_login":       return { text: "Send the documents to a lender", cta: "Open" };
+      case "send_lender":       return { text: "Follow up the lender · record the decision", cta: "Open" };
+      case "docs_pending":      return { text: "Collect the pending documents", cta: "Open" };
+      case "approved_rejected": return { text: "Record the disbursement", cta: "Open" };
+      case "phase1":            return { text: "Record the 2nd disbursement", cta: "Open" };
+      case "phase2":            return null; // fully disbursed — done
+      default:                  return { text: c.statusLabel, cta: "Open" };
+    }
+  }
+  if (c.source === "lead") return { text: "Follow up · convert this lead", cta: "Open" };
+  return { text: c.statusLabel, cta: "Open" };
+}
+
+// "YYYY-MM" → last calendar day "YYYY-MM-DD" (inclusive end of the month range).
+function monthEnd(ym: string): string {
+  const [y, m] = ym.split("-").map(Number);
+  if (!y || !m) return "";
+  const last = new Date(y, m, 0).getDate();
+  return `${ym}-${String(last).padStart(2, "0")}`;
+}
+
+// "My Day" — a single ranked to-do list of the RM's own cases: what to do next,
+// how long it's been waiting, and a button to open it. Replaces the Kanban as
+// the default screen for RMs / managers.
+function MyDayQueue({ items, onOpen, q, onSearch }: { items: OpsCase[]; onOpen: (href: string) => void; q: string; onSearch: (v: string) => void }) {
+  const ql = q.trim().toLowerCase();
+  const shown = ql ? items.filter((c) => `${c.name} ${c.lender ?? ""} ${c.epcName ?? ""}`.toLowerCase().includes(ql)) : items;
+  const lvlOf = (c: OpsCase) => (c.source === "loan" ? loanOutline(c) : attention(c, 1));
+  const urgent = shown.filter((c) => lvlOf(c) === "red").length;
+  return (
+    <div className="max-w-3xl">
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
+        <div className="text-[16px] font-bold text-text">
+          My Day <span className="text-text-muted font-medium text-[13px]">· {shown.length} to action{urgent > 0 ? ` · ${urgent} urgent` : ""}</span>
+        </div>
+        <div className="relative ml-auto">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+          <input value={q} onChange={(e) => onSearch(e.target.value)} placeholder="Search my cases…"
+            className="w-56 border-2 border-line rounded-lg pl-9 pr-3 py-1.5 text-[13px] outline-none focus:border-[#0f766e]" />
+        </div>
+      </div>
+      {shown.length === 0 ? (
+        <div className="text-[13px] text-text-muted border border-dashed border-line rounded-lg p-10 text-center">
+          Nothing needs your action right now. 🎉
+        </div>
+      ) : (
+        <ul className="flex flex-col gap-2">
+          {shown.map((c) => {
+            const act = nextAction(c)!;
+            const days = Math.max(0, Math.floor(c.stageHours / 24));
+            const lvl = lvlOf(c);
+            return (
+              <li key={c.source + c.id} className="flex items-center gap-3 rounded-lg border border-line bg-white px-3.5 py-3 transition-shadow hover:shadow-md">
+                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: OUTLINE[lvl] }} title={lvl === "red" ? "Overdue" : lvl === "yellow" ? "Watch" : "On track"} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <strong className="text-[14px] text-text truncate">{c.name}</strong>
+                    {c.lender && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#eef2f7] text-[#334155] shrink-0">{c.lender}</span>}
+                  </div>
+                  <div className="text-[12.5px] text-text-mid truncate">{act.text}{c.epcName ? ` · ${c.epcName}` : ""}</div>
+                </div>
+                <span className="text-[12px] font-semibold shrink-0 whitespace-nowrap" style={{ color: lvl === "red" ? "#b42318" : "#5a8a76" }}>
+                  {lvl === "red" ? "⚠ " : ""}{days}d
+                </span>
+                <button type="button" onClick={() => onOpen(c.href)}
+                  className="shrink-0 text-[12px] font-semibold px-3.5 py-1.5 rounded-lg bg-[#0f766e] text-white hover:bg-[#0c5f58]">
+                  {act.cta}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
 function monthKey(iso: string | null): string | null {
   if (!iso) return null;
   const d = new Date(iso);
@@ -150,8 +232,13 @@ function Inner() {
   const [target, setTarget] = useState<number>(() => (typeof window !== "undefined" ? Number(localStorage.getItem("opsboard.target")) : 0) || 65);
   const [q, setQ] = useState("");
   // Period filter (by case creation date). Default "all" so no active case ever
-  // disappears; persisted so the choice sticks until changed. See changeBoardPeriod.
+  // disappears; persisted so the choice sticks until changed. "custom" uses
+  // month-to-month pickers (boardFrom/boardTo as "YYYY-MM").
   const [boardPeriod, setBoardPeriod] = useState<Period>("all");
+  const [boardFrom, setBoardFrom] = useState("");
+  const [boardTo, setBoardTo] = useState("");
+  // RMs / managers default to the "My Day" action queue; admins stay on the board.
+  const [view, setView] = useState<"myday" | "board">(isMainAdmin ? "board" : "myday");
   const [quick, setQuick] = useState<"none" | "myoverdue" | "unassigned" | "breaches">("none");
   const [dragId, setDragId] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ caseId: string; column: string } | null>(null);
@@ -176,8 +263,19 @@ function Inner() {
   useEffect(() => { void reload(); }, [reload]);
   useEffect(() => { if (typeof window !== "undefined") localStorage.setItem("opsboard.target", String(target)); }, [target]);
   // Restore + persist the period choice (sticks until changed).
-  useEffect(() => { try { const p = localStorage.getItem("boardPeriod") as Period | null; if (p) setBoardPeriod(p); } catch { /* ignore */ } }, []);
-  const changeBoardPeriod = (p: Period) => { setBoardPeriod(p); try { localStorage.setItem("boardPeriod", p); } catch { /* ignore */ } };
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("boardPeriod");
+      if (raw) {
+        const s = JSON.parse(raw) as { p?: Period; f?: string; t?: string };
+        if (s.p) setBoardPeriod(s.p); if (s.f) setBoardFrom(s.f); if (s.t) setBoardTo(s.t);
+      }
+    } catch { /* ignore (legacy plain-string value) */ }
+  }, []);
+  const saveBoardPeriod = (p: Period, f: string, t: string) => { try { localStorage.setItem("boardPeriod", JSON.stringify({ p, f, t })); } catch { /* ignore */ } };
+  const changeBoardPeriod = (p: Period) => { setBoardPeriod(p); saveBoardPeriod(p, boardFrom, boardTo); };
+  const changeBoardFrom = (f: string) => { setBoardFrom(f); saveBoardPeriod(boardPeriod, f, boardTo); };
+  const changeBoardTo = (t: string) => { setBoardTo(t); saveBoardPeriod(boardPeriod, boardFrom, t); };
 
   // Load the selected case's comments (per-source table).
   useEffect(() => {
@@ -227,18 +325,38 @@ function Inner() {
       if (quick === "myoverdue" && !(c.ownerUserId === me?.id && c.idleDays >= sla)) return false;
       if (quick === "unassigned" && c.ownerUserId) return false;
       if (quick === "breaches" && c.idleDays < sla) return false;
-      if (boardPeriod !== "all" && !inPeriod(c.createdAt, boardPeriod)) return false;
+      if (boardPeriod === "custom") {
+        const from = boardFrom ? `${boardFrom}-01` : "";
+        const to = boardTo ? monthEnd(boardTo) : "";
+        if ((from || to) && !inPeriod(c.createdAt, "custom", from, to)) return false;
+      } else if (boardPeriod !== "all" && !inPeriod(c.createdAt, boardPeriod)) return false;
       if (ql && !`${c.name} ${c.lender ?? ""} ${c.blocker ?? ""} ${c.ownerName ?? ""}`.toLowerCase().includes(ql)) return false;
       return true;
     });
-  }, [cases, srcFilter, ownerFilter, canOversee, quick, sla, q, me, boardPeriod]);
+  }, [cases, srcFilter, ownerFilter, canOversee, quick, sla, q, me, boardPeriod, boardFrom, boardTo]);
 
+  // Urgency rank for ordering: RED outline first, then yellow, then green, then
+  // neutral (abort), with rejected always at the very bottom. Within the same
+  // colour, the case that has sat LONGEST in this stage rises to the top — so
+  // the most urgent work is always at the top of every column.
+  const outlineRank = useCallback((c: OpsCase) => {
+    if (c.outcome === "rejected") return 4;
+    const lvl = c.source === "loan" ? loanOutline(c) : attention(c, sla);
+    return lvl === "red" ? 0 : lvl === "yellow" ? 1 : lvl === "green" ? 2 : 3;
+  }, [sla]);
   const byCol = (k: string) => visible.filter((c) => colOf(c) === k).sort((a, b) => {
-    // Rejected cases sink to the bottom of the column; otherwise oldest-first.
-    const ar = a.outcome === "rejected" ? 1 : 0, br = b.outcome === "rejected" ? 1 : 0;
-    if (ar !== br) return ar - br;
-    return b.idleDays - a.idleDays;
+    const ra = outlineRank(a), rb = outlineRank(b);
+    if (ra !== rb) return ra - rb;
+    return b.stageHours - a.stageHours; // longest in this stage first
   });
+
+  // "My Day" queue — the RM's OWN cases that need action, across all sources,
+  // ranked most-urgent first (red → yellow → green, longest-in-stage on top).
+  const myDay = useMemo(() => {
+    return cases
+      .filter((c) => c.ownerUserId === me?.id && !!nextAction(c))
+      .sort((a, b) => outlineRank(a) - outlineRank(b) || b.stageHours - a.stageHours);
+  }, [cases, me, outlineRank]);
   const breaches = visible.filter((c) => c.idleDays >= sla).length;
   const thisMonth = `${new Date().getFullYear()}-${new Date().getMonth()}`;
   const mtd = cases.reduce((sum, c) => sum + (monthKey(c.disbursedThisMonthAt) === thisMonth ? c.disbursed : 0), 0);
@@ -415,6 +533,16 @@ function Inner() {
               </h1>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
+              {!isMainAdmin && (
+                <div className="inline-flex border border-line rounded-lg overflow-hidden">
+                  {(["myday", "board"] as const).map((v) => (
+                    <button key={v} type="button" onClick={() => setView(v)}
+                      className={["px-3.5 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", view === v ? "bg-[#0f766e] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
+                      {v === "myday" ? "My Day" : "Board"}
+                    </button>
+                  ))}
+                </div>
+              )}
               <NotificationBell />
               {isMainAdmin && (
                 <label className="text-[12px] text-text-muted flex items-center gap-1.5">Target
@@ -423,7 +551,8 @@ function Inner() {
               )}
             </div>
           </div>
-          {/* Filters */}
+          {/* Filters — board view only (My Day is its own ranked list). */}
+          {view === "board" && (
           <div className="mt-3 flex items-center gap-2 flex-wrap">
             {/* Source filter */}
             <div className="inline-flex border border-line rounded-lg overflow-hidden">
@@ -441,11 +570,23 @@ function Inner() {
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search cases…"
                 className="w-64 sm:w-80 border-2 border-line rounded-lg pl-9 pr-3 py-2 text-[13px] outline-none focus:border-[#0f766e] transition-colors" />
             </div>
-            {/* Period filter (by creation date; Previous Month / All time / …) */}
+            {/* Period filter (by creation date). "This Week" removed; custom is a
+                month-to-month range. */}
             <select value={boardPeriod} onChange={(e) => changeBoardPeriod(e.target.value as Period)}
               className="rounded-lg border border-line bg-white px-3 py-2 text-[12px] font-medium text-text outline-none focus:border-[#0f766e] cursor-pointer">
-              {PERIOD_OPTIONS.filter((o) => o.value !== "custom").map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {PERIOD_OPTIONS.filter((o) => o.value !== "week").map((o) => (
+                <option key={o.value} value={o.value}>{o.value === "custom" ? "Month to month" : o.label}</option>
+              ))}
             </select>
+            {boardPeriod === "custom" && (
+              <div className="inline-flex items-center gap-1.5">
+                <input type="month" value={boardFrom} max={boardTo || undefined} onChange={(e) => changeBoardFrom(e.target.value)}
+                  className="rounded-lg border border-line bg-white px-2.5 py-2 text-[12px] outline-none focus:border-[#0f766e]" aria-label="From month" />
+                <span className="text-[12px] text-text-muted">to</span>
+                <input type="month" value={boardTo} min={boardFrom || undefined} onChange={(e) => changeBoardTo(e.target.value)}
+                  className="rounded-lg border border-line bg-white px-2.5 py-2 text-[12px] outline-none focus:border-[#0f766e]" aria-label="To month" />
+              </div>
+            )}
             {/* Quick filters */}
             {([["myoverdue", "My overdue", "all"], ["unassigned", "Unassigned", "admin"], ["breaches", "Breaches", "oversee"]] as const)
               .filter(([, , vis]) => vis === "all" || (vis === "admin" && isMainAdmin) || (vis === "oversee" && canOversee))
@@ -467,11 +608,19 @@ function Inner() {
               </div>
             )}
           </div>
+          )}
         </header>
 
         <main className="flex-1 flex min-h-0">
           {/* Kanban */}
           <div className="flex-1 overflow-x-auto p-4 sm:p-6">
+            {view === "myday" ? (
+              loading ? <p className="text-text-muted">Loading…</p> : (
+                <MyDayQueue items={myDay} q={q} onSearch={setQ}
+                  onOpen={(href) => { sessionStorage.setItem("ccReturnTo", "/admin/board"); router.push(href as unknown as string); }} />
+              )
+            ) : (
+            <>
             {!canOversee && !loading && (() => {
               // The RM's own scorecard, this month: Total / WIP / Oldest / Done.
               const wipCases = cases.filter((c) => c.source === srcFilter && c.column != null && c.ownerUserId === me?.id);
@@ -569,6 +718,8 @@ function Inner() {
                   );
                 })}
               </div>
+            )}
+            </>
             )}
           </div>
 
