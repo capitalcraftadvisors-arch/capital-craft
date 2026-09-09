@@ -150,6 +150,33 @@ function monthEnd(ym: string): string {
   return `${ym}-${String(last).padStart(2, "0")}`;
 }
 
+// ── Side-panel detail form (loan cases) ──────────────────────────────────────
+const money = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? "₹" + Math.round(n).toLocaleString("en-IN") : "—"; };
+const GRID_LABEL: Record<string, string> = { on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" };
+const gridLabel = (s: unknown) => (s ? GRID_LABEL[String(s)] ?? String(s) : "—");
+const placeLabel = (s: unknown) => (s === "residential" ? "House (residential)" : s === "commercial" ? "Commercial" : "—");
+// Columns fetched on demand when a loan card is opened.
+const DETAIL_COLS = "borrower_name, aadhaar_name, borrower_mobile, borrower_email, coapp_name, coapp_mobile, coapp_email, organization_name, total_project_cost, loan_amount_required, selected_tenure_years, project_size, project_size_unit, plant_use_type, system_type, central_subsidy, state_subsidy, bill_on_applicant_name";
+
+// A stacked label-over-value field — cleaner than a squeezed two-column row for
+// long values (emails, business names).
+function Field({ k, v }: { k: string; v: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[10.5px] uppercase tracking-wide text-text-muted">{k}</div>
+      <div className="text-[13px] font-semibold text-text break-words">{v || "—"}</div>
+    </div>
+  );
+}
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="border-t border-line pt-2.5">
+      <div className="text-[10px] font-bold uppercase tracking-wider text-[#5a8a76] mb-1.5">{title}</div>
+      <div className="flex flex-col gap-2">{children}</div>
+    </div>
+  );
+}
+
 // "My Day" — a single ranked to-do list of the RM's own cases: what to do next,
 // how long it's been waiting, and a button to open it. Replaces the Kanban as
 // the default screen for RMs / managers.
@@ -246,6 +273,7 @@ function Inner() {
   const [picker, setPicker] = useState<{ c: OpsCase; mode: "docsent" | "approve" | "reject"; rows: LoanLenderRow[] } | null>(null);
   const [pickerBusy, setPickerBusy] = useState(false);
   // Side-panel comments + collapsible comment history.
+  const [detail, setDetail] = useState<Record<string, any> | null>(null); // selected loan's full detail (on-demand)
   const [comments, setComments] = useState<{ id: string; author_name: string | null; comment_text: string; created_at: string }[]>([]);
   const [commentText, setCommentText] = useState("");
   const [commentBusy, setCommentBusy] = useState(false);
@@ -362,6 +390,21 @@ function Inner() {
   const mtd = cases.reduce((sum, c) => sum + (monthKey(c.disbursedThisMonthAt) === thisMonth ? c.disbursed : 0), 0);
   const pct = Math.min(100, Math.round(mtd / (target * 1e5) * 100));
   const selCase = cases.find((c) => c.id === sel) || null;
+
+  // Fetch the selected LOAN's full detail on demand (one small query per open —
+  // keeps it off the board list query).
+  const selId = selCase?.id ?? null;
+  const selIsLoan = selCase?.source === "loan";
+  useEffect(() => {
+    if (!selId || !selIsLoan) { setDetail(null); return; }
+    let cancelled = false;
+    setDetail(null);
+    void (async () => {
+      const { data } = await supabase().from("epc_applications").select(DETAIL_COLS).eq("id", selId).maybeSingle();
+      if (!cancelled) setDetail((data as Record<string, any>) ?? {});
+    })();
+    return () => { cancelled = true; };
+  }, [selId, selIsLoan]);
 
   async function runAction(target: OpsCase, action: string, payload?: Record<string, unknown>): Promise<boolean> {
     setBusy(true);
@@ -683,8 +726,6 @@ function Inner() {
                           // Top-right chip: the LENDER (loan) / partner (insurance) in a single-
                           // source view; the source tag only in the mixed "All" view.
                           const chip = srcFilter === "all" ? sm.label : c.lender;
-                          // Line 2: full rupee amount + EPC partner (falls back to the stage label).
-                          const line2 = [c.amount ? fmtFull(c.amount) : null, c.epcName].filter(Boolean).join(" · ") || c.statusLabel;
                           return (
                             <button key={c.source + c.id} type="button" onClick={() => setSel(c.id)}
                               draggable={canDrag} onDragStart={(e) => { if (!canDrag) { e.preventDefault(); return; } setDragId(c.id); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", c.id); } catch { /* ignore */ } }}
@@ -692,8 +733,8 @@ function Inner() {
                               // Selection is shown by LIFTING the card (shadow + raise), not by a
                               // coloured ring — that used to clash with the red/green status border.
                               style={{ borderColor: OUTLINE[lvl], backgroundColor: fill, transform: picked ? "translateY(-3px)" : undefined, boxShadow: picked ? "0 12px 26px -8px rgba(15,23,42,0.45)" : "0 1px 2px rgba(15,23,42,0.06)", position: picked ? "relative" : undefined, zIndex: picked ? 1 : undefined }}>
-                              <div className="flex items-center justify-between gap-1.5">
-                                <strong className="text-[13px] text-text truncate">{c.name}</strong>
+                              <div className="flex items-center justify-between gap-2">
+                                <strong className="text-[13.5px] font-semibold text-text truncate">{c.name}</strong>
                                 {chip && (
                                   <span className="text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0"
                                     style={srcFilter === "all" ? { backgroundColor: sm.tint, color: sm.color } : { backgroundColor: "#eef2f7", color: "#334155" }}>
@@ -701,14 +742,19 @@ function Inner() {
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[11px] text-text-muted truncate mt-0.5">
-                                {c.onHold ? "⏸ Hold · " : ""}{line2}
+                              <div className="flex items-baseline gap-1.5 mt-1 min-w-0">
+                                {c.amount ? <span className="text-[12.5px] font-bold text-[#0f3d2e] shrink-0">{fmtFull(c.amount)}</span> : null}
+                                {c.epcName ? <span className="text-[11px] text-text-muted truncate">{c.amount ? "· " : ""}{c.epcName}</span>
+                                  : (!c.amount && <span className="text-[11px] text-text-muted truncate">{c.statusLabel}</span>)}
                               </div>
-                              {/* Time the case has been sitting in its CURRENT stage. */}
-                              <div className="text-[11px] font-semibold mt-1" style={{ color: late ? "#b45309" : "#5a8a76" }}>
-                                {late && "⚠ "}🕒 {stageDays}d in stage{c.blocker ? " · " + c.blocker.slice(0, 20) : ""}
+                              <div className="flex items-center justify-between gap-2 mt-1.5">
+                                <span className="text-[11px] font-semibold" style={{ color: late ? "#b45309" : "#5a8a76" }}>
+                                  {late && "⚠ "}🕒 {stageDays}d in stage
+                                </span>
+                                {isMainAdmin && c.ownerName && <span className="text-[10px] font-medium text-text-muted shrink-0">{c.ownerName}</span>}
                               </div>
-                              {isMainAdmin && c.ownerName && <div className="text-[10px] text-text-muted mt-0.5">{c.ownerName}</div>}
+                              {c.onHold && <div className="text-[10px] font-semibold text-[#b45309] mt-0.5">⏸ On hold</div>}
+                              {c.blocker && <div className="text-[10px] text-text-muted truncate mt-0.5">{c.blocker.slice(0, 30)}</div>}
                             </button>
                           );
                         })}
@@ -734,14 +780,69 @@ function Inner() {
                 <button type="button" onClick={() => setSel(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
               </div>
 
-              <div className="text-[13px] flex flex-col gap-1.5 border-t border-line pt-3">
-                <Row k="Amount" v={selCase.amount ? fmtFull(selCase.amount) : "—"} />
-                <Row k="Lender" v={selCase.lender || "—"} />
-                <Row k="Owner" v={selCase.ownerName || "Unassigned"} />
-                <Row k="Lead owner" v={selCase.leadOwnerName || "—"} />
-                <Row k="Working (TAT)" v={selCase.tatDays + "d"} />
-                {selCase.blocker && <div><span className="text-text-muted">Blocker:</span> {selCase.blocker}</div>}
+              {/* Two working stats — total time, and time in the CURRENT stage. */}
+              <div className="grid grid-cols-2 gap-2 border-t border-line pt-3">
+                <div className="rounded-lg bg-[#f6f8f7] px-3 py-2">
+                  <div className="text-[10px] uppercase tracking-wide text-text-muted">Working</div>
+                  <div className="text-[16px] font-bold text-text leading-tight">{selCase.tatDays}<span className="text-[12px] font-medium text-text-muted"> days total</span></div>
+                </div>
+                <div className="rounded-lg bg-[#f6f8f7] px-3 py-2">
+                  <div className="text-[10px] uppercase tracking-wide text-text-muted">In this stage</div>
+                  <div className="text-[16px] font-bold text-text leading-tight">{Math.max(0, Math.floor(selCase.stageHours / 24))}<span className="text-[12px] font-medium text-text-muted"> days</span></div>
+                </div>
               </div>
+
+              {selCase.source === "loan" ? (
+                <div className="flex flex-col gap-1.5">
+                  {/* Operational context (not in the applicant form, kept for the RM). */}
+                  <div className="text-[13px] flex flex-col gap-1.5">
+                    <Row k="Lender" v={selCase.lender || "—"} />
+                    <Row k="Owner" v={selCase.ownerName || "Unassigned"} />
+                  </div>
+                  {detail === null ? (
+                    <div className="text-[12px] text-text-muted pt-2">Loading details…</div>
+                  ) : (
+                    <>
+                      <Section title="Applicant">
+                        <Field k="Applicant Name" v={detail.borrower_name || detail.aadhaar_name || selCase.name} />
+                        <Field k="App Mob No." v={detail.borrower_mobile ? `+91 ${detail.borrower_mobile}` : "—"} />
+                        <Field k="App email ID" v={detail.borrower_email || "—"} />
+                      </Section>
+                      {(detail.coapp_name || detail.bill_on_applicant_name === false) && (
+                        <Section title="Co-applicant">
+                          <Field k="Co-app Name" v={detail.coapp_name || "—"} />
+                          <Field k="Co-app Mob No" v={detail.coapp_mobile ? `+91 ${detail.coapp_mobile}` : "—"} />
+                          <Field k="Co-app email ID" v={detail.coapp_email || "—"} />
+                        </Section>
+                      )}
+                      <Section title="Business">
+                        <Field k="Employer / Business Name" v={detail.organization_name || "—"} />
+                      </Section>
+                      <Section title="Loan">
+                        <Field k="Project Cost" v={money(detail.total_project_cost)} />
+                        <Field k="Loan Amount" v={money(detail.loan_amount_required)} />
+                        <Field k="Loan Tenure" v={detail.selected_tenure_years ? `${detail.selected_tenure_years} year` : "—"} />
+                      </Section>
+                      <Section title="System">
+                        <Field k="Merchant Name" v={selCase.epcName || "—"} />
+                        <Field k="Capacity" v={detail.project_size ? `${detail.project_size} ${String(detail.project_size_unit || "kw").toUpperCase()}` : "—"} />
+                        <Field k="Place of Installation" v={placeLabel(detail.plant_use_type)} />
+                        <Field k="Subsidy" v={(Number(detail.central_subsidy) > 0 || Number(detail.state_subsidy) > 0) ? "Yes" : "No"} />
+                        <Field k="On-Grid / Off-grid" v={gridLabel(detail.system_type)} />
+                      </Section>
+                    </>
+                  )}
+                  {selCase.blocker && <div className="text-[12px] pt-1"><span className="text-text-muted">Blocker:</span> {selCase.blocker}</div>}
+                </div>
+              ) : (
+                <div className="text-[13px] flex flex-col gap-1.5">
+                  <Row k="Amount" v={selCase.amount ? fmtFull(selCase.amount) : "—"} />
+                  <Row k="Lender" v={selCase.lender || "—"} />
+                  <Row k="Owner" v={selCase.ownerName || "Unassigned"} />
+                  <Row k="Lead owner" v={selCase.leadOwnerName || "—"} />
+                  {selCase.blocker && <div><span className="text-text-muted">Blocker:</span> {selCase.blocker}</div>}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-2">
                 {/* Move stage — same flow as dragging: choose the next stage, then
