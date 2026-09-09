@@ -32,6 +32,7 @@ const LOAN_COLS: ColumnDef[] = [
   { key: "docs_pending", label: "Docs Pending" },
   { key: "approved_rejected", label: "Approved / Rejected" },
   { key: "phase1", label: "1st Phase" },
+  { key: "phase2", label: "2nd Phase" },
   { key: "abort", label: "Abort" },
 ];
 const INSURANCE_COLS: ColumnDef[] = [
@@ -76,6 +77,7 @@ export type OpsCase = {
   ownerUserId: string | null;
   ownerName: string | null;
   leadOwnerName: string | null; // loan: epc_applications.lead_owner_name · lead: loan_leads.lead_owner_name
+  epcName: string | null;       // the EPC partner, shown on the card
   lender: string | null;
   statusLabel: string;
   column: string | null;     // key within the source's own column set (null = off that board)
@@ -128,7 +130,7 @@ function loanColumn(r: Record<string, any>, lenderMidDecision: boolean): { colum
   // (RFD removed). Once the 1st tranche is in → 1st Phase; drops off after the 2nd.
   if (s === "rfd" || s === "approved" || s === "sent_to_nbfc" || s === "disbursed") {
     if (r.first_disbursement_amount != null) {
-      if (r.second_disbursement_amount != null) return { column: null, label: "Fully disbursed", stageSince: r.second_disbursement_date };
+      if (r.second_disbursement_amount != null) return { column: "phase2", label: "2nd disbursed", stageSince: r.second_disbursement_date };
       return { column: "phase1", label: "1st disbursed · 2nd pending", stageSince: r.first_disbursement_date };
     }
     return { column: "approved_rejected", label: "Approved by lender", stageSince: r.approved_at || r.updated_at };
@@ -218,14 +220,14 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
     // lead_owner_name arrives with migration 0074. Until it exists in prod the
     // select must not fail (42703 = undefined column) — retry without it.
     (async () => {
-      const LOAN_COLS = "id, borrower_name, aadhaar_name, loan_amount, loan_amount_required, status, created_at, submitted_at, docs_sent_at, hold_at, approved_at, rejected_at, rfd_at, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, second_disbursement_date, aborted_at, updated_at, review_notes, assigned_to_user_id";
+      const LOAN_COLS = "id, borrower_name, aadhaar_name, loan_amount, loan_amount_required, status, created_at, submitted_at, docs_sent_at, hold_at, approved_at, rejected_at, rfd_at, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, second_disbursement_date, aborted_at, updated_at, review_notes, assigned_to_user_id, epc_business_id";
       const withCol = await db.from("epc_applications").select(`${LOAN_COLS}, lead_owner_name`);
       if (isUndefinedColumn(withCol.error, "lead_owner_name")) return await db.from("epc_applications").select(LOAN_COLS);
       return withCol;
     })(),
     db.from("loan_application_lenders").select("application_id, lender_key, lender_label, docs_sent_at, approved_at, rejected_at"),
-    db.from("insurance_applications").select("id, aadhaar_name, sum_insured, invoice_confirmed_amount, invoice_amount, insurance_partner, status, created_at, updated_at, assigned_to_user_id"),
-    db.from("loan_leads").select("id, name, loan_amount, status, created_at, reviewed_at, epc_name_custom, assigned_to_user_id, lead_owner_name"),
+    db.from("insurance_applications").select("id, aadhaar_name, sum_insured, invoice_confirmed_amount, invoice_amount, insurance_partner, status, created_at, updated_at, assigned_to_user_id, epc_business_id"),
+    db.from("loan_leads").select("id, name, loan_amount, status, created_at, reviewed_at, epc_name_custom, epc_business_id, assigned_to_user_id, lead_owner_name"),
     db.from("epc_business").select("id, trade_name, legal_name, contact_name, status, current_step, created_at, updated_at, business_type, assigned_to_user_id").neq("business_type", "admin").in("status", ["draft", "under_review", "on_hold", "approved", "rejected"]),
     db.from("epc_lender_status").select("business_id, docs_given, approved, rejected"),
     db.from("epc_business").select("id, contact_name, role, parent_user_id").eq("business_type", "admin").order("contact_name", { ascending: true }),
@@ -238,6 +240,13 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
   for (const r of (lenders.data ?? []) as any[]) {
     const arr = lenderByApp.get(r.application_id) ?? [];
     arr.push(r); lenderByApp.set(r.application_id, arr);
+  }
+  // EPC id → display name (reused from the epc_business fetch above; approved
+  // EPCs that own loans are included, so no extra query needed).
+  const epcNameById = new Map<string, string>();
+  for (const r of (epcs.data ?? []) as any[]) {
+    const nm = r.trade_name || r.legal_name || r.contact_name;
+    if (nm) epcNameById.set(r.id, nm);
   }
   const epcLenderBy = new Map<string, { docs: boolean; approved: boolean; rejected: boolean }>();
   for (const r of (epcLenders.data ?? []) as any[]) {
@@ -259,6 +268,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       ownerUserId: r.assigned_to_user_id ?? null,
       ownerName: r.assigned_to_user_id ? nameOf.get(r.assigned_to_user_id) ?? null : null,
       leadOwnerName: r.lead_owner_name ?? null,
+      epcName: (r.epc_business_id ? epcNameById.get(r.epc_business_id) : null) ?? null,
       lender: loanLenderLabel(lrows),
       statusLabel: label, column, allColumn: allColumnFor("loan", column, r),
       outcome: r.status === "rejected" ? "rejected" : (column === "approved_rejected" || column === "phase1") ? "approved" : null,
@@ -282,6 +292,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       ownerUserId: r.assigned_to_user_id ?? null,
       ownerName: r.assigned_to_user_id ? nameOf.get(r.assigned_to_user_id) ?? null : null,
       leadOwnerName: null,
+      epcName: (r.epc_business_id ? epcNameById.get(r.epc_business_id) : null) ?? null,
       lender: r.insurance_partner || null,
       statusLabel: label, column, allColumn: allColumnFor("insurance", column, r),
       outcome: column === "issued" ? "approved" : column === "rejected" ? "rejected" : null,
@@ -302,6 +313,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       ownerUserId: r.assigned_to_user_id ?? null,
       ownerName: r.assigned_to_user_id ? nameOf.get(r.assigned_to_user_id) ?? null : null,
       leadOwnerName: r.lead_owner_name ?? null,
+      epcName: r.epc_name_custom || (r.epc_business_id ? epcNameById.get(r.epc_business_id) : null) || null,
       lender: r.epc_name_custom || null,
       statusLabel: label, column, allColumn: allColumnFor("lead", column, r),
       outcome: column === "converted" ? "approved" : null,
@@ -323,6 +335,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       ownerUserId: r.assigned_to_user_id ?? null,
       ownerName: r.assigned_to_user_id ? nameOf.get(r.assigned_to_user_id) ?? null : null,
       leadOwnerName: null,
+      epcName: null, // the card name IS the EPC
       lender: null,
       statusLabel: label, column, allColumn: allColumnFor("epc", column, r),
       outcome: column === "approved" ? "approved" : column === "rejected" ? "rejected" : null,

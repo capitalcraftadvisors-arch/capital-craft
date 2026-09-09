@@ -100,6 +100,7 @@ const LOAN_OUTLINE: Record<string, [number, number]> = {
   docs_pending: [24, 48],       // >24h → yellow, >48h → red
   approved_rejected: [24, 48],  // approved cards: >24h → yellow, >48h → red
   phase1: [600, 1080],          // >25d → yellow, ≥45d → red
+  phase2: [600, 1080],          // 2nd disbursement — same aging as 1st
 };
 function loanOutline(c: OpsCase): "green" | "yellow" | "red" | "neutral" {
   if (c.column === "abort") return "neutral";
@@ -505,7 +506,7 @@ function Inner() {
             {loading ? (
               <p className="text-text-muted">Loading…</p>
             ) : (
-              <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${activeCols.length}, minmax(184px, 1fr))` }}>
+              <div className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(${activeCols.length}, minmax(150px, 1fr))` }}>
                 {activeCols.map((col) => {
                   const items = byCol(col.key);
                   return (
@@ -527,6 +528,14 @@ function Inner() {
                           // than before, per request).
                           const fill = c.outcome === "approved" ? "#d1efdf" : c.outcome === "rejected" ? "#f7d9d9" : "#ffffff";
                           const picked = sel === c.id;
+                          // Days the case has sat in its CURRENT stage (e.g. "7d" since it was
+                          // approved / disbursed). Total days-worked lives in the side panel.
+                          const stageDays = Math.max(0, Math.floor(c.stageHours / 24));
+                          // Top-right chip: the LENDER (loan) / partner (insurance) in a single-
+                          // source view; the source tag only in the mixed "All" view.
+                          const chip = srcFilter === "all" ? sm.label : c.lender;
+                          // Line 2: full rupee amount + EPC partner (falls back to the stage label).
+                          const line2 = [c.amount ? fmtFull(c.amount) : null, c.epcName].filter(Boolean).join(" · ") || c.statusLabel;
                           return (
                             <button key={c.source + c.id} type="button" onClick={() => setSel(c.id)}
                               draggable={canDrag} onDragStart={(e) => { if (!canDrag) { e.preventDefault(); return; } setDragId(c.id); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", c.id); } catch { /* ignore */ } }}
@@ -536,14 +545,19 @@ function Inner() {
                               style={{ borderColor: OUTLINE[lvl], backgroundColor: fill, transform: picked ? "translateY(-3px)" : undefined, boxShadow: picked ? "0 12px 26px -8px rgba(15,23,42,0.45)" : "0 1px 2px rgba(15,23,42,0.06)", position: picked ? "relative" : undefined, zIndex: picked ? 1 : undefined }}>
                               <div className="flex items-center justify-between gap-1.5">
                                 <strong className="text-[13px] text-text truncate">{c.name}</strong>
-                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0" style={{ backgroundColor: sm.tint, color: sm.color }}>{sm.label}</span>
+                                {chip && (
+                                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded shrink-0"
+                                    style={srcFilter === "all" ? { backgroundColor: sm.tint, color: sm.color } : { backgroundColor: "#eef2f7", color: "#334155" }}>
+                                    {chip}
+                                  </span>
+                                )}
                               </div>
                               <div className="text-[11px] text-text-muted truncate mt-0.5">
-                                {[c.amount ? fmt(c.amount) : null, c.lender, c.onHold ? "⏸ Hold" : null].filter(Boolean).join(" · ") || c.statusLabel}
+                                {c.onHold ? "⏸ Hold · " : ""}{line2}
                               </div>
-                              {/* TAT — days worked on this profile since Ready for Login. */}
+                              {/* Time the case has been sitting in its CURRENT stage. */}
                               <div className="text-[11px] font-semibold mt-1" style={{ color: late ? "#b45309" : "#5a8a76" }}>
-                                {late && "⚠ "}🕒 {c.tatDays}d working{c.blocker ? " · " + c.blocker.slice(0, 24) : ""}
+                                {late && "⚠ "}🕒 {stageDays}d in stage{c.blocker ? " · " + c.blocker.slice(0, 20) : ""}
                               </div>
                               {isMainAdmin && c.ownerName && <div className="text-[10px] text-text-muted mt-0.5">{c.ownerName}</div>}
                             </button>
