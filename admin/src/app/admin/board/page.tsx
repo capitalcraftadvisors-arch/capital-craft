@@ -744,15 +744,16 @@ function Inner() {
                                   </span>
                                 )}
                               </div>
-                              <div className="flex items-baseline gap-1.5 mt-1 min-w-0">
-                                {c.amount ? <span className="text-[12.5px] font-bold text-[#0f3d2e] shrink-0">{fmtFull(c.amount)}</span> : null}
-                                {c.epcName ? <span className="text-[11px] text-text-muted truncate">{c.amount ? "· " : ""}{c.epcName}</span>
-                                  : (!c.amount && <span className="text-[11px] text-text-muted truncate">{c.statusLabel}</span>)}
-                              </div>
-                              <div className="flex items-center justify-between gap-2 mt-1.5">
-                                <span className="text-[11px] font-semibold" style={{ color: late ? "#b45309" : "#5a8a76" }}>
+                              <div className="flex items-center justify-between gap-2 mt-1 min-w-0">
+                                <span className="text-[12.5px] font-bold text-[#0f3d2e] truncate">
+                                  {c.amount ? fmtFull(c.amount) : <span className="text-[11px] font-normal text-text-muted">{c.statusLabel}</span>}
+                                </span>
+                                <span className="text-[11px] font-semibold shrink-0" style={{ color: late ? "#b45309" : "#5a8a76" }}>
                                   {late && "⚠ "}🕒 {stageDays}d in stage
                                 </span>
+                              </div>
+                              <div className="flex items-center justify-between gap-2 mt-1.5 min-w-0">
+                                {c.epcName ? <span className="text-[11px] text-text-muted truncate">{c.epcName}</span> : <span />}
                                 {isMainAdmin && c.ownerName && <span className="text-[10px] font-medium text-text-muted shrink-0">{c.ownerName}</span>}
                               </div>
                               {c.onHold && <div className="text-[10px] font-semibold text-[#b45309] mt-0.5">⏸ On hold</div>}
@@ -791,6 +792,26 @@ function Inner() {
                 <div className="rounded-lg bg-[#f6f8f7] px-3 py-2">
                   <div className="text-[10px] uppercase tracking-wide text-text-muted">In this stage</div>
                   <div className="text-[16px] font-bold text-text leading-tight">{Math.max(0, Math.floor(selCase.stageHours / 24))}<span className="text-[12px] font-medium text-text-muted"> days</span></div>
+                </div>
+              </div>
+
+              {/* Quick actions — reassign + open the full profile, right up top. */}
+              <div className="grid grid-cols-2 gap-2">
+                {reassignOptions.length > 0 ? (
+                  <div>
+                    <div className="text-[11px] text-text-muted mb-1">{isMainAdmin || isManager ? "Reassign to" : "Send to senior ↑"}</div>
+                    <Select value={selCase.ownerUserId ?? ""} disabled={busy}
+                      onChange={(e) => void act("reassign", { assigned_to_user_id: e.target.value || null })}
+                      placeholder="Select…"
+                      options={[...(isMainAdmin ? [{ value: "", label: "Unassigned" }] : []), ...reassignOptions]} />
+                  </div>
+                ) : <div />}
+                <div className="flex flex-col justify-end">
+                  <button type="button" className="btn-act ghost text-center inline-flex items-center justify-center gap-1.5"
+                    onClick={() => { sessionStorage.setItem("ccReturnTo", "/admin/board"); router.push(selCase.href as unknown as string); }}>
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M1.5 12s3.5-7 10.5-7 10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg>
+                    View profile
+                  </button>
                 </div>
               </div>
 
@@ -846,41 +867,22 @@ function Inner() {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-2">
-                {/* Move stage — same flow as dragging: choose the next stage, then
-                    the confirmation + lender/decision/disbursement popup appears. */}
-                {(() => {
-                  const targets = selCase.source === "loan"
-                    ? (LOAN_FORWARD[selCase.column ?? ""] ?? [])
-                    : columnsFor(selCase.source).map((c) => c.key).filter((k) => k !== selCase.column);
-                  if (!targets.length) return <div className="col-span-2 text-[11px] text-text-muted">No further stage from here.</div>;
-                  return (
-                    <div className="col-span-2">
-                      <div className="text-[11px] text-text-muted mb-1">Move to stage →</div>
-                      <Select value="" disabled={busy} placeholder="Choose next stage…"
-                        onChange={(e) => { if (e.target.value) setDrop({ caseId: selCase.id, column: e.target.value }); }}
-                        options={targets.map((k) => ({ value: k, label: columnsFor(selCase.source).find((c) => c.key === k)?.label || k }))} />
-                    </div>
-                  );
-                })()}
-                {/* Reassign + View profile, side by side. */}
-                {reassignOptions.length > 0 ? (
+              {/* Move stage — same flow as dragging: choose the next stage, then
+                  the confirmation + lender/decision/disbursement popup appears. */}
+              {(() => {
+                const targets = selCase.source === "loan"
+                  ? (LOAN_FORWARD[selCase.column ?? ""] ?? [])
+                  : columnsFor(selCase.source).map((c) => c.key).filter((k) => k !== selCase.column);
+                if (!targets.length) return <div className="text-[11px] text-text-muted">No further stage from here.</div>;
+                return (
                   <div>
-                    <div className="text-[11px] text-text-muted mb-1">{isMainAdmin || isManager ? "Reassign to" : "Send to senior ↑"}</div>
-                    <Select value={selCase.ownerUserId ?? ""} disabled={busy}
-                      onChange={(e) => void act("reassign", { assigned_to_user_id: e.target.value || null })}
-                      placeholder="Select…"
-                      options={[...(isMainAdmin ? [{ value: "", label: "Unassigned" }] : []), ...reassignOptions]} />
+                    <div className="text-[11px] text-text-muted mb-1">Move to stage →</div>
+                    <Select value="" disabled={busy} placeholder="Choose next stage…"
+                      onChange={(e) => { if (e.target.value) setDrop({ caseId: selCase.id, column: e.target.value }); }}
+                      options={targets.map((k) => ({ value: k, label: columnsFor(selCase.source).find((c) => c.key === k)?.label || k }))} />
                   </div>
-                ) : <div />}
-                <div className="flex flex-col justify-end">
-                  <button type="button" className="btn-act ghost text-center inline-flex items-center justify-center gap-1.5"
-                    onClick={() => { sessionStorage.setItem("ccReturnTo", "/admin/board"); router.push(selCase.href as unknown as string); }}>
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M1.5 12s3.5-7 10.5-7 10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg>
-                    View profile
-                  </button>
-                </div>
-              </div>
+                );
+              })()}
 
               {/* Comments — add one, see the latest, expand history. */}
               <div className="border-t border-line pt-3 flex-1">

@@ -15,6 +15,7 @@ import InsuranceUpload from "@/components/InsuranceUpload";
 import OwnershipCard from "@/components/OwnershipCard";
 import ProfileTabBar, { TabButton } from "@/components/ProfileTabBar";
 import DeleteInsuranceModal from "@/components/DeleteInsuranceModal";
+import DateField from "@/components/ui/DateField";
 import { policyValidity } from "@/lib/insurance-validity";
 
 type App = Record<string, any>;
@@ -192,7 +193,8 @@ function Inner() {
       <header className="border-b border-[#cdeadd] bg-white sticky top-0 z-30">
         <div className="w-full px-5 sm:px-8 h-14 flex items-center justify-between">
           <button onClick={() => router.push("/admin")} className="text-[14px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1">← Back to console</button>
-          <span className="font-display font-bold text-[18px] text-[#0f3d2e]">Capital Craft</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/capital-craft.png" alt="Capital Craft" className="h-7 w-auto object-contain" />
         </div>
       </header>
 
@@ -279,13 +281,13 @@ function Inner() {
           <div className="grid sm:grid-cols-2 gap-3 mt-4 max-w-md">
             <div>
               <p className="text-[12px] text-[#5a8a76] mb-1">Coverage from</p>
-              <input type="date" value={policyFrom} onChange={(e) => { setPolicyFrom(e.target.value); setPolicySaved(false); }}
-                className="w-full border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] bg-white focus:border-[#185fa5] outline-none" />
+              <DateField value={policyFrom} onChange={(iso) => { setPolicyFrom(iso); setPolicySaved(false); }} ariaLabel="Coverage from"
+                className="border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] bg-white focus:border-[#185fa5] outline-none" />
             </div>
             <div>
               <p className="text-[12px] text-[#5a8a76] mb-1">Coverage to (renewal deadline)</p>
-              <input type="date" value={policyTo} onChange={(e) => { setPolicyTo(e.target.value); setPolicySaved(false); }}
-                className="w-full border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] bg-white focus:border-[#185fa5] outline-none" />
+              <DateField value={policyTo} onChange={(iso) => { setPolicyTo(iso); setPolicySaved(false); }} ariaLabel="Coverage to"
+                className="border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] bg-white focus:border-[#185fa5] outline-none" />
             </div>
           </div>
           <div className="mt-3 flex items-center gap-3 flex-wrap">

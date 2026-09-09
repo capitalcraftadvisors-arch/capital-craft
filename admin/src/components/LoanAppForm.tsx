@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { useState } from "react";
 import Button from "./ui/Button";
 import Input from "./ui/Input";
+import DateField from "./ui/DateField";
 import Select from "./ui/Select";
 import Card from "./ui/Card";
 import FileUpload from "./FileUpload";
@@ -50,9 +51,12 @@ export default function LoanAppForm({
   const router = useRouter();
   const [appId, setAppId] = useState<string | null>(existing?.id ?? null);
   const [saving, setSaving] = useState(false);
-  const { register, handleSubmit, formState: { errors } } = useForm<Form>({
+  const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<Form>({
     defaultValues: { ...emptyForm(), ...existing } as Form,
   });
+  // borrower_dob is registered so RHF tracks it; DateField drives its value via
+  // setValue (keeps the DD/MM/YYYY display, stores ISO).
+  register("borrower_dob");
 
   async function onSubmit(values: Form, submit: boolean) {
     setSaving(true);
@@ -107,7 +111,14 @@ export default function LoanAppForm({
           <Input label="PAN (optional)" maxLength={10}
                  {...register("borrower_pan", { validate: (v) => !v || PAN_RE.test(v.toUpperCase()) || "Invalid PAN" })}
                  error={errors.borrower_pan?.message} />
-          <Input label="DOB (optional)" type="date" {...register("borrower_dob")} />
+          <div className="w-full">
+            <label className="block mb-1.5 text-[13px] font-medium text-text-mid">DOB (optional)</label>
+            <DateField
+              value={watch("borrower_dob") || ""}
+              onChange={(iso) => setValue("borrower_dob", iso, { shouldDirty: true })}
+              className="rounded-input border bg-white py-3 text-[15px] text-text px-3.5 outline-none border-line focus:border-blue"
+            />
+          </div>
           <Input label="Pincode (optional)" maxLength={6}
                  {...register("borrower_pincode", { validate: (v) => !v || PINCODE_RE.test(v) || "6 digits" })}
                  error={errors.borrower_pincode?.message} />

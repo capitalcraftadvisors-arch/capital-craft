@@ -19,6 +19,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
+import DateField from "@/components/ui/DateField";
 import Card from "@/components/ui/Card";
 import WizardProgress from "@/components/WizardProgress";
 import FileUpload from "@/components/FileUpload";
@@ -388,12 +389,14 @@ export default function Step3Page() {
                 value={s.father_name}
                 onChange={(e) => updateField(s.id, "father_name", e.target.value)}
               />
-              <Input
-                label="Date of Birth"
-                type="date"
-                value={s.dob}
-                onChange={(e) => updateField(s.id, "dob", e.target.value)}
-              />
+              <div className="w-full">
+                <label className="block mb-1.5 text-[13px] font-medium text-text-mid">Date of Birth</label>
+                <DateField
+                  value={s.dob}
+                  onChange={(iso) => updateField(s.id, "dob", iso)}
+                  className="rounded-input border bg-white py-3 text-[15px] text-text px-3.5 outline-none border-line focus:border-blue"
+                />
+              </div>
               <Input
                 label="Aadhaar No."
                 placeholder="12-digit Aadhaar number"

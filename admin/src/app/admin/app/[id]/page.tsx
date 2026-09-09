@@ -111,7 +111,11 @@ function Inner() {
     <main className="min-h-screen bg-bg-soft">
       <header className="border-b border-line bg-white print:hidden">
         <div className="max-w-container mx-auto px-7 h-16 flex items-center justify-between">
-          <span className="font-display font-bold text-[20px] grad-text">Capital Craft / Admin</span>
+          <span className="flex items-center gap-2.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/capital-craft.png" alt="Capital Craft" className="h-7 w-auto object-contain" />
+            <span className="text-[13px] font-semibold text-text-muted">Admin</span>
+          </span>
           <div className="flex items-center gap-4">
             <a href="/admin" className="text-[13px] text-text-muted hover:text-text">← Back</a>
             <button onClick={() => window.print()} className="text-[13px] text-blue hover:underline">Print summary</button>

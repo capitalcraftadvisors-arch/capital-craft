@@ -115,17 +115,21 @@ export default function AdminSidebar({
     const rowJustify = inDrawer ? "" : "justify-center group-hover:justify-start";
     return (
       <>
-        {/* Brand */}
+        {/* Brand — real logo. Collapsed rail shows just the swirl mark; the
+            expanded panel / drawer shows the full wordmark. */}
         <div className={"flex items-center gap-2.5 px-1 h-12 mb-2 shrink-0 " + rowJustify}>
-          <div
-            className="w-8 h-8 rounded-lg grid place-items-center text-white font-display font-extrabold text-[15px] shrink-0"
-            style={{ background: "linear-gradient(135deg,#185fa5,#178a5c)" }}
-          >
-            C
-          </div>
-          <span className={"font-display font-bold text-[16px] text-text whitespace-nowrap " + labelCls}>
-            Capital&nbsp;Craft
-          </span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/capital-craft-mark.png"
+            alt="Capital Craft"
+            className={"h-8 w-8 object-contain shrink-0 " + (inDrawer ? "hidden" : "group-hover:hidden")}
+          />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/capital-craft.png"
+            alt="Capital Craft"
+            className={"h-7 w-auto object-contain " + (inDrawer ? "block" : "hidden group-hover:block")}
+          />
         </div>
 
         {/* Nav */}
@@ -177,7 +181,8 @@ export default function AdminSidebar({
         <button type="button" onClick={() => setOpen(true)} aria-label="Open menu" className="p-2 -ml-2 text-text">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
         </button>
-        <span className="font-display font-bold text-[18px] grad-text">Capital Craft</span>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/brand/capital-craft.png" alt="Capital Craft" className="h-6 w-auto object-contain" />
         <span className="w-8" />
       </div>
 

@@ -278,7 +278,12 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       lender: loanLenderLabel(lrows),
       statusLabel: label, column, allColumn: allColumnFor("loan", column, r),
       outcome: r.status === "rejected" ? "rejected" : (column === "approved_rejected" || column === "phase1") ? "approved" : null,
-      stageHours: hoursSince(stageSince || r.updated_at),
+      // A case can't have sat in its CURRENT stage longer than it has existed in
+      // the system. User-entered event dates (rejection / disbursement dates) can
+      // predate the record's own created_at, which would otherwise render a "37d
+      // in stage" badge on a file only 15 days old. Cap stage-time at the file's
+      // total lifetime so the two stats stay coherent.
+      stageHours: Math.min(hoursSince(stageSince || r.updated_at), hoursSince(r.created_at || r.submitted_at || r.updated_at)),
       tatDays: daysSince(r.created_at || r.submitted_at || r.updated_at),
       idleDays: daysSince(r.updated_at), onHold: r.status === "on_hold",
       blocker: r.review_notes || null,

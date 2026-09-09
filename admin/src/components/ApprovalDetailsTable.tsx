@@ -21,6 +21,7 @@
 // ╚══════════════════════════════════════════════════════════════════╝
 
 import React from "react";
+import DateField from "@/components/ui/DateField";
 import type { LenderKey } from "@/components/LenderPickerModal";
 import { rupeesInWords, yearsInWords } from "@/lib/numberToWords";
 
@@ -227,12 +228,14 @@ export default function ApprovalDetailsTable({ value, onChange, readOnly }: Prop
               {ro ? (
                 <span className="text-[15px] font-semibold text-[#0f3d2e]">{fmtDate(value.approval_date)}</span>
               ) : (
-                <input
-                  type="date"
-                  value={value.approval_date ?? ""}
-                  onChange={(e) => onChange?.({ ...value, approval_date: e.target.value || null })}
-                  className="w-48 border border-[#cdeadd] rounded-[8px] px-3 py-2 text-[14px] focus:border-[#185fa5] outline-none bg-white"
-                />
+                <div className="w-48">
+                  <DateField
+                    value={value.approval_date ?? ""}
+                    onChange={(iso) => onChange?.({ ...value, approval_date: iso || null })}
+                    ariaLabel="Date of approval"
+                    className="border border-[#cdeadd] rounded-[8px] px-3 py-2 text-[14px] focus:border-[#185fa5] outline-none bg-white"
+                  />
+                </div>
               )}
             </td>
           </tr>

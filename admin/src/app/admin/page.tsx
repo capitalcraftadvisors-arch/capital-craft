@@ -208,26 +208,38 @@ function inCurrentFY(dateStr: string | null | undefined): boolean {
   return t >= start && t < end;
 }
 
-// ── Summary-card time period (Today / Week / Month / Quarter / Year / Custom) ──
-type Period = "today" | "week" | "month" | "quarter" | "year" | "custom";
+// ── Summary-card time period — SAME dropdown as the Task Manager board ──
+// (Current Month / Previous Month / All time, month-to-month custom, no "This
+// Week"). "week" stays in the union for back-compat but is no longer offered.
+type Period = "today" | "week" | "month" | "prev_month" | "quarter" | "year" | "all" | "custom";
 // Period is owned by the page shell and passed to each summary tab so the
 // picker can live in the section header (top-right), with a per-tab default.
 type TabPeriodProps = { period: Period; pFrom: string; pTo: string };
 const PERIOD_OPTIONS: Array<{ value: Period; label: string }> = [
-  { value: "today",   label: "Today" },
-  { value: "week",    label: "This Week" },
-  { value: "month",   label: "This Month" },
-  { value: "quarter", label: "This Quarter" },
-  { value: "year",    label: "This Year" },
-  { value: "custom",  label: "Custom range" },
+  { value: "today",      label: "Today" },
+  { value: "month",      label: "Current Month" },
+  { value: "prev_month", label: "Previous Month" },
+  { value: "quarter",    label: "This Quarter" },
+  { value: "year",       label: "This Year" },
+  { value: "all",        label: "All time" },
+  { value: "custom",     label: "Month to month" },
 ];
 function periodBounds(period: Period, from?: string, to?: string): { start: number; end: number } {
   const DAY = 86400000;
   if (period === "custom") {
-    return {
-      start: from ? Date.parse(from + "T00:00:00+05:30") : -Infinity,
-      end:   to   ? Date.parse(to + "T23:59:59.999+05:30") : Infinity,
+    // Month-to-month range (matches the board): from/to are "YYYY-MM",
+    // inclusive of whole months. (.slice guards any stale day-level value
+    // persisted before this became a month picker.)
+    const f = from ? from.slice(0, 7) : "";
+    const t = to ? to.slice(0, 7) : "";
+    const monthStart = (ym: string) => Date.parse(`${ym}-01T00:00:00+05:30`);
+    const nextMonthStart = (ym: string) => {
+      const [yy, mm] = ym.split("-").map(Number);
+      return mm === 12
+        ? Date.parse(`${yy + 1}-01-01T00:00:00+05:30`)
+        : Date.parse(`${yy}-${String(mm + 1).padStart(2, "0")}-01T00:00:00+05:30`);
     };
+    return { start: f ? monthStart(f) : -Infinity, end: t ? nextMonthStart(t) : Infinity };
   }
   const p = new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Kolkata", year: "numeric", month: "numeric", day: "numeric", weekday: "short" }).formatToParts(new Date());
   const y = Number(p.find((x) => x.type === "year")?.value);
@@ -245,6 +257,7 @@ function periodBounds(period: Period, from?: string, to?: string): { start: numb
       return { start, end: start + 7 * DAY };
     }
     case "month":   return { start: mid(y, m, 1), end: m === 12 ? mid(y + 1, 1, 1) : mid(y, m + 1, 1) };
+    case "prev_month": return { start: m === 1 ? mid(y - 1, 12, 1) : mid(y, m - 1, 1), end: mid(y, m, 1) };
     case "quarter": {
       const qs = m - ((m - 1) % 3);
       const qe = qs + 3;
@@ -255,6 +268,7 @@ function periodBounds(period: Period, from?: string, to?: string): { start: numb
   }
 }
 function inPeriod(dateStr: string | null | undefined, period: Period, from?: string, to?: string): boolean {
+  if (period === "all") return true; // no date filter — keeps rows with null dates too
   if (!dateStr) return false;
   const t = Date.parse(dateStr);
   if (isNaN(t)) return false;
@@ -276,9 +290,9 @@ function PeriodPicker({ period, onPeriod, from, onFrom, to, onTo }: {
       </select>
       {period === "custom" && (
         <>
-          <input type="date" value={from} onChange={(e) => onFrom(e.target.value)} className="rounded-input border border-line bg-white px-2.5 py-2 text-[13px]" />
+          <input type="month" value={from} max={to || undefined} onChange={(e) => onFrom(e.target.value)} className="rounded-input border border-line bg-white px-2.5 py-2 text-[13px]" aria-label="From month" />
           <span className="text-[12px] text-text-muted">to</span>
-          <input type="date" value={to} onChange={(e) => onTo(e.target.value)} className="rounded-input border border-line bg-white px-2.5 py-2 text-[13px]" />
+          <input type="month" value={to} min={from || undefined} onChange={(e) => onTo(e.target.value)} className="rounded-input border border-line bg-white px-2.5 py-2 text-[13px]" aria-label="To month" />
         </>
       )}
     </div>
@@ -884,8 +898,8 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
     <>
       <SummaryCards accent={ACCENTS.epcs.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
-      <div className="flex items-center gap-3 mb-3">
-        <div className="flex-1">
+      <div className="flex flex-wrap items-center gap-3 mb-3">
+        <div className="flex-1 min-w-[220px]">
           <Input
             placeholder="Search by name, ID, POC, mobile, or email…"
             value={q}
@@ -1471,8 +1485,8 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     <>
       <SummaryCards accent={ACCENTS.apps.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
-      <div className="flex items-center gap-3 mb-3">
-        <div className="flex-1">
+      <div className="flex flex-wrap items-center gap-3 mb-3">
+        <div className="flex-1 min-w-[220px]">
           <Input placeholder="Search by borrower…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
         </div>
         <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.apps.color} onClick={() => setFiltersOpen((o) => !o)} />
@@ -1971,8 +1985,8 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
     <>
       <SummaryCards accent={ACCENTS.insurance.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
-      <div className="mb-3 flex items-center gap-3">
-        <div className="flex-1">
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-[220px]">
           <Input placeholder="Search by applicant, INS id, or EPC…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
         </div>
         <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.insurance.color} onClick={() => setFiltersOpen((o) => !o)} />

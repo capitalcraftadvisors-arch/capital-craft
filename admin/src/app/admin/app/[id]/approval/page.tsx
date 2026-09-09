@@ -236,7 +236,8 @@ function Inner() {
           >
             ← Back to profile
           </button>
-          <span className="font-display font-bold text-[18px] text-[#0f3d2e]">Capital Craft</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/capital-craft.png" alt="Capital Craft" className="h-7 w-auto object-contain" />
         </div>
       </header>
 

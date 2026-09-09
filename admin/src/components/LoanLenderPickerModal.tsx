@@ -8,13 +8,14 @@
 import { useState } from "react";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
+import DateField from "@/components/ui/DateField";
 import { slugifyLender } from "@/lib/loan-lenders";
 
 export type PickerLender = { key: string; label: string };
 const CUSTOM = "__custom__";
 
-// Local YYYY-MM-DD for the native date input's default (today, in the admin's
-// timezone). The <input type="date"> renders DD/MM/YYYY under lang="en-GB".
+// Local YYYY-MM-DD upper bound for the date picker (today, in the admin's
+// timezone) — DateField always displays it as DD/MM/YYYY.
 function todayLocal(): string {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
@@ -119,12 +120,12 @@ export default function LoanLenderPickerModal({
             <label className="block text-[13px] font-medium text-text mb-1">
               Date of rejection <span className="text-red-600">*</span>
             </label>
-            <input
-              type="date"
+            <DateField
               value={date}
               max={todayLocal()}
-              onChange={(e) => setDate(e.target.value)}
-              className="w-full rounded-input border border-line bg-white px-3 py-2 text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-red-200"
+              onChange={(iso) => setDate(iso)}
+              ariaLabel="Date of rejection"
+              className="rounded-input border border-line bg-white px-3 py-2 text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-red-200"
             />
           </div>
         )}

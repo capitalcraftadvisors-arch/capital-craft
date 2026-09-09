@@ -23,6 +23,7 @@ import { supabase } from "@/lib/supabase";
 import { getBusiness } from "@/lib/auth";
 import { logLoanActivity } from "@/lib/loanAudit";
 import CompletionDocsSection from "@/components/CompletionDocsSection";
+import DateField from "@/components/ui/DateField";
 import { I, SectionCard, KV, Pill, StatusBtn } from "@/components/view/ViewKit";
 import {
   deadlineState, DEADLINE_PILL, remainingAmount, fmtRupees, fmtDateShort,
@@ -196,7 +197,8 @@ function Inner() {
           >
             ← Back to application
           </button>
-          <span className="font-display font-bold text-[18px] text-[#0f3d2e]">Capital Craft</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/capital-craft.png" alt="Capital Craft" className="h-7 w-auto object-contain" />
         </div>
       </header>
 
@@ -282,7 +284,7 @@ function Inner() {
                     </div>
                     <div>
                       <p className="text-[12px] text-[#5a8a76] mb-1">Date</p>
-                      <input type="date" className={inputCls} value={firstDate} onChange={(e) => setFirstDate(e.target.value)} />
+                      <DateField className={inputCls} value={firstDate} onChange={(iso) => setFirstDate(iso)} ariaLabel="First disbursement date" />
                     </div>
                   </div>
                   {sanctioned != null && firstAmt && Number(firstAmt) > 0 && (
@@ -364,7 +366,7 @@ function Inner() {
                       </div>
                       <div>
                         <p className="text-[12px] text-[#5a8a76] mb-1">Date</p>
-                        <input type="date" className={inputCls} value={secondDate} onChange={(e) => setSecondDate(e.target.value)} />
+                        <DateField className={inputCls} value={secondDate} onChange={(iso) => setSecondDate(iso)} ariaLabel="Second disbursement date" />
                       </div>
                     </div>
                     <div className="mt-4">
