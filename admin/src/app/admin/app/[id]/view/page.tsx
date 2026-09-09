@@ -330,7 +330,10 @@ function Inner() {
   }, [loading, loan, searchParams, router, params.id]);
 
   const applicantName = useMemo(
-    () => loan?.borrower_name || loan?.aadhaar_name || "(unnamed applicant)",
+    // Prefer the KYC (Aadhaar) name — it's the verified applicant. borrower_name
+    // can be a stale lead name (e.g. when a lead was converted to a loan app),
+    // which used to make this header disagree with the identity card below.
+    () => loan?.aadhaar_name || loan?.borrower_name || "(unnamed applicant)",
     [loan],
   );
   const epcName = useMemo(() => {
