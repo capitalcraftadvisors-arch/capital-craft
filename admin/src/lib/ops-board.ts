@@ -74,6 +74,7 @@ export type OpsCase = {
   source: CaseSource;
   name: string;
   amount: number;
+  mobile: string | null;   // applicant / lead / EPC contact number — quick-call in My Day
   ownerUserId: string | null;
   ownerName: string | null;
   leadOwnerName: string | null; // loan: epc_applications.lead_owner_name · lead: loan_leads.lead_owner_name
@@ -96,6 +97,9 @@ export type OpsCase = {
   boardDate: string | null;
   disbursed: number;
   disbursedThisMonthAt: string | null;
+  commentCount: number;    // number of comments on the case — My Day badge
+  followUpAt: string | null;      // "YYYY-MM-DD" call-back date (ops_case_touch)
+  lastContactedAt: string | null; // ISO — when an RM last called / WhatsApp'd
   href: string;
 };
 
@@ -222,21 +226,27 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
     if (cached) return cached;
   }
 
-  const [loans, lenders, insurance, leads, epcs, epcLenders, team] = await Promise.all([
+  const [loans, lenders, insurance, leads, epcs, epcLenders, team, loanComments, epcComments, leadComments, touches] = await Promise.all([
     // lead_owner_name arrives with migration 0074. Until it exists in prod the
     // select must not fail (42703 = undefined column) — retry without it.
     (async () => {
-      const LOAN_COLS = "id, borrower_name, aadhaar_name, loan_amount, loan_amount_required, status, created_at, submitted_at, docs_sent_at, hold_at, approved_at, rejected_at, rfd_at, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, second_disbursement_date, aborted_at, updated_at, review_notes, assigned_to_user_id, epc_business_id";
+      const LOAN_COLS = "id, borrower_name, aadhaar_name, borrower_mobile, loan_amount, loan_amount_required, status, created_at, submitted_at, docs_sent_at, hold_at, approved_at, rejected_at, rfd_at, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, second_disbursement_date, aborted_at, updated_at, review_notes, assigned_to_user_id, epc_business_id";
       const withCol = await db.from("epc_applications").select(`${LOAN_COLS}, lead_owner_name`);
       if (isUndefinedColumn(withCol.error, "lead_owner_name")) return await db.from("epc_applications").select(LOAN_COLS);
       return withCol;
     })(),
     db.from("loan_application_lenders").select("application_id, lender_key, lender_label, docs_sent_at, approved_at, rejected_at"),
     db.from("insurance_applications").select("id, aadhaar_name, sum_insured, invoice_confirmed_amount, invoice_amount, insurance_partner, status, created_at, updated_at, assigned_to_user_id, epc_business_id"),
-    db.from("loan_leads").select("id, name, loan_amount, status, created_at, reviewed_at, epc_name_custom, epc_business_id, assigned_to_user_id, lead_owner_name"),
-    db.from("epc_business").select("id, trade_name, legal_name, contact_name, status, current_step, created_at, updated_at, business_type, assigned_to_user_id").neq("business_type", "admin").in("status", ["draft", "under_review", "on_hold", "approved", "rejected"]),
+    db.from("loan_leads").select("id, name, mobile, loan_amount, status, created_at, reviewed_at, epc_name_custom, epc_business_id, assigned_to_user_id, lead_owner_name"),
+    db.from("epc_business").select("id, trade_name, legal_name, contact_name, contact_mobile, status, current_step, created_at, updated_at, business_type, assigned_to_user_id").neq("business_type", "admin").in("status", ["draft", "under_review", "on_hold", "approved", "rejected"]),
     db.from("epc_lender_status").select("business_id, docs_given, approved, rejected"),
     db.from("epc_business").select("id, contact_name, role, parent_user_id").eq("business_type", "admin").order("contact_name", { ascending: true }),
+    // Comment counts (My Day badge) — one tiny key-column select per table.
+    db.from("loan_comments").select("application_id"),
+    db.from("epc_comments").select("business_id"),
+    db.from("lead_comments").select("lead_id"),
+    // Per-case follow-up + last-contacted (0077). Resilient if not yet migrated.
+    db.from("ops_case_touch").select("source, case_id, follow_up_at, last_contacted_at"),
   ]);
 
   const users: TeamUser[] = ((team.data ?? []) as any[]).map((u) => ({ id: u.id, name: u.contact_name || "(unnamed)", role: u.role, parentUserId: u.parent_user_id ?? null }));
@@ -261,6 +271,19 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
     epcLenderBy.set(r.business_id, cur);
   }
 
+  // Comment counts keyed by `${source}:${id}` (insurance has no comment table).
+  const commentCount = new Map<string, number>();
+  const bump = (k: string) => commentCount.set(k, (commentCount.get(k) ?? 0) + 1);
+  for (const r of (loanComments.data ?? []) as any[]) if (r.application_id) bump(`loan:${r.application_id}`);
+  for (const r of (epcComments.data ?? []) as any[]) if (r.business_id) bump(`epc:${r.business_id}`);
+  for (const r of (leadComments.data ?? []) as any[]) if (r.lead_id) bump(`lead:${r.lead_id}`);
+
+  // Follow-up / last-contacted keyed by `${source}:${case_id}`.
+  const touchBy = new Map<string, { followUpAt: string | null; lastContactedAt: string | null }>();
+  for (const r of (touches.data ?? []) as any[]) {
+    touchBy.set(`${r.source}:${r.case_id}`, { followUpAt: r.follow_up_at ?? null, lastContactedAt: r.last_contacted_at ?? null });
+  }
+
   const cases: OpsCase[] = [];
 
   for (const r of (loans.data ?? []) as any[]) {
@@ -271,6 +294,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       id: r.id, source: "loan",
       name: r.borrower_name || r.aadhaar_name || "—",
       amount: num(r.loan_amount_required) || num(r.loan_amount),
+      mobile: r.borrower_mobile ?? null,
       ownerUserId: r.assigned_to_user_id ?? null,
       ownerName: r.assigned_to_user_id ? nameOf.get(r.assigned_to_user_id) ?? null : null,
       leadOwnerName: r.lead_owner_name ?? null,
@@ -293,6 +317,9 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       boardDate: (column === "phase2" || column === "abort" || r.status === "rejected") ? (stageSince ?? r.updated_at ?? nowISO) : nowISO,
       disbursed: num(r.first_disbursement_amount) + num(r.second_disbursement_amount),
       disbursedThisMonthAt: r.first_disbursement_date || r.second_disbursement_date || null,
+      commentCount: commentCount.get(`loan:${r.id}`) ?? 0,
+      followUpAt: touchBy.get(`loan:${r.id}`)?.followUpAt ?? null,
+      lastContactedAt: touchBy.get(`loan:${r.id}`)?.lastContactedAt ?? null,
       href: `/admin/app/${r.id}/view`,
     });
   }
@@ -303,6 +330,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       id: r.id, source: "insurance",
       name: r.aadhaar_name || "—",
       amount: num(r.sum_insured) || num(r.invoice_confirmed_amount) || num(r.invoice_amount),
+      mobile: null,
       ownerUserId: r.assigned_to_user_id ?? null,
       ownerName: r.assigned_to_user_id ? nameOf.get(r.assigned_to_user_id) ?? null : null,
       leadOwnerName: null,
@@ -316,6 +344,9 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       createdAt: r.created_at ?? r.updated_at ?? null,
       boardDate: (column === "issued" || column === "rejected") ? (r.updated_at ?? nowISO) : nowISO,
       disbursed: 0, disbursedThisMonthAt: null,
+      commentCount: 0,
+      followUpAt: touchBy.get(`insurance:${r.id}`)?.followUpAt ?? null,
+      lastContactedAt: touchBy.get(`insurance:${r.id}`)?.lastContactedAt ?? null,
       href: `/admin/insurance/${r.id}/view`,
     });
   }
@@ -325,6 +356,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
     cases.push({
       id: r.id, source: "lead",
       name: r.name || "—", amount: num(r.loan_amount),
+      mobile: r.mobile ?? null,
       ownerUserId: r.assigned_to_user_id ?? null,
       ownerName: r.assigned_to_user_id ? nameOf.get(r.assigned_to_user_id) ?? null : null,
       leadOwnerName: r.lead_owner_name ?? null,
@@ -338,6 +370,9 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       createdAt: r.created_at ?? null,
       boardDate: column === "converted" ? (r.reviewed_at ?? r.created_at ?? nowISO) : nowISO,
       disbursed: 0, disbursedThisMonthAt: null,
+      commentCount: commentCount.get(`lead:${r.id}`) ?? 0,
+      followUpAt: touchBy.get(`lead:${r.id}`)?.followUpAt ?? null,
+      lastContactedAt: touchBy.get(`lead:${r.id}`)?.lastContactedAt ?? null,
       href: `/admin/lead/${r.id}/view`,
     });
   }
@@ -348,6 +383,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
     cases.push({
       id: r.id, source: "epc",
       name: r.trade_name || r.legal_name || r.contact_name || "—", amount: 0,
+      mobile: r.contact_mobile ?? null,
       ownerUserId: r.assigned_to_user_id ?? null,
       ownerName: r.assigned_to_user_id ? nameOf.get(r.assigned_to_user_id) ?? null : null,
       leadOwnerName: null,
@@ -361,6 +397,9 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       createdAt: r.created_at ?? r.updated_at ?? null,
       boardDate: (column === "approved" || column === "rejected") ? (r.updated_at ?? nowISO) : nowISO,
       disbursed: 0, disbursedThisMonthAt: null,
+      commentCount: commentCount.get(`epc:${r.id}`) ?? 0,
+      followUpAt: touchBy.get(`epc:${r.id}`)?.followUpAt ?? null,
+      lastContactedAt: touchBy.get(`epc:${r.id}`)?.lastContactedAt ?? null,
       href: `/admin/epc/${r.id}/view`,
     });
   }
