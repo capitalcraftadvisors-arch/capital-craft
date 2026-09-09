@@ -258,10 +258,10 @@ function Inner() {
   const sla = 1; // fixed at ≤1 day (backend only — no UI control, per spec)
   const [target, setTarget] = useState<number>(() => (typeof window !== "undefined" ? Number(localStorage.getItem("opsboard.target")) : 0) || 65);
   const [q, setQ] = useState("");
-  // Period filter (by case creation date). Default "all" so no active case ever
-  // disappears; persisted so the choice sticks until changed. "custom" uses
+  // Period filter (by the case's boardDate — active cases carry into the current
+  // month automatically). Default "Current Month"; persisted; "custom" uses
   // month-to-month pickers (boardFrom/boardTo as "YYYY-MM").
-  const [boardPeriod, setBoardPeriod] = useState<Period>("all");
+  const [boardPeriod, setBoardPeriod] = useState<Period>("month");
   const [boardFrom, setBoardFrom] = useState("");
   const [boardTo, setBoardTo] = useState("");
   // RMs / managers default to the "My Day" action queue; admins stay on the board.
@@ -356,8 +356,8 @@ function Inner() {
       if (boardPeriod === "custom") {
         const from = boardFrom ? `${boardFrom}-01` : "";
         const to = boardTo ? monthEnd(boardTo) : "";
-        if ((from || to) && !inPeriod(c.createdAt, "custom", from, to)) return false;
-      } else if (boardPeriod !== "all" && !inPeriod(c.createdAt, boardPeriod)) return false;
+        if ((from || to) && !inPeriod(c.boardDate, "custom", from, to)) return false;
+      } else if (boardPeriod !== "all" && !inPeriod(c.boardDate, boardPeriod)) return false;
       if (ql && !`${c.name} ${c.lender ?? ""} ${c.blocker ?? ""} ${c.ownerName ?? ""}`.toLowerCase().includes(ql)) return false;
       return true;
     });
@@ -618,7 +618,9 @@ function Inner() {
             <select value={boardPeriod} onChange={(e) => changeBoardPeriod(e.target.value as Period)}
               className="rounded-lg border border-line bg-white px-3 py-2 text-[12px] font-medium text-text outline-none focus:border-[#0f766e] cursor-pointer">
               {PERIOD_OPTIONS.filter((o) => o.value !== "week").map((o) => (
-                <option key={o.value} value={o.value}>{o.value === "custom" ? "Month to month" : o.label}</option>
+                <option key={o.value} value={o.value}>
+                  {o.value === "month" ? "Current Month" : o.value === "custom" ? "Month to month" : o.label}
+                </option>
               ))}
             </select>
             {boardPeriod === "custom" && (

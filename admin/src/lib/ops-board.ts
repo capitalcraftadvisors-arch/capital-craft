@@ -88,7 +88,12 @@ export type OpsCase = {
   idleDays: number;
   onHold: boolean;
   blocker: string | null;
-  createdAt: string | null; // for the board's period filter
+  createdAt: string | null; // raw creation date
+  // Which month the case is worked in, for the board's month filter. ACTIVE
+  // cases compute to NOW (so they carry into the current month automatically on
+  // the 1st); TERMINAL cases (rejected / aborted / 2nd-phase / issued /
+  // converted / approved-EPC) freeze at the date they finished.
+  boardDate: string | null;
   disbursed: number;
   disbursedThisMonthAt: string | null;
   href: string;
@@ -206,6 +211,7 @@ function loanLenderLabel(rows: Record<string, any>[]): string | null {
 // result up to 20s old to cut egress.
 export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ cases: OpsCase[]; users: TeamUser[] }> {
   const db = supabase();
+  const nowISO = new Date().toISOString(); // active cases → current month
   const me = getBusiness();
   const isRm = me?.role === "OPERATIONS_USER";
   const myId = me?.id ?? null;
@@ -277,6 +283,9 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       idleDays: daysSince(r.updated_at), onHold: r.status === "on_hold",
       blocker: r.review_notes || null,
       createdAt: r.created_at ?? null,
+      // Terminal loans (2nd-phase / abort / rejected) freeze at their finish date;
+      // active loans carry into the current month.
+      boardDate: (column === "phase2" || column === "abort" || r.status === "rejected") ? (stageSince ?? r.updated_at ?? nowISO) : nowISO,
       disbursed: num(r.first_disbursement_amount) + num(r.second_disbursement_amount),
       disbursedThisMonthAt: r.first_disbursement_date || r.second_disbursement_date || null,
       href: `/admin/app/${r.id}/view`,
@@ -300,6 +309,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       tatDays: daysSince(r.updated_at),
       idleDays: daysSince(r.updated_at), onHold: r.status === "hold", blocker: null,
       createdAt: r.created_at ?? r.updated_at ?? null,
+      boardDate: (column === "issued" || column === "rejected") ? (r.updated_at ?? nowISO) : nowISO,
       disbursed: 0, disbursedThisMonthAt: null,
       href: `/admin/insurance/${r.id}/view`,
     });
@@ -321,6 +331,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       tatDays: daysSince(r.created_at),
       idleDays: daysSince(r.reviewed_at || r.created_at), onHold: false, blocker: null,
       createdAt: r.created_at ?? null,
+      boardDate: column === "converted" ? (r.reviewed_at ?? r.created_at ?? nowISO) : nowISO,
       disbursed: 0, disbursedThisMonthAt: null,
       href: `/admin/lead/${r.id}/view`,
     });
@@ -343,6 +354,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       tatDays: daysSince(r.updated_at),
       idleDays: daysSince(r.updated_at), onHold: r.status === "on_hold", blocker: null,
       createdAt: r.created_at ?? r.updated_at ?? null,
+      boardDate: (column === "approved" || column === "rejected") ? (r.updated_at ?? nowISO) : nowISO,
       disbursed: 0, disbursedThisMonthAt: null,
       href: `/admin/epc/${r.id}/view`,
     });
