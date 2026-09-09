@@ -21,5 +21,8 @@ ENV NODE_ENV=production
 ENV PORT=8080
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+# Standalone output does NOT bundle public/ — copy it so static brand assets
+# (e.g. /brand/capital-craft.png) are served.
+COPY --from=builder /app/public ./public
 EXPOSE 8080
 CMD ["node", "server.js"]
