@@ -4,6 +4,7 @@ import { ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Business, ModuleKey, getBusiness, getToken, routeForBusiness, setBusiness, portalAccess, canAccessModule } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
+import { useIdleLogout } from "@/lib/use-idle-logout";
 
 type Allow = "any" | "draft" | "approved" | "admin" | "status" | "self_edit";
 
@@ -36,6 +37,7 @@ type Props = {
 export default function AuthGuard({ children, allow, requireModule }: Props) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
+  useIdleLogout(); // sign out after 1h of inactivity (egress precaution)
 
   useEffect(() => {
     const token = getToken();
