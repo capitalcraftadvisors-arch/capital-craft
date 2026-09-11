@@ -56,19 +56,30 @@ export async function POST(
     const aadhaar_name          = strOrNull(b.aadhaar_name);
     const aadhaar_dob           = strOrNull(b.aadhaar_dob);
     const aadhaar_gender        = strOrNull(b.aadhaar_gender);
-    // Full 12-digit number (product decision — KYC needs the full value).
-    // The masked form is derived server-side, never trusted from the client.
-    const aadhaar_number_raw    = strOrNull(b.aadhaar_number)?.replace(/\D/g, "") ?? null;
+    // The classic KYC form sends the full 12-digit number; the chatbot (which
+    // masks for privacy) sends the "xxxxxxxx####" form. Keep them straight:
+    // blindly stripping non-digits from a MASKED value left a bogus bare
+    // 4-digit number (the "0996" bug that made the classic form show 4 digits +
+    // a red error). Masked in → store the masked form (the full number was
+    // never provided); full digits in → store full + derive the masked form.
     const aadhaar_care_of       = strOrNull(b.aadhaar_care_of);
     const aadhaar_address       = strOrNull(b.aadhaar_address);
     const aadhaar_front_path    = strOrNull(b.aadhaar_front_path);
     const aadhaar_back_path     = strOrNull(b.aadhaar_back_path);
     const aadhaar_face_path     = strOrNull(b.aadhaar_face_path);
 
-    // Admin-only route — no required-field blocking. Store whatever's present;
-    // the masked form is derived only when digits exist.
-    const aadhaar_number        = aadhaar_number_raw;
-    const aadhaar_number_masked = aadhaar_number_raw ? "xxxxxxxx" + aadhaar_number_raw.slice(-4) : null;
+    // Admin-only route — no required-field blocking.
+    const aadhaar_in            = strOrNull(b.aadhaar_number);
+    let aadhaar_number:        string | null;
+    let aadhaar_number_masked: string | null;
+    if (aadhaar_in && /^x{8}\d{4}$/i.test(aadhaar_in)) {
+      aadhaar_number        = null;                     // full number wasn't provided (chatbot masks)
+      aadhaar_number_masked = aadhaar_in.toLowerCase();
+    } else {
+      const digits          = aadhaar_in ? aadhaar_in.replace(/\D/g, "") : null;
+      aadhaar_number        = digits;
+      aadhaar_number_masked = digits ? "xxxxxxxx" + digits.slice(-4) : null;
+    }
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
       global: { headers: { Authorization: `Bearer ${token}` } },

@@ -28,7 +28,7 @@ import {
   latestLenderStatus, lendersWithDocs, approvedLenders,
 } from "@/lib/loan-lenders";
 import LenderPickerModal, { type LenderKey } from "@/components/LenderPickerModal";
-import SendToLenderModal from "@/components/SendToLenderModal";
+import EmailComposerModal from "@/components/EmailComposerModal";
 import ProfileTabBar, { TabButton, DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
@@ -1321,10 +1321,11 @@ function Inner() {
         onConfirm={(lender) => downloadZip(lender)}
       />
 
-      <SendToLenderModal
-        appId={loan.id}
+      <EmailComposerModal
         open={sendOpen}
         onClose={() => setSendOpen(false)}
+        endpoint={`/api/admin/loan-app/${loan.id}/send-to-lender`}
+        title="Send to lender"
         defaultLender={loan.approved_lender}
       />
       <LoanLenderPickerModal

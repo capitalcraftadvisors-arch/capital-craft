@@ -218,6 +218,15 @@ function Inner() {
   const refs = ((biz?.business_references ?? []) as Array<{ type: "customer" | "supplier"; name: string; mobile: string }>);
   const customers = refs.filter((r) => r.type === "customer");
   const suppliers = refs.filter((r) => r.type === "supplier");
+  // "How did you know about us?" (referral_source is stored as a key).
+  const REFERRAL_LABELS: Record<string, string> = { facebook: "Facebook", instagram: "Instagram", website: "Website", linkedin: "LinkedIn", friend: "Friend", epc_partner: "EPC Partner", others: "Others" };
+  const referral = (() => {
+    const src = (biz?.referral_source as string | undefined) || "";
+    if (!src) return null;
+    const label = REFERRAL_LABELS[src] ?? src;
+    const other = (biz?.referral_source_other as string | undefined) || "";
+    return src === "others" && other ? `Others — ${other}` : label;
+  })();
 
   const docsGivenCount = lender.filter((l) => l.docs_given).length;
   const anyApproved = lender.some((l) => l.approved);
@@ -695,8 +704,11 @@ function Inner() {
             </SectionCard>
 
             <SectionCard title="References" accent="green" icon={I.star}>
+              {/* How did you know about us? (referral source) */}
+              <div className="text-[12px] font-semibold text-[#5a8a76] uppercase tracking-wide mt-0.5">How did you know about us?</div>
+              <div className="text-[14px] text-[#0f3d2e] mt-1 mb-2 leading-snug">{referral || "—"}</div>
               {refs.length === 0 ? (
-                <p className="text-[13px] text-[#5a8a76]">No references.</p>
+                <p className="text-[13px] text-[#5a8a76]">No customer / supplier references.</p>
               ) : (
                 <>
                   {customers.length > 0 && (

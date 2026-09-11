@@ -19,6 +19,8 @@ import NamasteGreeting from "@/components/NamasteGreeting";
 import NotificationBell from "@/components/NotificationBell";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
 import { getCached, setCached, invalidate } from "@/lib/list-cache";
+import { useAdminNames } from "@/lib/use-admin-names";
+import EmailComposerModal from "@/components/EmailComposerModal";
 import {
   deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort,
   displayAmount as amountFor,
@@ -516,7 +518,9 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
     submitted_at: string | null;
     epc_self_edited: boolean | null;
     reviewed_at: string | null;
+    created_by_user_id: string | null;
   };
+  const adminNames = useAdminNames();
   const [rows, setRows] = useState<Row[]>([]);
   const [q, setQ] = useState("");
   const [sourceFilter, setSourceFilter] = useState("");
@@ -534,6 +538,7 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
   const [addOpen, setAddOpen] = useState(false);
   const [zipPickerRow, setZipPickerRow] = useState<Row | null>(null);
+  const [emailRow, setEmailRow] = useState<Row | null>(null); // EPC → send-to-lender email
   // Row highlighted after returning from View. sessionStorage-backed so
   // it survives navigation but not full reload.
   const [highlightId, setHighlightId] = useState<string | null>(null);
@@ -604,7 +609,7 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
       if (cached) { setRows(cached.rows); setLenderState(cached.lenderState); return; }
     }
     let query = supabase().from("epc_business")
-      .select("id, epc_display_id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, source, created_at, submitted_at, epc_self_edited, reviewed_at")
+      .select("id, epc_display_id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, source, created_at, submitted_at, epc_self_edited, reviewed_at, created_by_user_id")
       .neq("business_type", "admin");
     const { data } = await query;
     const rs = (data ?? []) as Row[];
@@ -878,7 +883,7 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
         r.contact_mobile || "",
         r.contact_email || "",
         EPC_STAGE_META[epcBadge(r)]?.label ?? "",
-        (r.source || "website").toLowerCase() === "manual" ? "Admin" : "EPC",
+        r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : ((r.source || "website").toLowerCase() === "manual" ? "Admin" : "EPC"),
         r.created_at,
       ].map(esc).join(","));
     }
@@ -1054,25 +1059,23 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
                     {new Date(r.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
                   </p>
                 </td>
-                {/* Created by — plain text; website (self-onboarded) → EPC,
-                    manual (admin-added) → Admin. Source FILTER keeps website/manual. */}
+                {/* Created by — the admin user who added it (from created_by_user_id);
+                    self-onboarded EPCs have none → "EPC"; legacy admin-added → "Admin". */}
                 <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">
-                  {(r.source || "website").toLowerCase() === "manual" ? "Admin" : "EPC"}
+                  {r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : ((r.source || "website").toLowerCase() === "manual" ? "Admin" : "EPC")}
                 </td>
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    disabled={!!downloading[r.id]}
-                    onClick={(e) => { e.stopPropagation(); setZipPickerRow(r); }}
-                    className={[
-                      "text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 transition-colors",
-                      downloading[r.id]
-                        ? "bg-bg-soft text-text-muted cursor-not-allowed"
-                        : "bg-[#178a5c] text-white hover:bg-[#12734c]",
-                    ].join(" ")}
-                  >
-                    {IconDownload} {downloading[r.id] ? "Preparing…" : "Download ZIP"}
-                  </button>
+                  <div className="flex flex-col items-center gap-1">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setEmailRow(r); }}
+                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 bg-[#178a5c] text-white hover:bg-[#12734c] transition-colors">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
+                      Email
+                    </button>
+                    <button type="button" disabled={!!downloading[r.id]} onClick={(e) => { e.stopPropagation(); setZipPickerRow(r); }}
+                      className="text-[11px] text-[#5a8a76] hover:underline disabled:opacity-60">
+                      {downloading[r.id] ? "Preparing ZIP…" : "Download ZIP"}
+                    </button>
+                  </div>
                 </td>
               </tr>
               );
@@ -1091,6 +1094,12 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
           if (!row) return;
           await downloadZip(row, lender);
         }}
+      />
+      <EmailComposerModal
+        open={!!emailRow}
+        onClose={() => setEmailRow(null)}
+        endpoint={emailRow ? `/api/admin/epc/${emailRow.id}/send-to-lender` : ""}
+        title="Send EPC to lender"
       />
     </>
   );
@@ -1126,7 +1135,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     first_disbursement_amount: number | null;
     first_disbursement_date: string | null;
     second_disbursement_amount: number | null;
-    status: string; created_at: string; created_by: string;
+    status: string; created_at: string; created_by: string; created_by_user_id: string | null;
     rfd_at: string | null;
     reviewed_at: string | null;
     aborted_at: string | null;
@@ -1150,6 +1159,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     rejected_lender: string | null;
     epc_business: { contact_name: string | null; trade_name: string | null; legal_name: string | null; epc_display_id: string | null } | null;
   };
+  const adminNames = useAdminNames();
   const [rows, setRows] = useState<Row[]>([]);
   // 6h — per-application latest lender status label (most-recent event).
   const [lenderLatest, setLenderLatest] = useState<Record<string, string>>({});
@@ -1249,7 +1259,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
           // NOTE: rfd_at is intentionally NOT selected — it doesn't exist until
           // migration 0059 is applied, and the dashboard doesn't need it (new
           // RFD rows carry status='rfd'; disbursed rows are detected by amount).
-          "status, created_at, created_by, reviewed_at, aborted_at, approved_lender, rejected_lender, " +
+          "status, created_at, created_by, created_by_user_id, reviewed_at, aborted_at, approved_lender, rejected_lender, " +
           "aadhaar_front_path, aadhaar_back_path, ebill_path, proforma_invoice_path, " +
           "rooftop_photo_path, bank_statement_path, customer_photo_path, bill_on_applicant_name, " +
           "coapp_pan_path, coapp_aadhaar_front_path, coapp_aadhaar_back_path, " +
@@ -1464,7 +1474,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         amountFor(r),
         STAGE[loanStage(r)] ?? loanStage(r),
         r.created_at,
-        r.created_by === "admin" ? "Admin" : "EPC",
+        r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : (r.created_by === "admin" ? "Admin" : "EPC"),
         r.first_disbursement_amount ?? "",
         r.second_disbursement_amount ?? "",
       ].map(esc).join(","));
@@ -1687,7 +1697,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                   <p className="text-[11px] text-[#5a8a76] mt-0.5">{fmtAddedTime(r.created_at)}</p>
                 </td>
                 <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">
-                  {r.created_by === "admin" ? "Admin" : "EPC"}
+                  {r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : (r.created_by === "admin" ? "Admin" : "EPC")}
                 </td>
                 {/* Action: View + Download ZIP. stopPropagation so the
                     buttons don't also trigger the row's navigate. */}
@@ -1741,6 +1751,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
 // "insurance" tab is restored on Back.
 function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
   const router = useRouter();
+  const adminNames = useAdminNames();
   type Row = {
     id: string;
     insurance_display_id: string | null;
@@ -1764,6 +1775,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
     invoice_path: string | null;
     status: string;
     created_at: string;
+    created_by_user_id: string | null;
     epc_business: { contact_name: string | null; trade_name: string | null; legal_name: string | null; epc_display_id: string | null } | null;
   };
   const [rows, setRows] = useState<Row[]>([]);
@@ -1789,7 +1801,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
         .from("insurance_applications")
         .select(
           "id, insurance_display_id, aadhaar_name, pan_number, sum_insured, invoice_confirmed_amount, " +
-          "invoice_amount, insurance_partner, policy_from_date, policy_to_date, policy_path, status, created_at, " +
+          "invoice_amount, insurance_partner, policy_from_date, policy_to_date, policy_path, status, created_at, created_by_user_id, " +
           "pan_path, aadhaar_front_path, aadhaar_back_path, plant_photo_path, ebill_path, invoice_path, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
@@ -2050,12 +2062,13 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Status</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Policy Validity</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Created on</th>
+              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Created by</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Action</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={8} className="px-5 py-10 text-center text-[#5a8a76]">No insurance applications yet.</td></tr>
+              <tr><td colSpan={9} className="px-5 py-10 text-center text-[#5a8a76]">No insurance applications yet.</td></tr>
             ) : filtered.map((r) => {
               const hl = highlightId === r.id;
               return (
@@ -2116,6 +2129,10 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
                 <td className="px-3 py-3 text-center">
                   <p className="text-[13px] font-semibold text-[#0f3d2e]">{fmtAddedDate(r.created_at)}</p>
                   <p className="text-[11px] text-[#5a8a76] mt-0.5">{fmtAddedTime(r.created_at)}</p>
+                </td>
+                {/* Created by — the admin user who added it (from created_by_user_id). */}
+                <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">
+                  {r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : "—"}
                 </td>
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <div className="flex flex-col gap-1.5">

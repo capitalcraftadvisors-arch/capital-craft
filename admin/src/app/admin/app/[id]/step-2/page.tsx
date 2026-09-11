@@ -199,7 +199,10 @@ function Inner() {
       if (!gender  && result.fields.gender)  setGender(result.fields.gender);
       if (!careOf  && result.fields.care_of) setCareOf(result.fields.care_of);
       if (!address && result.fields.address) setAddress(result.fields.address);
-      if (!aadhaarNumber && result.fields.aadhaar_number) {
+      // Fill from OCR whenever it returns a valid number AND the field is empty
+      // or not a clean 12-digit value (e.g. a masked/partial value left by an
+      // earlier chatbot capture) — so re-uploading in the classic form fixes it.
+      if (result.fields.aadhaar_number && (!aadhaarNumber || !/^\d{12}$/.test(aadhaarNumber))) {
         setAadhaarNumber(result.fields.aadhaar_number);
       }
     } catch (e) {

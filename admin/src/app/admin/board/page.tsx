@@ -15,6 +15,8 @@ import NotificationBell from "@/components/NotificationBell";
 import LoanLenderPickerModal, { type PickerLender } from "@/components/LoanLenderPickerModal";
 import Select from "@/components/ui/Select";
 import DateField from "@/components/ui/DateField";
+import LoanActivityLogModal from "@/components/LoanActivityLogModal";
+import ActivityLogModal from "@/components/ActivityLogModal";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, getToken, greetingName } from "@/lib/auth";
 import { loadOpsCases, columnsFor, SOURCE_META, type OpsCase, type TeamUser, type CaseSource } from "@/lib/ops-board";
@@ -113,6 +115,9 @@ function loanOutline(c: OpsCase): "green" | "yellow" | "red" | "neutral" {
   return "green";
 }
 const OUTLINE: Record<"green" | "yellow" | "red" | "neutral", string> = { green: "#16a34a", yellow: "#eab308", red: "#dc2626", neutral: "#cbd5e1" };
+// Inner card fill by SLA status (replaces the coloured border): green = within
+// SLA, amber = approaching breach, red = breached/blocked, neutral = terminal.
+const OUTLINE_FILL: Record<"green" | "yellow" | "red" | "neutral", string> = { green: "#e7f5ee", yellow: "#fdf0da", red: "#fbe4e4", neutral: "#e8ebef" };
 
 function fmt(v: number): string {
   if (!v) return "₹0";
@@ -163,11 +168,11 @@ const placeLabel = (s: unknown) => (s === "residential" ? "House (residential)" 
 // Columns fetched on demand when a loan card is opened.
 const DETAIL_COLS = "borrower_name, aadhaar_name, borrower_mobile, borrower_email, coapp_name, coapp_mobile, coapp_email, organization_name, total_project_cost, loan_amount_required, selected_tenure_years, project_size, project_size_unit, plant_use_type, system_type, central_subsidy, state_subsidy, bill_on_applicant_name";
 
-// A stacked label-over-value field — cleaner than a squeezed two-column row for
-// long values (emails, business names).
-function Field({ k, v }: { k: string; v: React.ReactNode }) {
+// A stacked label-over-value field. Two sit side by side in the Section grid;
+// long values (emails, business names) pass `wide` to span the full width.
+function Field({ k, v, wide }: { k: string; v: React.ReactNode; wide?: boolean }) {
   return (
-    <div>
+    <div className={wide ? "col-span-2" : undefined}>
       <div className="text-[10.5px] uppercase tracking-wide text-text-muted">{k}</div>
       <div className="text-[13px] font-semibold text-text break-words">{v || "—"}</div>
     </div>
@@ -177,7 +182,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   return (
     <div className="border-t border-line pt-2.5">
       <div className="text-[10px] font-bold uppercase tracking-wider text-[#5a8a76] mb-1.5">{title}</div>
-      <div className="flex flex-col gap-2">{children}</div>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2">{children}</div>
     </div>
   );
 }
@@ -214,38 +219,66 @@ const WA_PENDING: { key: string; label: string; hi: string }[] = [
   { key: "cheque",    label: "Cancelled cheque",       hi: "कैंसिल चेक" },
   { key: "gst",       label: "GST certificate",        hi: "GST प्रमाणपत्र" },
 ];
-// Message intents the RM can pick — each a distinct Hindi template.
-type WaIntent = "docs" | "approved" | "disbursed" | "sitevisit" | "followup";
+// Message intents (message text only — the composer UI itself stays English).
+type WaIntent = "docs" | "approved" | "disbursed" | "followup";
 const WA_INTENTS: { key: WaIntent; label: string }[] = [
-  { key: "docs",      label: "दस्तावेज़ पेंडिंग" },
-  { key: "approved",  label: "लोन स्वीकृत" },
-  { key: "disbursed", label: "डिस्बर्समेंट" },
-  { key: "sitevisit", label: "साइट विज़िट" },
-  { key: "followup",  label: "फॉलो-अप" },
+  { key: "docs",      label: "Documents pending" },
+  { key: "approved",  label: "Loan approved" },
+  { key: "disbursed", label: "Disbursement" },
+  { key: "followup",  label: "Follow-up" },
 ];
-// Build the Hindi message from customer name, RM name, chosen items, source, intent.
-function buildWaMessage(customer: string, rm: string, itemsHi: string[], source: CaseSource, intent: WaIntent): string {
+// The message body can be written in English, Hinglish, or easy Hindi.
+type WaLang = "en" | "hinglish" | "hi";
+const WA_LANGS: { key: WaLang; label: string }[] = [
+  { key: "en", label: "English" },
+  { key: "hinglish", label: "Hinglish" },
+  { key: "hi", label: "Hindi" },
+];
+// Build the WhatsApp message from name, RM, chosen doc keys, source, intent, language.
+function buildWaMessage(customer: string, rm: string, itemKeys: string[], source: CaseSource, intent: WaIntent, lang: WaLang): string {
   const name = customer && customer !== "—" ? customer : "";
-  const greeting = name ? `नमस्ते ${name} जी,` : "नमस्ते जी,";
+  const isEpc = source === "epc";
+  const items = WA_PENDING.filter((it) => itemKeys.includes(it.key));
+  if (lang === "en") {
+    const greet = name ? `Hello ${name},` : "Hello,";
+    const who = `This is ${rm} from Capital Craft Financial Advisors.`;
+    const subj = isEpc ? "your Capital Craft partner profile" : "your solar loan application";
+    const sign = `\n\nThank you,\n${rm}\nCapital Craft Financial Advisors`;
+    switch (intent) {
+      case "approved":  return `${greet}\n\nCongratulations! ${who} ${subj} has been approved. We'll reach out shortly for the next steps. Feel free to contact us with any questions.${sign}`;
+      case "disbursed": return `${greet}\n\n${who} Your loan amount has been disbursed. Please check your bank account for the details. Thank you.${sign}`;
+      case "followup":  return `${greet}\n\n${who} We wanted to follow up regarding ${subj}. Please reply or contact us at your convenience.${sign}`;
+      default:
+        if (!items.length) return `${greet}\n\n${who} To move ${subj} forward, we need a few documents/details. Please get in touch.${sign}`;
+        return `${greet}\n\n${who} To move ${subj} forward, we need the following documents/information:\n\n${items.map((it) => `• ${it.label}`).join("\n")}\n\nPlease share them on WhatsApp as soon as possible.${sign}`;
+    }
+  }
+  if (lang === "hinglish") {
+    const greet = name ? `Namaste ${name} ji,` : "Namaste ji,";
+    const who = `Main ${rm}, Capital Craft Financial Advisors se hoon.`;
+    const subj = isEpc ? "aapki Capital Craft partner profile" : "aapke solar loan application";
+    const sign = `\n\nDhanyavaad,\n${rm}\nCapital Craft Financial Advisors`;
+    switch (intent) {
+      case "approved":  return `${greet}\n\nBadhai ho! ${who} ${subj} approved ho gaya hai. Agle steps ke liye hum jald sampark karenge. Koi sawaal ho to zaroor bataiye.${sign}`;
+      case "disbursed": return `${greet}\n\n${who} Aapke loan ki amount disburse kar di gayi hai. Details ke liye apna bank account check karein. Dhanyavaad.${sign}`;
+      case "followup":  return `${greet}\n\n${who} ${subj} ke baare mein aapse follow-up karna tha. Kripya reply karein ya sampark karein.${sign}`;
+      default:
+        if (!items.length) return `${greet}\n\n${who} ${subj} ko aage badhane ke liye kuch documents chahiye. Kripya sampark karein.${sign}`;
+        return `${greet}\n\n${who} ${subj} ko aage badhane ke liye humein ye documents/jaankari chahiye:\n\n${items.map((it) => `• ${it.label}`).join("\n")}\n\nKripya inhe jald se jald WhatsApp par bhejein.${sign}`;
+    }
+  }
+  // hi — easy Hindi
+  const greet = name ? `नमस्ते ${name} जी,` : "नमस्ते जी,";
   const who = `मैं ${rm}, Capital Craft Financial Advisors से हूँ।`;
-  const subject = source === "epc" ? "आपकी Capital Craft पार्टनर प्रोफ़ाइल" : "आपके सोलर लोन आवेदन";
+  const subj = isEpc ? "आपकी Capital Craft पार्टनर प्रोफ़ाइल" : "आपके सोलर लोन आवेदन";
   const sign = `\n\nधन्यवाद,\n${rm}\nCapital Craft Financial Advisors`;
   switch (intent) {
-    case "approved":
-      return `${greeting}\n\nबधाई हो! ${who} ${subject} स्वीकृत (approved) हो गया है। अगले चरण के लिए हम जल्द ही आपसे संपर्क करेंगे। किसी भी प्रश्न के लिए बेझिझक संपर्क करें।${sign}`;
-    case "disbursed":
-      return `${greeting}\n\n${who} आपके सोलर लोन की राशि डिस्बर्स कर दी गई है। विवरण के लिए कृपया अपना बैंक खाता जांचें। सहयोग के लिए धन्यवाद।${sign}`;
-    case "sitevisit":
-      return `${greeting}\n\n${who} आपके सोलर सिस्टम के लिए साइट विज़िट हेतु हम समय तय करना चाहते हैं। कृपया अपनी सुविधानुसार दिन व समय बताएं।${sign}`;
-    case "followup":
-      return `${greeting}\n\n${who} ${subject} के संबंध में आपसे संपर्क करना था। कृपया सुविधानुसार उत्तर दें या संपर्क करें।${sign}`;
-    default: { // docs
-      if (itemsHi.length === 0) {
-        return `${greeting}\n\n${who} ${subject} को आगे बढ़ाने के लिए हमें कुछ दस्तावेज़/जानकारी चाहिए। कृपया संपर्क करें।${sign}`;
-      }
-      const bullets = itemsHi.map((h) => `• ${h}`).join("\n");
-      return `${greeting}\n\n${who} ${subject} को आगे बढ़ाने के लिए हमें निम्नलिखित दस्तावेज़/जानकारी चाहिए:\n\n${bullets}\n\nकृपया इन्हें जल्द से जल्द WhatsApp पर साझा करें।${sign}`;
-    }
+    case "approved":  return `${greet}\n\nबधाई हो! ${who} ${subj} स्वीकृत हो गया है। अगले चरण के लिए हम जल्द ही आपसे संपर्क करेंगे। कोई सवाल हो तो ज़रूर बताएं।${sign}`;
+    case "disbursed": return `${greet}\n\n${who} आपके लोन की राशि आपके खाते में भेज दी गई है। कृपया अपना बैंक खाता जांचें। धन्यवाद।${sign}`;
+    case "followup":  return `${greet}\n\n${who} ${subj} के बारे में आपसे बात करनी थी। कृपया जवाब दें या संपर्क करें।${sign}`;
+    default:
+      if (!items.length) return `${greet}\n\n${who} ${subj} को आगे बढ़ाने के लिए कुछ दस्तावेज़ चाहिए। कृपया संपर्क करें।${sign}`;
+      return `${greet}\n\n${who} ${subj} को आगे बढ़ाने के लिए हमें ये दस्तावेज़ चाहिए:\n\n${items.map((it) => `• ${it.hi}`).join("\n")}\n\nकृपया इन्हें जल्दी WhatsApp पर भेजें।${sign}`;
   }
 }
 // Days since an ISO timestamp (for the "contacted Nd ago" chip).
@@ -267,13 +300,16 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
   onStampContact: (c: OpsCase) => void;
   onSetFollowUp: (c: OpsCase, date: string | null) => void;
   onAddNote: (c: OpsCase, text: string) => void;
-  onDetectDocs: (c: OpsCase) => Promise<Set<string>>;
+  onDetectDocs: (c: OpsCase) => Promise<{ have: string[]; need: string[] }>;
 }) {
   const [src, setSrc] = useState<CaseSource>(defaultSrc);
+  const [colour, setColour] = useState<"all" | "red" | "yellow" | "green">("all");
   // WhatsApp composer state.
   const [waCase, setWaCase] = useState<OpsCase | null>(null);
   const [waIntent, setWaIntent] = useState<WaIntent>("docs");
-  const [waSel, setWaSel] = useState<Set<string>>(new Set());
+  const [waLang, setWaLang] = useState<WaLang>("hi");
+  const [waSel, setWaSel] = useState<Set<string>>(new Set());   // docs to REQUEST (go in the message)
+  const [waHave, setWaHave] = useState<Set<string>>(new Set()); // docs already on file
   const [waTo, setWaTo] = useState("");
   const [waMsg, setWaMsg] = useState("");
   const [detecting, setDetecting] = useState(false);
@@ -282,21 +318,30 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
   const [remindDate, setRemindDate] = useState("");
   const [noteCase, setNoteCase] = useState<OpsCase | null>(null);
   const [noteText, setNoteText] = useState("");
+  const [logCase, setLogCase] = useState<OpsCase | null>(null); // activity-log modal
 
-  const openWa = (c: OpsCase) => { setWaCase(c); setWaIntent("docs"); setWaSel(new Set()); setWaTo(myDayTel(c.mobile)); };
-  const toggleItem = (key: string) => setWaSel((prev) => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
-  const detect = async () => {
-    if (!waCase) return;
+  // Check the case's documents (loan only) → split into on-file vs missing; the
+  // missing ones are pre-ticked to request. On-demand only: runs once when the
+  // composer opens, never polls.
+  const runDetect = useCallback(async (c: OpsCase) => {
     setDetecting(true);
-    try { setWaSel(await onDetectDocs(waCase)); } finally { setDetecting(false); }
+    try {
+      const { have, need } = await onDetectDocs(c);
+      setWaHave(new Set(have));
+      setWaSel(new Set(need));
+    } finally { setDetecting(false); }
+  }, [onDetectDocs]);
+  const openWa = (c: OpsCase) => {
+    setWaCase(c); setWaIntent("docs"); setWaLang("hi"); setWaTo(myDayTel(c.mobile));
+    setWaSel(new Set()); setWaHave(new Set());
+    if (c.source === "loan") void runDetect(c);
   };
-  // Rebuild the message whenever the case, intent, or pending selection changes
-  // (this overwrites manual edits — a deliberate, predictable reset).
+  const toggleItem = (key: string) => setWaSel((prev) => { const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n; });
+  // Rebuild the message whenever the case, intent, language, or selection changes.
   useEffect(() => {
     if (!waCase) return;
-    const itemsHi = WA_PENDING.filter((it) => waSel.has(it.key)).map((it) => it.hi);
-    setWaMsg(buildWaMessage(waCase.name, rmName, itemsHi, waCase.source, waIntent));
-  }, [waCase, waSel, waIntent, rmName]);
+    setWaMsg(buildWaMessage(waCase.name, rmName, Array.from(waSel), waCase.source, waIntent, waLang));
+  }, [waCase, waSel, waIntent, waLang, rmName]);
   const sendWa = () => {
     const ten = myDayTel(waTo);
     if (!ten || !waCase) return;
@@ -306,10 +351,11 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
   };
   const counts: Record<CaseSource, number> = { loan: 0, lead: 0, insurance: 0, epc: 0 };
   for (const c of items) counts[c.source]++;
+  const lvlOf = (c: OpsCase) => (c.source === "loan" ? loanOutline(c) : attention(c, 1));
   const ql = q.trim().toLowerCase();
   const inSrc = items.filter((c) => c.source === src);
-  const shown = ql ? inSrc.filter((c) => `${c.name} ${c.lender ?? ""} ${c.epcName ?? ""} ${c.ownerName ?? ""}`.toLowerCase().includes(ql)) : inSrc;
-  const lvlOf = (c: OpsCase) => (c.source === "loan" ? loanOutline(c) : attention(c, 1));
+  const byColour = colour === "all" ? inSrc : inSrc.filter((c) => lvlOf(c) === colour);
+  const shown = ql ? byColour.filter((c) => `${c.name} ${c.lender ?? ""} ${c.epcName ?? ""} ${c.ownerName ?? ""}`.toLowerCase().includes(ql)) : byColour;
   const urgent = shown.filter((c) => lvlOf(c) === "red").length;
   return (
     <div className="max-w-3xl">
@@ -319,6 +365,14 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
         </div>
         <div className="flex items-center gap-2 ml-auto">
           {ownerControl}
+          {/* Filter by urgency colour (red / yellow / green). */}
+          <select value={colour} onChange={(e) => setColour(e.target.value as "all" | "red" | "yellow" | "green")}
+            className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-[12px] font-medium text-text outline-none focus:border-[#0f766e] cursor-pointer">
+            <option value="all">All colours</option>
+            <option value="red">🔴 Red</option>
+            <option value="yellow">🟡 Yellow</option>
+            <option value="green">🟢 Green</option>
+          </select>
           <div className="relative">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
             <input value={q} onChange={(e) => onSearch(e.target.value)} placeholder="Search my cases…"
@@ -360,7 +414,7 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
                     {showOwner && c.ownerName && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#f0f7ff] text-[#185fa5] shrink-0">{c.ownerName}</span>}
                     {c.followUpAt && (
                       <span className={["text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0", fuDue ? "bg-[#fde7e7] text-[#b42318]" : "bg-[#fff4e0] text-[#b45309]"].join(" ")}>
-                        ⏰ {fuDue ? (c.followUpAt < todayStr ? "फॉलो-अप बकाया" : "फॉलो-अप आज") : dmy(c.followUpAt)}
+                        ⏰ {fuDue ? (c.followUpAt < todayStr ? "Overdue" : "Due today") : dmy(c.followUpAt)}
                       </span>
                     )}
                   </div>
@@ -368,15 +422,13 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
                   <div className="flex items-center gap-3 mt-1 text-[11.5px] flex-wrap">
                     {c.amount > 0 && <span className="font-semibold text-[#0f3d2e]">{fmtFull(c.amount)}</span>}
                     {tel && (
-                      <span className="inline-flex items-center gap-2.5">
-                        <a href={`tel:+91${tel}`} onClick={(e) => { e.stopPropagation(); onStampContact(c); }} className="inline-flex items-center gap-1 text-[#0f766e] font-semibold hover:underline">📞 Call</a>
-                        <button type="button" onClick={(e) => { e.stopPropagation(); openWa(c); }} className="inline-flex items-center gap-1 text-[#128C7E] font-semibold hover:underline">WhatsApp</button>
-                      </span>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); openWa(c); }} className="inline-flex items-center gap-1 text-[#128C7E] font-semibold hover:underline">WhatsApp</button>
                     )}
                     <button type="button" onClick={(e) => { e.stopPropagation(); setRemindCase(c); setRemindDate(c.followUpAt || ""); }} className="inline-flex items-center gap-1 text-[#b45309] font-semibold hover:underline">⏰ Remind</button>
-                    {hasNote && <button type="button" onClick={(e) => { e.stopPropagation(); setNoteCase(c); setNoteText(""); }} className="inline-flex items-center gap-1 text-[#4338ca] font-semibold hover:underline">✎ Note</button>}
+                    {hasNote && <button type="button" onClick={(e) => { e.stopPropagation(); setNoteCase(c); setNoteText(""); }} className="inline-flex items-center gap-1 text-[#4338ca] font-semibold hover:underline">✎ Comment</button>}
+                    {(c.source === "loan" || c.source === "epc") && <button type="button" onClick={(e) => { e.stopPropagation(); setLogCase(c); }} className="inline-flex items-center gap-1 text-[#5a6b7b] font-semibold hover:underline">🕘 Activity</button>}
                     {c.commentCount > 0 && <span className="inline-flex items-center gap-1 text-text-muted">💬 {c.commentCount}</span>}
-                    {contacted !== null && <span className="text-text-muted">संपर्क: {contacted === 0 ? "आज" : `${contacted}d`}</span>}
+                    {contacted !== null && <span className="text-text-muted">contacted {contacted === 0 ? "today" : `${contacted}d ago`}</span>}
                   </div>
                 </div>
                 <span className="text-[12px] font-semibold shrink-0 whitespace-nowrap" style={{ color: lvl === "red" ? "#b42318" : "#5a8a76" }}>
@@ -399,14 +451,15 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
           <div className="relative w-full max-w-md bg-white rounded-card-lg shadow-lg p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-2 mb-3">
               <div>
-                <div className="text-[15px] font-bold text-text">WhatsApp भेजें</div>
+                <div className="text-[15px] font-bold text-text">Send WhatsApp</div>
                 <div className="text-[12px] text-text-muted">{waCase.name}</div>
               </div>
               <button type="button" onClick={() => setWaCase(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
             </div>
 
             {/* Message intent */}
-            <div className="flex flex-wrap gap-1.5 mb-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid mb-1.5">Message</div>
+            <div className="flex flex-wrap gap-1.5 mb-2.5">
               {WA_INTENTS.map((t) => (
                 <button key={t.key} type="button" onClick={() => setWaIntent(t.key)}
                   className={["text-[12px] rounded-lg border px-2.5 py-1.5 transition-colors", waIntent === t.key ? "border-[#0f766e] bg-[#0f766e] text-white font-semibold" : "border-line bg-white text-text-mid hover:bg-bg-tint"].join(" ")}>
@@ -415,20 +468,43 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
               ))}
             </div>
 
-            {/* Documents checklist (only for the "docs" intent) */}
+            {/* Message language (message text only) */}
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Language</span>
+              <div className="inline-flex border border-line rounded-lg overflow-hidden">
+                {WA_LANGS.map((l) => (
+                  <button key={l.key} type="button" onClick={() => setWaLang(l.key)}
+                    className={["px-2.5 py-1 text-[12px] font-semibold border-r border-line last:border-r-0", waLang === l.key ? "bg-[#0f766e] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
+                    {l.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Documents — on-file vs still-needed (loan cases are auto-checked) */}
             {waIntent === "docs" && (
               <>
+                {waHave.size > 0 && (
+                  <div className="mb-2.5">
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid mb-1">Already on file ({waHave.size})</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {WA_PENDING.filter((it) => waHave.has(it.key)).map((it) => (
+                        <span key={it.key} className="text-[11.5px] rounded-lg border border-[#bfe6d3] bg-[#eefaf3] text-[#0f6b4b] px-2 py-1 inline-flex items-center gap-1">✓ {it.label}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">क्या पेंडिंग है?</span>
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Request{waCase.source === "loan" ? " · missing pre-ticked" : ""}</span>
                   {waCase.source === "loan" && (
-                    <button type="button" onClick={() => void detect()} disabled={detecting}
+                    <button type="button" onClick={() => void runDetect(waCase)} disabled={detecting}
                       className="text-[11px] font-semibold text-[#185fa5] hover:underline disabled:opacity-50">
-                      {detecting ? "जांच रहे हैं…" : "पेंडिंग जांचें"}
+                      {detecting ? "Checking…" : "Re-check"}
                     </button>
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-1.5 mb-3">
-                  {WA_PENDING.map((it) => {
+                  {WA_PENDING.filter((it) => !waHave.has(it.key)).map((it) => {
                     const on = waSel.has(it.key);
                     return (
                       <button key={it.key} type="button" onClick={() => toggleItem(it.key)}
@@ -441,24 +517,24 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
               </>
             )}
 
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">भेजने का नंबर</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Send to</div>
             <div className="flex items-center gap-2 mt-1 mb-3">
               <span className="text-[13px] text-text-muted">+91</span>
               <input value={waTo} onChange={(e) => setWaTo(e.target.value)} inputMode="numeric" placeholder="10-digit number"
                 className="flex-1 border border-line rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#0f766e]" />
             </div>
 
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">मैसेज</div>
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Message preview</div>
             <textarea value={waMsg} onChange={(e) => setWaMsg(e.target.value)} rows={9}
               className="w-full mt-1 border border-line rounded-lg px-3 py-2 text-[13px] leading-relaxed outline-none focus:border-[#0f766e] resize-none" />
 
             <div className="flex items-center justify-between gap-2 mt-3">
-              <span className="text-[11px] text-text-muted">आपके WhatsApp से भेजा जाएगा</span>
+              <span className="text-[11px] text-text-muted">Sent from your WhatsApp</span>
               <div className="flex gap-2">
-                <button type="button" onClick={() => setWaCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">रद्द करें</button>
+                <button type="button" onClick={() => setWaCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">Cancel</button>
                 <button type="button" onClick={sendWa} disabled={!myDayTel(waTo)}
                   className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#128C7E] text-white hover:bg-[#0f766e] disabled:opacity-50 inline-flex items-center gap-1.5">
-                  WhatsApp पर भेजें →
+                  Send on WhatsApp →
                 </button>
               </div>
             </div>
@@ -473,7 +549,7 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
           <div className="relative w-full max-w-sm bg-white rounded-card-lg shadow-lg p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-2 mb-3">
               <div>
-                <div className="text-[15px] font-bold text-text">फॉलो-अप कब?</div>
+                <div className="text-[15px] font-bold text-text">Follow-up date</div>
                 <div className="text-[12px] text-text-muted">{remindCase.name}</div>
               </div>
               <button type="button" onClick={() => setRemindCase(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
@@ -482,12 +558,12 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
               className="border border-line rounded-lg px-3 py-2 text-[14px] outline-none focus:border-[#0f766e]" />
             <div className="flex items-center justify-between gap-2 mt-4">
               {remindCase.followUpAt
-                ? <button type="button" onClick={() => { onSetFollowUp(remindCase, null); setRemindCase(null); }} className="text-[12px] font-semibold text-[#b42318] hover:underline">हटाएं</button>
+                ? <button type="button" onClick={() => { onSetFollowUp(remindCase, null); setRemindCase(null); }} className="text-[12px] font-semibold text-[#b42318] hover:underline">Remove</button>
                 : <span />}
               <div className="flex gap-2">
-                <button type="button" onClick={() => setRemindCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">रद्द करें</button>
+                <button type="button" onClick={() => setRemindCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">Cancel</button>
                 <button type="button" onClick={() => { onSetFollowUp(remindCase, remindDate || null); setRemindCase(null); }} disabled={!remindDate}
-                  className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#0f766e] text-white hover:bg-[#0c5f58] disabled:opacity-50">सेट करें</button>
+                  className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#0f766e] text-white hover:bg-[#0c5f58] disabled:opacity-50">Set</button>
               </div>
             </div>
           </div>
@@ -501,20 +577,28 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
           <div className="relative w-full max-w-sm bg-white rounded-card-lg shadow-lg p-5" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-2 mb-2">
               <div>
-                <div className="text-[15px] font-bold text-text">नोट जोड़ें</div>
-                <div className="text-[12px] text-text-muted">{noteCase.name} · सभी को दिखेगा</div>
+                <div className="text-[15px] font-bold text-text">Add comment</div>
+                <div className="text-[12px] text-text-muted">{noteCase.name} · visible to everyone</div>
               </div>
               <button type="button" onClick={() => setNoteCase(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
             </div>
-            <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} rows={4} autoFocus placeholder="नोट लिखें…"
+            <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} rows={4} autoFocus placeholder="Write a comment…"
               className="w-full border border-line rounded-lg px-3 py-2 text-[13px] leading-relaxed outline-none focus:border-[#0f766e] resize-none" />
             <div className="flex justify-end gap-2 mt-3">
-              <button type="button" onClick={() => setNoteCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">रद्द करें</button>
+              <button type="button" onClick={() => setNoteCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">Cancel</button>
               <button type="button" onClick={() => { onAddNote(noteCase, noteText); setNoteCase(null); }} disabled={!noteText.trim()}
-                className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#0f766e] text-white hover:bg-[#0c5f58] disabled:opacity-50">जोड़ें</button>
+                className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#0f766e] text-white hover:bg-[#0c5f58] disabled:opacity-50">Add</button>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Activity log — the case's audit trail (loan / EPC). */}
+      {logCase && logCase.source === "loan" && (
+        <LoanActivityLogModal open onClose={() => setLogCase(null)} loan={{ id: logCase.id, borrower_name: logCase.name }} borrowerName={logCase.name} />
+      )}
+      {logCase && logCase.source === "epc" && (
+        <ActivityLogModal open onClose={() => setLogCase(null)} businessId={logCase.id} epcName={logCase.name} />
       )}
     </div>
   );
@@ -609,30 +693,47 @@ function Inner() {
   }, [me, reload]);
   // Auto-detect pending docs for a LOAN (on-demand only). Returns the checklist
   // keys that appear MISSING across both doc stores.
-  const detectPendingDocs = useCallback(async (c: OpsCase): Promise<Set<string>> => {
-    if (c.source !== "loan") return new Set();
+  const detectPendingDocs = useCallback(async (c: OpsCase): Promise<{ have: string[]; need: string[] }> => {
+    if (c.source !== "loan") return { have: [], need: [] };
     try {
       const db = supabase();
+      // NOTE: column list is verified against the live schema. epc_applications
+      // has NO pan_path / invoice_path / gst_path — the borrower PAN is the
+      // `borrower_pan` text column (and/or a user_application_docs row). Selecting
+      // a non-existent column 42703s the whole query → the old check detected
+      // nothing (the "inaccurate" behaviour).
       const [appRes, docRes] = await Promise.all([
-        db.from("epc_applications").select("aadhaar_front_path, aadhaar_face_path, pan_path, ebill_path, bank_statement_path, customer_photo_path, proforma_invoice_path, invoice_path, coapp_pan_path, coapp_aadhaar_front_path, gst_path").eq("id", c.id).maybeSingle(),
+        db.from("epc_applications").select("aadhaar_front_path, aadhaar_back_path, aadhaar_face_path, borrower_pan, ebill_path, bank_statement_path, customer_photo_path, proforma_invoice_path, coapp_name, coapp_pan, coapp_pan_path, coapp_aadhaar_front_path, coapp_aadhaar_back_path").eq("id", c.id).maybeSingle(),
         db.from("user_application_docs").select("category").eq("application_id", c.id),
       ]);
       const p = (appRes.data ?? {}) as Record<string, unknown>;
       const cats = new Set(((docRes.data ?? []) as { category: string }[]).map((d) => d.category));
-      const has: Record<string, boolean> = {
-        aadhaar: !!p.aadhaar_front_path || !!p.aadhaar_face_path || cats.has("borrower_aadhaar"),
-        pan: !!p.pan_path || cats.has("borrower_pan"),
-        ebill: !!p.ebill_path || cats.has("electricity_bill"),
-        bank: !!p.bank_statement_path || cats.has("bank_statement"),
-        photo: !!p.customer_photo_path || cats.has("customer_photo"),
-        quotation: !!p.proforma_invoice_path || !!p.invoice_path,
-        coapp: !!p.coapp_pan_path || !!p.coapp_aadhaar_front_path || cats.has("coapp_pan") || cats.has("coapp_aadhaar"),
-        gst: !!p.gst_path,
+      const str = (v: unknown) => typeof v === "string" && v.trim() !== "";
+      const hasCoapp = str(p.coapp_name);
+      // Verifiable docs get true/false; anything we can't check (income, cheque,
+      // GST — no column on loan apps — or co-applicant docs when there's no
+      // co-applicant) is null → left to the RM to tick manually, never
+      // auto-flagged as "missing".
+      const status: Record<string, boolean | null> = {
+        aadhaar:   !!p.aadhaar_front_path || !!p.aadhaar_back_path || !!p.aadhaar_face_path,
+        pan:       str(p.borrower_pan) || cats.has("borrower_pan"),
+        ebill:     !!p.ebill_path,
+        bank:      !!p.bank_statement_path || cats.has("bank_statement"),
+        photo:     !!p.customer_photo_path || !!p.aadhaar_face_path || cats.has("customer_photo") || cats.has("borrower_photo"),
+        quotation: !!p.proforma_invoice_path,
+        coapp:     hasCoapp ? (str(p.coapp_pan) || !!p.coapp_pan_path || !!p.coapp_aadhaar_front_path || !!p.coapp_aadhaar_back_path) : null,
+        gst:       null,
+        income:    null,
+        cheque:    null,
       };
-      const pending = new Set<string>();
-      for (const k of Object.keys(has)) if (!has[k]) pending.add(k); // income / cheque aren't tracked → left manual
-      return pending;
-    } catch { return new Set(); }
+      const have: string[] = [];
+      const need: string[] = [];
+      for (const [k, v] of Object.entries(status)) {
+        if (v === true) have.push(k);
+        else if (v === false) need.push(k);
+      }
+      return { have, need };
+    } catch { return { have: [], need: [] }; }
   }, []);
 
   useEffect(() => { if (typeof window !== "undefined") localStorage.setItem("opsboard.target", String(target)); }, [target]);
@@ -926,9 +1027,11 @@ function Inner() {
   return (
     <div className="min-h-screen bg-bg-soft md:flex">
       <AdminSidebar active="board" />
-      <div className="flex-1 min-w-0 flex flex-col">
+      {/* Fixed-height app shell: the page itself doesn't scroll — the board and
+          the side panel each scroll in their own container (no scroll bleed). */}
+      <div className="flex-1 min-w-0 flex flex-col md:h-screen md:overflow-hidden">
         {/* Header */}
-        <header className="px-4 sm:px-6 py-5 border-b border-line bg-white">
+        <header className="px-4 sm:px-6 py-5 border-b border-line bg-white shrink-0">
           <p className="text-[15px] font-semibold text-text mb-2">
             Hi <span className="font-bold text-[#178a5c]">{greetingName(me)}</span>
           </p>
@@ -943,7 +1046,7 @@ function Inner() {
               {!isMainAdmin && (
                 <div className="inline-flex border border-line rounded-lg overflow-hidden">
                   {(["myday", "board"] as const).map((v) => (
-                    <button key={v} type="button" onClick={() => setView(v)}
+                    <button key={v} type="button" onClick={() => { setView(v); if (v === "myday") setSel(null); }}
                       className={["px-3.5 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", view === v ? "bg-[#0f766e] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
                       {v === "myday" ? "My Day" : "Board"}
                     </button>
@@ -1020,9 +1123,9 @@ function Inner() {
           )}
         </header>
 
-        <main className="flex-1 flex min-h-0">
-          {/* Kanban */}
-          <div className="flex-1 overflow-x-auto p-4 sm:p-6">
+        <main className="flex-1 flex min-h-0 relative">
+          {/* Kanban — its own scroll container. */}
+          <div className="flex-1 overflow-auto p-4 sm:p-6">
             {view === "myday" ? (
               loading ? <p className="text-text-muted">Loading…</p> : (
                 <MyDayQueue items={myDayScoped} q={q} onSearch={setQ} showOwner={isManager}
@@ -1093,9 +1196,10 @@ function Inner() {
                           // Loans use per-stage timing (change #2/3/5/7); other sources use idle-vs-SLA.
                           const lvl = c.source === "loan" ? loanOutline(c) : attention(c, sla);
                           const late = lvl === "red";
-                          // Approved cards get a green wash, rejected a red one (slightly deeper
-                          // than before, per request).
-                          const fill = c.outcome === "approved" ? "#d1efdf" : c.outcome === "rejected" ? "#f7d9d9" : "#ffffff";
+                          // Colour is now the INNER fill (SLA status), not a border:
+                          // green within SLA, amber approaching, red breached/blocked.
+                          // Terminal cards (rejected / aborted, any source) are grey.
+                          const fill = (c.outcome === "rejected" || c.column === "abort") ? OUTLINE_FILL.neutral : OUTLINE_FILL[lvl];
                           const picked = sel === c.id;
                           // Days the case has sat in its CURRENT stage (e.g. "7d" since it was
                           // approved / disbursed). Total days-worked lives in the side panel.
@@ -1106,10 +1210,10 @@ function Inner() {
                           return (
                             <button key={c.source + c.id} type="button" onClick={() => setSel(c.id)}
                               draggable={canDrag} onDragStart={(e) => { if (!canDrag) { e.preventDefault(); return; } setDragId(c.id); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", c.id); } catch { /* ignore */ } }}
-                              className={"text-left rounded-lg border-2 p-2.5 transition-all duration-150 will-change-transform" + (canDrag ? " cursor-grab active:cursor-grabbing" : " cursor-pointer")}
-                              // Selection is shown by LIFTING the card (shadow + raise), not by a
-                              // coloured ring — that used to clash with the red/green status border.
-                              style={{ borderColor: OUTLINE[lvl], backgroundColor: fill, transform: picked ? "translateY(-3px)" : undefined, boxShadow: picked ? "0 12px 26px -8px rgba(15,23,42,0.45)" : "0 1px 2px rgba(15,23,42,0.06)", position: picked ? "relative" : undefined, zIndex: picked ? 1 : undefined }}>
+                              className={"text-left rounded-lg border border-line p-2.5 transition-all duration-150 will-change-transform" + (canDrag ? " cursor-grab active:cursor-grabbing" : " cursor-pointer")}
+                              // No coloured boundary — the SLA status is the inner fill now.
+                              // Selection lifts the card (shadow + raise).
+                              style={{ backgroundColor: fill, transform: picked ? "translateY(-3px)" : undefined, boxShadow: picked ? "0 12px 26px -8px rgba(15,23,42,0.45)" : "0 1px 2px rgba(15,23,42,0.06)", position: picked ? "relative" : undefined, zIndex: picked ? 1 : undefined }}>
                               <div className="flex items-center justify-between gap-2">
                                 <strong className="text-[13.5px] font-semibold text-text truncate">{c.name}</strong>
                                 {chip && (
@@ -1148,8 +1252,11 @@ function Inner() {
           </div>
 
           {/* Side panel */}
-          {selCase && (
-            <aside className="w-[340px] shrink-0 border-l border-line bg-white p-5 flex flex-col gap-3 overflow-y-auto sticky top-0 self-start max-h-screen">
+          {view === "board" && selCase && (
+            <>
+              {/* Backdrop — freezes the board; click anywhere on it closes the panel. */}
+              <div className="absolute inset-0 z-30 bg-black/5" onClick={() => setSel(null)} />
+              <aside className="absolute top-0 bottom-0 right-0 w-[360px] z-40 border-l border-line bg-white p-5 flex flex-col gap-3 overflow-y-auto shadow-[-8px_0_24px_-12px_rgba(15,23,42,0.25)]">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <h2 className="text-[18px] font-bold text-text truncate">{selCase.name}</h2>
@@ -1204,17 +1311,17 @@ function Inner() {
                       <Section title="Applicant">
                         <Field k="Applicant Name" v={detail.borrower_name || detail.aadhaar_name || selCase.name} />
                         <Field k="App Mob No." v={detail.borrower_mobile ? `+91 ${detail.borrower_mobile}` : "—"} />
-                        <Field k="App email ID" v={detail.borrower_email || "—"} />
+                        <Field k="App email ID" v={detail.borrower_email || "—"} wide />
                       </Section>
                       {(detail.coapp_name || detail.bill_on_applicant_name === false) && (
                         <Section title="Co-applicant">
                           <Field k="Co-app Name" v={detail.coapp_name || "—"} />
                           <Field k="Co-app Mob No" v={detail.coapp_mobile ? `+91 ${detail.coapp_mobile}` : "—"} />
-                          <Field k="Co-app email ID" v={detail.coapp_email || "—"} />
+                          <Field k="Co-app email ID" v={detail.coapp_email || "—"} wide />
                         </Section>
                       )}
                       <Section title="Business">
-                        <Field k="Employer / Business Name" v={detail.organization_name || "—"} />
+                        <Field k="Employer / Business Name" v={detail.organization_name || "—"} wide />
                       </Section>
                       <Section title="Loan">
                         <Field k="Project Cost" v={money(detail.total_project_cost)} />
@@ -1222,7 +1329,7 @@ function Inner() {
                         <Field k="Loan Tenure" v={detail.selected_tenure_years ? `${detail.selected_tenure_years} year` : "—"} />
                       </Section>
                       <Section title="System">
-                        <Field k="Merchant Name" v={selCase.epcName || "—"} />
+                        <Field k="Merchant Name" v={selCase.epcName || "—"} wide />
                         <Field k="Capacity" v={detail.project_size ? `${detail.project_size} ${String(detail.project_size_unit || "kw").toUpperCase()}` : "—"} />
                         <Field k="Place of Installation" v={placeLabel(detail.plant_use_type)} />
                         <Field k="Subsidy" v={(Number(detail.central_subsidy) > 0 || Number(detail.state_subsidy) > 0) ? "Yes" : "No"} />
@@ -1241,23 +1348,6 @@ function Inner() {
                   {selCase.blocker && <div><span className="text-text-muted">Blocker:</span> {selCase.blocker}</div>}
                 </div>
               )}
-
-              {/* Move stage — same flow as dragging: choose the next stage, then
-                  the confirmation + lender/decision/disbursement popup appears. */}
-              {(() => {
-                const targets = selCase.source === "loan"
-                  ? (LOAN_FORWARD[selCase.column ?? ""] ?? [])
-                  : columnsFor(selCase.source).map((c) => c.key).filter((k) => k !== selCase.column);
-                if (!targets.length) return <div className="text-[11px] text-text-muted">No further stage from here.</div>;
-                return (
-                  <div>
-                    <div className="text-[11px] text-text-muted mb-1">Move to stage →</div>
-                    <Select value="" disabled={busy} placeholder="Choose next stage…"
-                      onChange={(e) => { if (e.target.value) setDrop({ caseId: selCase.id, column: e.target.value }); }}
-                      options={targets.map((k) => ({ value: k, label: columnsFor(selCase.source).find((c) => c.key === k)?.label || k }))} />
-                  </div>
-                );
-              })()}
 
               {/* Comments — add one, see the latest, expand history. */}
               <div className="border-t border-line pt-3 flex-1">
@@ -1293,7 +1383,8 @@ function Inner() {
                   <div className="text-text-muted text-[12px]">Comments aren’t available for insurance cases.</div>
                 )}
               </div>
-            </aside>
+              </aside>
+            </>
           )}
         </main>
 

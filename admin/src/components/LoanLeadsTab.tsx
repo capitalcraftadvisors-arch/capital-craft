@@ -11,6 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness } from "@/lib/auth";
+import { useAdminNames } from "@/lib/use-admin-names";
 
 type LeadRow = {
   id: string;
@@ -24,6 +25,7 @@ type LeadRow = {
   email: string | null;
   lead_owner_name: string | null;
   created_by: string | null;
+  created_by_user_id: string | null;
   epc_business_id: string | null;
   epc_name_custom: string | null;
   status: string;
@@ -48,6 +50,7 @@ function createdByLabel(v: string | null): string {
 
 export default function LoanLeadsTab() {
   const router = useRouter();
+  const adminNames = useAdminNames();
   const [rows, setRows] = useState<LeadRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -58,7 +61,7 @@ export default function LoanLeadsTab() {
     setLoading(true);
     const { data } = await supabase()
       .from("loan_leads")
-      .select("id, lead_display_id, name, mobile, dob, loan_amount, project_size, project_size_unit, email, lead_owner_name, created_by, epc_business_id, epc_name_custom, status, dead_at, created_at, epc_business:epc_business_id(trade_name, legal_name, contact_name, epc_display_id)")
+      .select("id, lead_display_id, name, mobile, dob, loan_amount, project_size, project_size_unit, email, lead_owner_name, created_by, created_by_user_id, epc_business_id, epc_name_custom, status, dead_at, created_at, epc_business:epc_business_id(trade_name, legal_name, contact_name, epc_display_id)")
       .eq("status", "under_review")
       .is("aborted_at", null)
       .order("created_at", { ascending: false });
@@ -194,7 +197,7 @@ export default function LoanLeadsTab() {
                     <td className="px-4 py-3 text-center text-[13px] text-[#5a8a76]">
                       {new Date(r.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
                     </td>
-                    <td className="px-4 py-3 text-center text-[13px] text-[#5a8a76]">{createdByLabel(r.created_by)}</td>
+                    <td className="px-4 py-3 text-center text-[13px] text-[#5a8a76]">{r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : createdByLabel(r.created_by)}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-2 flex-wrap">
                         {r.dead_at ? (
