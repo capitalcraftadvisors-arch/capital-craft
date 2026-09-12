@@ -97,6 +97,9 @@ export type OpsCase = {
   boardDate: string | null;
   disbursed: number;
   disbursedThisMonthAt: string | null;
+  // Each disbursement tranche with its OWN amount + date, so a period total can
+  // count each tranche in the month it was actually paid (loans only).
+  tranches: { amount: number; date: string | null }[];
   commentCount: number;    // number of comments on the case — My Day badge
   followUpAt: string | null;      // "YYYY-MM-DD" call-back date (ops_case_touch)
   lastContactedAt: string | null; // ISO — when an RM last called / WhatsApp'd
@@ -317,6 +320,10 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       boardDate: (column === "phase2" || column === "abort" || r.status === "rejected") ? (stageSince ?? r.updated_at ?? nowISO) : nowISO,
       disbursed: num(r.first_disbursement_amount) + num(r.second_disbursement_amount),
       disbursedThisMonthAt: r.first_disbursement_date || r.second_disbursement_date || null,
+      tranches: [
+        { amount: num(r.first_disbursement_amount),  date: r.first_disbursement_date ?? null },
+        { amount: num(r.second_disbursement_amount), date: r.second_disbursement_date ?? null },
+      ].filter((t) => t.amount > 0),
       commentCount: commentCount.get(`loan:${r.id}`) ?? 0,
       followUpAt: touchBy.get(`loan:${r.id}`)?.followUpAt ?? null,
       lastContactedAt: touchBy.get(`loan:${r.id}`)?.lastContactedAt ?? null,
@@ -343,7 +350,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       idleDays: daysSince(r.updated_at), onHold: r.status === "hold", blocker: null,
       createdAt: r.created_at ?? r.updated_at ?? null,
       boardDate: (column === "issued" || column === "rejected") ? (r.updated_at ?? nowISO) : nowISO,
-      disbursed: 0, disbursedThisMonthAt: null,
+      disbursed: 0, disbursedThisMonthAt: null, tranches: [],
       commentCount: 0,
       followUpAt: touchBy.get(`insurance:${r.id}`)?.followUpAt ?? null,
       lastContactedAt: touchBy.get(`insurance:${r.id}`)?.lastContactedAt ?? null,
@@ -369,7 +376,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       idleDays: daysSince(r.reviewed_at || r.created_at), onHold: false, blocker: null,
       createdAt: r.created_at ?? null,
       boardDate: column === "converted" ? (r.reviewed_at ?? r.created_at ?? nowISO) : nowISO,
-      disbursed: 0, disbursedThisMonthAt: null,
+      disbursed: 0, disbursedThisMonthAt: null, tranches: [],
       commentCount: commentCount.get(`lead:${r.id}`) ?? 0,
       followUpAt: touchBy.get(`lead:${r.id}`)?.followUpAt ?? null,
       lastContactedAt: touchBy.get(`lead:${r.id}`)?.lastContactedAt ?? null,
@@ -396,7 +403,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       idleDays: daysSince(r.updated_at), onHold: r.status === "on_hold", blocker: null,
       createdAt: r.created_at ?? r.updated_at ?? null,
       boardDate: (column === "approved" || column === "rejected") ? (r.updated_at ?? nowISO) : nowISO,
-      disbursed: 0, disbursedThisMonthAt: null,
+      disbursed: 0, disbursedThisMonthAt: null, tranches: [],
       commentCount: commentCount.get(`epc:${r.id}`) ?? 0,
       followUpAt: touchBy.get(`epc:${r.id}`)?.followUpAt ?? null,
       lastContactedAt: touchBy.get(`epc:${r.id}`)?.lastContactedAt ?? null,

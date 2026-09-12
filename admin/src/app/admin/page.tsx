@@ -535,9 +535,7 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
   const [lenderState, setLenderState] = useState<Record<string, LenderMap>>({});
   // Live lender registry (falls back to the static list until it loads).
   const [lenderList, setLenderList] = useState<LenderInfo[]>(LENDERS);
-  const [downloading, setDownloading] = useState<Record<string, boolean>>({});
   const [addOpen, setAddOpen] = useState(false);
-  const [zipPickerRow, setZipPickerRow] = useState<Row | null>(null);
   const [emailRow, setEmailRow] = useState<Row | null>(null); // EPC → send-to-lender email
   // Row highlighted after returning from View. sessionStorage-backed so
   // it survives navigation but not full reload.
@@ -816,37 +814,6 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
     }
   }
 
-  async function downloadZip(row: Row, lender: LenderKey) {
-    if (downloading[row.id]) return;
-    setDownloading((d) => ({ ...d, [row.id]: true }));
-    try {
-      const res = await fetch(`/api/epc/${row.id}/download-zip?lender=${lender}`, {
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
-      });
-      if (!res.ok) {
-        let msg = `HTTP ${res.status}`;
-        try { const j = await res.json(); if (j?.error) msg = j.error; } catch { /* keep */ }
-        throw new Error(msg);
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const cd = res.headers.get("content-disposition") || "";
-      const m = /filename="?([^"]+)"?/.exec(cd);
-      const fallback = `EPC_${row.id.slice(0, 8)}.zip`;
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = m?.[1] || fallback;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } catch (e) {
-      alert("Download failed: " + ((e as Error)?.message ?? String(e)));
-    } finally {
-      setDownloading((d) => { const next = { ...d }; delete next[row.id]; return next; });
-    }
-  }
-
   // Mutually-exclusive stage cards (sum = Total) + Application Unseen (overlap).
   const fyRows = useMemo(() => rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo)), [rows, period, pFrom, pTo]);
   const cards: SummaryCard[] = [
@@ -1071,10 +1038,6 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
                       Email
                     </button>
-                    <button type="button" disabled={!!downloading[r.id]} onClick={(e) => { e.stopPropagation(); setZipPickerRow(r); }}
-                      className="text-[11px] text-[#5a8a76] hover:underline disabled:opacity-60">
-                      {downloading[r.id] ? "Preparing ZIP…" : "Download ZIP"}
-                    </button>
                   </div>
                 </td>
               </tr>
@@ -1085,16 +1048,6 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
       </Card>
 
       <AddNewEpcModal open={addOpen} onClose={() => setAddOpen(false)} />
-      <LenderPickerModal
-        open={!!zipPickerRow}
-        onClose={() => setZipPickerRow(null)}
-        epcName={zipPickerRow ? (zipPickerRow.trade_name || zipPickerRow.legal_name || zipPickerRow.contact_name) : null}
-        onConfirm={async (lender) => {
-          const row = zipPickerRow;
-          if (!row) return;
-          await downloadZip(row, lender);
-        }}
-      />
       <EmailComposerModal
         open={!!emailRow}
         onClose={() => setEmailRow(null)}

@@ -222,8 +222,7 @@ const WA_PENDING: { key: string; label: string; hi: string }[] = [
 // Message intents (message text only — the composer UI itself stays English).
 type WaIntent = "docs" | "approved" | "disbursed" | "followup";
 const WA_INTENTS: { key: WaIntent; label: string }[] = [
-  { key: "docs",      label: "Documents pending" },
-  { key: "approved",  label: "Loan approved" },
+  { key: "docs",      label: "Docs pending" },
   { key: "disbursed", label: "Disbursement" },
   { key: "followup",  label: "Follow-up" },
 ];
@@ -235,9 +234,10 @@ const WA_LANGS: { key: WaLang; label: string }[] = [
   { key: "hi", label: "Hindi" },
 ];
 // Build the WhatsApp message from name, RM, chosen doc keys, source, intent, language.
-function buildWaMessage(customer: string, rm: string, itemKeys: string[], source: CaseSource, intent: WaIntent, lang: WaLang): string {
+function buildWaMessage(customer: string, rm: string, itemKeys: string[], source: CaseSource, intent: WaIntent, lang: WaLang, epc?: string | null): string {
   const name = customer && customer !== "—" ? customer : "";
   const isEpc = source === "epc";
+  const vendor = epc && epc !== "—" ? epc : "";
   const items = WA_PENDING.filter((it) => itemKeys.includes(it.key));
   if (lang === "en") {
     const greet = name ? `Hello ${name},` : "Hello,";
@@ -246,7 +246,7 @@ function buildWaMessage(customer: string, rm: string, itemKeys: string[], source
     const sign = `\n\nThank you,\n${rm}\nCapital Craft Financial Advisors`;
     switch (intent) {
       case "approved":  return `${greet}\n\nCongratulations! ${who} ${subj} has been approved. We'll reach out shortly for the next steps. Feel free to contact us with any questions.${sign}`;
-      case "disbursed": return `${greet}\n\n${who} Your loan amount has been disbursed. Please check your bank account for the details. Thank you.${sign}`;
+      case "disbursed": return `${greet}\n\n${who} Your loan amount has been credited to your solar vendor${vendor ? ` (${vendor})` : ""}'s bank account. For details, please contact your solar vendor.${sign}`;
       case "followup":  return `${greet}\n\n${who} We wanted to follow up regarding ${subj}. Please reply or contact us at your convenience.${sign}`;
       default:
         if (!items.length) return `${greet}\n\n${who} To move ${subj} forward, we need a few documents/details. Please get in touch.${sign}`;
@@ -260,7 +260,7 @@ function buildWaMessage(customer: string, rm: string, itemKeys: string[], source
     const sign = `\n\nDhanyavaad,\n${rm}\nCapital Craft Financial Advisors`;
     switch (intent) {
       case "approved":  return `${greet}\n\nBadhai ho! ${who} ${subj} approved ho gaya hai. Agle steps ke liye hum jald sampark karenge. Koi sawaal ho to zaroor bataiye.${sign}`;
-      case "disbursed": return `${greet}\n\n${who} Aapke loan ki amount disburse kar di gayi hai. Details ke liye apna bank account check karein. Dhanyavaad.${sign}`;
+      case "disbursed": return `${greet}\n\n${who} Aapke loan ki amount aapke solar vendor${vendor ? ` (${vendor})` : ""} ke bank account me ja chuki hai. Details ke liye apne solar vendor se sampark karein.${sign}`;
       case "followup":  return `${greet}\n\n${who} ${subj} ke baare mein aapse follow-up karna tha. Kripya reply karein ya sampark karein.${sign}`;
       default:
         if (!items.length) return `${greet}\n\n${who} ${subj} ko aage badhane ke liye kuch documents chahiye. Kripya sampark karein.${sign}`;
@@ -274,7 +274,7 @@ function buildWaMessage(customer: string, rm: string, itemKeys: string[], source
   const sign = `\n\nधन्यवाद,\n${rm}\nCapital Craft Financial Advisors`;
   switch (intent) {
     case "approved":  return `${greet}\n\nबधाई हो! ${who} ${subj} स्वीकृत हो गया है। अगले चरण के लिए हम जल्द ही आपसे संपर्क करेंगे। कोई सवाल हो तो ज़रूर बताएं।${sign}`;
-    case "disbursed": return `${greet}\n\n${who} आपके लोन की राशि आपके खाते में भेज दी गई है। कृपया अपना बैंक खाता जांचें। धन्यवाद।${sign}`;
+    case "disbursed": return `${greet}\n\n${who} आपके लोन की राशि आपके सोलर वेंडर${vendor ? ` (${vendor})` : ""} के बैंक खाते में भेजी जा चुकी है। विवरण के लिए कृपया अपने सोलर वेंडर से संपर्क करें।${sign}`;
     case "followup":  return `${greet}\n\n${who} ${subj} के बारे में आपसे बात करनी थी। कृपया जवाब दें या संपर्क करें।${sign}`;
     default:
       if (!items.length) return `${greet}\n\n${who} ${subj} को आगे बढ़ाने के लिए कुछ दस्तावेज़ चाहिए। कृपया संपर्क करें।${sign}`;
@@ -340,7 +340,7 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
   // Rebuild the message whenever the case, intent, language, or selection changes.
   useEffect(() => {
     if (!waCase) return;
-    setWaMsg(buildWaMessage(waCase.name, rmName, Array.from(waSel), waCase.source, waIntent, waLang));
+    setWaMsg(buildWaMessage(waCase.name, rmName, Array.from(waSel), waCase.source, waIntent, waLang, waCase.epcName));
   }, [waCase, waSel, waIntent, waLang, rmName]);
   const sendWa = () => {
     const ten = myDayTel(waTo);
@@ -486,7 +486,7 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
               <>
                 {waHave.size > 0 && (
                   <div className="mb-2.5">
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid mb-1">Already on file ({waHave.size})</div>
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid mb-1">Docs received ({waHave.size})</div>
                     <div className="flex flex-wrap gap-1.5">
                       {WA_PENDING.filter((it) => waHave.has(it.key)).map((it) => (
                         <span key={it.key} className="text-[11.5px] rounded-lg border border-[#bfe6d3] bg-[#eefaf3] text-[#0f6b4b] px-2 py-1 inline-flex items-center gap-1">✓ {it.label}</span>
@@ -650,6 +650,9 @@ function Inner() {
   const [commentText, setCommentText] = useState("");
   const [commentBusy, setCommentBusy] = useState(false);
   const [showCmtHist, setShowCmtHist] = useState(false);
+  // Side-panel view: "details" (full, with comments) vs "emi" (EMI-confirmation
+  // view — same details but comments hidden, so it's clean to share/screenshot).
+  const [panelTab, setPanelTab] = useState<"details" | "emi">("details");
 
   // force=true after any action so the board reflects the change immediately;
   // plain mount/navigation reuses the short (20s) cache to cut egress.
@@ -828,15 +831,27 @@ function Inner() {
   // "My Day" queue — the RM's OWN cases that need action, across all sources,
   // ranked most-urgent first (red → yellow → green, longest-in-stage on top).
   const breaches = visible.filter((c) => c.idleDays >= sla).length;
-  const thisMonth = `${new Date().getFullYear()}-${new Date().getMonth()}`;
-  const mtd = cases.reduce((sum, c) => sum + (monthKey(c.disbursedThisMonthAt) === thisMonth ? c.disbursed : 0), 0);
+  // Business disbursed within the SELECTED board period. Each tranche is counted
+  // in the month it was ACTUALLY paid (1st and 2nd disbursements independently),
+  // so changing the period dropdown (Previous month, All time, custom) always
+  // recomputes the real payout for that window.
+  const inSelPeriod = (d: string | null) =>
+    boardPeriod === "all" ? true
+    : boardPeriod === "custom" ? inPeriod(d, "custom", boardFrom ? `${boardFrom}-01` : "", boardTo ? monthEnd(boardTo) : "")
+    : inPeriod(d, boardPeriod);
+  const mtd = cases.reduce((sum, c) => sum + c.tranches.reduce((s, t) => s + (inSelPeriod(t.date) ? t.amount : 0), 0), 0);
   const pct = Math.min(100, Math.round(mtd / (target * 1e5) * 100));
+  const periodLabel = boardPeriod === "custom"
+    ? (boardFrom || boardTo ? `${boardFrom || "…"} → ${boardTo || "…"}` : "Custom")
+    : (PERIOD_OPTIONS.find((o) => o.value === boardPeriod)?.label ?? "This month");
   const selCase = cases.find((c) => c.id === sel) || null;
 
   // Fetch the selected LOAN's full detail on demand (one small query per open —
   // keeps it off the board list query).
   const selId = selCase?.id ?? null;
   const selIsLoan = selCase?.source === "loan";
+  // A freshly-opened case always starts on the full Details view.
+  useEffect(() => { setPanelTab("details"); }, [selId]);
   useEffect(() => {
     if (!selId || !selIsLoan) { setDetail(null); return; }
     let cancelled = false;
@@ -1260,9 +1275,19 @@ function Inner() {
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <h2 className="text-[18px] font-bold text-text truncate">{selCase.name}</h2>
-                  <div className="text-[12px] text-text-muted mt-0.5">{SOURCE_META[selCase.source].label} · {selCase.statusLabel}</div>
                 </div>
                 <button type="button" onClick={() => setSel(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
+              </div>
+
+              {/* View switch — Details (full, with comments) vs EMI confirmation
+                  (same details, comments hidden so it's clean to share). */}
+              <div className="inline-flex self-start border border-line rounded-lg overflow-hidden">
+                {([["details", "Details"], ["emi", "EMI confirmation"]] as const).map(([k, lbl]) => (
+                  <button key={k} type="button" onClick={() => setPanelTab(k)}
+                    className={["px-3 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", panelTab === k ? "bg-[#0f766e] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
+                    {lbl}
+                  </button>
+                ))}
               </div>
 
               {/* Two working stats — total time, and time in the CURRENT stage. */}
@@ -1277,8 +1302,9 @@ function Inner() {
                 </div>
               </div>
 
-              {/* Quick actions — reassign + open the full profile, right up top. */}
-              <div className="grid grid-cols-2 gap-2">
+              {/* Quick actions — reassign + open the full profile, right up top.
+                  Both controls share the same label row + height so they match. */}
+              <div className="grid grid-cols-2 gap-2 items-end">
                 {reassignOptions.length > 0 ? (
                   <div>
                     <div className="text-[11px] text-text-muted mb-1">{isMainAdmin || isManager ? "Reassign to" : "Send to senior ↑"}</div>
@@ -1288,8 +1314,10 @@ function Inner() {
                       options={[...(isMainAdmin ? [{ value: "", label: "Unassigned" }] : []), ...reassignOptions]} />
                   </div>
                 ) : <div />}
-                <div className="flex flex-col justify-end">
-                  <button type="button" className="btn-act ghost text-center inline-flex items-center justify-center gap-1.5"
+                <div>
+                  <div className="text-[11px] text-text-muted mb-1">&nbsp;</div>
+                  <button type="button"
+                    className="w-full rounded-input border border-line bg-white text-text py-3 text-[14px] font-semibold inline-flex items-center justify-center gap-1.5 hover:bg-[#f5f8f6]"
                     onClick={() => { sessionStorage.setItem("ccReturnTo", "/admin/board"); router.push(selCase.href as unknown as string); }}>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M1.5 12s3.5-7 10.5-7 10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg>
                     View profile
@@ -1311,7 +1339,6 @@ function Inner() {
                       <Section title="Applicant">
                         <Field k="Applicant Name" v={detail.borrower_name || detail.aadhaar_name || selCase.name} />
                         <Field k="App Mob No." v={detail.borrower_mobile ? `+91 ${detail.borrower_mobile}` : "—"} />
-                        <Field k="App email ID" v={detail.borrower_email || "—"} wide />
                       </Section>
                       {(detail.coapp_name || detail.bill_on_applicant_name === false) && (
                         <Section title="Co-applicant">
@@ -1349,7 +1376,9 @@ function Inner() {
                 </div>
               )}
 
-              {/* Comments — add one, see the latest, expand history. */}
+              {/* Comments — add one, see the latest, expand history. Shown only in
+                  the Details view; hidden in the EMI-confirmation view. */}
+              {panelTab === "details" && (
               <div className="border-t border-line pt-3 flex-1">
                 <div className="text-[11px] font-bold uppercase tracking-wide text-text-mid mb-2">Comments</div>
                 {COMMENT_TBL[selCase.source] ? (
@@ -1383,6 +1412,7 @@ function Inner() {
                   <div className="text-text-muted text-[12px]">Comments aren’t available for insurance cases.</div>
                 )}
               </div>
+              )}
               </aside>
             </>
           )}
@@ -1398,7 +1428,7 @@ function Inner() {
             <span className="flex items-center gap-1"><i className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: "#dc2626" }} />overdue</span>
           </span>
           <div className="flex items-center gap-2.5 ml-auto min-w-[300px]">
-            <span className="whitespace-nowrap">This month <strong>{fmt(mtd)}</strong> of ₹{target} L</span>
+            <span className="whitespace-nowrap">{periodLabel} <strong>{fmt(mtd)}</strong> of ₹{target} L</span>
             <div className="flex-1 h-3 rounded-full bg-neutral-200"><div className="h-3 rounded-full" style={{ width: pct + "%", backgroundColor: "#178a5c" }} /></div>
           </div>
         </footer>

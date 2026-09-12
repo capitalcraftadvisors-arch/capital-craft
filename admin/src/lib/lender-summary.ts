@@ -127,7 +127,7 @@ export function epcSummaryRows(epc: Record<string, any>): Array<[string, string]
 //   Notes: Project cost is the FULL system cost (total_project_cost) — NOT the
 //   loan amount; the borrower's down payment is the difference. Merchant ID is
 //   blank for Credit Fair; Address statuses default to "Owned".
-export function creditFairEmailRows(loan: Record<string, any>): Array<[string, string]> {
+export function creditFairEmailRows(loan: Record<string, any>, epcName?: string | null): Array<[string, string]> {
   const name = loan.borrower_name || loan.aadhaar_name || "—";
   return [
     ["Name", name],
@@ -135,6 +135,10 @@ export function creditFairEmailRows(loan: Record<string, any>): Array<[string, s
     ["Mobile number", loan.borrower_mobile ? `+91 ${loan.borrower_mobile}` : "—"],
     ["Email", loan.borrower_email ?? "—"],
     ["PAN", loan.borrower_pan ?? "—"],
+    ["Co-applicant name", loan.coapp_name ?? "—"],
+    ["Co-applicant mobile", loan.coapp_mobile ? `+91 ${loan.coapp_mobile}` : "—"],
+    ["Co-applicant email", loan.coapp_email ?? "—"],
+    ["EPC name", epcName || "—"],
     ["Monthly income", rupees(loan.monthly_income)],
     ["Project cost", rupees(loan.total_project_cost)],
     ["Loan amount required", rupees(loan.loan_amount_required)],

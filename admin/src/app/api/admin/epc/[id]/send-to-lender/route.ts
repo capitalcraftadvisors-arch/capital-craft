@@ -88,7 +88,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (mode === "preview") {
       return NextResponse.json({
         ok: true,
-        subject: `EPC application — ${epcName}`,
+        subject: `EPC Onboarding Application _${epcName}`,
         toName: "",
         detail: epcSummaryRows(epc),
         docLabels: docList.map((d) => d.label),
@@ -102,7 +102,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (!EMAIL_RE.test(to)) return err("Enter a valid recipient (TO) email.", 400);
     const cc = cleanEmails(body.cc);
     const bcc = cleanEmails(body.bcc);
-    const subject = String(body.subject ?? "").trim() || `EPC application — ${epcName}`;
+    const subject = String(body.subject ?? "").trim() || `EPC Onboarding Application _${epcName}`;
     const toName = String(body.toName ?? "").trim();
     const detail = Array.isArray(body.detail) && body.detail.length
       ? body.detail.map((r) => [String(r?.[0] ?? ""), String(r?.[1] ?? "")] as [string, string])

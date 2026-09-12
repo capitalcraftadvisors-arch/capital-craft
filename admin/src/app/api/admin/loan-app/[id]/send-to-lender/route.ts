@@ -117,6 +117,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (!loan) return err("Loan application not found.", 404);
 
     const borrowerName: string = loan.borrower_name || loan.aadhaar_name || "applicant";
+    const epcName: string =
+      loan.epc_business?.trade_name || loan.epc_business?.legal_name || loan.epc_business?.contact_name || "";
     const docList = loanDocList(loan, (docs ?? []) as Array<{ category: string; storage_path: string }>);
 
     // ── PREVIEW ──
@@ -125,7 +127,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         ok: true,
         subject: `Loan application — ${borrowerName}`,
         toName: "",
-        detail: creditFairEmailRows(loan),
+        detail: creditFairEmailRows(loan, epcName),
         docLabels: docList.map((d) => d.label),
         ccDefault: LOAN_CC_DEFAULT,
         bccDefault: [],
@@ -142,7 +144,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const toName = String(body.toName ?? "").trim();
     const detail = Array.isArray(body.detail) && body.detail.length
       ? body.detail.map((r) => [String(r?.[0] ?? ""), String(r?.[1] ?? "")] as [string, string])
-      : creditFairEmailRows(loan);
+      : creditFairEmailRows(loan, epcName);
 
     // summary.xlsx built from the (edited) detail rows.
     const wb = new ExcelJS.Workbook();
