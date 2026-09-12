@@ -21,6 +21,7 @@ import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
 import { getCached, setCached, invalidate } from "@/lib/list-cache";
 import { useAdminNames } from "@/lib/use-admin-names";
 import EmailComposerModal from "@/components/EmailComposerModal";
+import { ScoreBadge } from "@/components/EpcScoreModal";
 import {
   deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort,
   displayAmount as amountFor,
@@ -519,6 +520,7 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
     epc_self_edited: boolean | null;
     reviewed_at: string | null;
     created_by_user_id: string | null;
+    epc_score_total: number | null;
   };
   const adminNames = useAdminNames();
   const [rows, setRows] = useState<Row[]>([]);
@@ -607,7 +609,7 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
       if (cached) { setRows(cached.rows); setLenderState(cached.lenderState); return; }
     }
     let query = supabase().from("epc_business")
-      .select("id, epc_display_id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, source, created_at, submitted_at, epc_self_edited, reviewed_at, created_by_user_id")
+      .select("id, epc_display_id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, source, created_at, submitted_at, epc_self_edited, reviewed_at, created_by_user_id, epc_score_total")
       .neq("business_type", "admin");
     const { data } = await query;
     const rs = (data ?? []) as Row[];
@@ -994,6 +996,9 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
                       </p>
                       {r.epc_display_id && (
                         <p className="text-[11px] font-mono text-[#185fa5]">{r.epc_display_id}</p>
+                      )}
+                      {r.epc_score_total != null && (
+                        <div className="mt-0.5"><ScoreBadge total={r.epc_score_total} /></div>
                       )}
                       <p className="text-[12px] text-[#5a8a76]">
                         +91 {maskMobile(r.contact_mobile)}

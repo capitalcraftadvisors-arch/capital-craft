@@ -31,6 +31,7 @@ import OwnershipCard from "@/components/OwnershipCard";
 import ActivityLogModal from "@/components/ActivityLogModal";
 import DeleteEpcModal from "@/components/DeleteEpcModal";
 import ProfileTabBar, { TabButton, DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
+import EpcScoreModal, { ScoreBadge } from "@/components/EpcScoreModal";
 // Shared view chrome — the SAME kit the Loan Application View imports, so the
 // two dashboards can't drift apart. EPC-specific pieces stay in this file.
 import {
@@ -125,6 +126,18 @@ function maskMobile(m: string | null | undefined): string {
   return m.length === 10 ? "•••••" + m.slice(5) : m;
 }
 
+// Reasons offered when an admin rejects an EPC (last option = free text).
+const EPC_REJECT_REASONS = [
+  "Incomplete documents",
+  "Poor / unreadable document quality",
+  "Invalid or mismatched GST details",
+  "Ineligible business / outside service area",
+  "Duplicate registration",
+  "Failed verification",
+  "Unresponsive / no follow-up",
+  "Other",
+];
+
 function Inner() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -148,6 +161,10 @@ function Inner() {
   const [zipPickerOpen, setZipPickerOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [scoreOpen, setScoreOpen] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState<string>("");
+  const [rejectOther, setRejectOther] = useState<string>("");
   // Bumped after any comment write to force ActivityLog to re-fetch.
   const [activityRefresh, setActivityRefresh] = useState(0);
 
@@ -256,7 +273,7 @@ function Inner() {
   // internal tracking field) and logs to admin_edit_log. This mirrors the
   // detail page's changeStatus. IMPORTANT: this DOES NOT unlock the EPC's
   // loan application — only a lender "Approved" tick does that.
-  async function changeStatus(next: "approved" | "on_hold" | "rejected" | "under_review") {
+  async function changeStatus(next: "approved" | "on_hold" | "rejected" | "under_review", reason?: string | null) {
     if (!biz || statusBusy) return;
     setStatusBusy(true);
     try {
@@ -267,6 +284,9 @@ function Inner() {
       const patch: Record<string, unknown> = { status: next };
       const firstReview = !biz.reviewed_at ? new Date().toISOString() : null;
       if (firstReview) patch.reviewed_at = firstReview;
+      // Rejection reason: set it when rejecting, clear it on any other status.
+      const nextReason = next === "rejected" ? (reason ?? null) : null;
+      patch.rejection_reason = nextReason;
 
       const { error } = await supabase()
         .from("epc_business")
@@ -277,7 +297,7 @@ function Inner() {
         return;
       }
       await logAudit(biz.id, "field_edit", "status", biz.status, next);
-      setBiz({ ...biz, status: next, ...(firstReview ? { reviewed_at: firstReview } : {}) });
+      setBiz({ ...biz, status: next, rejection_reason: nextReason, ...(firstReview ? { reviewed_at: firstReview } : {}) });
     } finally {
       setStatusBusy(false);
     }
@@ -401,7 +421,10 @@ function Inner() {
               </div>
               <div className="min-w-0">
                 {/* Header bar shows trade name + EPC id only — legal name removed. */}
-                <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">{trade}</div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">{trade}</div>
+                  {biz.epc_score_total != null && <ScoreBadge total={biz.epc_score_total} size="lg" />}
+                </div>
                 {biz.epc_display_id && <div className="text-[14px] font-medium text-[#0f7a52] truncate mt-0.5">{biz.epc_display_id}</div>}
               </div>
             </div>
@@ -419,6 +442,11 @@ function Inner() {
               )}
             </div>
           </div>
+          {biz.status === "rejected" && biz.rejection_reason && (
+            <div className="mt-3 pt-3 border-t border-[#cdeadd] text-[13px] font-medium text-red-700">
+              Rejection reason: {biz.rejection_reason}
+            </div>
+          )}
         </div>
 
         {/* ── TAB / ACTION ROW — tabs (left); Review-by-CC → status + lender
@@ -441,7 +469,7 @@ function Inner() {
                   label="Review by CC"
                   items={[
                     { label: "Approved", onClick: () => void changeStatus("approved") },
-                    { label: "Rejected", onClick: () => void changeStatus("rejected") },
+                    { label: "Rejected", onClick: () => { setRejectReason(""); setRejectOther(""); setRejectOpen(true); } },
                   ]}
                 />
               )}
@@ -471,6 +499,11 @@ function Inner() {
               {biz.business_type !== "admin" && (
                 <KebabMenu
                   items={[
+                    {
+                      label: biz.epc_score_total != null ? "Edit EPC score" : "Add EPC score",
+                      icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3 6.9 7.5.6-5.7 4.9 1.8 7.3L12 17.8 5.4 21.7l1.8-7.3L1.5 9.5 9 8.9 12 2z"/></svg>),
+                      onClick: () => setScoreOpen(true),
+                    },
                     ...((biz.status === "approved" || biz.status === "rejected")
                       ? [{
                           label: "Change review",
@@ -828,6 +861,41 @@ function Inner() {
         contactName={biz.contact_name ?? null}
         contactMobile={biz.contact_mobile ?? null}
       />
+      <EpcScoreModal
+        open={scoreOpen}
+        onClose={() => setScoreOpen(false)}
+        businessId={biz.id}
+        initial={biz.epc_score ?? null}
+        onSaved={(total, score) => setBiz({ ...biz, epc_score: score, epc_score_total: total })}
+      />
+      {/* Reject-reason picker — choose a reason (or type one) before rejecting. */}
+      {rejectOpen && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={statusBusy ? undefined : () => setRejectOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-white rounded-[12px] shadow-lg p-5">
+            <div className="flex items-start justify-between gap-2 mb-3">
+              <h3 className="text-[17px] font-bold text-[#0f3d2e]">Reject this EPC</h3>
+              <button type="button" onClick={() => setRejectOpen(false)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
+            </div>
+            <label className="block text-[13px] font-medium text-text-mid">Reason for rejection
+              <select value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}
+                className="mt-1 w-full rounded-input border border-line bg-white px-3 py-2.5 text-[14px] outline-none focus:border-blue">
+                <option value="">Select a reason…</option>
+                {EPC_REJECT_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </label>
+            {rejectReason === "Other" && (
+              <textarea value={rejectOther} onChange={(e) => setRejectOther(e.target.value)} rows={3} autoFocus placeholder="Type the reason…"
+                className="mt-2 w-full rounded-input border border-line px-3 py-2 text-[13px] outline-none focus:border-blue resize-none" />
+            )}
+            <div className="flex justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setRejectOpen(false)} disabled={statusBusy} className="px-4 py-2 rounded-lg border border-line text-[13px] text-text-mid disabled:opacity-60">Cancel</button>
+              <button type="button" disabled={statusBusy || !rejectReason || (rejectReason === "Other" && !rejectOther.trim())}
+                onClick={() => { const reason = rejectReason === "Other" ? rejectOther.trim() : rejectReason; void changeStatus("rejected", reason).then(() => setRejectOpen(false)); }}
+                className="px-5 py-2 rounded-lg bg-red-600 text-white text-[13px] font-semibold hover:bg-red-700 disabled:opacity-60">{statusBusy ? "Rejecting…" : "Reject EPC"}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

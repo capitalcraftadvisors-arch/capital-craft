@@ -1279,12 +1279,13 @@ function Inner() {
                 <button type="button" onClick={() => setSel(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
               </div>
 
-              {/* View switch — Details (full, with comments) vs EMI confirmation
-                  (same details, comments hidden so it's clean to share).
+              {/* View switch — Update (stats + reassign + view profile + comments,
+                  for working the case) vs EMI confirmation (the full applicant /
+                  loan / system detail, no comments — clean to share/screenshot).
                   Individually-bordered buttons + shrink-0 so the row never
                   collapses when the scrolling panel's content grows. */}
               <div className="flex gap-1.5 shrink-0">
-                {([["details", "Details"], ["emi", "EMI confirmation"]] as const).map(([k, lbl]) => (
+                {([["details", "Update"], ["emi", "EMI confirmation"]] as const).map(([k, lbl]) => (
                   <button key={k} type="button" onClick={() => setPanelTab(k)}
                     className={["text-[12px] font-semibold rounded-lg border px-3 py-1.5 transition-colors", panelTab === k ? "border-[#0f766e] bg-[#0f766e] text-white" : "border-line bg-white text-text-mid hover:bg-bg-tint"].join(" ")}>
                     {lbl}
@@ -1327,7 +1328,8 @@ function Inner() {
                 </div>
               </div>
 
-              {selCase.source === "loan" ? (
+              {/* Full case detail — shown only in the EMI-confirmation view. */}
+              {panelTab === "emi" && (selCase.source === "loan" ? (
                 <div className="flex flex-col gap-1.5">
                   {/* Operational context (not in the applicant form, kept for the RM). */}
                   <div className="text-[13px] flex flex-col gap-1.5">
@@ -1376,10 +1378,10 @@ function Inner() {
                   <Row k="Lead owner" v={selCase.leadOwnerName || "—"} />
                   {selCase.blocker && <div><span className="text-text-muted">Blocker:</span> {selCase.blocker}</div>}
                 </div>
-              )}
+              ))}
 
               {/* Comments — add one, see the latest, expand history. Shown only in
-                  the Details view; hidden in the EMI-confirmation view. */}
+                  the Update view; hidden in the EMI-confirmation view. */}
               {panelTab === "details" && (
               <div className="border-t border-line pt-3 flex-1">
                 <div className="text-[11px] font-bold uppercase tracking-wide text-text-mid mb-2">Comments</div>

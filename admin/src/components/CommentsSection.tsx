@@ -58,11 +58,9 @@ type Props = {
 export default function CommentsSection({
   businessId, applicationId, leadId, onChanged, maxListHeight = 360,
 }: Props) {
-  // Every note is labelled simply "Admin" — this is the single admin (CEO)
-  // console. We deliberately don't surface the individual admin's name
-  // (author_name still stores it for audit). When the regional-manager
-  // hierarchy lands, this label is where each portal's own identity will
-  // surface instead; the epcName prop is kept on Props for that.
+  // Each note shows the name of the portal it was written from (author_name,
+  // captured at insert = that admin/manager/RM's contact_name), falling back to
+  // "Admin" only for legacy rows with no stored name.
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState("");
@@ -151,7 +149,7 @@ export default function CommentsSection({
             {rows.map((r) => (
               <li key={r.id} className="p-3">
                 <div className="text-[12px] text-text-mid min-w-0 mb-1">
-                  <span className="font-semibold text-[#0f3d2e]">Admin</span>
+                  <span className="font-semibold text-[#0f3d2e]">{r.author_name || "Admin"}</span>
                   <span className="mx-1 text-text-muted">·</span>
                   <span>{fmtWhen(r.created_at)}</span>
                   {r.updated_at !== r.created_at && (
