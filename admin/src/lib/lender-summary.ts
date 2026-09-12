@@ -124,7 +124,8 @@ export function epcSummaryRows(epc: Record<string, any>): Array<[string, string]
 // Credit Fair email body — the applicant-detail table Credit Fair asked for.
 // Used ONLY to compose the Credit Fair email (send-to-lender); the attached
 // summary.xlsx stays the general layout above for every lender.
-//   Notes: Project Value == Loan amount required (same figure); Merchant ID is
+//   Notes: Project cost is the FULL system cost (total_project_cost) — NOT the
+//   loan amount; the borrower's down payment is the difference. Merchant ID is
 //   blank for Credit Fair; Address statuses default to "Owned".
 export function creditFairEmailRows(loan: Record<string, any>): Array<[string, string]> {
   const name = loan.borrower_name || loan.aadhaar_name || "—";
@@ -135,7 +136,7 @@ export function creditFairEmailRows(loan: Record<string, any>): Array<[string, s
     ["Email", loan.borrower_email ?? "—"],
     ["PAN", loan.borrower_pan ?? "—"],
     ["Monthly income", rupees(loan.monthly_income)],
-    ["Project Value", rupees(loan.loan_amount_required)],
+    ["Project cost", rupees(loan.total_project_cost)],
     ["Loan amount required", rupees(loan.loan_amount_required)],
     ["Product", loan.system_type ? (SYSTEM_LABEL[loan.system_type] ?? loan.system_type) : "—"],
     ["Tenure", loan.selected_tenure_years ? `${loan.selected_tenure_years} years` : "—"],

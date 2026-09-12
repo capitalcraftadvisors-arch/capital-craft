@@ -1349,15 +1349,17 @@ function mapExtract(turn: Turn, j: Record<string, any>): { patch: Form; fields: 
   if (turn.extractRoute === "extract-aadhaar") {
     const f = j.fields ?? {}, p = j.storage_paths ?? {};
     if (coapp) return { patch: {
-      // Stored data stays MASKED (xxxxxxxx####); the chat displays the full number above for RM verification.
-      coapp_aadhaar_name: f.name ?? "", coapp_aadhaar_dob: f.dob ?? "", coapp_aadhaar_gender: f.gender ?? "", coapp_aadhaar_number: f.aadhaar_masked ?? f.aadhaar_number ?? "",
+      // Store the FULL 12-digit number when OCR read it (epc_applications is
+      // admin-only via RLS); fall back to the masked form only if OCR couldn't.
+      coapp_aadhaar_name: f.name ?? "", coapp_aadhaar_dob: f.dob ?? "", coapp_aadhaar_gender: f.gender ?? "", coapp_aadhaar_number: f.aadhaar_number ?? f.aadhaar_masked ?? "",
       coapp_aadhaar_care_of: f.care_of ?? "", coapp_aadhaar_address: f.address ?? "",
       coapp_aadhaar_front_path: p.front ?? "", coapp_aadhaar_back_path: p.back ?? "", coapp_aadhaar_face_path: p.face ?? "",
       coapp_name: f.name ?? "", coapp_dob: f.dob ?? "",
     }, fields: [row("Name", f.name, "coapp_aadhaar_name"), row("DOB", f.dob, "coapp_aadhaar_dob"), row("Aadhaar", f.aadhaar_number ?? f.aadhaar_masked)] };
     return { patch: {
-      // Stored data stays MASKED (xxxxxxxx####); the chat displays the full number above for RM verification.
-      aadhaar_name: f.name ?? "", aadhaar_dob: f.dob ?? "", aadhaar_gender: f.gender ?? "", aadhaar_number: f.aadhaar_masked ?? f.aadhaar_number ?? "",
+      // Store the FULL 12-digit number when OCR read it (epc_applications is
+      // admin-only via RLS); fall back to the masked form only if OCR couldn't.
+      aadhaar_name: f.name ?? "", aadhaar_dob: f.dob ?? "", aadhaar_gender: f.gender ?? "", aadhaar_number: f.aadhaar_number ?? f.aadhaar_masked ?? "",
       aadhaar_care_of: f.care_of ?? "", aadhaar_address: f.address ?? "",
       aadhaar_front_path: p.front ?? "", aadhaar_back_path: p.back ?? "", aadhaar_face_path: p.face ?? "",
       // Auto-fill the applicant identity so the RM doesn't type it (only when read).
