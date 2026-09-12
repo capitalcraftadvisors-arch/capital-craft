@@ -1280,11 +1280,13 @@ function Inner() {
               </div>
 
               {/* View switch — Details (full, with comments) vs EMI confirmation
-                  (same details, comments hidden so it's clean to share). */}
-              <div className="inline-flex self-start border border-line rounded-lg overflow-hidden">
+                  (same details, comments hidden so it's clean to share).
+                  Individually-bordered buttons + shrink-0 so the row never
+                  collapses when the scrolling panel's content grows. */}
+              <div className="flex gap-1.5 shrink-0">
                 {([["details", "Details"], ["emi", "EMI confirmation"]] as const).map(([k, lbl]) => (
                   <button key={k} type="button" onClick={() => setPanelTab(k)}
-                    className={["px-3 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", panelTab === k ? "bg-[#0f766e] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
+                    className={["text-[12px] font-semibold rounded-lg border px-3 py-1.5 transition-colors", panelTab === k ? "border-[#0f766e] bg-[#0f766e] text-white" : "border-line bg-white text-text-mid hover:bg-bg-tint"].join(" ")}>
                     {lbl}
                   </button>
                 ))}
