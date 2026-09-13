@@ -68,6 +68,8 @@ export default function NotificationBell() {
   const router = useRouter();
   const [items, setItems] = useState<Notif[]>([]);
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [seen, setSeen] = useState<number>(() => (typeof window !== "undefined" ? Number(localStorage.getItem(SEEN_KEY)) : 0) || 0);
   const lastMax = useRef(0);
   const first = useRef(true);
@@ -138,16 +140,10 @@ export default function NotificationBell() {
     lastMax.current = maxTs;
   }, [meId, seen]);
 
-  useEffect(() => {
-    void load();
-    // Poll every 90s (was 25s) and only while the tab is visible. This bell runs
-    // for every signed-in user around the clock and was a major share of
-    // Supabase egress; a hidden tab now costs nothing and refreshes on return.
-    const tick = () => { if (document.visibilityState === "visible") void load(); };
-    const t = setInterval(tick, 90_000);
-    document.addEventListener("visibilitychange", tick);
-    return () => { clearInterval(t); document.removeEventListener("visibilitychange", tick); };
-  }, [load]);
+  // ON-DEMAND ONLY — no polling, no timer, no fetch on mount. The bell checks
+  // for notifications ONLY when the user opens it (see the button handler below),
+  // so it costs zero Supabase egress while idle. Trade-off: the unread badge
+  // appears after the first time the bell is opened in a session, not before.
 
   // Close on outside click.
   useEffect(() => {
@@ -164,8 +160,8 @@ export default function NotificationBell() {
 
   return (
     <div className="relative" ref={boxRef}>
-      <button type="button" onClick={() => { setOpen((o) => !o); if (!open && unread) { /* keep unread until read */ } }}
-        aria-label="Notifications" title="Notifications from your team"
+      <button type="button" onClick={() => { const next = !open; setOpen(next); if (next) { setLoading(true); void load().finally(() => { setLoading(false); setLoadedOnce(true); }); } }}
+        aria-label="Notifications" title="Check notifications from your team"
         className="relative grid place-items-center w-9 h-9 rounded-lg border border-line bg-white hover:bg-bg-tint transition-colors">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#15241d" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -186,8 +182,10 @@ export default function NotificationBell() {
               ? <button type="button" onClick={markAllRead} className="text-[11px] font-semibold text-[#178a5c] hover:underline">Mark all read</button>
               : <span className="text-[11px] text-text-muted">You're all caught up</span>}
           </div>
-          {items.length === 0 ? (
-            <div className="px-4 py-6 text-[12px] text-text-muted text-center">Nothing yet.<br />When your team assigns you a case or comments on your work, it shows here.</div>
+          {loading && items.length === 0 ? (
+            <div className="px-4 py-6 text-[12px] text-text-muted text-center">Checking…</div>
+          ) : items.length === 0 ? (
+            <div className="px-4 py-6 text-[12px] text-text-muted text-center">{loadedOnce ? "Nothing yet." : "Nothing to show."}<br />When your team assigns you a case or comments on your work, it shows here.</div>
           ) : (
             <ul className="divide-y divide-line">
               {items.map((n) => {
