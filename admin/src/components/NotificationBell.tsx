@@ -59,6 +59,12 @@ function ago(iso: string): string {
 
 export default function NotificationBell() {
   const me = getBusiness();
+  // getBusiness() JSON-parses localStorage → a NEW object every render. Depending
+  // on it would give `load` a new identity each render, so the [load] effect would
+  // re-run every render and re-fetch — a self-sustaining loop (setItems → render →
+  // new load → effect → load again) that hammered PostgREST. Depend on the stable
+  // primitive id instead so `load` is created once.
+  const meId = me?.id ?? null;
   const router = useRouter();
   const [items, setItems] = useState<Notif[]>([]);
   const [open, setOpen] = useState(false);
@@ -71,16 +77,16 @@ export default function NotificationBell() {
   const caseMaps = useRef<{ at: number; loanName: Map<string, string>; epcName: Map<string, string>; leadName: Map<string, string>; insName: Map<string, string> } | null>(null);
 
   const load = useCallback(async () => {
-    if (!me?.id) return;
+    if (!meId) return;
     const db = supabase();
     // Refresh the assigned-case name maps at most every 5 min; reuse otherwise.
     let maps = caseMaps.current;
     if (!maps || Date.now() - maps.at > 300000) {
       const [loans, epcs, leads, ins] = await Promise.all([
-        db.from("epc_applications").select("id, borrower_name, aadhaar_name").eq("assigned_to_user_id", me.id),
-        db.from("epc_business").select("id, trade_name, legal_name, contact_name").eq("assigned_to_user_id", me.id).neq("business_type", "admin"),
-        db.from("loan_leads").select("id, name").eq("assigned_to_user_id", me.id),
-        db.from("insurance_applications").select("id, aadhaar_name").eq("assigned_to_user_id", me.id),
+        db.from("epc_applications").select("id, borrower_name, aadhaar_name").eq("assigned_to_user_id", meId),
+        db.from("epc_business").select("id, trade_name, legal_name, contact_name").eq("assigned_to_user_id", meId).neq("business_type", "admin"),
+        db.from("loan_leads").select("id, name").eq("assigned_to_user_id", meId),
+        db.from("insurance_applications").select("id, aadhaar_name").eq("assigned_to_user_id", meId),
       ]);
       maps = {
         at: Date.now(),
@@ -96,13 +102,13 @@ export default function NotificationBell() {
 
     const empty = Promise.resolve({ data: [] as Record<string, string>[] });
     const [lc, ec, dc, act] = await Promise.all([
-      loanIds.length ? db.from("loan_comments").select("id, application_id, author_id, author_name, comment_text, created_at").in("application_id", loanIds).neq("author_id", me.id).order("created_at", { ascending: false }).limit(20) : empty,
-      epcIds.length ? db.from("epc_comments").select("id, business_id, author_id, author_name, comment_text, created_at").in("business_id", epcIds).neq("author_id", me.id).order("created_at", { ascending: false }).limit(20) : empty,
-      leadIds.length ? db.from("lead_comments").select("id, lead_id, author_id, author_name, comment_text, created_at").in("lead_id", leadIds).neq("author_id", me.id).order("created_at", { ascending: false }).limit(20) : empty,
+      loanIds.length ? db.from("loan_comments").select("id, application_id, author_id, author_name, comment_text, created_at").in("application_id", loanIds).neq("author_id", meId).order("created_at", { ascending: false }).limit(20) : empty,
+      epcIds.length ? db.from("epc_comments").select("id, business_id, author_id, author_name, comment_text, created_at").in("business_id", epcIds).neq("author_id", meId).order("created_at", { ascending: false }).limit(20) : empty,
+      leadIds.length ? db.from("lead_comments").select("id, lead_id, author_id, author_name, comment_text, created_at").in("lead_id", leadIds).neq("author_id", meId).order("created_at", { ascending: false }).limit(20) : empty,
       // Cases someone ELSE assigned/reassigned TO me (e.g. Malvika → Manish).
       db.from("user_activity_log")
         .select("id, module, record_id, action, created_at, actor:actor_user_id(contact_name)")
-        .eq("subject_user_id", me.id).in("action", ["assigned", "reassigned"]).neq("actor_user_id", me.id)
+        .eq("subject_user_id", meId).in("action", ["assigned", "reassigned"]).neq("actor_user_id", meId)
         .order("created_at", { ascending: false }).limit(20),
     ]);
 
@@ -130,7 +136,7 @@ export default function NotificationBell() {
     if (!first.current && maxTs > lastMax.current && maxTs > seen) ring();
     first.current = false;
     lastMax.current = maxTs;
-  }, [me, seen]);
+  }, [meId, seen]);
 
   useEffect(() => {
     void load();
