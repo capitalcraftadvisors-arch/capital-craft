@@ -381,7 +381,19 @@ function Inner() {
           )}
 
           {!uploaded && (
-            <div className="flex justify-end pt-1">
+            <div className="flex justify-between items-center pt-1">
+              {/* Admin/team flow — any stage is skippable. Skip saves a blank
+                  Aadhaar (nulls) via the same route so the step advances, then
+                  moves to Step 3; the app stays a draft. */}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={saveAndNext}
+                loading={saving}
+                disabled={extracting || saving}
+              >
+                Skip this step →
+              </Button>
               <Button
                 type="button"
                 variant="primary"
