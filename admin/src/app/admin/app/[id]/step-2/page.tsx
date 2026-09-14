@@ -244,24 +244,29 @@ function Inner() {
     gender.trim().length > 0 &&
     validAadhaar &&
     address.trim().length > 0;
-  const canNext = !!uploaded && validForm && !saving;
+  // Admin/team flow — any stage can be skipped. Next is always available; a
+  // skipped Aadhaar just saves blank (the app stays a draft) and moves on.
+  const canNext = !saving;
 
   async function saveAndNext() {
     if (!loan) return; // admin-only flow: never block on missing fields/docs
     setSaveError(null);
     setSaving(true);
     try {
+      // Skippable: send only what's present. A partial Aadhaar number is stored
+      // as NULL (never a truncated value), and missing docs send null paths.
+      const validNum = /^\d{12}$/.test(aadhaarNumber);
       const body = {
-        aadhaar_name:          name.trim(),
-        aadhaar_dob:           dob.trim(),
-        aadhaar_gender:        gender.trim(),
-        aadhaar_number:        aadhaarNumber,
-        aadhaar_number_masked: "xxxxxxxx" + aadhaarNumber.slice(-4),
+        aadhaar_name:          name.trim() || null,
+        aadhaar_dob:           dob.trim() || null,
+        aadhaar_gender:        gender.trim() || null,
+        aadhaar_number:        validNum ? aadhaarNumber : null,
+        aadhaar_number_masked: validNum ? "xxxxxxxx" + aadhaarNumber.slice(-4) : null,
         aadhaar_care_of:       careOf.trim() || null,
-        aadhaar_address:       address.trim(),
-        aadhaar_front_path:    uploaded!.storage_paths.front,
-        aadhaar_back_path:     uploaded!.storage_paths.back,
-        aadhaar_face_path:     uploaded!.storage_paths.face,
+        aadhaar_address:       address.trim() || null,
+        aadhaar_front_path:    uploaded?.storage_paths.front ?? null,
+        aadhaar_back_path:     uploaded?.storage_paths.back ?? null,
+        aadhaar_face_path:     uploaded?.storage_paths.face ?? null,
       };
       const res = await fetch(`/api/admin/loan-app/${loan.id}/complete-step-2`, {
         method: "POST",

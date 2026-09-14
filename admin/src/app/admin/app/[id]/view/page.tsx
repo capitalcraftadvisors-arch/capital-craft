@@ -899,7 +899,7 @@ function Inner() {
                   icon={I.edit}
                   items={[
                     {
-                      // AI concierge — resumes the chat and asks only what's missing.
+                      // Chatbot — resumes the chat and asks only what's missing.
                       label: "Continue in chat",
                       onClick: () => router.push(`/admin/app/intake?app=${loan.id}&edit=1` as any),
                     },
@@ -930,7 +930,7 @@ function Inner() {
                   icon={I.edit}
                   items={[
                     {
-                      // AI concierge — asks only for what's still missing.
+                      // Chatbot — asks only for what's still missing.
                       label: "Continue in chat",
                       onClick: () => router.push(`/admin/app/intake?app=${loan.id}&edit=1` as any),
                     },

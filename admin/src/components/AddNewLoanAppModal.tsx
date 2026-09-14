@@ -5,7 +5,7 @@
 // UX:
 //   1. Admin clicks "+ New Applicant" on the Loan applications tab.
 //   2. A CHOOSER appears — two ways to create the application:
-//        • AI chat concierge  → /admin/app/intake (guided chat that builds the
+//        • Application maker (chatbot)  → /admin/app/intake (guided chat that builds the
 //          whole profile from documents + a few questions).
 //        • Classic form       → pick an approved EPC, then the step-by-step
 //          wizard (the original flow, unchanged).

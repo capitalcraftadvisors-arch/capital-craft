@@ -1,6 +1,6 @@
 "use client";
 
-// AI intake — a premium, WhatsApp-style guided chat that builds a FULL loan
+// Chatbot intake — a premium, WhatsApp-style guided chat that builds a FULL loan
 // application (all 5 steps) and submits it as a complete profile. Documents do
 // the data entry (OCR via the existing extract-* routes); the chat collects
 // everything else. It writes through the SAME create + complete-step routes the
@@ -321,11 +321,16 @@ function Inner() {
     setResuming(true);
     void (async () => {
       try {
-        // 1) Restore a previously-saved chat (create OR edit) if one exists.
+        // 1) Restore a previously-saved chat if one exists — BUT when the user
+        // came here to EDIT (edit=1), a leftover *create* chat must NOT be
+        // restored: that would resume the old creation wizard and skip the edit
+        // Q1/Q2 flow (which recognises what's already filled, incl. documents).
+        // So restore only when not editing, or when the saved chat is itself an
+        // edit chat (e.g. a mid-edit refresh).
         const res = await fetch(`/api/admin/loan-app/${appParam}/intake-chat`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
         const j = await res.json().catch(() => ({}));
         const chat = j?.chat;
-        if (chat && Array.isArray(chat.transcript) && chat.transcript.length) {
+        if (chat && Array.isArray(chat.transcript) && chat.transcript.length && (!editFlag || chat.mode === "edit")) {
           idRef.current = chat.transcript.length + 1000; // avoid key collisions with restored ids
           setAppId(appParam);
           setForm((chat.form_state as Form) || {});
