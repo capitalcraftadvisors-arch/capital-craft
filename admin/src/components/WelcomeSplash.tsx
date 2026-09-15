@@ -44,6 +44,7 @@ export default function WelcomeSplash({
         .ccw {
           position: fixed; inset: 0; z-index: 200; overflow: hidden;
           display: flex; flex-direction: column; align-items: center;
+          padding-bottom: 46px;
           font-family: Inter, system-ui, Arial, sans-serif; color: #12564b;
           animation: ccw-in .45s ease both;
           background:
@@ -60,7 +61,7 @@ export default function WelcomeSplash({
         }
         .ccw-badge::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #2c9b73; box-shadow: 0 0 0 4px rgba(44,155,115,.18); }
 
-        .ccw-copy { position: relative; z-index: 5; text-align: center; margin-top: clamp(48px, 10vh, 104px); animation: ccw-rise .7s .1s cubic-bezier(.2,.7,.2,1) both; }
+        .ccw-copy { position: relative; z-index: 5; flex-shrink: 0; text-align: center; margin-top: clamp(16px, 3vh, 40px); padding: 0 5vw; animation: ccw-rise .7s .1s cubic-bezier(.2,.7,.2,1) both; }
         .ccw-logo { height: clamp(30px, 4.4vh, 46px); width: auto; margin: 0 auto 22px; }
         .ccw-title {
           margin: 0; font-family: Georgia, "Times New Roman", serif; font-weight: 400;
@@ -75,8 +76,8 @@ export default function WelcomeSplash({
         }
 
         .ccw-stage {
-          position: absolute; left: 50%; bottom: 0; transform: translateX(-50%);
-          width: min(92vw, 640px); height: min(66vh, 620px);
+          position: relative; flex: 1; min-height: 0; margin-top: clamp(8px, 2vh, 24px);
+          width: min(92vw, 640px);
           display: flex; align-items: flex-end; justify-content: center;
         }
         .ccw-halo {
@@ -119,8 +120,7 @@ export default function WelcomeSplash({
         @keyframes ccw-halo { 0%,100% { opacity: .55; transform: translateX(-50%) scale(1) } 50% { opacity: .8; transform: translateX(-50%) scale(1.05) } }
 
         @media (max-width: 640px) {
-          .ccw-copy { margin-top: 74px; }
-          .ccw-stage { width: 96vw; height: 58vh; }
+          .ccw-stage { width: 96vw; }
           .ccw-foot { font-size: 7px; letter-spacing: .08em; }
         }
         @media (prefers-reduced-motion: reduce) {

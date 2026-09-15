@@ -15,7 +15,6 @@ import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import AdminSidebar, { ACCENTS } from "@/components/AdminSidebar";
 import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness, allowedModules, greetingName } from "@/lib/auth";
-import NamasteGreeting from "@/components/NamasteGreeting";
 import NotificationBell from "@/components/NotificationBell";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
 import { getCached, setCached, invalidate } from "@/lib/list-cache";
@@ -102,7 +101,6 @@ function Inner() {
 
   return (
     <div className="min-h-screen bg-bg-soft md:flex">
-      <NamasteGreeting />
       <AdminSidebar active={tab} onSelectTab={setTab} />
       <div className="flex-1 min-w-0">
         <section className="w-full px-4 sm:px-6 py-8">
