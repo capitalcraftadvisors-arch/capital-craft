@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { downloadBuffer } from "@/lib/gcs";
 import { geminiExtractAadhaar } from "@/lib/aadhaar";
+import { geminiExtractPan } from "@/lib/doc-extractors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -33,9 +34,10 @@ export async function POST(req: NextRequest) {
     const claims = await verifyJwt(token);
     if (claims.business_type !== "admin") return err("admin_only", 403);
 
-    const body = (await req.json().catch(() => ({}))) as { front?: string; back?: string };
+    const body = (await req.json().catch(() => ({}))) as { front?: string; back?: string; type?: string };
     const front = String(body.front ?? "").trim();
     const back = String(body.back ?? "").trim();
+    const type = body.type === "pan" ? "pan" : "aadhaar";
     if (!front) return err("front path is required.", 400);
 
     const images: { buffer: Buffer; mime: string }[] = [];
@@ -44,6 +46,11 @@ export async function POST(req: NextRequest) {
       if (back) images.push({ buffer: await downloadBuffer(back), mime: mimeOf(back) });
     } catch (e) {
       return err("Could not read stored image: " + (e instanceof Error ? e.message : String(e)), 404);
+    }
+
+    if (type === "pan") {
+      const p = await geminiExtractPan(images);
+      return NextResponse.json({ ok: true, pan: p?.pan ?? null, name: p?.name ?? null, father_name: p?.father_name ?? null, dob: p?.dob ?? null });
     }
 
     const fields = await geminiExtractAadhaar(images);
