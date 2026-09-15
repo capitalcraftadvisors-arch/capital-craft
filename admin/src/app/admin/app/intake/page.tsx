@@ -148,6 +148,10 @@ const SCRIPT: Turn[] = [
 const STEP_PAYLOAD: Record<number, (f: Form) => Record<string, unknown>> = {
   1: (f) => ({
     borrower_name: f.borrower_name || "", borrower_mobile: f.borrower_mobile || "", borrower_email: f.borrower_email || "", lead_owner_name: f.lead_owner_name || "",
+    // borrower_pan + father name MUST be sent — complete-step-1 does .update() and
+    // would otherwise NULL them at "Create application", wiping the PAN OCR read
+    // during the chat (this was the "PAN uploaded but number blank" bug).
+    borrower_pan: f.borrower_pan || "", borrower_father_name: f.borrower_father_name || "",
     install_pincode: f.install_pincode || "", install_state: f.install_state || "", install_district: f.install_district || "", install_city: f.install_city || "",
     system_type: f.system_type || "", plant_use_type: f.plant_use_type || "",
     consent_policies: ["terms_conditions", "privacy_policy", "cookie_policy"],
