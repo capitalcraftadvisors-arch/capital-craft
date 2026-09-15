@@ -41,7 +41,8 @@ export default function LoginForm() {
         onChange={(e) => setMobile(e.target.value.replace(/\D/g, ""))}
         error={error ?? undefined}
       />
-      <Button type="submit" variant="primary" fullWidth loading={loading}>
+      <Button type="submit" variant="primary" fullWidth loading={loading}
+        className="!bg-[#1e3a8a] hover:!bg-[#17307a]">
         Login
       </Button>
     </form>
