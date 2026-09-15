@@ -21,6 +21,7 @@ import { getCached, setCached, invalidate } from "@/lib/list-cache";
 import { useAdminNames } from "@/lib/use-admin-names";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import { ScoreBadge } from "@/components/EpcScoreModal";
+import LoginWelcome from "@/components/LoginWelcome";
 import {
   deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort,
   displayAmount as amountFor,
@@ -101,6 +102,7 @@ function Inner() {
 
   return (
     <div className="min-h-screen bg-bg-soft md:flex">
+      <LoginWelcome />
       <AdminSidebar active={tab} onSelectTab={setTab} />
       <div className="flex-1 min-w-0">
         <section className="w-full px-4 sm:px-6 py-8">

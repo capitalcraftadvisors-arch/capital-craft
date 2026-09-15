@@ -3,25 +3,14 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Button from "./ui/Button";
 import Input from "./ui/Input";
-import WelcomeSplash from "./WelcomeSplash";
-import { login, routeForBusiness, greetingName, type Business } from "@/lib/auth";
+import { login, routeForBusiness } from "@/lib/auth";
 import { MOBILE_RE } from "@/lib/validators";
-
-// The 2-second "Namaste" welcome only plays for the internal team (admins);
-// EPCs go straight to their portal. Malvika gets the woman portrait, everyone
-// else on the team the man portrait.
-function welcomeFor(b: Business | null | undefined): { name: string; image: string } | null {
-  if (!b || b.business_type !== "admin") return null;
-  const isWoman = /malvika/i.test(b.contact_name || "");
-  return { name: greetingName(b), image: isWoman ? "/welcome/woman.png" : "/welcome/man.png" };
-}
 
 export default function LoginForm() {
   const router = useRouter();
   const [mobile, setMobile] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [welcome, setWelcome] = useState<{ name: string; image: string; dest: string } | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -37,14 +26,10 @@ export default function LoginForm() {
       setError(r.error);
       return;
     }
-    const dest = routeForBusiness(r.business) as string;
-    const w = welcomeFor(r.business);
-    if (w) setWelcome({ ...w, dest });     // play the greeting, then route on done
-    else router.replace(dest as any);
-  }
-
-  if (welcome) {
-    return <WelcomeSplash name={welcome.name} image={welcome.image} onDone={() => router.replace(welcome.dest as any)} />;
+    // Route straight to the destination. The "Namaste" welcome (login sets the
+    // cc_greet flag) now plays ON the dashboard via <LoginWelcome/>, so it covers
+    // the dashboard as it loads — no flash of the login page in between.
+    router.replace(routeForBusiness(r.business) as any);
   }
 
   return (
