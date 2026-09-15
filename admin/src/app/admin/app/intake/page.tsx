@@ -95,7 +95,10 @@ const SCRIPT: Turn[] = [
   { id: "quotation", bot: "Upload the quotation / proforma invoice.", kind: "docs", docLabel: "Quotation / invoice",
     uploads: [{ name: "proforma", label: "Quotation / invoice" }], extractRoute: "extract-loan-docs" },
   { id: "rooftop", bot: "Upload the geo-tagged rooftop photo.", kind: "docs", docLabel: "Rooftop photo",
-    uploads: [{ name: "photo", label: "Rooftop photo" }], uploadCategory: "other", pathField: "rooftop_photo_path" },
+    // category MUST be "borrower_photo" — that's the rooftop slot the classic form,
+    // the profile view and the ZIP all read. ("customer_photo" = applicant selfie,
+    // "other" = additional docs — don't use those here.)
+    uploads: [{ name: "photo", label: "Rooftop photo" }], uploadCategory: "borrower_photo", pathField: "rooftop_photo_path" },
   { id: "bank", bot: "Upload the bank statement.", kind: "docs", docLabel: "Bank statement",
     uploads: [{ name: "file", label: "Bank statement" }], extractRoute: "extract-bank-statement", extraForm: { method: "manual_epdf" } },
 

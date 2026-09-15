@@ -193,16 +193,18 @@ function Inner() {
         face_signed_url: data.face_signed_url ?? null,
       };
       setUploaded(result);
-      // Prefill — but only if the admin hadn't already typed something.
-      if (!name    && result.fields.name)    setName(result.fields.name);
-      if (!dob     && result.fields.dob)     setDob(result.fields.dob);
-      if (!gender  && result.fields.gender)  setGender(result.fields.gender);
-      if (!careOf  && result.fields.care_of) setCareOf(result.fields.care_of);
-      if (!address && result.fields.address) setAddress(result.fields.address);
-      // Fill from OCR whenever it returns a valid number AND the field is empty
-      // or not a clean 12-digit value (e.g. a masked/partial value left by an
-      // earlier chatbot capture) — so re-uploading in the classic form fixes it.
-      if (result.fields.aadhaar_number && (!aadhaarNumber || !/^\d{12}$/.test(aadhaarNumber))) {
+      // The uploaded Aadhaar is the source of truth: OVERWRITE the identity fields
+      // with whatever this card yielded (only when a value was actually read, so a
+      // field OCR couldn't read isn't wiped). This keeps the form consistent with
+      // the card just uploaded — and surfaces a wrong-document upload (the admin
+      // sees the real cardholder) instead of silently keeping stale/mismatched
+      // data. The admin can still correct any field afterwards.
+      if (result.fields.name)    setName(result.fields.name);
+      if (result.fields.dob)     setDob(result.fields.dob);
+      if (result.fields.gender)  setGender(result.fields.gender);
+      if (result.fields.care_of) setCareOf(result.fields.care_of);
+      if (result.fields.address) setAddress(result.fields.address);
+      if (result.fields.aadhaar_number && /^\d{12}$/.test(result.fields.aadhaar_number)) {
         setAadhaarNumber(result.fields.aadhaar_number);
       }
     } catch (e) {
