@@ -333,18 +333,12 @@ function Inner() {
         const res = await fetch(`/api/admin/loan-app/${appParam}/intake-chat`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
         const j = await res.json().catch(() => ({}));
         const chat = j?.chat;
-        if (chat && Array.isArray(chat.transcript) && chat.transcript.length && (!editFlag || chat.mode === "edit")) {
-          idRef.current = chat.transcript.length + 1000; // avoid key collisions with restored ids
-          setAppId(appParam);
-          setForm((chat.form_state as Form) || {});
-          setMsgs(chat.transcript as Msg[]);
-          setMode(chat.mode === "edit" ? "edit" : "create");
-          setEditMode(chat.mode === "edit");
-          if (chat.mode === "edit") setEditStep("q1"); // always ask the edit questions first
-          setIdx(Number(chat.cursor) || 0);
-          return;
-        }
-        // 2) Fresh EDIT session — prefill from the profile, ask only what's missing.
+        const savedMsgs: Msg[] = (chat && Array.isArray(chat.transcript)) ? (chat.transcript as Msg[]) : [];
+
+        // 1) EDIT session — prefill from the CURRENT profile and run the edit
+        // Q1/Q2 flow, but KEEP the previous conversation visible above it as
+        // history/context. We never resume the old create cursor (that would skip
+        // the edit questions); the edit flow operates on the latest saved data.
         if (editFlag) {
           const app = await loadApp(appParam);
           if (!app) { router.replace(`/admin/app/${appParam}/step-1` as any); return; }
@@ -356,10 +350,27 @@ function Inner() {
           if (pf.central_subsidy) setCentralSub(pf.central_subsidy);
           if (pf.state_subsidy) setStateSub(pf.state_subsidy);
           if (pf.selected_tenure_years) setTenure(Number(pf.selected_tenure_years));
+          idRef.current = savedMsgs.length + 1000; // avoid key collisions with restored ids
           const nm = pf.borrower_name || "this applicant";
-          setMsgs([{ id: uid(), from: "bot", text: `Editing ${nm}'s profile.`, time: nowLabel(), turnId: "edit_intro" }]);
+          const intro: Msg = { id: uid(), from: "bot", text: `Editing ${nm}'s profile.`, time: nowLabel(), turnId: "edit_intro" };
+          // Show the earlier chat (if any) as history, then the edit intro. Drop
+          // any prior edit_intro so re-editing doesn't stack duplicate headers.
+          const hist = savedMsgs.filter((m) => m.turnId !== "edit_intro");
+          setMsgs([...hist, intro]);
           setEditStep("q1"); // Q1/Q2 intro drives the edit; the script runs after
           setIdx(1);
+          return;
+        }
+        // 2) Non-edit resume — restore an in-progress chat if one exists.
+        if (savedMsgs.length) {
+          idRef.current = savedMsgs.length + 1000;
+          setAppId(appParam);
+          setForm((chat.form_state as Form) || {});
+          setMsgs(savedMsgs);
+          setMode(chat.mode === "edit" ? "edit" : "create");
+          setEditMode(chat.mode === "edit");
+          if (chat.mode === "edit") setEditStep("q1");
+          setIdx(Number(chat.cursor) || 0);
           return;
         }
         // 3) ?app but nothing saved and not an edit → fall back to the classic wizard.
@@ -425,7 +436,16 @@ function Inner() {
     else if (editStep === "q2") pushBot("This profile isn't complete yet. Do you want to complete it now?", "edit_q2");
   }, [editStep, editMode, pushBot]);
 
-  useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }); }, [msgs, confirm, idx, busy]);
+  // Keep the view pinned to the newest message. The FIRST scroll after load jumps
+  // instantly to the bottom (so opening an edit lands you at the edit prompt,
+  // below the restored history — the user sees what's left to do); later updates
+  // animate smoothly.
+  const didFirstScroll = useRef(false);
+  useEffect(() => {
+    const el = scrollRef.current; if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: didFirstScroll.current ? "smooth" : "auto" });
+    if (msgs.length) didFirstScroll.current = true;
+  }, [msgs, confirm, idx, busy]);
   useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
 
   // Paste-to-attach while on a document turn (RM copies an image, hits Ctrl+V).
