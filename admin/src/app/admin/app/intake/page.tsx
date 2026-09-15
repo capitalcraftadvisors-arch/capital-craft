@@ -487,7 +487,8 @@ function Inner() {
         setAppId(j.application.id);
       } finally { setBusy(false); }
     }
-    pushUser(label, { turnId: turn.id, field: turn.field, editable: opts.editable });
+    // Every answer is editable by default — tap the ✎ on any message to change it.
+    pushUser(label, { turnId: turn.id, field: turn.field, editable: opts.editable ?? true });
     const nextForm = { ...form, ...(turn.field ? { [turn.field]: value } : {}), ...(opts.extra ?? {}) };
     setForm(nextForm);
     void persistForm(nextForm); // silent background save so nothing is lost
@@ -627,6 +628,14 @@ function Inner() {
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't read the document. Attach a clearer copy, or skip and fill it in later."); setBusy(false); return; }
       const { patch, fields } = mapExtract(t, j);
+      // Name fallback: if we still don't have the applicant's name, take one read
+      // from THIS document (bank-statement holder or e-bill owner, honorific
+      // stripped) so we never ask for a name a document already shows.
+      if (!form.borrower_name && !patch.borrower_name) {
+        const docName = String(patch.bank_account_holder || patch.ebill_name || "")
+          .replace(/^(m\/s|mr|mrs|ms|smt|shri|sri|dr)\.?\s+/i, "").trim();
+        if (docName.length >= 2) patch.borrower_name = docName;
+      }
       merge(patch);
       void persistForm({ ...form, ...patch }); // persist OCR results immediately (create + edit)
       const gaps = fields.filter((f) => !f.ok).map((f) => f.label);
@@ -819,7 +828,14 @@ function Inner() {
     } finally { setBusy(false); }
   }
 
-  const progress = Math.min(100, Math.round((idx / script.length) * 100));
+  // Progress = how COMPLETE the profile actually is (filled applicable steps),
+  // not just how far the cursor has moved. This makes it consistent no matter how
+  // the profile was filled — a profile built in the CLASSIC form (prefilled here
+  // in edit mode) shows its true high %, and create mode still climbs as answers
+  // come in.
+  const progApplicable = script.filter((t) => isEditableTurn(t) && (!t.when || t.when(form)));
+  const progFilled = progApplicable.filter((t) => isTurnFilled(t, form)).length;
+  const progress = progApplicable.length ? Math.min(100, Math.round((progFilled / progApplicable.length) * 100)) : 0;
   const showEditIntro = editMode && (editStep === "q1" || editStep === "pick" || editStep === "q2");
   const showDock = !donId && !leadDoneId && !showEditIntro && active && !confirm && active.kind !== "save" && active.kind !== "leadsave" && active.kind !== "namecheck" && (editing ? true : turn === active);
 
@@ -850,7 +866,7 @@ function Inner() {
         <button onClick={undo} disabled={!undoStack.length || !!donId || !!leadDoneId} className="w-8 h-8 rounded-full hover:bg-white/10 grid place-items-center text-white/80 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent text-[17px] leading-none" aria-label="Undo last" title="Undo last">↶</button>
         <button onClick={() => void closeChat()} className="w-8 h-8 -mr-1 rounded-full hover:bg-white/10 grid place-items-center text-white/80 hover:text-white text-[18px] leading-none" aria-label="Close chat" title="Close">✕</button>
       </header>
-      <div className="h-0.5 bg-black/10 shrink-0"><div className="h-0.5 bg-[#5df2ad] transition-all duration-500" style={{ width: progress + "%" }} /></div>
+      <div className="h-2 bg-black/15 shrink-0"><div className="h-2 bg-[#34e39b] rounded-r-full transition-all duration-500" style={{ width: progress + "%" }} /></div>
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-4">
@@ -1022,12 +1038,15 @@ function Inner() {
             )}
 
             {active.kind === "choice" && (
-              <div className="grid sm:grid-cols-2 gap-2">
-                {active.choices!.map((c) => (
-                  <button key={c.value} onClick={() => void answer(c.value, c.label, { editable: true })} className="text-left px-4 py-3 rounded-xl border border-line bg-white hover:border-[#178a5c] hover:bg-[#f7fcf9] transition">
-                    <div className="text-[14px] font-semibold text-text">{c.label}</div>{c.sub && <div className="text-[12px] text-text-muted">{c.sub}</div>}
-                  </button>
-                ))}
+              <div className="flex flex-col gap-2">
+                <div className="grid sm:grid-cols-2 gap-2">
+                  {active.choices!.map((c) => (
+                    <button key={c.value} onClick={() => void answer(c.value, c.label, { editable: true })} className="text-left px-4 py-3 rounded-xl border border-line bg-white hover:border-[#178a5c] hover:bg-[#f7fcf9] transition">
+                      <div className="text-[14px] font-semibold text-text">{c.label}</div>{c.sub && <div className="text-[12px] text-text-muted">{c.sub}</div>}
+                    </button>
+                  ))}
+                </div>
+                {!editing && <button onClick={() => void skipText()} className="self-start px-3 py-1.5 text-[13px] text-text-muted hover:text-text" title="Continue without this — you can add it later">Skip</button>}
               </div>
             )}
 
@@ -1051,6 +1070,7 @@ function Inner() {
             {active.kind === "consent" && (
               <div className="flex gap-2">
                 <button onClick={() => void answer("yes", "Yes, consent given")} className="flex-1 px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c]">Yes, consent given</button>
+                {!editing && <button onClick={() => void skipText()} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft" title="Continue without this — you can record it later">Skip</button>}
                 <button onClick={() => router.push("/admin")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid">Cancel</button>
               </div>
             )}
@@ -1148,7 +1168,7 @@ function MessageRow({ m, rmName, onEdit, editingId }: { m: Msg; rmName: string; 
         {m.edited && <span>· edited</span>}
         {isUser && !m.files && <span className="text-[#178a5c]">✓✓</span>}
         {isUser && (m.editable || m.turnId === "epc") && (
-          <button onClick={onEdit} className="opacity-0 group-hover:opacity-100 transition text-[#178a5c] hover:underline" aria-label="Edit">{m.files ? "↺ replace" : "✎ edit"}</button>
+          <button onClick={onEdit} className="text-[#178a5c] font-semibold hover:underline" aria-label="Edit">{m.files ? "↺ replace" : "✎ edit"}</button>
         )}
       </div>
     </div>
