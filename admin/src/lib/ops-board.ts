@@ -240,7 +240,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
     })(),
     db.from("loan_application_lenders").select("application_id, lender_key, lender_label, docs_sent_at, approved_at, rejected_at"),
     db.from("insurance_applications").select("id, aadhaar_name, sum_insured, invoice_confirmed_amount, invoice_amount, insurance_partner, status, created_at, updated_at, assigned_to_user_id, epc_business_id"),
-    db.from("loan_leads").select("id, name, mobile, loan_amount, status, created_at, reviewed_at, epc_name_custom, epc_business_id, assigned_to_user_id, lead_owner_name"),
+    db.from("loan_leads").select("id, name, mobile, loan_amount, status, created_at, reviewed_at, epc_name_custom, epc_business_id, assigned_to_user_id, lead_owner_name, dead_at"),
     db.from("epc_business").select("id, trade_name, legal_name, contact_name, contact_mobile, status, current_step, created_at, updated_at, business_type, assigned_to_user_id").neq("business_type", "admin").in("status", ["draft", "under_review", "on_hold", "approved", "rejected"]),
     db.from("epc_lender_status").select("business_id, docs_given, approved, rejected"),
     db.from("epc_business").select("id, contact_name, role, parent_user_id").eq("business_type", "admin").order("contact_name", { ascending: true }),
@@ -359,6 +359,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
   }
 
   for (const r of (leads.data ?? []) as any[]) {
+    if (r.dead_at) continue; // dead leads are written off — off the Task Manager entirely
     const { column, label } = leadColumn(r.status);
     cases.push({
       id: r.id, source: "lead",

@@ -11,7 +11,6 @@ import AddNewEpcModal from "@/components/AddNewEpcModal";
 import AddNewLoanAppModal from "@/components/AddNewLoanAppModal";
 import AddNewInsuranceModal from "@/components/AddNewInsuranceModal";
 import DeleteLeadModal from "@/components/DeleteLeadModal";
-import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import AdminSidebar, { ACCENTS } from "@/components/AdminSidebar";
 import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness, allowedModules, greetingName } from "@/lib/auth";
@@ -1130,10 +1129,9 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
   // toggles to fewest-days-first.
   const [sortKey, setSortKey] = useState<"created" | "days">("created");
   const [addOpen, setAddOpen] = useState(false);
-  const [zipBusy, setZipBusy] = useState<string | null>(null);
-  // Row whose Download ZIP popup is open — the lender picker is the same
-  // component the EPC list uses.
-  const [zipPickerRow, setZipPickerRow] = useState<Row | null>(null);
+  // Row whose "send to lender" email composer is open (replaces the old
+  // Download-ZIP action — ZIP still lives on the loan View page).
+  const [emailRow, setEmailRow] = useState<Row | null>(null);
   // Row highlighted after returning from View — same behaviour as the EPC
   // list, with its own sessionStorage keys.
   const [highlightId, setHighlightId] = useState<string | null>(null);
@@ -1257,34 +1255,6 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     if (!m) return null;
     const last4 = m.slice(-4);
     return `XXXX XXXX ${last4}`;
-  }
-
-  // Streams the loan-app ZIP through the admin's bearer token and
-  // triggers a browser download. Mirrors the EPC list's ZIP flow.
-  async function downloadLoanZip(r: Row, lender: LenderKey) {
-    if (zipBusy) return;
-    setZipBusy(r.id);
-    try {
-      const res = await fetch(`/api/admin/loan-app/${r.id}/download-zip?lender=${lender}`, {
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        alert("ZIP failed: " + (data?.error || `HTTP ${res.status}`));
-        return;
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${r.loan_display_id || r.id.slice(0, 8)}_${(displayBorrower(r) || "loan").replace(/[^\w-]+/g, "_")}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-    } finally {
-      setZipBusy(null);
-    }
   }
 
   // EPC options for the filter dropdown — only EPCs actually present in the list.
@@ -1652,23 +1622,17 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                 <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">
                   {r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : (r.created_by === "admin" ? "Admin" : "EPC")}
                 </td>
-                {/* Action: View + Download ZIP. stopPropagation so the
-                    buttons don't also trigger the row's navigate. */}
-                {/* Action buttons — same shape/icons as the EPC list. */}
+                {/* Action: Email (send to lender). stopPropagation so the
+                    button doesn't also trigger the row's navigate. */}
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <button
                     type="button"
-                    disabled={zipBusy === r.id}
-                    onClick={() => setZipPickerRow(r)}
-                    title="Download all documents + summary as ZIP"
-                    className={[
-                      "text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 transition-colors",
-                      zipBusy === r.id
-                        ? "bg-bg-soft text-text-muted cursor-not-allowed"
-                        : "bg-[#178a5c] text-white hover:bg-[#12734c]",
-                    ].join(" ")}
+                    onClick={() => setEmailRow(r)}
+                    title="Send this application to a lender by email"
+                    className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 bg-[#178a5c] text-white hover:bg-[#12734c] transition-colors"
                   >
-                    {IconDownload} {zipBusy === r.id ? "Preparing…" : "Download ZIP"}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
+                    Email
                   </button>
                 </td>
               </tr>
@@ -1680,17 +1644,14 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
 
       <AddNewLoanAppModal open={addOpen} onClose={() => setAddOpen(false)} />
 
-      {/* Same lender picker the EPC list uses — the chosen lender stamps
-          "Submitted to" in the Excel and lands in the ZIP filename. */}
-      <LenderPickerModal
-        open={!!zipPickerRow}
-        onClose={() => setZipPickerRow(null)}
-        epcName={zipPickerRow ? displayBorrower(zipPickerRow) : null}
-        onConfirm={async (lender) => {
-          const row = zipPickerRow;
-          if (!row) return;
-          await downloadLoanZip(row, lender);
-        }}
+      {/* Send-to-lender email composer — same shared modal + preview/send flow
+          the loan View page uses (editable subject/detail, CC/BCC, attachments). */}
+      <EmailComposerModal
+        open={!!emailRow}
+        onClose={() => setEmailRow(null)}
+        endpoint={emailRow ? `/api/admin/loan-app/${emailRow.id}/send-to-lender` : ""}
+        title="Send to lender"
+        defaultLender={emailRow?.approved_lender}
       />
     </>
   );

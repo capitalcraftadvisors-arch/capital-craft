@@ -822,11 +822,18 @@ function Inner() {
     const lvl = c.source === "loan" ? loanOutline(c) : attention(c, sla);
     return lvl === "red" ? 0 : lvl === "yellow" ? 1 : lvl === "green" ? 2 : 3;
   }, [sla]);
-  const byCol = (k: string) => visible.filter((c) => colOf(c) === k).sort((a, b) => {
-    const ra = outlineRank(a), rb = outlineRank(b);
-    if (ra !== rb) return ra - rb;
-    return b.stageHours - a.stageHours; // longest in this stage first
-  });
+  const createdMs = (c: OpsCase) => (c.createdAt ? new Date(c.createdAt).getTime() : 0);
+  const byCol = (k: string) => {
+    const items = visible.filter((c) => colOf(c) === k);
+    // Leads are ordered newest-first (most recent lead on top) — reversed from
+    // the urgency/longest-in-stage ordering the other pipelines use.
+    if (srcFilter === "lead") return items.sort((a, b) => createdMs(b) - createdMs(a));
+    return items.sort((a, b) => {
+      const ra = outlineRank(a), rb = outlineRank(b);
+      if (ra !== rb) return ra - rb;
+      return b.stageHours - a.stageHours; // longest in this stage first
+    });
+  };
 
   // "My Day" queue — the RM's OWN cases that need action, across all sources,
   // ranked most-urgent first (red → yellow → green, longest-in-stage on top).

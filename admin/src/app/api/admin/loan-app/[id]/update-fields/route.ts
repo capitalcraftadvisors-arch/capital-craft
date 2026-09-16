@@ -125,9 +125,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
     if (updErr) return err(`Save failed: ${updErr.message}`, 500);
 
-    // Best-effort edit trail.
+    // Best-effort edit trail. Keep it concise — one readable line, not a dump of
+    // every column the chatbot happened to write in this save.
     const edited = Object.keys(patch).filter((k) => k !== "last_updated_by_user_id");
-    await logLoanActivityServer(supabase, appId, "field_edit", claims.business_id ?? null, { detail: `intake chat: ${edited.join(", ")}` });
+    const detail = `Updated ${edited.length} detail${edited.length === 1 ? "" : "s"} via chatbot`;
+    await logLoanActivityServer(supabase, appId, "field_edit", claims.business_id ?? null, { detail });
 
     return NextResponse.json({ ok: true, updated: Object.keys(patch).filter((k) => k !== "last_updated_by_user_id") });
   } catch (e) {

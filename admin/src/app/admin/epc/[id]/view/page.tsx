@@ -31,7 +31,7 @@ import OwnershipCard from "@/components/OwnershipCard";
 import ActivityLogModal from "@/components/ActivityLogModal";
 import DeleteEpcModal from "@/components/DeleteEpcModal";
 import ProfileTabBar, { TabButton, DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
-import { computeEpcScore, ScoreBadge } from "@/lib/epc-score";
+import { computeEpcHealth, scoreTone, type TatBands } from "@/lib/epc-score";
 // Shared view chrome — the SAME kit the Loan Application View imports, so the
 // two dashboards can't drift apart. EPC-specific pieces stay in this file.
 import {
@@ -205,26 +205,17 @@ function Inner() {
 
   const r3bDocs = useMemo(() => docs.filter((d) => d.category === "gst_r3b"), [docs]);
 
-  // EPC Health — all-time aggregate of THIS EPC's own loan applications,
-  // split Residential / C&I via the CC-RES / CC-COM display-id prefix.
-  const loanAgg = useMemo(() => {
-    type LR = (typeof loans)[number];
-    // Scope to the selected period (by application created_at); "all" = every row.
-    const scoped = hPeriod === "all" ? loans : loans.filter((r) => inPeriod(r.created_at, hPeriod));
-    const isRes = (r: LR) => (r.loan_display_id || "").toUpperCase().startsWith("CC-RES") || r.plant_use_type === "residential";
-    const isCom = (r: LR) => (r.loan_display_id || "").toUpperCase().startsWith("CC-COM") || r.plant_use_type === "commercial";
-    const bucket = (rows: LR[]) => {
-      const submitted  = rows.filter((r) => r.status !== "draft").length;
-      const rejected   = rows.filter((r) => r.status === "rejected").length;
-      const sanctioned = rows.reduce((s, r) => s + (Number(r.sanctioned_amount) || 0), 0);
-      const disbursed  = rows.reduce((s, r) => s + (Number(r.first_disbursement_amount) || 0) + (Number(r.second_disbursement_amount) || 0), 0);
-      return { submitted, rejected, sanctioned, disbursed, pending: Math.max(0, sanctioned - disbursed) };
-    };
-    return { res: bucket(scoped.filter(isRes)), com: bucket(scoped.filter(isCom)), total: bucket(scoped) };
-  }, [loans, hPeriod]);
+  // Which EPC Health tab is active (RESI / C&I / Total).
+  const [healthTab, setHealthTab] = useState<"res" | "com" | "total">("total");
 
-  // Auto EPC score — computed from the full loan history (all-time, not period-scoped).
-  const epcScore = useMemo(() => computeEpcScore(loans), [loans]);
+  // EPC Health + Score — one engine over THIS EPC's own loan applications,
+  // scoped to the selected period ("all" = every row). Split RESI / C&I via the
+  // CC-RES / CC-COM display-id prefix; the Total tab also carries the portfolio
+  // signals (transaction volume, repeat business, installation TAT) + the score.
+  const health = useMemo(() => {
+    const scoped = hPeriod === "all" ? loans : loans.filter((r) => inPeriod(r.created_at, hPeriod));
+    return computeEpcHealth(scoped);
+  }, [loans, hPeriod]);
   const r3bTotal = useMemo(
     () => r3bDocs.reduce((s, d) => {
       const v = (d.metadata as { total_taxable_value?: number } | null)?.total_taxable_value;
@@ -328,6 +319,13 @@ function Inner() {
   // Approved / Rejected are gated behind Docs Sent in the UI below.
   async function setLenderExclusive(lenderKey: string, target: "none" | "docs" | "approved" | "rejected") {
     if (!biz) return;
+    // Gate: docs can't go to a lender until Capital Craft has approved the EPC
+    // profile. If it hasn't, offer to approve it now and continue in one step —
+    // clicking "OK" flips the profile to Approved by CC, then sends the docs.
+    if ((target === "docs" || target === "approved") && biz.status !== "approved") {
+      if (!window.confirm("This EPC profile hasn't been approved by Capital Craft yet.\n\nApprove it now and continue?")) return;
+      await changeStatus("approved");
+    }
     if (target === "approved" && !window.confirm("Mark this lender as Approved?")) return;
     if (target === "rejected" && !window.confirm("Mark this lender as Rejected?")) return;
     const flags = { docs_given: target === "docs", approved: target === "approved", rejected: target === "rejected" };
@@ -425,7 +423,6 @@ function Inner() {
                 {/* Header bar shows trade name + EPC id only — legal name removed. */}
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">{trade}</div>
-                  {epcScore && <ScoreBadge total={epcScore.total} size="lg" />}
                 </div>
                 {biz.epc_display_id && <div className="text-[14px] font-medium text-[#0f7a52] truncate mt-0.5">{biz.epc_display_id}</div>}
               </div>
@@ -475,28 +472,30 @@ function Inner() {
                   ]}
                 />
               )}
-              {/* After the CC decision: a status box (Approved/Rejected by CC)
-                  plus the SAME lender-status dropdown the main table uses, so
-                  the lender decision can be set / rejected from here too. */}
+              {/* After the CC decision: a status box (Approved/Rejected by CC). */}
               {(biz.status === "approved" || biz.status === "rejected") && (
-                <>
-                  <span
-                    className={
-                      "inline-flex items-center px-3 py-1.5 rounded-[8px] text-[13px] font-semibold border whitespace-nowrap " +
-                      (biz.status === "approved"
-                        ? "bg-[#e6f6ee] text-[#0f7a52] border-[#bfe6d5]"
-                        : "bg-red-50 text-red-700 border-red-200")
-                    }
-                  >
-                    {biz.status === "approved" ? "Approved by CC" : "Rejected by CC"}
-                  </span>
-                  <LenderCell
-                    state={lenderMap}
-                    lenders={lenderList}
-                    onSet={(l, target) => void setLenderExclusive(l, target)}
-                    onAddLender={addLender}
-                  />
-                </>
+                <span
+                  className={
+                    "inline-flex items-center px-3 py-1.5 rounded-[8px] text-[13px] font-semibold border whitespace-nowrap " +
+                    (biz.status === "approved"
+                      ? "bg-[#e6f6ee] text-[#0f7a52] border-[#bfe6d5]"
+                      : "bg-red-50 text-red-700 border-red-200")
+                  }
+                >
+                  {biz.status === "approved" ? "Approved by CC" : "Rejected by CC"}
+                </span>
+              )}
+              {/* Lender-status dropdown — available once the EPC has submitted
+                  (not draft), even before CC review. Sending docs (or approving)
+                  before CC approval prompts to approve the profile in the same
+                  step (see setLenderExclusive). */}
+              {biz.status !== "draft" && (
+                <LenderCell
+                  state={lenderMap}
+                  lenders={lenderList}
+                  onSet={(l, target) => void setLenderExclusive(l, target)}
+                  onAddLender={addLender}
+                />
               )}
               {biz.business_type !== "admin" && (
                 <KebabMenu
@@ -561,26 +560,11 @@ function Inner() {
         </div>
         )}
 
-        {/* ── EPC HEALTH — all-time aggregate; only once internally approved ─ */}
-        {biz.status === "approved" && (() => {
-          const lacs = (v: number) => `₹${(v / 100000).toLocaleString("en-IN", { maximumFractionDigits: 2 })} Lacs`;
-          const num  = (v: number) => v.toLocaleString("en-IN");
-          const segments = [
-            { key: "res" as const, label: "RESI" },
-            { key: "com" as const, label: "C&I" },
-          ];
-          const metrics = [
-            { label: "Applications Submitted", k: "submitted"  as const, money: false, green: false },
-            { label: "Rejected",               k: "rejected"   as const, money: false, green: false },
-            { label: "Sanctioned Amount",      k: "sanctioned" as const, money: true,  green: true  },
-            { label: "Disbursed",              k: "disbursed"  as const, money: true,  green: false },
-            { label: "Pending Disbursal",      k: "pending"    as const, money: true,  green: false },
-          ];
-          return (
+        {/* ── EPC HEALTH + SCORE — merged; only once internally approved ─ */}
+        {biz.status === "approved" && (
           <div className="rounded-[14px] border border-[#cdeadd] bg-[#eefaf3] p-5 sm:p-6 mb-4">
-            {/* Header — title + period selector (replaces the "all-time" subtitle
-                and the Overall Sanctioned box; all figures below follow it). */}
-            <div className="flex items-start justify-between gap-4 mb-4">
+            {/* Header — title + tabs (left) · EPC score + period (right). */}
+            <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
               <div>
                 <div className="text-[24px] font-bold text-[#0f3d2e] leading-tight">EPC Health</div>
                 <div className="text-[12px] text-[#5a8a76] mt-0.5">admin only</div>
@@ -599,48 +583,65 @@ function Inner() {
               </select>
             </div>
 
-            {/* Per-segment white cards */}
-            <div className="grid gap-3 sm:grid-cols-2">
-              {segments.map((seg) => (
-                <div key={seg.key} className="rounded-[12px] border border-[#e0f0e8] bg-white p-4 sm:p-5">
-                  <div className="text-[16px] font-bold text-[#178a5c] mb-2.5">{seg.label}</div>
-                  <div>
-                    {metrics.map((m) => {
-                      const v = loanAgg[seg.key][m.k];
-                      return (
-                        <div key={m.k} className="flex items-center justify-between gap-3 py-2 border-b border-[#eef1f4] last:border-0">
-                          <span className="text-[15px] text-[#334155]">{m.label}</span>
-                          <span className={"text-[15px] font-semibold " + (m.green ? "text-[#178a5c]" : "text-[#0f3d2e]")}>
-                            {m.money ? lacs(v) : num(v)}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            {/* TOTAL band */}
-            <div className="rounded-[12px] bg-[#178a5c] text-white mt-3 px-5 py-4">
-              <div className="text-[15px] font-bold tracking-wide mb-2.5 border-b border-white/20 pb-2">TOTAL</div>
-              <div className="grid grid-cols-4 gap-3 text-center">
-                {([
-                  { label: "Submitted",  text: num(loanAgg.total.submitted) },
-                  { label: "Sanctioned", text: lacs(loanAgg.total.sanctioned) },
-                  { label: "Disbursed",  text: lacs(loanAgg.total.disbursed) },
-                  { label: "Pending",    text: lacs(loanAgg.total.pending) },
-                ]).map((c) => (
-                  <div key={c.label}>
-                    <div className="text-[12px] text-[#bfe6d5]">{c.label}</div>
-                    <div className="text-[18px] font-bold mt-0.5">{c.text}</div>
-                  </div>
-                ))}
+            {!health ? (
+              <div className="rounded-[12px] border border-[#e0f0e8] bg-white p-6 text-center text-[14px] text-[#5a8a76]">
+                No applications in this period yet.
               </div>
-            </div>
+            ) : (() => {
+              const TABS = [
+                { key: "res" as const, label: "RESI" },
+                { key: "com" as const, label: "C&I" },
+                { key: "total" as const, label: "Total" },
+              ];
+              const b = health[healthTab];
+              return (
+                <>
+                  {/* Segment tabs */}
+                  <div className="inline-flex rounded-[10px] border border-[#cdeadd] overflow-hidden bg-white mb-3">
+                    {TABS.map((t) => (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => setHealthTab(t.key)}
+                        className={
+                          "px-4 py-1.5 text-[13px] font-semibold border-r border-[#cdeadd] last:border-r-0 transition-colors " +
+                          (healthTab === t.key ? "bg-[#178a5c] text-white" : "text-[#0f3d2e] bg-white hover:bg-[#f0faf5]")
+                        }
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Paired metrics — count next to its ratio; amounts next to disbursed. */}
+                  <div className="rounded-[12px] border border-[#e0f0e8] bg-white p-4 sm:p-5">
+                    <div className="grid sm:grid-cols-2 gap-x-8 gap-y-0">
+                      <HealthRow label="Applications Submitted" value={numFmt(b.submitted)} />
+                      <HealthRow label="Approval ratio" value={pctFmt(b.approvalRatio)} accent />
+                      <HealthRow label="Rejected" value={numFmt(b.rejected)} />
+                      <HealthRow label="Cancellation ratio" value={pctFmt(b.cancellationRatio)} />
+                      <HealthRow label="Approval Amount" value={lacsFmt(b.approvalAmount)} green />
+                      <HealthRow label="Disbursed" value={lacsFmt(b.disbursed)} />
+                      <HealthRow label="Pending Disbursed" value={lacsFmt(b.pending)} />
+                    </div>
+                  </div>
+
+                  {/* Total tab → portfolio signals + the blended EPC score. */}
+                  {healthTab === "total" && (
+                    <>
+                      <div className="grid gap-3 sm:grid-cols-3 mt-3">
+                        <MiniStat label="Transaction volume" value={numFmt(health.volume)} />
+                        <MiniStat label="Repeat customers" value={numFmt(health.repeat)} />
+                        <ScoreStat score={health.score} />
+                      </div>
+                      <TatCard tat={health.tat} className="mt-3" />
+                    </>
+                  )}
+                </>
+              );
+            })()}
           </div>
-          );
-        })()}
+        )}
 
         {/* ── 3-COLUMN GRID ──────────────────────────────────────────── */}
         <div className="grid gap-4 lg:grid-cols-3">
@@ -1033,6 +1034,85 @@ function LenderStatePill({ state }: { state: "approved" | "docs" | "none" | "rej
     </span>;
   }
   return <span className="text-[13px] text-[#8ab3a1]">not sent</span>;
+}
+
+// ── EPC Health formatters + cards ────────────────────────────────────
+const numFmt  = (v: number) => v.toLocaleString("en-IN");
+const pctFmt  = (r: number) => `${Math.round(r * 100)}%`;
+const lacsFmt = (v: number) => `₹${(v / 100000).toLocaleString("en-IN", { maximumFractionDigits: 2 })} Lacs`;
+
+// One paired metric row inside a segment tab (label left, value right).
+function HealthRow({ label, value, accent, green }: { label: string; value: string; accent?: boolean; green?: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2 border-b border-[#eef1f4]">
+      <span className="text-[15px] text-[#334155]">{label}</span>
+      <span className={"text-[15px] font-semibold " + (green ? "text-[#178a5c]" : accent ? "text-[#185fa5]" : "text-[#0f3d2e]")}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
+// A small headline stat card (transaction volume / repeat customers).
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-[12px] border border-[#e0f0e8] bg-white p-4">
+      <div className="text-[12px] font-semibold uppercase tracking-wide text-[#5a8a76]">{label}</div>
+      <div className="text-[26px] font-bold text-[#0f3d2e] mt-1 leading-none">{value}</div>
+    </div>
+  );
+}
+
+// The blended EPC score, coloured by band (strong / fair / needs attention).
+function ScoreStat({ score }: { score: number }) {
+  const t = scoreTone(score);
+  return (
+    <div className="rounded-[12px] border p-4" style={{ backgroundColor: t.bg, borderColor: t.border }}>
+      <div className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: t.text }}>EPC Score</div>
+      <div className="flex items-baseline gap-2 mt-1">
+        <span className="text-[26px] font-bold leading-none" style={{ color: t.text }}>{score}</span>
+        <span className="text-[13px] font-semibold" style={{ color: t.text }}>/100 · {t.label}</span>
+      </div>
+    </div>
+  );
+}
+
+// Installation-TAT ageing bands. The whole card takes the colour of whichever
+// band holds the most in-progress applications (older band wins ties).
+function TatCard({ tat, className }: { tat: TatBands; className?: string }) {
+  const TONE: Record<string, { dot: string; text: string; label: string }> = {
+    green:  { dot: "#16a34a", text: "#0f7a52", label: "On track" },
+    yellow: { dot: "#eab308", text: "#8a5a00", label: "Watch" },
+    red:    { dot: "#dc2626", text: "#b42318", label: "High alert" },
+    none:   { dot: "#cbd5e1", text: "#5a8a76", label: "Nothing in progress" },
+  };
+  const t = TONE[tat.alert];
+  const bands = [
+    { label: "≤ 60 days", value: tat.le60, color: "#16a34a", active: tat.alert === "green" },
+    { label: "60–90 days", value: tat.d60_90, color: "#eab308", active: tat.alert === "yellow" },
+    { label: "> 90 days", value: tat.gt90, color: "#dc2626", active: tat.alert === "red" },
+  ];
+  return (
+    <div className={"rounded-[12px] border border-[#e0f0e8] bg-white p-4 " + (className ?? "")}>
+      <div className="flex items-center justify-between gap-2 mb-3">
+        <div className="text-[12px] font-semibold uppercase tracking-wide text-[#5a8a76]">Installation TAT</div>
+        <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: t.text }}>
+          <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: t.dot }} />
+          {t.label}
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {bands.map((band) => (
+          <div key={band.label}
+            className="rounded-[10px] border px-3 py-2.5 text-center"
+            style={{ borderColor: band.active ? band.color : "#eef1f4", backgroundColor: band.active ? band.color + "14" : "#fbfdfc" }}>
+            <div className="text-[22px] font-bold" style={{ color: band.color }}>{band.value}</div>
+            <div className="text-[11px] font-medium text-[#5a8a76] mt-0.5">{band.label}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function fmtCapacity(n: number | null | undefined, unit: string | null | undefined): string {

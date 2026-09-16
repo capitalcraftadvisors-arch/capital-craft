@@ -1,20 +1,28 @@
-"use client";
-
-// Capital Craft EPC Score — computed AUTOMATICALLY from the EPC's loan history
-// (no manual entry). Six measurable criteria, each 1–5 stars, averaged to /100.
-// Shown in the EPC profile header.
+// Capital Craft — EPC Health + Score, computed AUTOMATICALLY from the EPC's
+// own loan history (no manual entry, no stars). One engine feeds the merged
+// "EPC Health" card on the EPC profile:
+//   • Per-segment health (RESI / C&I / Total): submitted, rejected, approval &
+//     cancellation ratios, approval (sanctioned) amount, disbursed, pending.
+//   • Portfolio signals (shown on the Total tab): transaction volume, repeat
+//     customers, Installation-TAT ageing bands, and a single EPC Score /100.
 //
-// Thresholds (tune here in one place):
-//  - Approval ratio       approved ÷ total          ≥80%→5 ≥60%→4 ≥40%→3 ≥20%→2 else 1
-//  - Cancellation ratio   (rejected+aborted) ÷ total  ≤10%→5 ≤20%→4 ≤35%→3 ≤50%→2 else 1  (lower is better)
-//  - Second-tranche       2nd-disbursed ÷ 1st-disbursed ≥80%→5 ≥60%→4 ≥40%→3 ≥20%→2 else 1
-//  - Transaction volume   total loans               ≥20→5 ≥10→4 ≥5→3 ≥2→2 ≥1→1
-//  - Repeat business      borrowers with >1 loan     ≥3→5  =2→4  =1→3  (else ≥3 loans→2)  else 1
-//  - Installation TAT     # of 1st-disbursement customers (user's rule):
-//                         ≥10→5  7–9→4  5–6→3  3–4→2  1–2→1  0→0
+// The score blends five measurable signals (tune the weights in ONE place —
+// SCORE_WEIGHTS below):
+//   approval ratio ·  cancellation (lower = better) ·  installation speed ·
+//   transaction volume ·  repeat business.
+//
+// Installation TAT — there is no "installation-complete" date in the schema, so
+// we age each in-progress application (submitted, not rejected, not yet fully
+// disbursed) by days since it was created:
+//   ≤ 60 days → on track (green) · 60–90 days → watch (yellow) · > 90 days →
+//   alert (red). The whole metric's alert colour is whichever band holds the
+//   MOST applications (older band wins ties).
 
 export type EpcLoan = {
   status?: string | null;
+  plant_use_type?: string | null;
+  loan_display_id?: string | null;
+  sanctioned_amount?: number | null;
   first_disbursement_amount?: number | null;
   second_disbursement_amount?: number | null;
   created_at?: string | null;
@@ -23,66 +31,143 @@ export type EpcLoan = {
 };
 
 const APPROVED = new Set(["approved", "rfd", "sent_to_nbfc", "disbursed"]);
-const CANCELLED = new Set(["rejected", "aborted"]);
 
-export type EpcScore = { total: number; stars: number; criteria: { key: string; label: string; stars: number; detail: string }[] };
+export type HealthBucket = {
+  submitted: number;
+  approved: number;
+  rejected: number;
+  approvalRatio: number;      // 0..1
+  cancellationRatio: number;  // 0..1
+  approvalAmount: number;     // sanctioned amount (₹)
+  disbursed: number;          // 1st + 2nd tranche (₹)
+  pending: number;            // approvalAmount − disbursed (₹, floored at 0)
+};
 
-export function computeEpcScore(all: EpcLoan[]): EpcScore | null {
-  // Only real submissions count — drafts aren't a transaction.
-  const loans = all.filter((l) => l.status !== "draft");
-  const total = loans.length;
-  if (total === 0) return null; // nothing to score yet
+export type AlertLevel = "green" | "yellow" | "red" | "none";
+export type TatBands = {
+  le60: number;      // ≤ 60 days in progress
+  d60_90: number;    // 60–90 days
+  gt90: number;      // > 90 days
+  alert: AlertLevel; // dominant band → overall colour
+};
 
-  const firstDisb = loans.filter((l) => l.first_disbursement_amount != null).length;
-  const secondDisb = loans.filter((l) => l.second_disbursement_amount != null).length;
-  const approved = loans.filter((l) => l.first_disbursement_amount != null || (l.status ? APPROVED.has(l.status) : false)).length;
-  const cancelled = loans.filter((l) => (l.status ? CANCELLED.has(l.status) : false)).length;
+export type ScorePart = { key: string; label: string; pct: number; weight: number };
+export type EpcHealth = {
+  res: HealthBucket;
+  com: HealthBucket;
+  total: HealthBucket;
+  volume: number;   // total submitted applications
+  repeat: number;   // borrowers with more than one application
+  tat: TatBands;
+  score: number;    // 0..100
+  parts: ScorePart[];
+};
 
-  const appR = approved / total;
-  const s1 = appR >= 0.8 ? 5 : appR >= 0.6 ? 4 : appR >= 0.4 ? 3 : appR >= 0.2 ? 2 : 1;
+// Weights for the blended EPC Score (must be meaningful relative to each other;
+// they're renormalised over whichever signals have data).
+const SCORE_WEIGHTS = {
+  approval: 30,
+  cancellation: 20,
+  installation: 25,
+  volume: 15,
+  repeat: 10,
+} as const;
 
-  const canR = cancelled / total;
-  const s2 = canR <= 0.1 ? 5 : canR <= 0.2 ? 4 : canR <= 0.35 ? 3 : canR <= 0.5 ? 2 : 1;
+const nz = (v: unknown): number => (typeof v === "number" && isFinite(v) ? v : Number(v) || 0);
+const DAY = 86400000;
+function daysSince(iso: string | null | undefined): number {
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  if (!isFinite(t)) return 0;
+  return Math.max(0, Math.floor((Date.now() - t) / DAY));
+}
 
-  const trR = firstDisb === 0 ? 0 : secondDisb / firstDisb;
-  const s3 = firstDisb === 0 ? 1 : trR >= 0.8 ? 5 : trR >= 0.6 ? 4 : trR >= 0.4 ? 3 : trR >= 0.2 ? 2 : 1;
+function isRes(l: EpcLoan): boolean {
+  return (l.loan_display_id || "").toUpperCase().startsWith("CC-RES") || l.plant_use_type === "residential";
+}
+function isCom(l: EpcLoan): boolean {
+  return (l.loan_display_id || "").toUpperCase().startsWith("CC-COM") || l.plant_use_type === "commercial";
+}
 
-  const s4 = total >= 20 ? 5 : total >= 10 ? 4 : total >= 5 ? 3 : total >= 2 ? 2 : 1;
+function bucket(rows: EpcLoan[]): HealthBucket {
+  const submitted = rows.length; // caller passes non-draft rows only
+  const approved = rows.filter((r) => r.first_disbursement_amount != null || (r.status ? APPROVED.has(r.status) : false)).length;
+  const rejected = rows.filter((r) => r.status === "rejected").length;
+  const approvalAmount = rows.reduce((s, r) => s + nz(r.sanctioned_amount), 0);
+  const disbursed = rows.reduce((s, r) => s + nz(r.first_disbursement_amount) + nz(r.second_disbursement_amount), 0);
+  return {
+    submitted,
+    approved,
+    rejected,
+    approvalRatio: submitted ? approved / submitted : 0,
+    cancellationRatio: submitted ? rejected / submitted : 0,
+    approvalAmount,
+    disbursed,
+    pending: Math.max(0, approvalAmount - disbursed),
+  };
+}
 
+// An application still "in installation" — submitted, not rejected, and its 2nd
+// (final) tranche not yet paid.
+function inProgress(l: EpcLoan): boolean {
+  return l.status !== "rejected" && l.second_disbursement_amount == null;
+}
+
+export function computeEpcHealth(all: EpcLoan[]): EpcHealth | null {
+  const loans = all.filter((l) => l.status !== "draft"); // drafts aren't a transaction
+  if (loans.length === 0) return null;
+
+  const res = bucket(loans.filter(isRes));
+  const com = bucket(loans.filter(isCom));
+  const total = bucket(loans);
+
+  const volume = total.submitted;
+
+  // Repeat business — borrowers that appear more than once (keyed by PAN, else mobile).
   const counts = new Map<string, number>();
   for (const l of loans) {
     const k = (l.borrower_pan || "").toUpperCase() || (l.borrower_mobile || "");
     if (k) counts.set(k, (counts.get(k) || 0) + 1);
   }
   const repeat = [...counts.values()].filter((c) => c > 1).length;
-  const s5 = repeat >= 3 ? 5 : repeat === 2 ? 4 : repeat === 1 ? 3 : total >= 3 ? 2 : 1;
 
-  // Installation TAT — throughput proxy: number of customers whose 1st tranche is out.
-  const n = firstDisb;
-  const s6 = n >= 10 ? 5 : n >= 7 ? 4 : n >= 5 ? 3 : n >= 3 ? 2 : n >= 1 ? 1 : 0;
+  // Installation-TAT ageing bands over in-progress applications.
+  let le60 = 0, d60_90 = 0, gt90 = 0;
+  for (const l of loans.filter(inProgress)) {
+    const d = daysSince(l.created_at);
+    if (d > 90) gt90++;
+    else if (d > 60) d60_90++;
+    else le60++;
+  }
+  const bandTotal = le60 + d60_90 + gt90;
+  const alert: AlertLevel = bandTotal === 0 ? "none"
+    : gt90 >= d60_90 && gt90 >= le60 && gt90 > 0 ? "red"
+    : d60_90 >= le60 && d60_90 > 0 ? "yellow"
+    : "green";
+  const tat: TatBands = { le60, d60_90, gt90, alert };
 
-  const criteria = [
-    { key: "approval_ratio", label: "Approval ratio", stars: s1, detail: `${approved}/${total} approved` },
-    { key: "cancellation_ratio", label: "Cancellation ratio", stars: s2, detail: `${cancelled}/${total} cancelled` },
-    { key: "second_tranche", label: "Second-tranche completion", stars: s3, detail: firstDisb ? `${secondDisb}/${firstDisb} 2nd tranche` : "no disbursals yet" },
-    { key: "transaction_volume", label: "Transaction volume", stars: s4, detail: `${total} loan${total === 1 ? "" : "s"}` },
-    { key: "repeat_business", label: "Repeat business", stars: s5, detail: `${repeat} repeat customer${repeat === 1 ? "" : "s"}` },
-    { key: "installation_tat", label: "Installation TAT", stars: s6, detail: `${n} disbursed customer${n === 1 ? "" : "s"}` },
-  ];
-  const sum = criteria.reduce((a, c) => a + c.stars, 0);
-  const totalScore = Math.round((sum / (criteria.length * 5)) * 100);
-  return { total: totalScore, stars: Math.round(totalScore / 20), criteria };
+  // ── Blend the EPC Score (each signal → 0..100) ──
+  const parts: ScorePart[] = [];
+  parts.push({ key: "approval", label: "Approval ratio", pct: Math.round(total.approvalRatio * 100), weight: SCORE_WEIGHTS.approval });
+  parts.push({ key: "cancellation", label: "Low cancellation", pct: Math.round((1 - total.cancellationRatio) * 100), weight: SCORE_WEIGHTS.cancellation });
+  // Installation speed — on-track weighted 100, watch 50, alert 0. Only when
+  // there ARE in-progress apps to judge.
+  if (bandTotal > 0) {
+    const installPct = Math.round(((le60 * 100 + d60_90 * 50 + gt90 * 0) / bandTotal));
+    parts.push({ key: "installation", label: "Installation speed", pct: installPct, weight: SCORE_WEIGHTS.installation });
+  }
+  parts.push({ key: "volume", label: "Transaction volume", pct: Math.min(100, Math.round((volume / 20) * 100)), weight: SCORE_WEIGHTS.volume });
+  parts.push({ key: "repeat", label: "Repeat business", pct: Math.min(100, repeat * 25), weight: SCORE_WEIGHTS.repeat });
+
+  const wSum = parts.reduce((s, p) => s + p.weight, 0);
+  const score = wSum ? Math.round(parts.reduce((s, p) => s + p.pct * p.weight, 0) / wSum) : 0;
+
+  return { res, com, total, volume, repeat, tat, score, parts };
 }
 
-// Compact star + /100 badge for the EPC profile header (and anywhere else).
-export function ScoreBadge({ total, size = "sm" }: { total: number | null | undefined; size?: "sm" | "lg" }) {
-  if (total == null) return null;
-  const stars = Math.round(total / 20);
-  const lg = size === "lg";
-  return (
-    <span className={"inline-flex items-center gap-1 rounded-full bg-[#fff7e6] border border-[#f5d98a] text-[#8a5a00] font-semibold " + (lg ? "px-2.5 py-0.5 text-[13px]" : "px-2 py-0.5 text-[11px]")}>
-      <span className="text-[#f5a524]">{"★".repeat(stars)}{"☆".repeat(5 - stars)}</span>
-      {total}/100
-    </span>
-  );
+// Score → traffic-light colour (used by the profile card).
+export function scoreTone(score: number): { text: string; bg: string; border: string; label: string } {
+  if (score >= 70) return { text: "#0f7a52", bg: "#e6f6ee", border: "#bfe6d5", label: "Strong" };
+  if (score >= 40) return { text: "#8a5a00", bg: "#fff7e6", border: "#f5d98a", label: "Fair" };
+  return { text: "#b42318", bg: "#fdecea", border: "#f5c2bd", label: "Needs attention" };
 }
