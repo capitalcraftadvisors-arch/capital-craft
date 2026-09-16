@@ -31,7 +31,7 @@ import OwnershipCard from "@/components/OwnershipCard";
 import ActivityLogModal from "@/components/ActivityLogModal";
 import DeleteEpcModal from "@/components/DeleteEpcModal";
 import ProfileTabBar, { TabButton, DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
-import EpcScoreModal, { ScoreBadge } from "@/components/EpcScoreModal";
+import { computeEpcScore, ScoreBadge } from "@/lib/epc-score";
 // Shared view chrome — the SAME kit the Loan Application View imports, so the
 // two dashboards can't drift apart. EPC-specific pieces stay in this file.
 import {
@@ -142,7 +142,7 @@ function Inner() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const [biz, setBiz] = useState<Biz | null>(null);
-  const [loans, setLoans] = useState<{ status: string; plant_use_type: string | null; loan_display_id: string | null; sanctioned_amount: number | null; first_disbursement_amount: number | null; second_disbursement_amount: number | null; created_at: string | null }[]>([]);
+  const [loans, setLoans] = useState<{ status: string; plant_use_type: string | null; loan_display_id: string | null; sanctioned_amount: number | null; first_disbursement_amount: number | null; second_disbursement_amount: number | null; created_at: string | null; borrower_pan: string | null; borrower_mobile: string | null }[]>([]);
   // EPC Health period filter ("all" = every application this EPC has, ever).
   const [hPeriod, setHPeriod] = useState<Period | "all">("all");
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -161,7 +161,6 @@ function Inner() {
   const [zipPickerOpen, setZipPickerOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [scoreOpen, setScoreOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState<string>("");
   const [rejectOther, setRejectOther] = useState<string>("");
@@ -175,7 +174,7 @@ function Inner() {
         supabase().from("epc_documents").select("id, category, file_name, mime_type, stakeholder_id, metadata").eq("business_id", params.id),
         supabase().from("epc_lender_status").select("lender, docs_given, approved, rejected").eq("business_id", params.id),
         supabase().from("epc_admin_info").select("*").eq("business_id", params.id).maybeSingle(),
-        supabase().from("epc_applications").select("status, plant_use_type, loan_display_id, sanctioned_amount, first_disbursement_amount, second_disbursement_amount, created_at").eq("epc_business_id", params.id),
+        supabase().from("epc_applications").select("status, plant_use_type, loan_display_id, sanctioned_amount, first_disbursement_amount, second_disbursement_amount, created_at, borrower_pan, borrower_mobile").eq("epc_business_id", params.id),
       ]);
       setBiz(b);
       setDocs((d ?? []) as Doc[]);
@@ -223,6 +222,9 @@ function Inner() {
     };
     return { res: bucket(scoped.filter(isRes)), com: bucket(scoped.filter(isCom)), total: bucket(scoped) };
   }, [loans, hPeriod]);
+
+  // Auto EPC score — computed from the full loan history (all-time, not period-scoped).
+  const epcScore = useMemo(() => computeEpcScore(loans), [loans]);
   const r3bTotal = useMemo(
     () => r3bDocs.reduce((s, d) => {
       const v = (d.metadata as { total_taxable_value?: number } | null)?.total_taxable_value;
@@ -423,7 +425,7 @@ function Inner() {
                 {/* Header bar shows trade name + EPC id only — legal name removed. */}
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">{trade}</div>
-                  {biz.epc_score_total != null && <ScoreBadge total={biz.epc_score_total} size="lg" />}
+                  {epcScore && <ScoreBadge total={epcScore.total} size="lg" />}
                 </div>
                 {biz.epc_display_id && <div className="text-[14px] font-medium text-[#0f7a52] truncate mt-0.5">{biz.epc_display_id}</div>}
               </div>
@@ -499,11 +501,6 @@ function Inner() {
               {biz.business_type !== "admin" && (
                 <KebabMenu
                   items={[
-                    {
-                      label: biz.epc_score_total != null ? "Edit EPC score" : "Add EPC score",
-                      icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3 6.9 7.5.6-5.7 4.9 1.8 7.3L12 17.8 5.4 21.7l1.8-7.3L1.5 9.5 9 8.9 12 2z"/></svg>),
-                      onClick: () => setScoreOpen(true),
-                    },
                     ...((biz.status === "approved" || biz.status === "rejected")
                       ? [{
                           label: "Change review",
@@ -860,13 +857,6 @@ function Inner() {
         displayId={biz.epc_display_id ?? null}
         contactName={biz.contact_name ?? null}
         contactMobile={biz.contact_mobile ?? null}
-      />
-      <EpcScoreModal
-        open={scoreOpen}
-        onClose={() => setScoreOpen(false)}
-        businessId={biz.id}
-        initial={biz.epc_score ?? null}
-        onSaved={(total, score) => setBiz({ ...biz, epc_score: score, epc_score_total: total })}
       />
       {/* Reject-reason picker — choose a reason (or type one) before rejecting. */}
       {rejectOpen && (
