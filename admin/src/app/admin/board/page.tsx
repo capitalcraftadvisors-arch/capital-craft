@@ -1065,6 +1065,18 @@ function Inner() {
               </h1>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
+              {/* Owner tabs live up here now (above the filters) so the filter row
+                  stays light. Board view only. */}
+              {canOversee && view === "board" && (
+                <div className="inline-flex border border-line rounded-lg overflow-hidden">
+                  {ownerTabs.map((o) => (
+                    <button key={o.id} type="button" onClick={() => setOwnerFilter(o.id)}
+                      className={["px-3 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", ownerFilter === o.id ? "bg-[#178a5c] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
+                      {o.name}
+                    </button>
+                  ))}
+                </div>
+              )}
               {!isMainAdmin && (
                 <div className="inline-flex border border-line rounded-lg overflow-hidden">
                   {(["myday", "board"] as const).map((v) => (
@@ -1130,17 +1142,6 @@ function Inner() {
                 {lbl}
               </button>
             ))}
-            {/* Owner tabs — pushed to the RIGHT (Admin sees all RMs, Manager sees own team) */}
-            {canOversee && (
-              <div className="inline-flex border border-line rounded-lg overflow-hidden ml-auto">
-                {ownerTabs.map((o) => (
-                  <button key={o.id} type="button" onClick={() => setOwnerFilter(o.id)}
-                    className={["px-3 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", ownerFilter === o.id ? "bg-[#178a5c] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
-                    {o.name}
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
           )}
         </header>
@@ -1203,14 +1204,18 @@ function Inner() {
               <div className="grid gap-2.5" style={{ gridTemplateColumns: `repeat(${activeCols.length}, minmax(150px, 1fr))` }}>
                 {activeCols.map((col) => {
                   const items = byCol(col.key);
+                  const colValue = items.reduce((s, c) => s + (c.amount || 0), 0);
                   return (
                     <div key={col.key}
                       onDragOver={(e) => { if (dragId && canDrag) e.preventDefault(); }}
                       onDrop={(e) => { e.preventDefault(); if (canDrag) onDropTo(col.key); }}
                       className={dragId && canDrag ? "rounded-lg outline-dashed outline-1 outline-[#9ccbb7] outline-offset-2" : ""}>
-                      <div className="flex items-center justify-between pb-2 mb-2 border-b-2 border-line">
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-text-mid">{col.label}</span>
-                        <span className="text-[12px] font-semibold text-text-muted">{items.length}</span>
+                      <div className="pb-2 mb-2 border-b-2 border-line">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-bold uppercase tracking-wide text-text-mid">{col.label}</span>
+                          <span className="text-[12px] font-semibold text-text-muted">{items.length}</span>
+                        </div>
+                        {srcFilter !== "epc" && <div className="text-[11px] font-semibold text-[#0f3d2e] mt-0.5">{fmt(colValue)}</div>}
                       </div>
                       <div className="flex flex-col gap-2">
                         {items.map((c) => {

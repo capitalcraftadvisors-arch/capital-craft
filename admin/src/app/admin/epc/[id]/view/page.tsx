@@ -31,7 +31,7 @@ import OwnershipCard from "@/components/OwnershipCard";
 import ActivityLogModal from "@/components/ActivityLogModal";
 import DeleteEpcModal from "@/components/DeleteEpcModal";
 import ProfileTabBar, { TabButton, DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
-import { computeEpcHealth, scoreTone, type TatBands } from "@/lib/epc-score";
+import { computeEpcHealth, scoreTone, type TatBands, type HealthBucket } from "@/lib/epc-score";
 // Shared view chrome — the SAME kit the Loan Application View imports, so the
 // two dashboards can't drift apart. EPC-specific pieces stay in this file.
 import {
@@ -563,24 +563,27 @@ function Inner() {
         {/* ── EPC HEALTH + SCORE — merged; only once internally approved ─ */}
         {biz.status === "approved" && (
           <div className="rounded-[14px] border border-[#cdeadd] bg-[#eefaf3] p-5 sm:p-6 mb-4">
-            {/* Header — title + tabs (left) · EPC score + period (right). */}
+            {/* Header — title (left) · EPC score + period (right). */}
             <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
               <div>
                 <div className="text-[24px] font-bold text-[#0f3d2e] leading-tight">EPC Health</div>
                 <div className="text-[12px] text-[#5a8a76] mt-0.5">admin only</div>
               </div>
-              <select
-                value={hPeriod}
-                onChange={(e) => setHPeriod(e.target.value as Period | "all")}
-                className="rounded-input border border-[#cdeadd] bg-white px-3 py-2 text-[13px] font-medium text-[#0f3d2e] outline-none focus:border-[#178a5c] cursor-pointer shrink-0"
-              >
-                <option value="all">All time</option>
-                <option value="today">Today</option>
-                <option value="week">This Week</option>
-                <option value="month">This Month</option>
-                <option value="quarter">This Quarter</option>
-                <option value="year">This Year</option>
-              </select>
+              <div className="flex items-center gap-2.5 flex-wrap justify-end">
+                {health && <HeaderScore score={health.score} />}
+                <select
+                  value={hPeriod}
+                  onChange={(e) => setHPeriod(e.target.value as Period | "all")}
+                  className="rounded-input border border-[#cdeadd] bg-white px-3 py-2 text-[13px] font-medium text-[#0f3d2e] outline-none focus:border-[#178a5c] cursor-pointer shrink-0"
+                >
+                  <option value="all">All time</option>
+                  <option value="today">Today</option>
+                  <option value="week">This Week</option>
+                  <option value="month">This Month</option>
+                  <option value="quarter">This Quarter</option>
+                  <option value="year">This Year</option>
+                </select>
+              </div>
             </div>
 
             {!health ? (
@@ -613,29 +616,21 @@ function Inner() {
                     ))}
                   </div>
 
-                  {/* Paired metrics — count next to its ratio; amounts next to disbursed. */}
-                  <div className="rounded-[12px] border border-[#e0f0e8] bg-white p-4 sm:p-5">
-                    <div className="grid sm:grid-cols-2 gap-x-8 gap-y-0">
-                      <HealthRow label="Applications Submitted" value={numFmt(b.submitted)} />
-                      <HealthRow label="Approval ratio" value={pctFmt(b.approvalRatio)} accent />
-                      <HealthRow label="Rejected" value={numFmt(b.rejected)} />
-                      <HealthRow label="Cancellation ratio" value={pctFmt(b.cancellationRatio)} />
-                      <HealthRow label="Approval Amount" value={lacsFmt(b.approvalAmount)} green />
-                      <HealthRow label="Disbursed" value={lacsFmt(b.disbursed)} />
-                      <HealthRow label="Pending Disbursed" value={lacsFmt(b.pending)} />
-                    </div>
-                  </div>
-
-                  {/* Total tab → portfolio signals + the blended EPC score. */}
-                  {healthTab === "total" && (
+                  {/* Total tab → paired metrics (left) + portfolio signals (right
+                      column) + Installation TAT below. Other tabs: metrics full-width. */}
+                  {healthTab === "total" ? (
                     <>
-                      <div className="grid gap-3 sm:grid-cols-3 mt-3">
-                        <MiniStat label="Transaction volume" value={numFmt(health.volume)} />
-                        <MiniStat label="Repeat customers" value={numFmt(health.repeat)} />
-                        <ScoreStat score={health.score} />
+                      <div className="grid gap-3 lg:grid-cols-3 items-stretch">
+                        <div className="lg:col-span-2"><MetricsCard b={b} /></div>
+                        <div className="flex flex-col gap-3">
+                          <MiniStat className="flex-1" label="Transaction volume" value={numFmt(health.volume)} />
+                          <MiniStat className="flex-1" label="Repeat customers" value={numFmt(health.repeat)} />
+                        </div>
                       </div>
                       <TatCard tat={health.tat} className="mt-3" />
                     </>
+                  ) : (
+                    <MetricsCard b={b} />
                   )}
                 </>
               );
@@ -1053,27 +1048,43 @@ function HealthRow({ label, value, accent, green }: { label: string; value: stri
   );
 }
 
-// A small headline stat card (transaction volume / repeat customers).
-function MiniStat({ label, value }: { label: string; value: string }) {
+// The full paired-metrics card for a segment (Applications↔Approval ratio, etc.).
+function MetricsCard({ b }: { b: HealthBucket }) {
   return (
-    <div className="rounded-[12px] border border-[#e0f0e8] bg-white p-4">
+    <div className="rounded-[12px] border border-[#e0f0e8] bg-white p-4 sm:p-5 h-full">
+      <div className="grid sm:grid-cols-2 gap-x-8 gap-y-0">
+        <HealthRow label="Applications Submitted" value={numFmt(b.submitted)} />
+        <HealthRow label="Approval ratio" value={pctFmt(b.approvalRatio)} accent />
+        <HealthRow label="Rejected" value={numFmt(b.rejected)} />
+        <HealthRow label="Cancellation ratio" value={pctFmt(b.cancellationRatio)} />
+        <HealthRow label="Approval Amount" value={lacsFmt(b.approvalAmount)} green />
+        <HealthRow label="Disbursed" value={lacsFmt(b.disbursed)} />
+        <HealthRow label="Pending Disbursed" value={lacsFmt(b.pending)} />
+      </div>
+    </div>
+  );
+}
+
+// A small headline stat card (transaction volume / repeat customers).
+function MiniStat({ label, value, className }: { label: string; value: string; className?: string }) {
+  return (
+    <div className={"rounded-[12px] border border-[#e0f0e8] bg-white p-4 flex flex-col justify-center " + (className ?? "")}>
       <div className="text-[12px] font-semibold uppercase tracking-wide text-[#5a8a76]">{label}</div>
       <div className="text-[26px] font-bold text-[#0f3d2e] mt-1 leading-none">{value}</div>
     </div>
   );
 }
 
-// The blended EPC score, coloured by band (strong / fair / needs attention).
-function ScoreStat({ score }: { score: number }) {
+// The blended EPC score as a compact header pill, coloured by band
+// (strong / fair / needs attention).
+function HeaderScore({ score }: { score: number }) {
   const t = scoreTone(score);
   return (
-    <div className="rounded-[12px] border p-4" style={{ backgroundColor: t.bg, borderColor: t.border }}>
-      <div className="text-[12px] font-semibold uppercase tracking-wide" style={{ color: t.text }}>EPC Score</div>
-      <div className="flex items-baseline gap-2 mt-1">
-        <span className="text-[26px] font-bold leading-none" style={{ color: t.text }}>{score}</span>
-        <span className="text-[13px] font-semibold" style={{ color: t.text }}>/100 · {t.label}</span>
-      </div>
-    </div>
+    <span className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 shrink-0" style={{ backgroundColor: t.bg, borderColor: t.border }}>
+      <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: t.text }}>EPC Score</span>
+      <span className="text-[17px] font-bold leading-none" style={{ color: t.text }}>{score}</span>
+      <span className="text-[11px] font-semibold" style={{ color: t.text }}>/100 · {t.label}</span>
+    </span>
   );
 }
 

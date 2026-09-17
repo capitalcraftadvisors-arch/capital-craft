@@ -17,12 +17,14 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useAdminNames } from "@/lib/use-admin-names";
 
 type StatusEntry = { from?: string; to?: string; by?: string; at?: string; note?: string };
 
 type LogRow = {
   id: string;
   actor: string;
+  actor_id: string | null;
   actor_name: string | null;
   action: string;
   step: number | null;
@@ -99,11 +101,10 @@ function fmtDate(v: string): string {
   });
 }
 
-function evFromLog(r: LogRow): Ev {
-  // Admin actions always read as "Admin" (never the individual admin's name);
-  // EPC actions keep the EPC's own name. This is consistent for every row —
-  // client- and server-logged alike — regardless of any stored actor_name.
-  const by = r.actor === "admin" ? "Admin" : (r.actor_name || "EPC");
+function evFromLog(r: LogRow, names: Map<string, string>): Ev {
+  // Admin actions attribute to the individual (Manish / Malvika / …) via the
+  // actor_id → name map, falling back to any stored actor_name, then "Admin".
+  const by = r.actor === "admin" ? (names.get(r.actor_id ?? "") || r.actor_name || "Admin") : (r.actor_name || "EPC");
   switch (r.action) {
     case "step_completed":
       return {
@@ -124,8 +125,8 @@ function evFromLog(r: LogRow): Ev {
   }
 }
 
-function buildEvents(loan: Record<string, any>, logs: LogRow[]): Ev[] {
-  const out: Ev[] = logs.map(evFromLog);
+function buildEvents(loan: Record<string, any>, logs: LogRow[], names: Map<string, string>): Ev[] {
+  const out: Ev[] = logs.map((l) => evFromLog(l, names));
 
   // ── Legacy fill-in for rows that predate loan_activity_log ──────────
   const loggedSteps = new Set(
@@ -164,6 +165,7 @@ function buildEvents(loan: Record<string, any>, logs: LogRow[]): Ev[] {
 export default function LoanActivityLogModal({ open, onClose, loan, borrowerName }: Props) {
   const [logs, setLogs] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const adminNames = useAdminNames();
 
   useEffect(() => {
     if (!open || !loan?.id) return;
@@ -172,7 +174,7 @@ export default function LoanActivityLogModal({ open, onClose, loan, borrowerName
       setLoading(true);
       const { data, error } = await supabase()
         .from("loan_activity_log")
-        .select("id, actor, actor_name, action, step, detail, created_at")
+        .select("id, actor, actor_id, actor_name, action, step, detail, created_at")
         .eq("application_id", loan.id)
         .order("created_at", { ascending: false })
         .limit(200);
@@ -185,7 +187,7 @@ export default function LoanActivityLogModal({ open, onClose, loan, borrowerName
   }, [open, loan?.id]);
 
   if (!open) return null;
-  const events = loan ? buildEvents(loan, logs) : [];
+  const events = loan ? buildEvents(loan, logs, adminNames) : [];
 
   return (
     <div

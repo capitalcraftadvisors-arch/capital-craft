@@ -93,6 +93,10 @@ function Inner() {
   const changeFrom = (v: string) => { setPFrom(v); persistPeriod(period, v, pTo); };
   const changeTo = (v: string) => { setPTo(v); persistPeriod(period, pFrom, v); };
 
+  // The KPI strip is a business-wide money snapshot — shown to the MAIN_ADMIN
+  // only (managers/RMs get the per-tab stage bar, not the top-line figures).
+  const kpiBiz = getBusiness();
+  const isMainAdmin = kpiBiz?.role === "MAIN_ADMIN" || (kpiBiz?.business_type === "admin" && !kpiBiz?.role && (kpiBiz?.allowed_modules ?? []).includes("analytics"));
   const section = ACCENTS[tab];
   // Tabs that carry summary cards + a period picker (loanleads/analytics don't).
   const showPeriod = tab === "epcs" || tab === "apps" || tab === "insurance" || tab === "leads";
@@ -111,6 +115,8 @@ function Inner() {
             </h1>
             <NotificationBell />
           </div>
+          {/* At-a-glance loan KPIs — MAIN_ADMIN only, compact. */}
+          {isMainAdmin && <DashboardKpis />}
           {/* Section header with the console's accent bar; period picker on the
               right, aligned with the heading. */}
           <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
@@ -341,13 +347,91 @@ const EPC_STAGE_META: Record<string, { label: string; cls: string }> = {
   rejected_by_lender: { label: "Rejected by Lender", cls: "bg-[#ffe4e6] text-[#9f1239]" },
 };
 
+// One consistent colour per pipeline stage — shared across EVERY dashboard tab,
+// so a colour always means the same thing. This is the single source of truth
+// the StageBar legend teaches (green = approved/good, red = rejected, amber =
+// waiting, blue = in-flight to lender, slate = inactive).
+const STAGE_COLOR: Record<string, string> = {
+  unseen: "#94a3b8",
+  under_review: "#d97706",
+  updated: "#ca8a04",
+  approved: "#178a5c",
+  hold: "#3b5a76",
+  rejected: "#dc2626",
+  docs_sent: "#185fa5",
+  lender_approved: "#0f7a52",
+  rejected_by_lender: "#9f1239",
+  rfd: "#7c3aed",
+  disbursed: "#0f766e",
+  docs_pending: "#d97706",
+  awaiting_policy: "#185fa5",
+  policy_issued: "#178a5c",
+  new: "#6366f1",
+  contacted: "#d97706",
+  converted: "#178a5c",
+  closed: "#94a3b8",
+};
+
+// A thin stacked "where is everything stuck" bar built from the stage cards,
+// with a colour legend + a "Breakdown" toggle that slides the detail cards open.
+// Segment + legend click filters the list.
+function StageBar({ cards, active, onPick, open, onToggle }: { cards: SummaryCard[]; active: string; onPick: (key: string) => void; open?: boolean; onToggle?: () => void }) {
+  const segs = cards.filter((c) => c.key && c.value > 0 && STAGE_COLOR[c.key]);
+  const total = segs.reduce((s, c) => s + c.value, 0);
+  if (total === 0) return null;
+  return (
+    <div>
+      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-[#eef1f4]">
+        {segs.map((c) => (
+          <button
+            key={c.key}
+            type="button"
+            onClick={() => onPick(c.key)}
+            title={`${c.label}: ${c.value}`}
+            aria-label={`${c.label}: ${c.value}`}
+            className="h-full transition-opacity hover:opacity-80"
+            style={{ width: `${(c.value / total) * 100}%`, backgroundColor: STAGE_COLOR[c.key], opacity: active && active !== c.key ? 0.35 : 1 }}
+          />
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+        {segs.map((c) => {
+          const on = active === c.key;
+          return (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => onPick(c.key)}
+              className={"inline-flex items-center gap-1.5 text-[11px] " + (on ? "font-bold text-text" : "text-text-muted hover:text-text")}
+            >
+              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: STAGE_COLOR[c.key] }} />
+              {c.label}
+            </button>
+          );
+        })}
+        {onToggle && (
+          <button type="button" onClick={onToggle} className="ml-auto inline-flex items-center gap-1 text-[11px] font-semibold text-[#178a5c] hover:underline">
+            {open ? "Hide breakdown" : "Breakdown"}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={"transition-transform " + (open ? "rotate-180" : "")}><path d="m6 9 6 6 6-6" /></svg>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Stage bar is always shown; the detailed count cards stay collapsed until the
+// admin opens the breakdown (or a stage filter is active). Cards are compact.
 function SummaryCards({ accent, cards, active, onPick, caption }: {
   accent: string; cards: SummaryCard[]; active: string; onPick: (key: string) => void; caption?: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const show = open || !!active;
   return (
     <div className="mb-5">
       {caption && <p className="text-[11px] text-text-muted mb-2 font-medium">{caption}</p>}
-      <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+      <StageBar cards={cards} active={active} onPick={onPick} open={show} onToggle={() => setOpen((o) => !o)} />
+      <div className={"grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 overflow-hidden transition-all duration-300 " + (show ? "mt-3 max-h-[900px] opacity-100" : "max-h-0 opacity-0")}>
         {cards.map((c) => {
           const on = active === c.key;
           return (
@@ -356,19 +440,102 @@ function SummaryCards({ accent, cards, active, onPick, caption }: {
               type="button"
               onClick={() => onPick(c.key)}
               aria-pressed={on}
-              className="flex items-center gap-3 rounded-xl border border-line bg-white px-4 py-3 text-left shadow-sm transition-colors"
+              className="flex items-center gap-2.5 rounded-lg border border-line bg-white px-3 py-2 text-left shadow-sm transition-colors"
               style={on ? { borderColor: accent, boxShadow: `inset 0 0 0 1px ${accent}` } : undefined}
             >
-              <span className="w-9 h-9 rounded-lg grid place-items-center shrink-0" style={{ backgroundColor: accent + "1a", color: accent }}>
+              <span className="w-7 h-7 rounded-md grid place-items-center shrink-0" style={{ backgroundColor: accent + "1a", color: accent }}>
                 {SUMMARY_ICON[c.key] ?? SUMMARY_ICON[""]}
               </span>
               <span className="min-w-0">
-                <span className="block text-[20px] font-display font-bold leading-none text-text">{c.value}</span>
-                <span className="block text-[11px] text-text-muted mt-1 truncate" title={c.label}>{c.label}</span>
+                <span className="block text-[16px] font-display font-bold leading-none text-text">{c.value}</span>
+                <span className="block text-[10px] text-text-muted mt-0.5 truncate" title={c.label}>{c.label}</span>
               </span>
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ── Dashboard KPI strip ──────────────────────────────────────────────────
+// A lightweight loan-wide snapshot shown above every tab. One small aggregate
+// query (cached 30s to protect egress); reuses the Task-Manager target.
+type KpiData = { pipeline: number; disbursedMonth: number; active: number; approvalRate: number; overdue: number; target: number };
+const KPI_APPROVED = new Set(["approved", "rfd", "sent_to_nbfc", "disbursed"]);
+
+function DashboardKpis() {
+  const [d, setD] = useState<KpiData | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const cached = getCached<KpiData>("dashkpis", 30000);
+    if (cached) { setD(cached); return; }
+    void (async () => {
+      const { data } = await supabase()
+        .from("epc_applications")
+        .select("status, loan_amount_required, loan_amount, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, second_disbursement_date, updated_at, aborted_at");
+      if (cancelled) return;
+      const rows = (data ?? []) as Record<string, any>[];
+      const now = new Date(); const ny = now.getFullYear(); const nm = now.getMonth();
+      const inMonth = (s: string | null) => { if (!s) return false; const x = new Date(s); return x.getFullYear() === ny && x.getMonth() === nm; };
+      const num = (v: unknown) => Number(v) || 0;
+      const active = rows.filter((r) => r.status !== "draft" && r.status !== "rejected" && !r.aborted_at && r.second_disbursement_amount == null);
+      const pipeline = active.reduce((s, r) => s + (num(r.loan_amount_required) || num(r.loan_amount)), 0);
+      const submitted = rows.filter((r) => r.status !== "draft").length;
+      const approved = rows.filter((r) => r.first_disbursement_amount != null || KPI_APPROVED.has(r.status)).length;
+      const approvalRate = submitted ? Math.round((approved / submitted) * 100) : 0;
+      const disbursedMonth = rows.reduce((s, r) =>
+        s + (inMonth(r.first_disbursement_date) ? num(r.first_disbursement_amount) : 0)
+          + (inMonth(r.second_disbursement_date) ? num(r.second_disbursement_amount) : 0), 0);
+      const overdue = active.filter((r) => r.updated_at && (Date.now() - new Date(r.updated_at).getTime()) > 7 * 86400000).length;
+      let target = 65; try { target = Number(localStorage.getItem("opsboard.target")) || 65; } catch { /* default */ }
+      const result: KpiData = { pipeline, disbursedMonth, active: active.length, approvalRate, overdue, target };
+      setCached("dashkpis", result);
+      setD(result);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  if (!d) return null;
+  const money = (v: number) => (v >= 1e7 ? `₹${(v / 1e7).toFixed(2)} Cr` : `₹${(v / 1e5).toFixed(1)} L`);
+  const ringPct = Math.min(100, d.target > 0 ? Math.round((d.disbursedMonth / (d.target * 1e5)) * 100) : 0);
+  return (
+    <div className="mb-4 grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+      <KpiTile label="Pipeline value" value={money(d.pipeline)} sub={`${d.active} active`} accent="#178a5c" />
+      <KpiRingTile label="Disbursed · this month" value={money(d.disbursedMonth)} sub={`Target ${money(d.target * 1e5)}`} pct={ringPct} />
+      <KpiTile label="Active applications" value={String(d.active)} accent="#185fa5" />
+      <KpiTile label="Approval rate" value={`${d.approvalRate}%`} accent="#0f7a52" />
+      <KpiTile label="Overdue" value={String(d.overdue)} sub="idle > 7 days" accent={d.overdue > 0 ? "#dc2626" : "#94a3b8"} />
+    </div>
+  );
+}
+
+function KpiTile({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent: string }) {
+  return (
+    <div className="rounded-lg border border-line bg-white px-3 py-2 shadow-sm">
+      <div className="flex items-center gap-1.5">
+        <span className="inline-block w-1 h-3 rounded-full shrink-0" style={{ backgroundColor: accent }} />
+        <span className="text-[10px] font-medium text-text-muted uppercase tracking-wide truncate">{label}</span>
+      </div>
+      <div className="text-[17px] font-display font-bold text-text mt-1 leading-none">{value}</div>
+      {sub && <div className="text-[10px] text-text-muted mt-0.5 truncate">{sub}</div>}
+    </div>
+  );
+}
+
+function KpiRingTile({ label, value, sub, pct }: { label: string; value: string; sub?: string; pct: number }) {
+  const r = 13, circ = 2 * Math.PI * r, off = circ * (1 - pct / 100);
+  const color = pct >= 100 ? "#178a5c" : pct >= 60 ? "#0f7a52" : pct >= 30 ? "#d97706" : "#dc2626";
+  return (
+    <div className="rounded-lg border border-line bg-white px-3 py-2 shadow-sm flex items-center gap-2.5">
+      <svg width="34" height="34" viewBox="0 0 34 34" className="shrink-0 -rotate-90">
+        <circle cx="17" cy="17" r={r} fill="none" stroke="#eef1f4" strokeWidth="4" />
+        <circle cx="17" cy="17" r={r} fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={off} />
+        <text x="17" y="17" transform="rotate(90 17 17)" textAnchor="middle" dominantBaseline="central" style={{ fontSize: 9, fontWeight: 700, fill: "#334155" }}>{pct}%</text>
+      </svg>
+      <div className="min-w-0">
+        <div className="text-[10px] font-medium text-text-muted uppercase tracking-wide truncate">{label}</div>
+        <div className="text-[15px] font-display font-bold text-text leading-none mt-0.5">{value}</div>
+        {sub && <div className="text-[10px] text-text-muted mt-0.5 truncate">{sub}</div>}
       </div>
     </div>
   );
@@ -1076,6 +1243,8 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     borrower_name: string | null;
     aadhaar_name:  string | null;
     aadhaar_number_masked: string | null;
+    borrower_pan: string | null;
+    borrower_mobile: string | null;
     loan_display_id: string | null;
     // Loan amount lives in loan_amount_required (Step 3). loan_amount is
     // the legacy 0001 column — read both, prefer the newer one.
@@ -1205,6 +1374,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         .from("epc_applications")
         .select(
           "id, borrower_name, aadhaar_name, aadhaar_number_masked, loan_display_id, " +
+          "borrower_pan, borrower_mobile, " +
           "loan_amount, loan_amount_required, " +
           "sanctioned_amount, first_disbursement_amount, first_disbursement_date, second_disbursement_amount, " +
           // NOTE: rfd_at is intentionally NOT selected — it doesn't exist until
@@ -1239,6 +1409,17 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
   function displayBorrower(r: Row): string {
     return r.borrower_name || r.aadhaar_name || "—";
   }
+  // Applications that share a PAN or mobile with another loan — flagged ⚠ so
+  // duplicates get caught before double-work.
+  const dupKeys = useMemo(() => {
+    const count = new Map<string, number>();
+    for (const r of rows) {
+      const k = (r.borrower_pan || "").toUpperCase().trim() || (r.borrower_mobile || "").trim();
+      if (k) count.set(k, (count.get(k) || 0) + 1);
+    }
+    return new Set([...count.entries()].filter(([, c]) => c > 1).map(([k]) => k));
+  }, [rows]);
+  const isDup = (r: Row) => { const k = (r.borrower_pan || "").toUpperCase().trim() || (r.borrower_mobile || "").trim(); return !!k && dupKeys.has(k); };
   function displayEpc(r: Row): string {
     return r.epc_business?.trade_name
         || r.epc_business?.legal_name
@@ -1528,7 +1709,10 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
                     </span>
                     <div className="min-w-0">
-                      <p className="text-[13px] font-semibold text-[#0f3d2e] truncate">{displayBorrower(r)}</p>
+                      <p className="text-[13px] font-semibold text-[#0f3d2e] truncate flex items-center gap-1">
+                        <span className="truncate">{displayBorrower(r)}</span>
+                        {isDup(r) && <span title="Shares a PAN / mobile with another application — possible duplicate" className="text-[#d97706] shrink-0">⚠</span>}
+                      </p>
                       {r.loan_display_id && (
                         <p className="text-[11px] font-mono text-[#185fa5] mt-0.5">{r.loan_display_id}</p>
                       )}

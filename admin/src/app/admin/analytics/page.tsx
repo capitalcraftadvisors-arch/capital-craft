@@ -36,12 +36,14 @@ import {
   Tooltip, Cell, PieChart, Pie, CartesianGrid, LabelList,
 } from "recharts";
 import AuthGuard from "@/components/AuthGuard";
-import AdminSidebar, { ACCENTS } from "@/components/AdminSidebar";
+import AdminSidebar from "@/components/AdminSidebar";
 import Card from "@/components/ui/Card";
 import { supabase } from "@/lib/supabase";
 import { lenderOutcome } from "@/lib/loan-status";
+import OverviewSection from "@/components/analytics/OverviewSection";
 
-const PURPLE = ACCENTS.analytics.color; // #6d28d9
+const ACCENT = "#178a5c"; // brand green — analytics chrome/charts match the rest of the console
+const SLATE = "#94a3b8"; // neutral slice colour (kept distinct from the green "good" slice)
 
 // Thresholds (deterministic intelligence).
 const FLAG_PCT = 10;   // flag a change only when |Δ| ≥ 10%
@@ -339,14 +341,6 @@ function geoInsights(cur: Loan[], prev: Loan[], noun: string): string[] {
 
 // At most ONE geography line for a loan section's What-Changed — only on a
 // meaningful shift (a period delta, a concentration flag, or new districts).
-function geoWhatChangedLine(loans: Loan[], w: Windows): string | null {
-  const cur = loans.filter((r) => inWin(t(r.created_at), w.cur));
-  if (cur.length < GEO_MIN_INSIGHT) return null;
-  const prev = loans.filter((r) => inWin(t(r.created_at), w.prev));
-  const lines = geoInsights(cur, prev, "applications");
-  return lines.find((l) => l.includes("last period") || l.includes("concentrated") || l.includes("new districts")) ?? null;
-}
-
 // ── section computation: INSURANCE ───────────────────────────────────────────
 type InsSection = {
   kpis: Kpi[];
@@ -543,20 +537,6 @@ const clamp = (n: number, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, n));
 // Loans: 35% approval rate · 25% speed (TAT, 20d→0) · 20% momentum (apps Δ) ·
 //        20% flow (disbursed/sanctioned). Insurance: 55% issuance rate · 25%
 //        momentum · 20% backlog-clear. Each sub-score is 0–100; final = weighted mean.
-function loanHealth(s: LoanSection): Health {
-  if (s.totalCur < MIN_CHART) return null;
-  const approval = s.approvalRateCur ?? 0;
-  const speed = clamp(100 - (s.avgTatCur ?? 20) * 5);
-  const momentum = clamp(50 + (pct(s.totalCur, s.totalPrev) ?? 0));
-  const flow = s.sanctionedCur ? clamp((s.disbursedCur / s.sanctionedCur) * 100) : 50;
-  const subs = [
-    { label: "Approval rate", score: Math.round(approval) },
-    { label: "Speed (TAT)", score: Math.round(speed) },
-    { label: "Momentum", score: Math.round(momentum) },
-    { label: "Flow to disbursal", score: Math.round(flow) },
-  ];
-  return { score: Math.round(approval * 0.35 + speed * 0.25 + momentum * 0.2 + flow * 0.2), subs };
-}
 function insHealth(s: InsSection): Health {
   if (s.totalCur < MIN_CHART) return null;
   const issuance = s.issuanceRateCur ?? 0;
@@ -593,8 +573,9 @@ export default function AnalyticsPage() {
   );
 }
 
-type SectionKey = "res" | "com" | "ins" | "epc" | "geo";
+type SectionKey = "overview" | "res" | "com" | "ins" | "epc" | "geo";
 const SECTION_TABS: { key: SectionKey; label: string }[] = [
+  { key: "overview", label: "Overview" },
   { key: "res", label: "Residential" }, { key: "com", label: "C&I" },
   { key: "ins", label: "Insurance" }, { key: "epc", label: "EPC" },
   { key: "geo", label: "Geography" },
@@ -607,7 +588,7 @@ function Inner() {
   const [lenders, setLenders] = useState<LenderRow[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [section, setSection] = useState<SectionKey>("res");
+  const [section, setSection] = useState<SectionKey>("overview");
   const [preset, setPreset] = useState<Preset>("month");
   const [cs, setCs] = useState("");
   const [ce, setCe] = useState("");
@@ -636,7 +617,6 @@ function Inner() {
 
   const resLoans = useMemo(() => loans.filter((r) => r.plant_use_type === "residential"), [loans]);
   const comLoans = useMemo(() => loans.filter((r) => r.plant_use_type === "commercial"), [loans]);
-  const uncategorized = useMemo(() => loans.filter((r) => r.plant_use_type == null).length, [loans]);
 
   const res = useMemo(() => computeLoanSection(resLoans, w), [resLoans, w]);
   const com = useMemo(() => computeLoanSection(comLoans, w), [comLoans, w]);
@@ -651,7 +631,7 @@ function Inner() {
         <div className="sticky top-0 z-20 bg-bg-soft/90 backdrop-blur border-b border-line">
           <div className="w-full px-4 sm:px-6 py-4">
             <div className="flex items-center gap-2.5 mb-3">
-              <span className="inline-block w-1.5 h-7 rounded-full" style={{ backgroundColor: PURPLE }} />
+              <span className="inline-block w-1.5 h-7 rounded-full" style={{ backgroundColor: ACCENT }} />
               <h1 className="font-display text-[24px] sm:text-[28px] font-bold">Analytics</h1>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -661,7 +641,7 @@ function Inner() {
                   return (
                     <button key={s.key} type="button" onClick={() => setSection(s.key)}
                       className="px-3.5 py-1.5 rounded-[8px] text-[13px] font-semibold transition-colors"
-                      style={on ? { backgroundColor: PURPLE + "1a", color: PURPLE } : { color: "var(--muted)" }}>
+                      style={on ? { backgroundColor: ACCENT + "1a", color: ACCENT } : { color: "var(--muted)" }}>
                       {s.label}
                     </button>
                   );
@@ -692,14 +672,15 @@ function Inner() {
             <p className="text-[13px] text-text-muted">Loading…</p>
           ) : (
             <div className="space-y-6">
-              {section === "res" && <LoanSectionView title="Residential" s={res} w={w} note={null} loans={resLoans} />}
-              {section === "com" && <LoanSectionView title="C&I" s={com} w={w} note={uncategorized ? `${uncategorized} loan${uncategorized === 1 ? "" : "s"} have no Residential/C&I category and are excluded from both sections.` : null} loans={comLoans} />}
+              {section === "overview" && <OverviewSection win={w.cur} />}
+              {section === "res" && <OverviewSection win={w.cur} segment="residential" />}
+              {section === "com" && <OverviewSection win={w.cur} segment="commercial" />}
               {section === "ins" && <InsSectionView s={insM} w={w} />}
               {section === "epc" && <EpcSectionView s={epc} w={w} />}
               {section === "geo" && <GeographySectionView resLoans={resLoans} comLoans={comLoans} allLoans={loans} w={w} />}
 
-              {/* Cross-business comparison — identical across sections (not on Geography) */}
-              {section !== "geo" && <CrossTable res={res} com={com} ins={insM} epc={epc} />}
+              {/* Cross-business comparison — identical across sections (not on Overview / Geography) */}
+              {section !== "geo" && section !== "overview" && <CrossTable res={res} com={com} ins={insM} epc={epc} />}
             </div>
           )}
         </section>
@@ -713,7 +694,7 @@ function SummaryBar({ text }: { text: string }) {
   return (
     <Card className="p-5" >
       <div className="flex items-start gap-3">
-        <span className="w-8 h-8 rounded-lg grid place-items-center shrink-0 mt-0.5" style={{ backgroundColor: PURPLE + "1a", color: PURPLE }}>
+        <span className="w-8 h-8 rounded-lg grid place-items-center shrink-0 mt-0.5" style={{ backgroundColor: ACCENT + "1a", color: ACCENT }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3a9 9 0 100 18 9 9 0 000-18zM12 8v4M12 16h.01" /></svg>
         </span>
         <div>
@@ -744,7 +725,7 @@ function KpiCard({ k }: { k: Kpi }) {
 function EmptyState({ msg }: { msg?: string }) {
   return (
     <div className="border border-dashed border-line rounded-xl p-8 flex flex-col items-center text-center bg-bg-tint/40">
-      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={PURPLE} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18" /><path d="M7 14l3-3 4 4 6-6" /></svg>
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={ACCENT} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18" /><path d="M7 14l3-3 4 4 6-6" /></svg>
       <p className="mt-2.5 text-[13px] font-semibold text-text">Not enough data yet</p>
       <p className="mt-1 text-[12px] text-text-muted">{msg ?? "This will populate as applications flow."}</p>
     </div>
@@ -772,7 +753,7 @@ function TrendChart({ data }: { data: { label: string; cur: number; prev: number
           <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#6b7280" }} axisLine={false} tickLine={false} width={28} />
           <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e5e7eb" }} />
           <Line type="monotone" dataKey="prev" name="Previous" stroke="#c9c4d8" strokeWidth={2} dot={false} />
-          <Line type="monotone" dataKey="cur" name="Current" stroke={PURPLE} strokeWidth={2.5} dot={false} />
+          <Line type="monotone" dataKey="cur" name="Current" stroke={ACCENT} strokeWidth={2.5} dot={false} />
         </LineChart>
       </ResponsiveContainer>
     </div>
@@ -791,7 +772,7 @@ function FunnelBars({ stages }: { stages: { label: string; value: number }[] }) 
             <span className="font-semibold text-text">{s.value}</span>
           </div>
           <div className="h-3 rounded-full bg-bg-tint overflow-hidden">
-            <div className="h-full rounded-full" style={{ width: `${(s.value / max) * 100}%`, backgroundColor: PURPLE, opacity: 1 - i * 0.22 }} />
+            <div className="h-full rounded-full" style={{ width: `${(s.value / max) * 100}%`, backgroundColor: ACCENT, opacity: 1 - i * 0.22 }} />
           </div>
         </div>
       ))}
@@ -830,27 +811,9 @@ function SimpleBar({ data }: { data: { name: string; value: number }[] }) {
           <YAxis allowDecimals={false} tick={{ fontSize: 10, fill: "#6b7280" }} axisLine={false} tickLine={false} width={28} />
           <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e5e7eb" }} />
           <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-            {data.map((d, i) => <Cell key={d.name} fill={i === data.length - 1 ? PURPLE : "#c9c4d8"} />)}
+            {data.map((d, i) => <Cell key={d.name} fill={i === data.length - 1 ? ACCENT : "#c9c4d8"} />)}
           </Bar>
         </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-function TatTrendChart({ data }: { data: { label: string; tat: number | null }[] }) {
-  const pts = data.filter((d) => d.tat != null);
-  if (pts.length < MIN_CHART) return <EmptyState />;
-  return (
-    <div style={{ width: "100%", height: 180 }}>
-      <ResponsiveContainer>
-        <LineChart data={data} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#eef1f4" vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#6b7280" }} axisLine={{ stroke: "#e5e7eb" }} tickLine={false} />
-          <YAxis tick={{ fontSize: 10, fill: "#6b7280" }} axisLine={false} tickLine={false} width={30} tickFormatter={(v: number) => `${v}d`} />
-          <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e5e7eb" }} />
-          <Line type="monotone" dataKey="tat" name="Avg TAT (d)" stroke={PURPLE} strokeWidth={2.5} connectNulls dot={{ r: 2 }} />
-        </LineChart>
       </ResponsiveContainer>
     </div>
   );
@@ -869,7 +832,7 @@ function HealthCard({ h }: { h: Health }) {
         {h.subs.map((s) => (
           <div key={s.label}>
             <div className="flex items-center justify-between text-[11.5px] mb-0.5"><span className="text-text-mid">{s.label}</span><span className="font-semibold text-text">{s.score}</span></div>
-            <div className="h-1.5 rounded-full bg-bg-tint overflow-hidden"><div className="h-full rounded-full" style={{ width: `${clamp(s.score)}%`, backgroundColor: PURPLE }} /></div>
+            <div className="h-1.5 rounded-full bg-bg-tint overflow-hidden"><div className="h-full rounded-full" style={{ width: `${clamp(s.score)}%`, backgroundColor: ACCENT }} /></div>
           </div>
         ))}
       </div>
@@ -957,7 +920,7 @@ function RecommendationsCard({ items }: { items: string[] }) {
       <p className="text-[13px] font-semibold text-text mb-2">Recommended Actions</p>
       {items.length ? (
         <ol className="space-y-2 list-none">
-          {items.map((x, i) => <li key={i} className="text-[12.5px] text-text-mid leading-snug flex gap-2"><span className="font-semibold" style={{ color: PURPLE }}>{i + 1}.</span><span>{x}</span></li>)}
+          {items.map((x, i) => <li key={i} className="text-[12.5px] text-text-mid leading-snug flex gap-2"><span className="font-semibold" style={{ color: ACCENT }}>{i + 1}.</span><span>{x}</span></li>)}
         </ol>
       ) : <p className="text-[12.5px] text-text-muted">No actions triggered — nothing above threshold this period.</p>}
     </Card>
@@ -965,48 +928,8 @@ function RecommendationsCard({ items }: { items: string[] }) {
 }
 
 // ── section views (identical order/layout across sections) ────────────────────
-function LoanSectionView({ title, s, w, note, loans }: { title: string; s: LoanSection; w: Windows; note: string | null; loans: Loan[] }) {
-  const deltas = toDeltas(s.kpis);
-  const geoNote = geoWhatChangedLine(loans, w);
-  const bottleneck = s.convDrop ? `${s.convDrop.stage} conversion fell ${s.convDrop.drop.toFixed(0)} points vs the previous ${w.label.toLowerCase()} — the biggest drop in the pipeline.` : null;
-  const recs: string[] = [];
-  if (s.pendingOverdue > 0) recs.push(`${s.pendingOverdue} application${s.pendingOverdue === 1 ? "" : "s"} pending beyond 7 days — review the post-sanction queue.`);
-  if (s.convDrop) recs.push(`Focus on the "${s.convDrop.stage}" step — its conversion dropped ${s.convDrop.drop.toFixed(0)} points.`);
-  const rej = deltas.find((d) => d.label === "Total Rejected");
-  if (rej && flagged(rej) && !improving(rej)) recs.push(`Rejections up ${Math.abs(rej.changePct as number).toFixed(0)}% — audit recent lender rejections for a common cause.`);
-
-  return (
-    <div className="space-y-6">
-      {note && <p className="text-[12px] text-text-muted bg-bg-tint/60 border border-line rounded-lg px-3 py-2">{note}</p>}
-      <SummaryBar text={buildSummary(title, deltas, w)} />
-      <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">{s.kpis.map((k) => <KpiCard key={k.label} k={k} />)}</div>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2"><WhatChangedCard wc={buildWhatChanged(deltas, s.pendingOverdue)} geoNote={geoNote} /></div>
-        <HealthCard h={loanHealth(s)} />
-      </div>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <ChartCard title="Applications trend (current vs previous)"><TrendChart data={s.trend} /></ChartCard>
-        <ChartCard title="Funnel — Applied → Sanctioned → Disbursed"><FunnelBars stages={[{ label: "Applied", value: s.funnel.applied }, { label: "Sanctioned", value: s.funnel.sanctioned }, { label: "Disbursed", value: s.funnel.disbursed }]} /></ChartCard>
-        <ChartCard title="Sanctioned vs Rejected vs Pending"><DonutChart data={[{ name: "Sanctioned", value: s.donut.sanctioned, color: "#178a5c" }, { name: "Rejected", value: s.donut.rejected, color: "#b42318" }, { name: "Pending", value: s.donut.pending, color: PURPLE }]} /></ChartCard>
-        <ChartCard title="TAT trend (disbursed loans)"><TatTrendChart data={s.tatTrend} /></ChartCard>
-        <ChartCard title="Disbursements — current vs previous"><SimpleBar data={s.disbBar} /></ChartCard>
-      </div>
-      <GeoBlock loans={loans} w={w} />
-      <div className="grid gap-4 lg:grid-cols-3">
-        <AlertsCard alerts={buildAlerts(deltas, s.pendingOverdue > 0 ? [{ sev: "medium", text: `${s.pendingOverdue} application${s.pendingOverdue === 1 ? "" : "s"} pending beyond 7 days.` }] : [])} />
-        <BottleneckCard text={bottleneck} />
-        <RecommendationsCard items={recs.slice(0, 3)} />
-      </div>
-    </div>
-  );
-}
-
 function InsSectionView({ s, w }: { s: InsSection; w: Windows }) {
   const deltas = toDeltas(s.kpis);
-  const recs: string[] = [];
-  if (s.underIssuanceCur > 0) recs.push(`${s.underIssuanceCur} application${s.underIssuanceCur === 1 ? "" : "s"} awaiting a policy document — chase the insurer/upload queue.`);
-  const iss = deltas.find((d) => d.label === "Policy Issued");
-  if (iss && flagged(iss) && !improving(iss)) recs.push(`Policies issued down ${Math.abs(iss.changePct as number).toFixed(0)}% — check the issuance pipeline.`);
   return (
     <div className="space-y-6">
       <SummaryBar text={buildSummary("Insurance", deltas, w)} />
@@ -1026,12 +949,7 @@ function InsSectionView({ s, w }: { s: InsSection; w: Windows }) {
       <div className="grid gap-4 lg:grid-cols-3">
         <ChartCard title="Applications trend (current vs previous)"><TrendChart data={s.trend} /></ChartCard>
         <ChartCard title="Funnel — Applied → Issued"><FunnelBars stages={[{ label: "Applied", value: s.funnel.applied }, { label: "Issued", value: s.funnel.issued }]} /></ChartCard>
-        <ChartCard title="Issued vs Rejected vs Pending"><DonutChart data={[{ name: "Issued", value: s.donut.issued, color: "#178a5c" }, { name: "Rejected", value: s.donut.rejected, color: "#b42318" }, { name: "Pending", value: s.donut.pending, color: PURPLE }]} /></ChartCard>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <AlertsCard alerts={buildAlerts(deltas)} />
-        <BottleneckCard text={null} />
-        <RecommendationsCard items={recs.slice(0, 3)} />
+        <ChartCard title="Issued vs Rejected vs Pending"><DonutChart data={[{ name: "Issued", value: s.donut.issued, color: "#178a5c" }, { name: "Rejected", value: s.donut.rejected, color: "#b42318" }, { name: "Pending", value: s.donut.pending, color: SLATE }]} /></ChartCard>
       </div>
     </div>
   );
@@ -1039,11 +957,6 @@ function InsSectionView({ s, w }: { s: InsSection; w: Windows }) {
 
 function EpcSectionView({ s, w }: { s: EpcSection; w: Windows }) {
   const deltas = toDeltas(s.kpis);
-  const recs: string[] = [];
-  const rev = deltas.find((d) => d.label === "Avg Review Time");
-  if (rev && flagged(rev) && !improving(rev)) recs.push(`Review time up ${Math.abs(rev.changePct as number).toFixed(0)}% (${rev.fmt(rev.m.cur)}) — clear the EPC review backlog.`);
-  const og = deltas.find((d) => d.label === "% Filled in One Go");
-  if (og && flagged(og) && !improving(og)) recs.push(`Single-session completion dropped to ${og.fmt(og.m.cur)} — check where EPCs abandon onboarding.`);
   return (
     <div className="space-y-6">
       <SummaryBar text={buildSummary("EPC", deltas, w)} />
@@ -1054,12 +967,7 @@ function EpcSectionView({ s, w }: { s: EpcSection; w: Windows }) {
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
         <ChartCard title="Fill-time distribution"><SimpleBar data={s.fillHist.map((b) => ({ name: b.label, value: b.count }))} /></ChartCard>
-        <ChartCard title="Filled in one go">{s.oneGo.length ? <DonutChart data={[{ name: "One go", value: s.oneGo[0].value, color: "#178a5c" }, { name: "Multi-session", value: s.oneGo[1].value, color: PURPLE }]} /> : <EmptyState />}</ChartCard>
-      </div>
-      <div className="grid gap-4 lg:grid-cols-3">
-        <AlertsCard alerts={buildAlerts(deltas)} />
-        <BottleneckCard text={null} />
-        <RecommendationsCard items={recs.slice(0, 3)} />
+        <ChartCard title="Filled in one go">{s.oneGo.length ? <DonutChart data={[{ name: "One go", value: s.oneGo[0].value, color: "#178a5c" }, { name: "Multi-session", value: s.oneGo[1].value, color: SLATE }]} /> : <EmptyState />}</ChartCard>
       </div>
     </div>
   );

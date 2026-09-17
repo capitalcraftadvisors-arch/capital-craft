@@ -18,6 +18,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { useAdminNames } from "@/lib/use-admin-names";
 
 type LogRow = {
   id: string;
@@ -38,6 +39,7 @@ type Props = {
 export default function ActivityLog({ businessId, refreshKey }: Props) {
   const [rows, setRows] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const adminNames = useAdminNames();
 
   useEffect(() => {
     let cancelled = false;
@@ -75,8 +77,8 @@ export default function ActivityLog({ businessId, refreshKey }: Props) {
               </div>
               <span className="text-[11px] text-[#5a8a76] shrink-0">{fmtDate(r.created_at)}</span>
             </div>
-            <p className="text-[12px] text-[#5a8a76] mt-0.5 pl-[26px] capitalize">
-              by {actorLabel(r.actor)}
+            <p className="text-[12px] text-[#5a8a76] mt-0.5 pl-[26px]">
+              by {r.actor === "epc" ? "the EPC" : (adminNames.get(r.actor_id) || "Admin")}
             </p>
           </li>
         );
@@ -144,12 +146,6 @@ function iconFor(r: LogRow): IconChoice {
     case "comment_delete":     return { svg: I_CHAT_X, tone: RED };
     default:                   return { svg: I_DOT, tone: NEUTRAL };
   }
-}
-
-function actorLabel(actor: string): string {
-  if (actor === "admin") return "admin";
-  if (actor === "epc")   return "the EPC";
-  return actor;
 }
 
 function describe(r: LogRow): string {
