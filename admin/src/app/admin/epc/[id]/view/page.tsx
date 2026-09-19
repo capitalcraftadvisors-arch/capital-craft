@@ -418,6 +418,7 @@ function Inner() {
         <ProfileRail>
           <TabButton label="Profile" icon={I.building} active rail />
           <TabButton label="Edit" icon={I.edit} rail onClick={() => router.push(`/admin/epc/${biz.id}` as any)} />
+          <TabButton label="Continue in chat" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>} rail onClick={() => router.push(`/admin/epc/intake?epc=${biz.id}&edit=1` as any)} />
           <TabButton label="Activity Log" icon={I.eye} rail onClick={() => setActivityOpen(true)} />
           <TabButton label="Download ZIP" icon={I.download} rail disabled={downloading} onClick={() => setZipPickerOpen(true)} />
         </ProfileRail>

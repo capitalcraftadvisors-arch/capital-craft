@@ -219,6 +219,18 @@ const WA_PENDING: { key: string; label: string; hi: string }[] = [
   { key: "cheque",    label: "Cancelled cheque",       hi: "कैंसिल चेक" },
   { key: "gst",       label: "GST certificate",        hi: "GST प्रमाणपत्र" },
 ];
+// EPC onboarding documents — a PARTNER's paperwork, not a loan applicant's.
+// Used by the WhatsApp composer when the case is an EPC (source === "epc").
+const WA_PENDING_EPC: { key: string; label: string; hi: string }[] = [
+  { key: "biz_pan",  label: "Business PAN card",           hi: "प्रतिष्ठान का पैन कार्ड" },
+  { key: "gst",      label: "GST certificate",             hi: "GST प्रमाणपत्र" },
+  { key: "reg",      label: "Registration proof",          hi: "पंजीकरण प्रमाण (डीड / इनकॉर्पोरेशन)" },
+  { key: "owner_aadhaar", label: "Owner / partner Aadhaar", hi: "मालिक / पार्टनर का आधार कार्ड" },
+  { key: "owner_pan",     label: "Owner / partner PAN",     hi: "मालिक / पार्टनर का पैन कार्ड" },
+  { key: "photo",    label: "Owner photo",                 hi: "मालिक की पासपोर्ट साइज़ फोटो" },
+  { key: "cheque",   label: "Cancelled cheque",            hi: "कैंसिल चेक" },
+  { key: "bank",     label: "Bank account details",        hi: "बैंक खाता विवरण" },
+];
 // Message intents (message text only — the composer UI itself stays English).
 type WaIntent = "docs" | "approved" | "disbursed" | "followup";
 const WA_INTENTS: { key: WaIntent; label: string }[] = [
@@ -226,6 +238,15 @@ const WA_INTENTS: { key: WaIntent; label: string }[] = [
   { key: "disbursed", label: "Disbursement" },
   { key: "followup",  label: "Follow-up" },
 ];
+// EPC intents — no "disbursement" (partners don't get disbursed); instead an
+// "Onboarded" congratulations once the partner profile is approved.
+const WA_INTENTS_EPC: { key: WaIntent; label: string }[] = [
+  { key: "docs",     label: "Onboarding docs" },
+  { key: "approved", label: "Onboarded" },
+  { key: "followup", label: "Follow-up" },
+];
+// Pick the right pending-docs list for a case's source.
+const waPendingFor = (source: CaseSource) => (source === "epc" ? WA_PENDING_EPC : WA_PENDING);
 // The message body can be written in English, Hinglish, or easy Hindi.
 type WaLang = "en" | "hinglish" | "hi";
 const WA_LANGS: { key: WaLang; label: string }[] = [
@@ -238,7 +259,7 @@ function buildWaMessage(customer: string, rm: string, itemKeys: string[], source
   const name = customer && customer !== "—" ? customer : "";
   const isEpc = source === "epc";
   const vendor = epc && epc !== "—" ? epc : "";
-  const items = WA_PENDING.filter((it) => itemKeys.includes(it.key));
+  const items = waPendingFor(source).filter((it) => itemKeys.includes(it.key));
   if (lang === "en") {
     const greet = name ? `Hello ${name},` : "Hello,";
     const who = `This is ${rm} from Capital Craft Financial Advisors.`;
@@ -401,6 +422,10 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
   const delayCounts = delayCats.map((k) => ({ k, n: shown.filter((c) => waitingOn(c) === k).length }));
   const delayMax = Math.max(1, ...delayCounts.map((d) => d.n));
   const todayLabel = (() => { try { return new Date(todayStr + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short" }).toUpperCase(); } catch { return ""; } })();
+  // WhatsApp composer uses an EPC-specific doc list + intents when the open case
+  // is a partner (source === "epc"); loan/lead/insurance keep the applicant set.
+  const waPending = waCase ? waPendingFor(waCase.source) : WA_PENDING;
+  const waIntents = waCase?.source === "epc" ? WA_INTENTS_EPC : WA_INTENTS;
   return (
     <div>
       <div className="mb-3">
@@ -557,7 +582,7 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
             {/* Message intent */}
             <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid mb-1.5">Message</div>
             <div className="flex flex-wrap gap-1.5 mb-2.5">
-              {WA_INTENTS.map((t) => (
+              {waIntents.map((t) => (
                 <button key={t.key} type="button" onClick={() => setWaIntent(t.key)}
                   className={["text-[12px] rounded-lg border px-2.5 py-1.5 transition-colors", waIntent === t.key ? "border-[#0f766e] bg-[#0f766e] text-white font-semibold" : "border-line bg-white text-text-mid hover:bg-bg-tint"].join(" ")}>
                   {t.label}
@@ -585,7 +610,7 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
                   <div className="mb-2.5">
                     <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid mb-1">Docs received ({waHave.size})</div>
                     <div className="flex flex-wrap gap-1.5">
-                      {WA_PENDING.filter((it) => waHave.has(it.key)).map((it) => (
+                      {waPending.filter((it) => waHave.has(it.key)).map((it) => (
                         <span key={it.key} className="text-[11.5px] rounded-lg border border-[#bfe6d3] bg-[#eefaf3] text-[#0f6b4b] px-2 py-1 inline-flex items-center gap-1">✓ {it.label}</span>
                       ))}
                     </div>
@@ -601,7 +626,7 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
                   )}
                 </div>
                 <div className="grid grid-cols-2 gap-1.5 mb-3">
-                  {WA_PENDING.filter((it) => !waHave.has(it.key)).map((it) => {
+                  {waPending.filter((it) => !waHave.has(it.key)).map((it) => {
                     const on = waSel.has(it.key);
                     return (
                       <button key={it.key} type="button" onClick={() => toggleItem(it.key)}

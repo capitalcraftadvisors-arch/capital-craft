@@ -52,6 +52,16 @@ export default function AddNewEpcModal({ open, onClose }: Props) {
     onClose();
   }
 
+  // Primary path — hand the mobile to the guided chat, which creates the EPC
+  // (or opens the existing one) and builds the profile turn by turn.
+  function goChat() {
+    setError(null);
+    const m = mobile.replace(/\D/g, "");
+    if (!MOBILE_RE.test(m)) { setError("Enter a valid 10-digit Indian mobile."); return; }
+    onClose();
+    router.push(`/admin/epc/intake?mobile=${m}` as any);
+  }
+
   async function submit() {
     setError(null);
     setDuplicate(null);
@@ -111,7 +121,7 @@ export default function AddNewEpcModal({ open, onClose }: Props) {
           <div>
             <h3 className="font-display font-semibold text-[18px] text-text">Add new EPC</h3>
             <p className="text-[12px] text-text-mid mt-0.5">
-              Enter the EPC&rsquo;s mobile number and complete the required details on their behalf.
+              Enter the EPC&rsquo;s mobile number, then build the profile in a guided chat &mdash; or use the classic form.
             </p>
           </div>
           <button
@@ -156,12 +166,17 @@ export default function AddNewEpcModal({ open, onClose }: Props) {
           )}
         </div>
 
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-5 flex justify-end gap-2 flex-wrap">
           <Button type="button" variant="outline" onClick={close} disabled={busy}>
             Cancel
           </Button>
-          <Button type="button" variant="primary" onClick={submit} loading={busy}>
-            Create
+          {/* Classic step-by-step wizard (unchanged) — kept for parity with the chat. */}
+          <Button type="button" variant="outline" onClick={submit} loading={busy}>
+            Classic form
+          </Button>
+          {/* Guided chat — the primary way to onboard now. */}
+          <Button type="button" variant="primary" onClick={goChat} disabled={busy}>
+            Build in chat
           </Button>
         </div>
       </div>
