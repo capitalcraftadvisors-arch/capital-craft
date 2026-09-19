@@ -23,7 +23,7 @@
 // locally that needs ADC (`gcloud auth application-default login`); on prod
 // it's automatic.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
@@ -46,7 +46,7 @@ type Form = Record<string, string>;
 type Turn = {
   id: string;
   bot: string;
-  kind: "epc" | "text" | "pincode" | "choice" | "consent" | "docs" | "save" | "loanconfig" | "leadsave" | "bundle" | "paste";
+  kind: "epc" | "text" | "pincode" | "choice" | "consent" | "docs" | "save" | "loanconfig" | "leadsave" | "doc_table" | "paste";
   field?: string;
   placeholder?: string;
   optional?: boolean;
@@ -61,9 +61,6 @@ type Turn = {
   uploadCategory?: string; // docs turn with NO OCR — POST the file to /api/upload under this category
   pathField?: string;      // where to store the returned storage_path in the form
   applicantPan?: boolean;  // reuse extract-coapp-pan OCR but map fields to the APPLICANT
-  // docs turn shown as a REVIEW card when the bundle already read this doc:
-  reviewBot?: string;                     // prompt used when reviewing (vs re-asking) a bundle-read doc
-  reviewFields?: (f: Form) => Fetched[];  // editable rows built from the current form for the review card
   // save turn:
   step?: number;
   method?: "POST" | "PATCH";
@@ -73,15 +70,14 @@ type Turn = {
 const MOBILE_RE = /^[6-9]\d{9}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const hasCoapp = (f: Form) => f._has_coapp === "1"; // set by the name-check (mandatory) or the optional "add co-applicant" choice
-// Did the bulk "bundle" upload already provide this doc turn's file(s)? Drives
-// the per-doc turns' `when` gate — a turn the bundle covered is skipped, and
-// anything it missed is still asked one-by-one (nothing is ever missed).
+// Is this doc turn's file already on the profile? Drives the standalone doc
+// turns' `when` gate (e.g. the bank statement self-skips once uploaded).
 function docProvided(turnId: string, f: Form): boolean {
   const keys = DOC_PATHS[turnId] || [];
   return keys.length > 0 && keys.every((k) => !!(f[k] && String(f[k]).trim()));
 }
 
-// Build one editable review row from a bundle-read value.
+// Build one editable "read from the document" row from a form value.
 function frow(label: string, value: string | undefined, field: string): Fetched {
   const v = (value ?? "").trim();
   return { label, value: v, ok: !!v, field };
@@ -99,60 +95,27 @@ const SCRIPT: Turn[] = [
     { value: "residential", label: "Residential", sub: "Home / society" },
     { value: "commercial", label: "Commercial", sub: "Shop / office / factory" },
   ] },
-  // 5) How the documents will arrive (a UI preference — optional, not profile data)
-  { id: "doc_choice", bot: "How are the documents coming in?", kind: "choice", field: "_doc_choice", optional: true, choices: [
-    { value: "single", label: "One combined PDF", sub: "Everything in a single file" },
-    { value: "multi", label: "Separate PDFs", sub: "Upload them all at once" },
+  // 5a) How the documents will be given. "Separate file per document" → the table
+  //     (drop each into its box). "One combined PDF" → the table shows a combined-PDF
+  //     box that auto-splits and fills the rows for review.
+  { id: "doc_choice", bot: "How do you have the applicant's documents?", kind: "choice", field: "_doc_choice", choices: [
+    { value: "separate", label: "Separate file for each document", sub: "Upload each into its own box" },
+    { value: "single", label: "One combined PDF", sub: "Everything together in a single PDF" },
   ] },
-  // 6) Bundle upload — classify, split + file every document in one pass, and send
-  //    the applicant + co-applicant names so each PAN / Aadhaar is assigned to the
-  //    right person by name. The quotation is never bundled (its own step below).
-  { id: "doc_bundle", bot: "Drop the documents here and I'll sort them out. Then I'll walk through each one so you can confirm the reading — and re-ask for anything I couldn't read clearly.", kind: "bundle" },
+  // 5) Documents — one labeled slot table (see DocTable). The RM drops each
+  //    document into its own box; each box reads with its OWN dedicated extractor
+  //    (accurate), and the reads fire in PARALLEL as boxes fill (fast — no
+  //    per-document waiting). Rooftop photo + applicant photo are rows here; the
+  //    quotation stays its OWN step (below). Rows left "don't have it" are recorded
+  //    as pending and never block. Replaces the old bundle auto-sort + the
+  //    one-at-a-time review/re-ask turns.
+  { id: "doc_table", bot: "Now the documents. Drop each one into its box — I'll read it as it lands. Tick “Don't have it” for anything you can't add right now.", kind: "doc_table", docLabel: "Documents" },
 
-  // 7) Step-by-step review / re-ask, driven by the bundle result. If the bundle
-  //    READ the doc → an editable review card (Replace + Skip). If it did NOT →
-  //    a single-doc upload turn that reads it with its own extractor.
-  //    Order: applicant Aadhaar → applicant PAN → e-bill → co-app Aadhaar → co-app PAN.
-  { id: "aadhaar", kind: "docs", docLabel: "Applicant Aadhaar",
-    bot: "I didn't get the applicant's Aadhaar from the bundle — upload the front & back and I'll read it.",
-    reviewBot: "Here's what I read from the applicant's Aadhaar. Check each field, replace the document, or skip.",
-    uploads: [{ name: "front", label: "Aadhaar front" }, { name: "back", label: "Aadhaar back" }], extractRoute: "extract-aadhaar",
-    reviewFields: (f) => [frow("Name", f.aadhaar_name || f.borrower_name, "aadhaar_name"), frow("DOB", f.aadhaar_dob, "aadhaar_dob"), frow("Gender", f.aadhaar_gender, "aadhaar_gender"), frow("Aadhaar", f.aadhaar_number, "aadhaar_number"), frow("Address", f.aadhaar_address, "aadhaar_address")] },
-  { id: "pan", kind: "docs", docLabel: "Applicant PAN", applicantPan: true,
-    bot: "I didn't get the applicant's PAN from the bundle — upload it and I'll read it.",
-    reviewBot: "Here's what I read from the applicant's PAN. Check each field, replace the document, or skip.",
-    uploads: [{ name: "file", label: "PAN card" }], extractRoute: "extract-coapp-pan",
-    reviewFields: (f) => [frow("PAN", f.borrower_pan, "borrower_pan"), frow("Name", f.borrower_name, "borrower_name"), frow("Father", f.borrower_father_name, "borrower_father_name")] },
-  { id: "ebill", kind: "docs", docLabel: "Electricity bill",
-    bot: "I didn't get the electricity bill from the bundle — upload the latest bill.",
-    reviewBot: "Here's what I read from the electricity bill. Check each field, replace the document, or skip.",
-    uploads: [{ name: "ebill", label: "Electricity bill" }], extractRoute: "extract-loan-docs",
-    reviewFields: (f) => [frow("Monthly bill", f.monthly_bill_amount ? `₹${f.monthly_bill_amount}` : "", "monthly_bill_amount"), frow("DISCOM", f.discom_name, "discom_name"), frow("Bill name", f.ebill_name, "ebill_name")] },
-  { id: "coapp_aadhaar", kind: "docs", docLabel: "Co-applicant Aadhaar", when: hasCoapp, extraForm: { _coapp: "1" },
-    bot: "I didn't get the co-applicant's Aadhaar from the bundle — upload the front & back.",
-    reviewBot: "Here's what I read from the co-applicant's Aadhaar. Check each field, replace the document, or skip.",
-    uploads: [{ name: "front", label: "Aadhaar front" }, { name: "back", label: "Aadhaar back" }], extractRoute: "extract-aadhaar",
-    reviewFields: (f) => [frow("Name", f.coapp_aadhaar_name || f.coapp_name, "coapp_aadhaar_name"), frow("DOB", f.coapp_aadhaar_dob, "coapp_aadhaar_dob"), frow("Aadhaar", f.coapp_aadhaar_number, "coapp_aadhaar_number"), frow("Address", f.coapp_aadhaar_address, "coapp_aadhaar_address")] },
-  { id: "coapp_pan", kind: "docs", docLabel: "Co-applicant PAN", when: hasCoapp,
-    bot: "I didn't get the co-applicant's PAN from the bundle — upload it.",
-    reviewBot: "Here's what I read from the co-applicant's PAN. Check each field, replace the document, or skip.",
-    uploads: [{ name: "file", label: "Co-applicant PAN" }], extractRoute: "extract-coapp-pan",
-    reviewFields: (f) => [frow("PAN", f.coapp_pan, "coapp_pan"), frow("Name", f.coapp_name, "coapp_name"), frow("Father", f.coapp_father_name, "coapp_father_name")] },
-
-  // Bank statement — stored from the bundle if present (self-skips); otherwise a
-  // single-doc upload turn (skippable). No mandatory review card.
+  // Bank statement — its own upload step (not one of the table's slots).
   { id: "bank", bot: "Upload the bank statement.", kind: "docs", docLabel: "Bank statement", when: (f) => !docProvided("bank", f),
     uploads: [{ name: "file", label: "Bank statement" }], extractRoute: "extract-bank-statement", extraForm: { method: "manual_epdf" } },
 
-  // 8) Rooftop photo — separate on-site capture (self-skips if the bundle had one).
-  { id: "rooftop", bot: "Upload the geo-tagged rooftop photo.", kind: "docs", docLabel: "Rooftop photo", when: (f) => !docProvided("rooftop", f),
-    // category MUST be "borrower_photo" — the rooftop slot the classic form, the
-    // profile view and the ZIP all read.
-    uploads: [{ name: "photo", label: "Rooftop photo" }], uploadCategory: "borrower_photo", pathField: "rooftop_photo_path" },
-  // 9) Applicant photo / selfie (self-skips if the bundle had one).
-  { id: "selfie", bot: "Upload the applicant's photo / selfie.", kind: "docs", docLabel: "Applicant photo", when: (f) => !docProvided("selfie", f),
-    uploads: [{ name: "file", label: "Applicant photo" }], uploadCategory: "customer_photo", pathField: "customer_photo_path" },
-  // 10) Quotation / proforma — its own step (never bundled; Gemini tags it "other").
+  // 6) Quotation / proforma — its own step (never in the table; Gemini tags it "other").
   { id: "quotation", bot: "Upload the quotation / proforma invoice — I'll read the project cost & size.", kind: "docs", docLabel: "Quotation / invoice",
     uploads: [{ name: "proforma", label: "Quotation / invoice" }], extractRoute: "extract-loan-docs" },
 
@@ -323,28 +286,6 @@ const SHEET_ROWS: { field: string; label: string; render?: (v: string) => string
   { field: "system_type", label: "System", render: (v) => ({ on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" }[v] || v) },
   { field: "install_city", label: "Place of installation" },
 ];
-// One document detected + split + filed by the bundle route.
-type BundleDoc = {
-  type: string; category: string; storage_path: string; mime_type: string;
-  file_name: string; page_start: number; page_end: number; summary: string; signed_url: string | null;
-  name?: string | null; name_confidence?: string | null;
-};
-// The correctable classification options shown in the review card's dropdown.
-// Values MUST match the DocType strings the bundle-docs route understands.
-const BUNDLE_TYPE_OPTIONS: { value: string; label: string }[] = [
-  { value: "applicant_pan", label: "Applicant PAN" },
-  { value: "applicant_aadhaar_front", label: "Applicant Aadhaar — front" },
-  { value: "applicant_aadhaar_back", label: "Applicant Aadhaar — back" },
-  { value: "ebill", label: "Electricity bill" },
-  { value: "bank_statement", label: "Bank statement" },
-  { value: "rooftop_photo", label: "Rooftop photo" },
-  { value: "applicant_photo", label: "Applicant photo" },
-  { value: "coapp_pan", label: "Co-applicant PAN" },
-  { value: "coapp_aadhaar_front", label: "Co-applicant Aadhaar — front" },
-  { value: "coapp_aadhaar_back", label: "Co-applicant Aadhaar — back" },
-  { value: "other", label: "Other / ignore" },
-];
-const bundleTypeLabel = (v: string) => BUNDLE_TYPE_OPTIONS.find((o) => o.value === v)?.label || v;
 type Msg = {
   id: string;
   from: "bot" | "user";
@@ -406,13 +347,8 @@ function Inner() {
   const [files, setFiles] = useState<Record<string, File>>({});
   const [thumbs, setThumbs] = useState<Record<string, string | null>>({});
   const [confirm, setConfirm] = useState<{ fields: Fetched[]; note: string; thumbs: (string | null)[]; edit?: boolean } | null>(null);
-  // Bulk "bundle" upload: staged multi-file drop → classify/split, then the flow
-  // walks each document as a review-or-re-ask turn.
-  const [bundleFiles, setBundleFiles] = useState<File[]>([]);
   // Info-sheet paste → editable confirm card (raw parsed values).
   const [sheetReview, setSheetReview] = useState<{ parsed: Form } | null>(null);
-  // Per-doc review card (shown when the bundle already read a document turn).
-  const [docReview, setDocReview] = useState<{ turnId: string; label: string; fields: Fetched[] } | null>(null);
   const [donId, setDonId] = useState<string | null>(null);
   const [donDraft, setDonDraft] = useState(false);
   const [missing, setMissing] = useState<string[]>([]);
@@ -567,13 +503,8 @@ function Inner() {
       else if (isTurnFilled(turn, form)) { setIdx((i) => i + 1); return; } // "complete" → ask only missing
     }
     if (turn.kind === "leadsave") { void createLead(); return; }
-    // A doc turn the bundle already read → show its editable REVIEW card (with
-    // Replace + Skip) instead of a fresh upload. Create mode only — in edit mode
-    // a picked doc turn means "replace it", so keep the upload dock.
-    const reviewing = !editMode && !!turn.reviewFields && docProvided(turn.id, form);
-    pushBot(reviewing ? (turn.reviewBot || turn.bot) : turn.bot, turn.id);
-    setInput(""); setError(null); setFiles({}); setThumbs({}); setConfirm(null); setEditing(null); setBundleFiles([]); setSheetReview(null); setDocReview(null);
-    if (reviewing && turn.reviewFields) setDocReview({ turnId: turn.id, label: turn.docLabel || turn.id, fields: turn.reviewFields(form) });
+    pushBot(turn.bot, turn.id);
+    setInput(""); setError(null); setFiles({}); setThumbs({}); setConfirm(null); setEditing(null); setSheetReview(null);
     // Re-editing a filled field → prefill the input with its current value.
     if (editMode && editStage === "selected" && (turn.kind === "text" || turn.kind === "pincode") && turn.field) setInput(form[turn.field] || "");
     if (turn.kind === "loanconfig") {
@@ -613,22 +544,21 @@ function Inner() {
   }, [msgs, confirm, idx, busy]);
   useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
 
-  // Paste-to-attach while on a document turn (RM copies an image, hits Ctrl+V).
-  // The bundle turn accepts multiple pasted files; single-doc turns take one.
+  // Paste-to-attach while on a single-doc turn (RM copies an image, hits Ctrl+V).
+  // The doc_table turn manages its own paste routing (per-slot) internally.
   useEffect(() => {
-    if (!active || confirm || docReview || sheetReview) return;
-    if (active.kind !== "docs" && active.kind !== "bundle") return;
+    if (!active || confirm || sheetReview) return;
+    if (active.kind !== "docs") return;
     const h = (e: ClipboardEvent) => {
       const pasted = e.clipboardData?.files;
       if (!pasted || pasted.length === 0) return;
       e.preventDefault();
-      if (active.kind === "bundle") addBundleFiles(pasted);
-      else fillNextSlot(pasted[0]);
+      fillNextSlot(pasted[0]);
     };
     window.addEventListener("paste", h);
     return () => window.removeEventListener("paste", h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, files, confirm, docReview, sheetReview]);
+  }, [active, files, confirm, sheetReview]);
 
   const advance = () => setIdx((i) => i + 1);
   const merge = (patch: Form) => setForm((f) => ({ ...f, ...patch }));
@@ -848,89 +778,27 @@ function Inner() {
     advance();
   }
 
-  // ── Bulk "bundle" upload (auto-split) ──
-  function addBundleFiles(list: FileList | File[]) {
-    const incoming = Array.from(list).filter((f) => f.type.startsWith("image/") || f.type.includes("pdf"));
-    if (!incoming.length) return;
-    // "One combined PDF" → keep a single file (the latest); "Separate PDFs" → many.
-    if (form._doc_choice === "single") setBundleFiles(incoming.slice(-1));
-    else setBundleFiles((s) => [...s, ...incoming]);
+  // ── Document-slot table (doc_table turn) ──
+  // The DocTable component owns the per-slot upload + read state; the parent only
+  // needs to (a) merge each read's field patch into the form and autosave it,
+  // (b) track which rows were marked "don't have it" as pending, and (c) advance
+  // when the RM is done. Each row reads with its OWN dedicated extractor and the
+  // reads fire in parallel, so nothing here blocks another row.
+  function applyDocPatch(patch: Form) {
+    // Functional merge keeps parallel reads from clobbering each other in memory;
+    // persistForm sends only this patch's keys (update-fields is a partial write),
+    // so each read's columns land independently.
+    setForm((prev) => ({ ...prev, ...patch }));
+    void persistForm({ ...form, ...patch });
   }
-  function removeBundleFile(i: number) { setBundleFiles((s) => s.filter((_, k) => k !== i)); }
-
-  // POST every staged file to bundle-docs → classify, split, store, extract in
-  // one pass, with the applicant + co-applicant names so each PAN / Aadhaar is
-  // assigned to the right person by name. Then merge the readings and walk each
-  // document (review-or-re-ask). Robust: any failure shows a friendly message and
-  // the one-by-one turns still cover everything.
-  async function runBundle() {
-    if (!appId || !bundleFiles.length) { setError("Add at least one file, or skip to add them one at a time."); return; }
+  // Record / clear a table row in the pending list (draft at submit; never blocks).
+  function docSkipChange(label: string, skipped: boolean) {
+    setMissing((s) => (skipped ? (s.includes(label) ? s : [...s, label]) : s.filter((x) => x !== label)));
+  }
+  // "Done with documents" → drop a receipt of what was uploaded now, then advance.
+  function finishDocTable(receipt: { name: string; thumb: string | null }[]) {
     pushUndo();
-    setBusy(true); setError(null);
-    pushUser(bundleFiles.map((f) => f.name).join(" · "), { turnId: "doc_bundle", files: bundleFiles.map((f) => ({ name: f.name, thumb: f.type.startsWith("image/") ? URL.createObjectURL(f) : null })) });
-    try {
-      const fd = new FormData();
-      for (const f of bundleFiles) fd.append("files", f);
-      // Names drive the server's per-person assignment (override Gemini's guess).
-      if (form.borrower_name?.trim()) fd.append("applicant_name", form.borrower_name.trim());
-      if (form.coapp_name?.trim()) fd.append("coapp_name", form.coapp_name.trim());
-      const res = await fetch(`/api/admin/loan-app/${appId}/bundle-docs`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j?.ok) {
-        setError(j?.error || "Couldn't sort those documents. You can try again, or skip and add them one at a time below.");
-        setBusy(false); return;
-      }
-      const documents: BundleDoc[] = Array.isArray(j.documents) ? j.documents : [];
-      const patch: Form = (j.form && typeof j.form === "object") ? j.form : {};
-      // The route already persisted to epc_applications; keep chat state in sync.
-      const nextForm = { ...form, ...patch };
-      setForm(nextForm);
-      void persistForm(nextForm);
-      setBundleFiles([]);
-      if (documents.length === 0) {
-        say("bot", "I couldn't read any documents from that — no problem, I'll ask for each one below.");
-      } else {
-        const kinds = documents.map((d) => bundleTypeLabel(d.type)).join(", ");
-        say("bot", `Read ${documents.length} document${documents.length === 1 ? "" : "s"}: ${kinds}. Let's confirm each one — I'll re-ask for anything I couldn't read.`);
-      }
-      advance();
-    } catch {
-      setError("Something went wrong sorting those documents. Try again, or skip and add them one at a time.");
-    } finally { setBusy(false); }
-  }
-  function skipBundle() {
-    pushUndo();
-    pushUser("I'll add them one at a time", {});
-    setBundleFiles([]); setError(null);
-    advance();
-  }
-
-  // ── Per-document review card (bundle already read this doc) ──
-  // Edit one field inline → reflects on the profile immediately + updates the card.
-  function saveReviewField(field: string, value: string) {
-    const nextForm = { ...form, [field]: value };
-    setForm(nextForm);
-    void persistForm(nextForm);
-    setDocReview((r) => r ? { ...r, fields: r.fields.map((ff) => (ff.field === field ? { ...ff, value, ok: !!value.trim() } : ff)) } : r);
-  }
-  function acceptReview() {
-    if (!docReview) return;
-    // Drop the reading into the permanent chat as a "read from the document" card.
-    const fields = docReview.fields;
-    setMsgs((m) => [...m, { id: uid(), from: "bot", time: nowLabel(), fetched: fields }]);
-    setDocReview(null);
-    advance();
-  }
-  function replaceReview() {
-    // Reveal the upload dock for this same turn → re-read via its per-doc extractor.
-    setDocReview(null); setFiles({}); setThumbs({}); setConfirm(null); setError(null);
-  }
-  function skipReview() {
-    const t = active; if (!t) return;
-    pushUndo();
-    setMissing((s) => (s.includes(t.docLabel || t.id) ? s : [...s, t.docLabel || t.id]));
-    pushUser(`Skipped — ${t.docLabel || "document"} left as read`, {});
-    setDocReview(null);
+    if (receipt.length) pushUser(receipt.map((r) => r.name).join(" · "), { files: receipt, turnId: "doc_table", editable: false });
     advance();
   }
 
@@ -1114,7 +982,7 @@ function Inner() {
   const progFilled = progApplicable.filter((t) => isTurnFilled(t, form)).length;
   const progress = progApplicable.length ? Math.min(100, Math.round((progFilled / progApplicable.length) * 100)) : 0;
   const showEditIntro = editMode && (editStep === "q1" || editStep === "pick" || editStep === "q2");
-  const showDock = !donId && !leadDoneId && !showEditIntro && active && !confirm && !docReview && !sheetReview && active.kind !== "save" && active.kind !== "leadsave" && (editing ? true : turn === active);
+  const showDock = !donId && !leadDoneId && !showEditIntro && active && !confirm && !sheetReview && active.kind !== "save" && active.kind !== "leadsave" && (editing ? true : turn === active);
 
   if (resuming) {
     return (
@@ -1192,11 +1060,6 @@ function Inner() {
           {/* Info-sheet confirm card — parsed fields, every one editable */}
           {sheetReview && (
             <SheetConfirmCard parsed={sheetReview.parsed} onEdit={editSheetField} onConfirm={confirmSheet} onSkip={skipSheet} />
-          )}
-
-          {/* Per-document review card — bundle already read this doc */}
-          {docReview && (
-            <DocReviewCard review={docReview} onEditField={saveReviewField} onAccept={acceptReview} onReplace={replaceReview} onSkip={skipReview} />
           )}
 
           {error && <div className="self-center text-[12px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5 my-1">{error}</div>}
@@ -1378,8 +1241,9 @@ function Inner() {
               <DocDock active={active} files={files} thumbs={thumbs} onPick={setFileFor} onDrop={fillNextSlot} onClear={clearFileFor} onRun={() => void runDocs()} onSkip={skipDoc} replacing={!!editing} />
             )}
 
-            {active.kind === "bundle" && (
-              <BundleDock files={bundleFiles} single={form._doc_choice === "single"} onAdd={addBundleFiles} onRemove={removeBundleFile} onRun={() => void runBundle()} onSkip={skipBundle} busy={busy} />
+            {active.kind === "doc_table" && appId && (
+              <DocTable key="doc_table" appId={appId} form={form}
+                onPatch={applyDocPatch} onSkipChange={docSkipChange} onDone={finishDocTable} />
             )}
 
             {active.kind === "loanconfig" && (
@@ -1537,41 +1401,405 @@ function DocDock({ active, files, thumbs, onPick, onDrop, onClear, onRun, onSkip
   );
 }
 
-// Bulk-upload dock — stage files (click / drag / paste), then "Sort". `single`
-// (one combined PDF) keeps a single file; otherwise many files are accepted.
-function BundleDock({ files, single, onAdd, onRemove, onRun, onSkip, busy }: {
-  files: File[]; single?: boolean; onAdd: (l: FileList | File[]) => void; onRemove: (i: number) => void; onRun: () => void; onSkip: () => void; busy: boolean;
+// ── Document-slot table ──────────────────────────────────────────────────────
+// The intake documents as fixed, labeled slots. Each ROW is one upload box; a
+// "read unit" is what one extractor call needs. Aadhaar reads BOTH sides in a
+// single extract-aadhaar call, so its front + back rows share one unit that fires
+// only once both files are present. Every other row is its own single-file unit.
+// Reads run in PARALLEL as boxes fill — no row waits on another.
+type DocSlot =
+  | "aadhaar_front" | "aadhaar_back" | "applicant_pan" | "ebill"
+  | "rooftop" | "selfie"
+  | "coapp_aadhaar_front" | "coapp_aadhaar_back" | "coapp_pan";
+type DocUnit = "aadhaar" | "applicant_pan" | "ebill" | "rooftop" | "selfie" | "coapp_aadhaar" | "coapp_pan";
+type DocRow = { slot: DocSlot; label: string; unit: DocUnit; lastOfUnit?: boolean; coappOnly?: boolean };
+
+// Column-1 rows, in order. Co-app rows appear only when a co-applicant is named.
+const DOC_TABLE_ROWS: DocRow[] = [
+  { slot: "aadhaar_front", label: "Applicant Aadhaar — front", unit: "aadhaar" },
+  { slot: "aadhaar_back",  label: "Applicant Aadhaar — back",  unit: "aadhaar", lastOfUnit: true },
+  { slot: "applicant_pan", label: "Applicant PAN",             unit: "applicant_pan", lastOfUnit: true },
+  { slot: "ebill",         label: "E-bill",                    unit: "ebill", lastOfUnit: true },
+  { slot: "rooftop",       label: "Rooftop photo",             unit: "rooftop", lastOfUnit: true },
+  { slot: "selfie",        label: "Applicant photo",           unit: "selfie", lastOfUnit: true },
+  { slot: "coapp_aadhaar_front", label: "Co-applicant Aadhaar — front", unit: "coapp_aadhaar", coappOnly: true },
+  { slot: "coapp_aadhaar_back",  label: "Co-applicant Aadhaar — back",  unit: "coapp_aadhaar", coappOnly: true, lastOfUnit: true },
+  { slot: "coapp_pan",           label: "Co-applicant PAN",             unit: "coapp_pan", coappOnly: true, lastOfUnit: true },
+];
+// The slot(s) that feed each read unit (order = FormData order for Aadhaar).
+const DOC_UNIT_PARTS: Record<DocUnit, DocSlot[]> = {
+  aadhaar: ["aadhaar_front", "aadhaar_back"],
+  applicant_pan: ["applicant_pan"], ebill: ["ebill"], rooftop: ["rooftop"], selfie: ["selfie"],
+  coapp_aadhaar: ["coapp_aadhaar_front", "coapp_aadhaar_back"], coapp_pan: ["coapp_pan"],
+};
+// Form key(s) that mark a whole unit already on the profile (edit-mode prefill).
+const DOC_UNIT_PATHS: Record<DocUnit, string[]> = {
+  aadhaar: ["aadhaar_front_path", "aadhaar_back_path"], applicant_pan: ["borrower_pan"], ebill: ["ebill_path"],
+  rooftop: ["rooftop_photo_path"], selfie: ["customer_photo_path"],
+  coapp_aadhaar: ["coapp_aadhaar_front_path", "coapp_aadhaar_back_path"], coapp_pan: ["coapp_pan_path"],
+};
+// The single form key that marks THIS row's own file present (prefill per row).
+const DOC_ROW_PATH: Record<DocSlot, string> = {
+  aadhaar_front: "aadhaar_front_path", aadhaar_back: "aadhaar_back_path",
+  applicant_pan: "borrower_pan", ebill: "ebill_path",
+  rooftop: "rooftop_photo_path", selfie: "customer_photo_path",
+  coapp_aadhaar_front: "coapp_aadhaar_front_path", coapp_aadhaar_back: "coapp_aadhaar_back_path",
+  coapp_pan: "coapp_pan_path",
+};
+// Editable "read from the document" rows for a unit, from the current form — the
+// same field mapping the old per-doc review cards used. Photo units have none.
+const DOC_UNIT_FIELDS: Partial<Record<DocUnit, (f: Form) => Fetched[]>> = {
+  aadhaar: (f) => [frow("Name", f.aadhaar_name || f.borrower_name, "aadhaar_name"), frow("DOB", f.aadhaar_dob, "aadhaar_dob"), frow("Gender", f.aadhaar_gender, "aadhaar_gender"), frow("Aadhaar", f.aadhaar_number, "aadhaar_number"), frow("Address", f.aadhaar_address, "aadhaar_address")],
+  applicant_pan: (f) => [frow("PAN", f.borrower_pan, "borrower_pan"), frow("Name", f.borrower_name, "borrower_name"), frow("Father", f.borrower_father_name, "borrower_father_name")],
+  ebill: (f) => [frow("Monthly bill (₹)", f.monthly_bill_amount, "monthly_bill_amount"), frow("DISCOM", f.discom_name, "discom_name"), frow("Bill name", f.ebill_name, "ebill_name")],
+  coapp_aadhaar: (f) => [frow("Name", f.coapp_aadhaar_name || f.coapp_name, "coapp_aadhaar_name"), frow("DOB", f.coapp_aadhaar_dob, "coapp_aadhaar_dob"), frow("Aadhaar", f.coapp_aadhaar_number, "coapp_aadhaar_number"), frow("Address", f.coapp_aadhaar_address, "coapp_aadhaar_address")],
+  coapp_pan: (f) => [frow("PAN", f.coapp_pan, "coapp_pan"), frow("Name", f.coapp_name, "coapp_name"), frow("Father", f.coapp_father_name, "coapp_father_name")],
+};
+
+// Applicable rows / units for the current form (co-app rows only with a co-app).
+function docTableRowsFor(f: Form): DocRow[] { return DOC_TABLE_ROWS.filter((r) => !r.coappOnly || hasCoapp(f)); }
+function docTableUnitsFor(f: Form): DocUnit[] { return Array.from(new Set(docTableRowsFor(f).map((r) => r.unit))); }
+// Every applicable unit is on the profile → the doc_table turn is "filled".
+function docTableComplete(f: Form): boolean {
+  return docTableUnitsFor(f).every((u) => DOC_UNIT_PATHS[u].every((k) => !!(f[k] && String(f[k]).trim())));
+}
+
+type DocSlotFile = { file: File; thumb: string | null };
+// Upload + read ONE unit with its dedicated route, returning the form patch. The
+// mapping reuses mapExtract (identical to the old per-doc turns). Throws on a hard
+// failure; the caller catches it and shows a per-row "couldn't read" state.
+async function callDocRoute(unit: DocUnit, appId: string, files: Partial<Record<DocSlot, DocSlotFile>>, form: Form): Promise<Form> {
+  const auth = { Authorization: `Bearer ${getToken() ?? ""}` };
+  const fileOf = (slot: DocSlot) => { const f = files[slot]?.file; if (!f) throw new Error("File missing — re-attach it."); return f; };
+  if (unit === "aadhaar" || unit === "coapp_aadhaar") {
+    const co = unit === "coapp_aadhaar";
+    const fd = new FormData();
+    fd.append("front", fileOf(co ? "coapp_aadhaar_front" : "aadhaar_front"));
+    fd.append("back",  fileOf(co ? "coapp_aadhaar_back"  : "aadhaar_back"));
+    const res = await fetch(`/api/admin/loan-app/${appId}/extract-aadhaar`, { method: "POST", headers: auth, body: fd });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the Aadhaar.");
+    return mapExtract({ id: unit, bot: "", kind: "docs", extractRoute: "extract-aadhaar", extraForm: co ? { _coapp: "1" } : undefined } as Turn, j).patch;
+  }
+  if (unit === "applicant_pan" || unit === "coapp_pan") {
+    const applicant = unit === "applicant_pan";
+    const fd = new FormData();
+    fd.append("file", fileOf(unit));
+    if (applicant) fd.append("applicant", "1"); // route files it under the borrower_pan slot
+    const res = await fetch(`/api/admin/loan-app/${appId}/extract-coapp-pan`, { method: "POST", headers: auth, body: fd });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the PAN.");
+    return mapExtract({ id: unit, bot: "", kind: "docs", extractRoute: "extract-coapp-pan", applicantPan: applicant } as Turn, j).patch;
+  }
+  if (unit === "ebill") {
+    const fd = new FormData();
+    fd.append("ebill", fileOf("ebill"));
+    const res = await fetch(`/api/admin/loan-app/${appId}/extract-loan-docs`, { method: "POST", headers: auth, body: fd });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the bill.");
+    const patch = mapExtract({ id: "ebill", bot: "", kind: "docs", extractRoute: "extract-loan-docs" } as Turn, j).patch;
+    // Name fallback (mirrors old runDocs): take the bill's name if the applicant's
+    // is still unknown, honorific stripped, so we never re-ask a name a doc shows.
+    if (!form.borrower_name && !patch.borrower_name && patch.ebill_name) {
+      const nm = String(patch.ebill_name).replace(/^(m\/s|mr|mrs|ms|smt|shri|sri|dr)\.?\s+/i, "").trim();
+      if (nm.length >= 2) patch.borrower_name = nm;
+    }
+    return patch;
+  }
+  // rooftop / selfie → /api/upload (no OCR). category MUST match the profile slot:
+  // borrower_photo = rooftop, customer_photo = applicant photo.
+  const category = unit === "rooftop" ? "borrower_photo" : "customer_photo";
+  const pathField = unit === "rooftop" ? "rooftop_photo_path" : "customer_photo_path";
+  const fd = new FormData();
+  fd.append("file", fileOf(unit));
+  fd.append("table", "user_application_docs");
+  fd.append("category", category);
+  fd.append("application_id", appId);
+  fd.append("uploaded_by", "admin");
+  const res = await fetch("/api/upload", { method: "POST", headers: auth, body: fd });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't upload the photo.");
+  const patch: Form = { [pathField]: j.storage_path };
+  if (unit === "rooftop") patch.rooftop_photo_uploaded_at = new Date().toISOString();
+  return patch;
+}
+
+// Small inline editor for a unit's read fields — same look/behaviour as the
+// permanent "read from the document" card; edits flow straight to the form.
+function DocFieldRows({ fields, onEdit }: { fields: Fetched[]; onEdit: (field: string, value: string) => void }) {
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const [val, setVal] = useState("");
+  return (
+    <div className="flex flex-col gap-1.5">
+      {fields.map((f) => (
+        <div key={f.field || f.label} className="flex items-center justify-between gap-3 text-[12.5px] min-h-[22px]">
+          <span className="text-text-muted shrink-0">{f.label}</span>
+          {editKey === f.field && f.field ? (
+            <span className="flex items-center gap-1.5">
+              <input autoFocus value={val} onChange={(e) => setVal(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { onEdit(f.field!, val.trim()); setEditKey(null); } if (e.key === "Escape") setEditKey(null); }}
+                className="border border-[#178a5c] rounded-lg px-2.5 py-1 text-[12.5px] w-40 text-right outline-none" />
+              <button onClick={() => { onEdit(f.field!, val.trim()); setEditKey(null); }} className="text-[#178a5c] text-[11.5px] font-semibold">Save</button>
+            </span>
+          ) : (
+            <span className="flex items-center gap-2 min-w-0">
+              {f.ok ? <span className="text-text font-medium text-right break-words">{f.value}</span> : <span className="text-amber-600 text-[11.5px] italic">not found</span>}
+              {f.field && <button onClick={() => { setEditKey(f.field!); setVal(f.ok ? f.value : ""); }} className="opacity-60 hover:opacity-100 text-[#178a5c] text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>}
+            </span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// The document-slot table shown inside the chat dock for the doc_table turn.
+// Column 1 = fixed label, Column 2 = upload box (tap / drop / paste) that reads
+// with the row's dedicated extractor the moment a file lands (in parallel; a
+// grouped Aadhaar reads once both sides are in), Column 3 = "Don't have it" skip.
+// Every read is caught → a failing row shows "couldn't read — try again" and never
+// blocks another. "Done with documents" enables once every row is uploaded or
+// skipped; pending rows are recorded on the parent (draft at submit).
+// Co-applicant visibility and edit-mode prefill both derive from `form`, so the
+// table needs nothing else from the parent beyond the callbacks.
+function DocTable({ appId, form, onPatch, onSkipChange, onDone }: {
+  appId: string; form: Form;
+  onPatch: (patch: Form) => void; onSkipChange: (label: string, skipped: boolean) => void;
+  onDone: (receipt: { name: string; thumb: string | null }[]) => void;
 }) {
-  const [drag, setDrag] = useState(false);
+  const [slotFiles, setSlotFiles] = useState<Partial<Record<DocSlot, DocSlotFile>>>({});
+  const [skipped, setSkipped] = useState<Partial<Record<DocSlot, boolean>>>({});
+  const [reads, setReads] = useState<Partial<Record<DocUnit, { status: "reading" | "done" | "error"; error?: string }>>>({});
+  const [replacing, setReplacing] = useState<Partial<Record<DocUnit, boolean>>>({});
+  // Optional shortcut: drop ONE combined PDF (all documents) → auto-split + fill
+  // the boxes below. The rows read `form`, so patching it here fills them.
+  const [combo, setCombo] = useState<{ status: "reading" | "done" | "error"; error?: string; filled?: number } | null>(null);
+  const filesRef = useRef<Partial<Record<DocSlot, DocSlotFile>>>({});
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
+
+  const rows = docTableRowsFor(form);
+  const labelOf = (slot: DocSlot) => DOC_TABLE_ROWS.find((r) => r.slot === slot)!.label;
+  const rowPrefilled = (slot: DocSlot) => !!(form[DOC_ROW_PATH[slot]] && String(form[DOC_ROW_PATH[slot]]).trim());
+  const unitPrefilled = (u: DocUnit) => DOC_UNIT_PATHS[u].every((k) => !!(form[k] && String(form[k]).trim()));
+  const unitDone = (u: DocUnit) => !replacing[u] && (reads[u]?.status === "done" || unitPrefilled(u));
+  // A box is "open" (needs a file) when it has no fresh file, isn't skipped, and
+  // is either not on the profile or being replaced.
+  const rowOpen = (slot: DocSlot, u: DocUnit) => !slotFiles[slot] && !skipped[slot] && (!rowPrefilled(slot) || !!replacing[u]);
+  // A row is settled for "Continue" when skipped, freshly attached (and its read
+  // hasn't hard-failed), or already on the profile. An errored read blocks only
+  // softly — the RM can always tick "Don't have it".
+  const rowSettled = (slot: DocSlot, u: DocUnit) =>
+    !!skipped[slot] || (!!slotFiles[slot] && reads[u]?.status !== "error") || (!replacing[u] && rowPrefilled(slot));
+  const allSettled = rows.every((r) => rowSettled(r.slot, r.unit));
+
+  async function runUnit(unit: DocUnit, files: Partial<Record<DocSlot, DocSlotFile>>) {
+    setReads((s) => ({ ...s, [unit]: { status: "reading" } }));
+    try {
+      const patch = await callDocRoute(unit, appId, files, form);
+      onPatch(patch);
+      if (mounted.current) setReads((s) => ({ ...s, [unit]: { status: "done" } }));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Couldn't read that — replace the file and try again.";
+      if (mounted.current) setReads((s) => ({ ...s, [unit]: { status: "error", error: msg } }));
+    }
+  }
+
+  // Combined-PDF shortcut → the auto-split route. Fills the table via onPatch;
+  // the RM then reviews the filled rows + adds anything it couldn't read.
+  async function runCombo(file: File) {
+    if (!(file.type.includes("pdf") || file.type.startsWith("image/"))) return;
+    setCombo({ status: "reading" });
+    try {
+      const fd = new FormData();
+      fd.append("files", file);
+      if (form.borrower_name) fd.append("applicant_name", form.borrower_name);
+      if (form.coapp_name) fd.append("coapp_name", form.coapp_name);
+      const res = await fetch(`/api/admin/loan-app/${appId}/bundle-docs`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read that PDF.");
+      if (j.form && typeof j.form === "object") onPatch(j.form as Form);
+      const n = Array.isArray(j.documents) ? j.documents.length : 0;
+      if (mounted.current) setCombo({ status: "done", filled: n });
+    } catch (e) {
+      if (mounted.current) setCombo({ status: "error", error: e instanceof Error ? e.message : "Couldn't read that PDF." });
+    }
+  }
+
+  function pickFile(slot: DocSlot, unit: DocUnit, file: File) {
+    if (!(file.type.startsWith("image/") || file.type.includes("pdf"))) return;
+    const thumb = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+    const next = { ...filesRef.current, [slot]: { file, thumb } };
+    filesRef.current = next;
+    setSlotFiles(next);
+    if (skipped[slot]) { setSkipped((s) => { const n = { ...s }; delete n[slot]; return n; }); onSkipChange(labelOf(slot), false); }
+    setReplacing((s) => (s[unit] ? { ...s, [unit]: false } : s));
+    // Fire the read once EVERY part of this unit has a file (Aadhaar = both sides).
+    if (DOC_UNIT_PARTS[unit].every((p) => next[p])) void runUnit(unit, next);
+  }
+
+  function toggleSkip(slot: DocSlot) {
+    const now = !skipped[slot];
+    setSkipped((s) => ({ ...s, [slot]: now }));
+    onSkipChange(labelOf(slot), now);
+    if (now) { const n = { ...filesRef.current }; delete n[slot]; filesRef.current = n; setSlotFiles(n); }
+  }
+
+  // "Replace" on a done unit → clear its file(s) + read so the box(es) re-open.
+  // Aadhaar clears BOTH sides (the extractor reads front + back together).
+  function replaceUnit(unit: DocUnit) {
+    const n = { ...filesRef.current };
+    for (const p of DOC_UNIT_PARTS[unit]) delete n[p];
+    filesRef.current = n; setSlotFiles(n);
+    setReads((s) => { const x = { ...s }; delete x[unit]; return x; });
+    setReplacing((s) => ({ ...s, [unit]: true }));
+  }
+  // "Replace" on a box before its read finishes (e.g. one Aadhaar side) → clear
+  // just that box; a done/prefilled unit clears wholesale.
+  function reopen(slot: DocSlot, unit: DocUnit) {
+    if (reads[unit]?.status === "done" || unitPrefilled(unit)) { replaceUnit(unit); return; }
+    const n = { ...filesRef.current }; delete n[slot]; filesRef.current = n; setSlotFiles(n);
+    setReads((s) => { const x = { ...s }; delete x[unit]; return x; });
+  }
+
+  function done() {
+    const receipt = rows.filter((r) => slotFiles[r.slot]).map((r) => ({ name: slotFiles[r.slot]!.file.name, thumb: slotFiles[r.slot]!.thumb }));
+    onDone(receipt);
+  }
+
+  // Paste (Ctrl+V) fills the first open box.
+  useEffect(() => {
+    const h = (e: ClipboardEvent) => {
+      const f = e.clipboardData?.files?.[0]; if (!f) return;
+      const target = rows.find((r) => rowOpen(r.slot, r.unit));
+      if (!target) return;
+      e.preventDefault();
+      pickFile(target.slot, target.unit, f);
+    };
+    window.addEventListener("paste", h);
+    return () => window.removeEventListener("paste", h);
+  });
+
+  // Column-2 content for a row (inline function, not a nested component — keeps the
+  // field editor from remounting when a sibling row's read updates the parent).
+  function cell(r: DocRow) {
+    if (skipped[r.slot]) return <span className="text-[11.5px] text-text-muted italic">skipped</span>;
+    if (rowOpen(r.slot, r.unit)) {
+      return (
+        <label
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) pickFile(r.slot, r.unit, f); }}
+          className="inline-flex items-center gap-1 rounded-lg border border-dashed border-line hover:border-[#178a5c] bg-white px-2.5 py-1.5 cursor-pointer text-[11.5px] font-semibold text-[#178a5c]">
+          <span className="text-[13px] leading-none">＋</span> Add
+          <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pickFile(r.slot, r.unit, f); e.currentTarget.value = ""; }} />
+        </label>
+      );
+    }
+    const live = slotFiles[r.slot];
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        {live?.thumb
+          ? <img src={live.thumb} alt="" className="w-8 h-8 rounded-md object-cover border border-line" />
+          : <span className="w-8 h-8 rounded-md bg-[#f7fcf9] border border-[#cdeadd] grid place-items-center text-[13px]">📄</span>}
+        <button onClick={() => reopen(r.slot, r.unit)} className="text-[#178a5c] text-[11px] font-semibold hover:underline">Replace</button>
+      </span>
+    );
+  }
+
+  // The read strip shown under a unit's last row: reading / error+retry / editable
+  // fields / replacing. Returns null when the unit's boxes are still empty.
+  function unitStrip(unit: DocUnit) {
+    const rd = reads[unit];
+    if (rd?.status === "reading") {
+      return (
+        <span className="flex items-center gap-2 text-[11.5px] text-text-muted">
+          <span className="w-3.5 h-3.5 rounded-full border-2 border-[#178a5c]/30 border-t-[#178a5c] animate-spin" /> Reading…
+        </span>
+      );
+    }
+    if (rd?.status === "error") {
+      const canRetry = DOC_UNIT_PARTS[unit].every((p) => filesRef.current[p]);
+      return (
+        <span className="flex flex-wrap items-center gap-2 text-[11.5px]">
+          <span className="text-red-600">{rd.error || "Couldn't read that."}</span>
+          {canRetry && <button onClick={() => void runUnit(unit, filesRef.current)} className="text-[#178a5c] font-semibold hover:underline">Try again</button>}
+          <span className="text-text-muted">or use “Replace” above.</span>
+        </span>
+      );
+    }
+    if (unitDone(unit)) {
+      const build = DOC_UNIT_FIELDS[unit];
+      return build
+        ? <DocFieldRows fields={build(form)} onEdit={(field, value) => onPatch({ [field]: value })} />
+        : <span className="text-[11.5px] text-[#178a5c] font-medium">Uploaded ✓</span>;
+    }
+    if (replacing[unit] && unitPrefilled(unit)) {
+      return (
+        <span className="flex items-center gap-2 text-[11.5px] text-text-muted">
+          Replacing — attach the file{DOC_UNIT_PARTS[unit].length > 1 ? "s" : ""} above, or
+          <button onClick={() => setReplacing((s) => ({ ...s, [unit]: false }))} className="text-[#178a5c] font-semibold hover:underline">keep the current one</button>
+        </span>
+      );
+    }
+    return null;
+  }
+
   return (
     <div className="flex flex-col gap-2">
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-        onDragLeave={() => setDrag(false)}
-        onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files?.length) onAdd(e.dataTransfer.files); }}
-        className={["rounded-xl border-2 border-dashed p-3 transition", drag ? "border-[#178a5c] bg-[#f0faf5]" : "border-line bg-white"].join(" ")}
-      >
-        <label className="flex flex-col items-center justify-center gap-1 py-3 cursor-pointer text-center">
-          <span className="w-10 h-10 rounded-full bg-bg-soft grid place-items-center text-[18px]">📥</span>
-          <span className="text-[13px] font-semibold text-[#0f3d2e]">{single ? "Drop the combined PDF here" : "Drop the documents here"}</span>
-          <span className="text-[11px] text-text-muted">Tap to choose · drag in · or paste (Ctrl+V). PAN, Aadhaar, e-bill, bank, photo…</span>
-          <input type="file" accept="image/*,application/pdf" multiple={!single} className="hidden" onChange={(e) => { if (e.target.files?.length) onAdd(e.target.files); e.currentTarget.value = ""; }} />
-        </label>
-        {files.length > 0 && (
-          <div className="mt-1 flex flex-col gap-1.5 border-t border-line/70 pt-2">
-            {files.map((f, i) => (
-              <div key={i} className="flex items-center gap-2 text-[12.5px]">
-                <span className="w-7 h-7 rounded-md bg-bg-soft grid place-items-center text-[13px] shrink-0">{f.type.includes("pdf") ? "📄" : "🖼️"}</span>
-                <span className="min-w-0 flex-1 truncate text-text">{f.name}</span>
-                <button type="button" onClick={() => onRemove(i)} className="text-text-muted hover:text-red-500 text-[15px] leading-none px-1">×</button>
-              </div>
-            ))}
+      {/* One combined PDF — shown ONLY when the RM chose "One combined PDF" — auto-fills the boxes below. */}
+      {form._doc_choice === "single" && (
+      <div className="rounded-xl border border-dashed border-[#cdeadd] bg-[#f7fcf9] px-3 py-2.5">
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="text-[12px] text-text-mid">
+            <span className="font-semibold text-[#0f3d2e]">Got one combined PDF?</span> Drop it here and I&rsquo;ll fill the boxes below.
           </div>
-        )}
+          <label onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) void runCombo(f); }}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[#178a5c] bg-white px-3 py-1.5 cursor-pointer text-[12px] font-semibold text-[#178a5c] hover:bg-[#f0faf5] shrink-0">
+            {combo?.status === "reading"
+              ? <><span className="w-3.5 h-3.5 rounded-full border-2 border-[#178a5c]/30 border-t-[#178a5c] animate-spin" /> Reading…</>
+              : <>＋ Upload combined PDF</>}
+            <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void runCombo(f); e.currentTarget.value = ""; }} />
+          </label>
+        </div>
+        {combo?.status === "done" && <div className="text-[11.5px] text-[#178a5c] mt-1">Filled {combo.filled ?? 0} document{combo.filled === 1 ? "" : "s"} — check the boxes below and add anything missing.</div>}
+        {combo?.status === "error" && <div className="text-[11.5px] text-red-600 mt-1">{combo.error} You can still add each document below.</div>}
       </div>
-      <div className="flex items-center gap-2">
-        <button onClick={onRun} disabled={busy || files.length === 0} className="px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">{busy ? "Sorting…" : files.length ? `Sort ${files.length} file${files.length === 1 ? "" : "s"} →` : "Sort them out →"}</button>
-        <button onClick={onSkip} disabled={busy} className="px-3 py-2 rounded-lg text-[12.5px] text-text-muted hover:text-text hover:bg-bg-soft disabled:opacity-50">Skip — add one at a time</button>
+      )}
+      <div className="rounded-xl border border-line bg-white overflow-hidden">
+        <table className="w-full border-collapse">
+          <thead>
+            <tr className="bg-[#f0faf5] border-b border-[#e0f0e8] text-[11px] font-semibold text-[#0f3d2e]">
+              <th className="text-left font-semibold px-3 py-2 w-full">Document</th>
+              <th className="text-left font-semibold px-2 py-2 whitespace-nowrap">Upload</th>
+              <th className="text-right font-semibold px-3 py-2 whitespace-nowrap">Don&apos;t have it</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => {
+              const strip = r.lastOfUnit ? unitStrip(r.unit) : null;
+              return (
+                <Fragment key={r.slot}>
+                  <tr className={i > 0 ? "border-t border-line/70" : ""}>
+                    <td className="px-3 py-2 align-middle text-[12.5px] text-text leading-snug">{r.label}</td>
+                    <td className="px-2 py-2 align-middle whitespace-nowrap">{cell(r)}</td>
+                    <td className="px-3 py-2 align-middle text-right">
+                      <input type="checkbox" checked={!!skipped[r.slot]} onChange={() => toggleSkip(r.slot)} className="w-4 h-4 accent-[#178a5c] cursor-pointer align-middle" aria-label={`Don't have ${r.label}`} />
+                    </td>
+                  </tr>
+                  {strip && (
+                    <tr>
+                      <td colSpan={3} className="px-3 pb-2.5 pt-0">{strip}</td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
+        <button onClick={done} disabled={!allSettled} className="px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">Done with documents →</button>
+        {!allSettled && <span className="text-[11px] text-text-muted">Add or tick “Don&apos;t have it” for every row to continue.</span>}
       </div>
     </div>
   );
@@ -1618,53 +1846,6 @@ function SheetConfirmCard({ parsed, onEdit, onConfirm, onSkip }: {
         <div className="flex flex-wrap gap-2 mt-1">
           <button onClick={onConfirm} className="px-3.5 py-1.5 rounded-lg bg-[#178a5c] text-white text-[12.5px] font-semibold hover:bg-[#12734c]">Confirm & continue →</button>
           <button onClick={onSkip} className="px-3 py-1.5 rounded-lg border border-line text-[12.5px] text-text-mid hover:bg-bg-soft">Skip</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// Per-document review card — the bundle's reading of one document, every field
-// editable, with Replace (re-upload → re-OCR) and Skip (leave as read).
-function DocReviewCard({ review, onEditField, onAccept, onReplace, onSkip }: {
-  review: { turnId: string; label: string; fields: Fetched[] };
-  onEditField: (field: string, value: string) => void; onAccept: () => void; onReplace: () => void; onSkip: () => void;
-}) {
-  const [editKey, setEditKey] = useState<string | null>(null);
-  const [val, setVal] = useState("");
-  return (
-    <div className="self-start w-full max-w-[88%] rounded-2xl rounded-tl-md border border-[#cdeadd] bg-white shadow-sm overflow-hidden">
-      <div className="px-3.5 py-2 bg-[#f0faf5] border-b border-[#e0f0e8] flex items-center gap-2">
-        <span className="text-[12px]">📄</span>
-        <span className="text-[12.5px] font-semibold text-[#0f3d2e]">{review.label} — read from the document</span>
-      </div>
-      <div className="p-3.5 flex flex-col gap-2">
-        {review.fields.map((f) => (
-          <div key={f.field} className="flex items-center justify-between gap-3 text-[13px] min-h-[24px]">
-            <span className="text-text-muted shrink-0">{f.label}</span>
-            {editKey === f.field && f.field ? (
-              <span className="flex items-center gap-1.5">
-                <input autoFocus value={val} onChange={(e) => setVal(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") { onEditField(f.field!, val.trim()); setEditKey(null); } if (e.key === "Escape") setEditKey(null); }}
-                  className="border border-[#178a5c] rounded-lg px-2.5 py-1 text-[13px] w-44 text-right outline-none" />
-                <button onClick={() => { onEditField(f.field!, val.trim()); setEditKey(null); }} className="text-[#178a5c] text-[12px] font-semibold">Save</button>
-              </span>
-            ) : (
-              <span className="flex items-center gap-2 min-w-0">
-                {f.ok
-                  ? <span className="text-text font-medium text-right break-words">{f.value}</span>
-                  : <span className="text-amber-600 text-[12px] italic">not found</span>}
-                {f.field && (
-                  <button onClick={() => { setEditKey(f.field!); setVal(f.ok ? f.value : ""); }} className="opacity-60 hover:opacity-100 text-[#178a5c] text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>
-                )}
-              </span>
-            )}
-          </div>
-        ))}
-        <div className="flex flex-wrap gap-2 mt-1.5">
-          <button onClick={onAccept} className="px-3.5 py-1.5 rounded-lg bg-[#178a5c] text-white text-[12.5px] font-semibold hover:bg-[#12734c]">Looks good →</button>
-          <button onClick={onReplace} className="px-3 py-1.5 rounded-lg border border-line text-[12.5px] text-text-mid hover:bg-bg-soft">Replace document</button>
-          <button onClick={onSkip} className="px-3 py-1.5 rounded-lg text-[12.5px] text-text-muted hover:text-text hover:bg-bg-soft">Skip</button>
         </div>
       </div>
     </div>
@@ -1752,10 +1933,12 @@ const DOC_PATHS: Record<string, string[]> = {
 // Is this turn's data already on the profile? Drives edit mode's "ask only
 // what's missing" — filled turns are skipped.
 function isTurnFilled(t: Turn, f: Form): boolean {
-  // Creation-time input aids (EPC pick, paste sheet, bundle) + transient `_`
-  // fields are never re-asked in edit mode.
-  if (t.kind === "epc" || t.kind === "consent" || t.kind === "bundle" || t.kind === "paste") return true;
+  // Creation-time input aids (EPC pick, paste sheet) + transient `_` fields are
+  // never re-asked in edit mode.
+  if (t.kind === "epc" || t.kind === "consent" || t.kind === "paste") return true;
   if (t.field && t.field.startsWith("_")) return true;
+  // The document table is "filled" when every applicable slot is on the profile.
+  if (t.kind === "doc_table") return docTableComplete(f);
   if (t.kind === "docs") { const keys = DOC_PATHS[t.id] || []; return keys.length > 0 && keys.every((k) => !!(f[k] && String(f[k]).trim())); }
   if (t.kind === "loanconfig") return !!(f.selected_tenure_years && String(f.selected_tenure_years).trim());
   if (t.field) return !!(f[t.field] && String(f[t.field]).trim());
@@ -1763,10 +1946,10 @@ function isTurnFilled(t: Turn, f: Form): boolean {
 }
 
 // A turn the RM can fill/edit (drives the edit "pick" list + completeness). The
-// paste sheet / bundle / doc-choice are creation aids, not editable profile fields.
+// paste sheet is a creation aid, not an editable profile field.
 function isEditableTurn(t: Turn): boolean {
   if (t.field && t.field.startsWith("_")) return false;
-  return t.kind === "text" || t.kind === "pincode" || t.kind === "choice" || t.kind === "docs" || t.kind === "loanconfig";
+  return t.kind === "text" || t.kind === "pincode" || t.kind === "choice" || t.kind === "docs" || t.kind === "doc_table" || t.kind === "loanconfig";
 }
 // Every required (non-optional, applicable) detail is present.
 function isProfileComplete(f: Form): boolean {
