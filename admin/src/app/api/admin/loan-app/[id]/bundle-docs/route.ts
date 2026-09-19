@@ -363,6 +363,23 @@ type Pending = {
   raw: RawDoc; type: Exclude<DocType, "other">; fields: Normalized;
 };
 
+// Run an async map with a concurrency cap — files/docs process in parallel (so
+// N separate files no longer read one-after-another and stack up to minutes),
+// but never more than `limit` at once (keeps Gemini/GCS from being hammered).
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(Math.max(1, limit), items.length || 1) }, worker));
+  return results;
+}
+
 // ── POST — classify, split, store, extract ───────────────────────────────────
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -400,11 +417,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // ── Phase 1: classify + normalize every file (one Gemini call each). No
     // upload yet — we first decide each PAN/Aadhaar's person by name so the file
     // lands in the correct GCS folder / column.
-    const pendings: Pending[] = [];
-    for (const file of files) {
+    // Classify + normalize every file with ONE Gemini call each, run CONCURRENTLY
+    // (capped) so several separate files read in parallel instead of one-by-one.
+    // Per-file grouping/order is preserved for the name-assignment phase below.
+    const perFile = await mapLimit(files, 6, async (file): Promise<{ pend: Pending[]; skip: Array<{ file_name: string; reason: string }> }> => {
       const fileLabel = file.name || "file";
+      const pend: Pending[] = [];
+      const skip: Array<{ file_name: string; reason: string }> = [];
       try {
-        if (!ACCEPTED.has(file.type)) { skipped.push({ file_name: fileLabel, reason: "Unsupported file type" }); continue; }
+        if (!ACCEPTED.has(file.type)) { skip.push({ file_name: fileLabel, reason: "Unsupported file type" }); return { pend, skip }; }
         const input = Buffer.from(await file.arrayBuffer());
         const isPdf = file.type.includes("pdf");
 
@@ -420,8 +441,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         if (docs.length === 0) {
           // Classification unavailable — let the RM add this file one-by-one
           // rather than mis-file it. (Applies to both PDFs and images.)
-          skipped.push({ file_name: fileLabel, reason: "Couldn't read this as a known document — please add it one at a time." });
-          continue;
+          skip.push({ file_name: fileLabel, reason: "Couldn't read this as a known document — please add it one at a time." });
+          return { pend, skip };
         }
 
         // For a PDF, load once so we can copy page ranges into per-doc PDFs later.
@@ -436,13 +457,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           const rawType = String(d.type || "other").trim() as DocType;
           const type: DocType = ALLOWED_TYPES.has(rawType) ? rawType : "other";
           if (type === "other") continue; // quotation / unknown → separate step, not stored here
-          pendings.push({ file, isPdf, srcPdf, pageCount, scanBuffer, scanMime, raw: d, type, fields: normalizeFields(type, d) });
+          pend.push({ file, isPdf, srcPdf, pageCount, scanBuffer, scanMime, raw: d, type, fields: normalizeFields(type, d) });
         }
       } catch (e) {
         console.error("[bundle-docs] file failed:", fileLabel, (e as Error)?.message);
-        skipped.push({ file_name: fileLabel, reason: "Couldn't process this file." });
+        skip.push({ file_name: fileLabel, reason: "Couldn't process this file." });
       }
-    }
+      return { pend, skip };
+    });
+    const pendings: Pending[] = [];
+    for (const r of perFile) { pendings.push(...r.pend); skipped.push(...r.skip); }
 
     // ── Phase 2: name-based person assignment (overrides Gemini's applicant_/
     // coapp_ guess when names are provided). PAN + Aadhaar-front carry a name and
@@ -477,10 +501,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       }
     }
 
-    // ── Phase 3: split, store, register, extract-apply each pending doc.
-    let seq = 0;
-    for (const p of pendings) {
-      seq++;
+    // ── Phase 3: split, store, register, extract-apply each pending doc —
+    // CONCURRENTLY (capped). Each task builds its own field-patch delta; deltas
+    // merge after (no shared-mutation races), and `documents` keeps input order.
+    const phase3 = await mapLimit(pendings, 6, async (p, seq) => {
       const type = p.type;
       const filing = FILING[type];
       try {
@@ -512,20 +536,34 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           catch (e) { console.warn("[bundle-docs] face crop:", (e as Error)?.message); }
         }
 
-        const summary = applyDoc(type, path, p.fields, dbPatch, formPatch, facePath);
+        const dDb: Record<string, unknown> = {};
+        const dForm: Record<string, string> = {};
+        const summary = applyDoc(type, path, p.fields, dDb, dForm, facePath);
 
         let signed: string | null = null;
         if (outMime.startsWith("image/")) { try { signed = await getSignedReadUrl(path, 3600); } catch { /* non-fatal */ } }
 
-        documents.push({
-          type, category: filing.folder, storage_path: path, mime_type: outMime,
-          file_name: p.file.name || type, page_start: pStart, page_end: pEnd, summary, signed_url: signed,
-          name: p.fields.name || null, name_confidence: nameConfidence(type, p.fields.name ?? null, appName, coName),
-        });
+        return {
+          skipped: null as { file_name: string; reason: string } | null,
+          document: {
+            type, category: filing.folder, storage_path: path, mime_type: outMime,
+            file_name: p.file.name || type, page_start: pStart, page_end: pEnd, summary, signed_url: signed,
+            name: p.fields.name || null, name_confidence: nameConfidence(type, p.fields.name ?? null, appName, coName),
+          } as Record<string, unknown> | null,
+          dDb, dForm,
+        };
       } catch (e) {
         console.error("[bundle-docs] doc failed:", (e as Error)?.message);
-        skipped.push({ file_name: p.file.name || type, reason: "Couldn't file this document." });
+        return {
+          skipped: { file_name: p.file.name || type, reason: "Couldn't file this document." } as { file_name: string; reason: string } | null,
+          document: null as Record<string, unknown> | null,
+          dDb: {} as Record<string, unknown>, dForm: {} as Record<string, string>,
+        };
       }
+    });
+    for (const r of phase3) {
+      if (r.skipped) { skipped.push(r.skipped); continue; }
+      if (r.document) { documents.push(r.document); Object.assign(dbPatch, r.dDb); Object.assign(formPatch, r.dForm); }
     }
 
     // Persist the extracted fields + `_path` columns to epc_applications. Mirror
