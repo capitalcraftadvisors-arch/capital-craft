@@ -47,6 +47,7 @@ export async function geminiExtract<T = Record<string, unknown>>(opts: {
       responseMimeType: "application/json",
       responseSchema: opts.schema,
       temperature: 0, // deterministic — we want faithful copying, not creativity
+      maxOutputTokens: 8192, // enough for multi-doc output; prevents a truncated (unparseable → empty) response
     },
   };
 

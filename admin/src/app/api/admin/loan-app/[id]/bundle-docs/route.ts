@@ -49,7 +49,7 @@ const SUPABASE_ANON =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const MAX_DIMENSION = 2000;
+const MAX_DIMENSION = 1100; // smaller image → far faster Gemini read (fewer vision tiles); still readable for KYC
 const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 
 function err(message: string, status: number) {
@@ -414,56 +414,48 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const dbPatch: Record<string, unknown> = {};
     const formPatch: Record<string, string> = {};
 
-    // ── Phase 1: read the WHOLE batch in ONE Gemini call, not one call per file.
-    // Separate files used to read back-to-back (N slow round-trips → minutes, and
-    // hitting the server's request timeout). We now prep each file cheaply
-    // (compress images / load PDFs — no network), then classify + extract every
-    // file at once; each returned document carries its source_index so we know
-    // which file it came from. Files can be PDF / JPEG / PNG, in any order.
-    const pendings: Pending[] = [];
-    type Scan = { file: File; isPdf: boolean; srcPdf: PDFDocument | null; pageCount: number; buffer: Buffer; mime: string };
-    const scans: Scan[] = [];
-    for (const file of files) {
+    // ── Phase 1: read each file with its OWN focused Gemini call, run in
+    // PARALLEL (capped). One big call over all files was too slow and returned
+    // empty; per-file calls stay small (one file each → fast, reliable JSON) and
+    // fire concurrently. Images are shrunk first (MAX_DIMENSION) so each read is
+    // quick. Files can be PDF / JPEG / PNG, in any order.
+    const perFile = await mapLimit(files, 6, async (file, fi): Promise<{ pend: Pending[]; skip: Array<{ file_name: string; reason: string }> }> => {
       const fileLabel = file.name || "file";
+      const pend: Pending[] = [];
+      const skip: Array<{ file_name: string; reason: string }> = [];
       try {
-        if (!ACCEPTED.has(file.type)) { skipped.push({ file_name: fileLabel, reason: "Unsupported file type" }); continue; }
+        if (!ACCEPTED.has(file.type)) { skip.push({ file_name: fileLabel, reason: "Unsupported file type" }); return { pend, skip }; }
         const input = Buffer.from(await file.arrayBuffer());
         const isPdf = file.type.includes("pdf");
-        const buffer = isPdf ? input : await compressImage(input);
-        const mime = isPdf ? "application/pdf" : "image/jpeg";
+        const scanBuffer = isPdf ? input : await compressImage(input);
+        const scanMime = isPdf ? "application/pdf" : "image/jpeg";
+
+        const result = await geminiExtract<{ documents?: RawDoc[] }>({
+          images: [{ buffer: scanBuffer, mime: scanMime }], prompt: BUNDLE_PROMPT, schema: BUNDLE_SCHEMA, label: "bundle",
+        });
+        const docs = Array.isArray(result?.documents) ? result!.documents! : [];
+        if (docs.length === 0) {
+          skip.push({ file_name: fileLabel, reason: "Couldn't read this as a known document — please add it one at a time." });
+          return { pend, skip };
+        }
         let srcPdf: PDFDocument | null = null;
         let pageCount = 1;
         if (isPdf) { srcPdf = await PDFDocument.load(input, { ignoreEncryption: true }); pageCount = srcPdf.getPageCount(); }
-        scans.push({ file, isPdf, srcPdf, pageCount, buffer, mime });
-      } catch (e) {
-        console.error("[bundle-docs] prep failed:", fileLabel, (e as Error)?.message);
-        skipped.push({ file_name: fileLabel, reason: "Couldn't process this file." });
-      }
-    }
-
-    if (scans.length > 0) {
-      try {
-        const result = await geminiExtract<{ documents?: RawDoc[] }>({
-          images: scans.map((s) => ({ buffer: s.buffer, mime: s.mime })), prompt: BUNDLE_PROMPT, schema: BUNDLE_SCHEMA, label: "bundle",
-        });
-        const docs = Array.isArray(result?.documents) ? result!.documents! : [];
-        const seen = new Set<number>();
         for (const d of docs) {
-          const si = clamp(Math.round(Number(d.source_index) || 0), 0, scans.length - 1);
-          const scan = scans[si];
-          seen.add(si);
           const rawType = String(d.type || "other").trim() as DocType;
           const type: DocType = ALLOWED_TYPES.has(rawType) ? rawType : "other";
           if (type === "other") continue; // quotation / unknown → separate step, not stored here
-          pendings.push({ file: scan.file, isPdf: scan.isPdf, srcPdf: scan.srcPdf, pageCount: scan.pageCount, scanBuffer: scan.buffer, scanMime: scan.mime, raw: d, type, fields: normalizeFields(type, d) });
+          d.source_index = fi; // keep same-file docs grouped for the name-assignment sort
+          pend.push({ file, isPdf, srcPdf, pageCount, scanBuffer, scanMime, raw: d, type, fields: normalizeFields(type, d) });
         }
-        // Any file the model returned nothing for → let the RM add it one at a time.
-        scans.forEach((s, i) => { if (!seen.has(i)) skipped.push({ file_name: s.file.name || "file", reason: "Couldn't read this as a known document — please add it one at a time." }); });
       } catch (e) {
-        console.error("[bundle-docs] batch read failed:", (e as Error)?.message);
-        for (const s of scans) skipped.push({ file_name: s.file.name || "file", reason: "Couldn't read the documents — please add them one at a time." });
+        console.error("[bundle-docs] file failed:", fileLabel, (e as Error)?.message);
+        skip.push({ file_name: fileLabel, reason: "Couldn't process this file." });
       }
-    }
+      return { pend, skip };
+    });
+    const pendings: Pending[] = [];
+    for (const r of perFile) { pendings.push(...r.pend); skipped.push(...r.skip); }
     // Group same-file docs together, in page order, so the name-assignment phase
     // (Aadhaar-back follows the nearest preceding front in the same file) works.
     pendings.sort((a, b) => (Number(a.raw.source_index) || 0) - (Number(b.raw.source_index) || 0) || (Number(a.raw.page_start) || 0) - (Number(b.raw.page_start) || 0));
