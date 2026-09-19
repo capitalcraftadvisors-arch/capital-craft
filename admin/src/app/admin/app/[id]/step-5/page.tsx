@@ -246,7 +246,7 @@ function Inner() {
             Your loan profile
           </h2>
           <div className="grid sm:grid-cols-3 gap-4">
-            <ProfileTile label="Loan amount"  value={formatRupees(loan.loan_amount_required)}  accent="green" />
+            <ProfileTile label="Loan amount required" value={formatRupees(loan.loan_amount_required)} accent="green" />
             <ProfileTile label="Monthly bill" value={formatRupees(loan.monthly_bill_amount)}   accent="sky" />
             <ProfileTile label="Annual income" value={formatRupees(loan.annual_income)}         accent="green" />
           </div>

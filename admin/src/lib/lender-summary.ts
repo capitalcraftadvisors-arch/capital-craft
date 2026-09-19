@@ -74,7 +74,7 @@ export function summaryRows(
     ["System type", loan.system_type ?? "—"],
     ["Project size", loan.project_size ? `${loan.project_size} ${(loan.project_size_unit ?? "kw").toUpperCase()}` : "—"],
     ["Project cost", rupees(loan.total_project_cost)],
-    ["Loan required", rupees(loan.loan_amount_required)],
+    ["Loan amount required", rupees(loan.loan_amount_required)],
     ["Monthly bill", rupees(loan.monthly_bill_amount)],
     ["DISCOM", loan.discom_name ?? "—"],
     ["CA number", loan.ca_number ?? "—"],

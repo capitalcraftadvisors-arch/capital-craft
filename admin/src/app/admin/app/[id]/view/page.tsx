@@ -1096,6 +1096,7 @@ function Inner() {
                 <StepBlock title="Loan requirements">
                   <KV k="Project size" v={loan.project_size ? `${loan.project_size} ${(loan.project_size_unit ?? "kw").toUpperCase()}` : null} />
                   <KV k="Project cost" v={fmtRupees(loan.total_project_cost)} />
+                  <KV k="Loan amount required" v={fmtRupees(loan.loan_amount_required)} />
                   <KV
                     k="Down payment"
                     v={loan.total_project_cost && loan.loan_amount_required
