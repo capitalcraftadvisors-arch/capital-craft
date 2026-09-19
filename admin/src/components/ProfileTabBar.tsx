@@ -9,8 +9,13 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+// Label visibility inside a collapsing ProfileRail: shown on mobile (static
+// expanded rail) and, on lg+, only while the rail is hovered (group/rail).
+const RAIL_LABEL = "truncate inline lg:hidden lg:group-hover/rail:inline";
+const RAIL_JUSTIFY = "w-full justify-start lg:justify-center lg:group-hover/rail:justify-start";
+
 export function TabButton({
-  label, icon, onClick, href, active, disabled, title,
+  label, icon, onClick, href, active, disabled, title, fullWidth, rail,
 }: {
   label: string;
   icon?: ReactNode;
@@ -19,27 +24,45 @@ export function TabButton({
   active?: boolean;
   disabled?: boolean;
   title?: string;
+  fullWidth?: boolean; // vertical rail: full-width, left-aligned
+  rail?: boolean;      // collapsing rail: icon-only until hover
 }) {
   const cls = [
     "inline-flex items-center gap-1.5 px-3 py-2 rounded-[8px] text-[13px] font-semibold transition-colors whitespace-nowrap",
+    rail ? RAIL_JUSTIFY : fullWidth ? "w-full justify-start" : "",
     active
       ? "bg-[#0f3d2e] text-white"
       : "text-[#0f3d2e] hover:bg-[#eef6f1]",
     disabled ? "opacity-40 cursor-not-allowed pointer-events-none" : "",
   ].join(" ");
+  const inner = (
+    <>
+      {icon && <span className="shrink-0 inline-flex">{icon}</span>}
+      <span className={rail ? RAIL_LABEL : undefined}>{label}</span>
+    </>
+  );
   if (href && !disabled) {
-    return (
-      <a href={href} className={cls} title={title}>
-        {icon && <span className="shrink-0 inline-flex">{icon}</span>}
-        {label}
-      </a>
-    );
+    return <a href={href} className={cls} title={title ?? label}>{inner}</a>;
   }
   return (
-    <button type="button" disabled={disabled} title={title} onClick={onClick} className={cls}>
-      {icon && <span className="shrink-0 inline-flex">{icon}</span>}
-      {label}
+    <button type="button" disabled={disabled} title={title ?? label} onClick={onClick} className={cls}>
+      {inner}
     </button>
+  );
+}
+
+// Collapsing left rail for the profile pages — a slim icon strip (56px) that
+// expands into a labelled panel on hover (overlaying the content, which keeps
+// the full window width), mirroring the main-console AdminSidebar. On mobile
+// it's a normal full-width block with labels always shown. Pass rail-mode
+// TabButton / DownloadMenu children.
+export function ProfileRail({ children }: { children: ReactNode }) {
+  return (
+    <div className="shrink-0 mb-4 lg:mb-0 lg:w-[56px]">
+      <div className="group/rail lg:sticky lg:top-[70px] w-full lg:w-[56px] lg:hover:w-[220px] transition-[width] duration-200 ease-out rounded-[12px] border border-[#cdeadd] bg-white p-2 flex flex-col gap-1 lg:z-30 lg:shadow-sm">
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -48,13 +71,15 @@ export function TabButton({
 // downloadable. When there's a single item it still renders as a menu for a
 // consistent look across profiles.
 export function DownloadMenu({
-  items, icon, disabled, busyLabel, label = "Download",
+  items, icon, disabled, busyLabel, label = "Download", fullWidth, rail,
 }: {
   items: Array<{ label: string; onClick: () => void; disabled?: boolean }>;
   icon?: ReactNode;
   disabled?: boolean;
   busyLabel?: string | null;
   label?: string;
+  fullWidth?: boolean; // vertical rail: full-width, left-aligned
+  rail?: boolean;      // collapsing rail: icon-only until hover
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -67,16 +92,18 @@ export function DownloadMenu({
     return () => document.removeEventListener("mousedown", onDoc);
   }, [open]);
   return (
-    <div className="relative" ref={ref}>
+    <div className={"relative" + (rail || fullWidth ? " w-full" : "")} ref={ref} title={rail ? (busyLabel ?? label) : undefined}>
       <button
         type="button"
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-[8px] text-[13px] font-semibold text-[#0f3d2e] hover:bg-[#eef6f1] transition-colors whitespace-nowrap disabled:opacity-50"
+        className={"inline-flex items-center gap-1.5 px-3 py-2 rounded-[8px] text-[13px] font-semibold text-[#0f3d2e] hover:bg-[#eef6f1] transition-colors whitespace-nowrap disabled:opacity-50" + (rail ? " " + RAIL_JUSTIFY : fullWidth ? " w-full justify-start" : "")}
       >
         {icon && <span className="shrink-0 inline-flex">{icon}</span>}
-        {busyLabel ?? label}
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+        <span className={rail ? RAIL_LABEL + " inline-flex items-center gap-1.5" : "inline-flex items-center gap-1.5"}>
+          {busyLabel ?? label}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+        </span>
       </button>
       {open && (
         <div className="absolute left-0 top-full mt-1 z-40 min-w-[190px] rounded-[10px] border border-[#cdeadd] bg-white shadow-lg py-1">

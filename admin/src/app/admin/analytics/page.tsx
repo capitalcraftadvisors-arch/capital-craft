@@ -41,6 +41,7 @@ import Card from "@/components/ui/Card";
 import { supabase } from "@/lib/supabase";
 import { lenderOutcome } from "@/lib/loan-status";
 import OverviewSection from "@/components/analytics/OverviewSection";
+import EpcHealthPanel from "@/components/analytics/EpcHealthPanel";
 
 const ACCENT = "#178a5c"; // brand green — analytics chrome/charts match the rest of the console
 const SLATE = "#94a3b8"; // neutral slice colour (kept distinct from the green "good" slice)
@@ -959,6 +960,7 @@ function EpcSectionView({ s, w }: { s: EpcSection; w: Windows }) {
   const deltas = toDeltas(s.kpis);
   return (
     <div className="space-y-6">
+      <EpcHealthPanel />
       <SummaryBar text={buildSummary("EPC", deltas, w)} />
       <div className="grid gap-3 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">{s.kpis.map((k) => <KpiCard key={k.label} k={k} />)}</div>
       <div className="grid gap-4 lg:grid-cols-3">

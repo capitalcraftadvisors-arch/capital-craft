@@ -84,6 +84,10 @@ serve(async (req) => {
     // Team view's "Last login" without a separate tracking system.
     supabase.from("epc_business").update({ last_login_at: new Date().toISOString() }).eq("id", biz.id)
       .then(({ error }) => { if (error) console.warn("last_login_at update failed:", error.message); });
+    // Append a login event (fire-and-forget) — powers "Logins / Active EPC" in
+    // the analytics EPC-health panel (a count over a window, not just the latest).
+    supabase.from("epc_login_events").insert({ epc_business_id: biz.id })
+      .then(({ error }) => { if (error) console.warn("login event insert failed:", error.message); });
 
     const claims = {
       sub: biz.id,

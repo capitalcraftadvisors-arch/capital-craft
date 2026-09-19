@@ -191,6 +191,23 @@ function capPhone(v: string): string {
   return /^\d+$/.test(v) ? v.slice(0, 10) : v;
 }
 
+// Shared CSV export — one blob/download path for every console table (Loans,
+// Insurance, Leads, EPCs). Excel-friendly: UTF-8 BOM + CRLF + quoted cells.
+function downloadCsv(filenameStem: string, header: string[], rows: (unknown[])[]) {
+  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const lines = [header.map(esc).join(",")];
+  for (const r of rows) lines.push(r.map(esc).join(","));
+  const csv = "﻿" + lines.join("\r\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${filenameStem}-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // ── shared: clickable summary cards + collapsible filters ─────────────────
 type SummaryCard = { key: string; label: string; value: number };
 
@@ -1420,6 +1437,16 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     return new Set([...count.entries()].filter(([, c]) => c > 1).map(([k]) => k));
   }, [rows]);
   const isDup = (r: Row) => { const k = (r.borrower_pan || "").toUpperCase().trim() || (r.borrower_mobile || "").trim(); return !!k && dupKeys.has(k); };
+  // Document completeness from the *_path columns on the row. Co-applicant docs
+  // count only when a co-applicant exists (bill_on_applicant_name === false).
+  // Applicant PAN lives in user_application_docs (not fetched here), so it's not
+  // part of this quick count — the chip reflects the uploaded file-path docs.
+  function docStat(r: Row): { have: number; need: number } {
+    const core = [r.aadhaar_front_path, r.aadhaar_back_path, r.ebill_path, r.proforma_invoice_path, r.rooftop_photo_path, r.bank_statement_path, r.customer_photo_path];
+    const coapp = r.bill_on_applicant_name === false ? [r.coapp_pan_path, r.coapp_aadhaar_front_path, r.coapp_aadhaar_back_path] : [];
+    const all = [...core, ...coapp];
+    return { have: all.filter(Boolean).length, need: all.length };
+  }
   function displayEpc(r: Row): string {
     return r.epc_business?.trade_name
         || r.epc_business?.legal_name
@@ -1567,32 +1594,23 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
       draft: "Draft", under_review: "Under Review", docs_sent: "Docs Sent", hold: "Hold",
       approved: "Approved", disbursed: "Disbursed", rejected: "Rejected", aborted: "Aborted",
     };
-    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const header = ["Loan ID", "Borrower", "EPC partner", "Amount", "Stage", "Created on", "Created by", "1st disbursement", "2nd disbursement"];
-    const lines = [header.map(esc).join(",")];
-    for (const r of filtered) {
-      lines.push([
+    const header = ["Loan ID", "Borrower", "EPC partner", "Amount", "Stage", "Docs", "Created on", "Created by", "1st disbursement", "2nd disbursement"];
+    const rows = filtered.map((r) => {
+      const d = docStat(r);
+      return [
         r.loan_display_id || r.id,
         displayBorrower(r),
         displayEpc(r),
         amountFor(r),
         STAGE[loanStage(r)] ?? loanStage(r),
+        `${d.have}/${d.need}`,
         r.created_at,
         r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : (r.created_by === "admin" ? "Admin" : "EPC"),
         r.first_disbursement_amount ?? "",
         r.second_disbursement_amount ?? "",
-      ].map(esc).join(","));
-    }
-    const csv = "﻿" + lines.join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `loan-applications-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+      ];
+    });
+    downloadCsv("loan-applications", header, rows);
   }
 
   return (
@@ -1719,6 +1737,19 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                       {displayMaskedAadhaar(r) && (
                         <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{displayMaskedAadhaar(r)}</p>
                       )}
+                      {(() => {
+                        const d = docStat(r);
+                        const done = d.have >= d.need;
+                        return (
+                          <span
+                            title={done ? "All uploaded documents present" : "Some documents still pending"}
+                            className={["inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold", done ? "bg-[#e6f6ee] text-[#0f7a52]" : "bg-[#fef0d6] text-[#854f0b]"].join(" ")}
+                          >
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+                            {d.have}/{d.need} docs
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
                 </td>
@@ -2091,6 +2122,24 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
     setDateFrom(""); setDateTo("");
   }
 
+  // "Report" — CSV export of the CURRENTLY-FILTERED insurance list.
+  function exportReport() {
+    const header = ["INS ID", "Insured", "EPC partner", "Sum insured", "Insurance partner", "Status", "Policy from", "Policy to", "Created on", "Created by"];
+    const rowsOut = filtered.map((r) => [
+      r.insurance_display_id || r.id,
+      applicant(r),
+      epc(r),
+      r.sum_insured ?? r.invoice_confirmed_amount ?? r.invoice_amount ?? "",
+      insurerLabelShort(r.insurance_partner),
+      STATUS_LABEL[r.status] ?? r.status,
+      r.policy_from_date ?? "",
+      r.policy_to_date ?? "",
+      r.created_at,
+      r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : "—",
+    ]);
+    downloadCsv("insurance-applications", header, rowsOut);
+  }
+
   return (
     <>
       <SummaryCards accent={ACCENTS.insurance.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
@@ -2100,6 +2149,9 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
           <Input placeholder="Search by applicant, INS id, or EPC…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
         </div>
         <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.insurance.color} onClick={() => setFiltersOpen((o) => !o)} />
+        <Button type="button" variant="primary" onClick={exportReport} style={{ backgroundColor: "#178a5c" }} className="whitespace-nowrap inline-flex items-center gap-1.5">
+          {IconDownload} Report
+        </Button>
         <Button type="button" variant="primary" onClick={() => setAddOpen(true)} className="whitespace-nowrap" style={{ backgroundColor: ACCENTS.insurance.color }}>
           + Add New Insurance Application
         </Button>
@@ -2344,6 +2396,26 @@ function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
     setDateFrom(""); setDateTo("");
   }
 
+  // "Report" — CSV export of the CURRENTLY-FILTERED non-EPC lead list.
+  function exportReport() {
+    const header = ["Name", "Mobile", "Type", "City", "Pincode", "Project cost", "Loan amount", "Plant value", "GSTIN", "PAN", "Status", "Received"];
+    const rowsOut = filtered.map((r) => [
+      r.name || "",
+      r.mobile,
+      r.lead_type,
+      r.city ?? "",
+      r.pincode ?? "",
+      r.project_cost ?? "",
+      r.loan_amount ?? "",
+      r.plant_value ?? "",
+      r.gstin ?? "",
+      r.pan ?? "",
+      r.status,
+      r.created_at,
+    ]);
+    downloadCsv("customer-leads", header, rowsOut);
+  }
+
   return (
     <>
       <SummaryCards accent={ACCENTS.leads.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
@@ -2353,6 +2425,9 @@ function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
           <Input placeholder="Search by name, mobile, or city…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
         </div>
         <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.leads.color} onClick={() => setFiltersOpen((o) => !o)} />
+        <Button variant="primary" onClick={exportReport} style={{ backgroundColor: "#178a5c" }} className="whitespace-nowrap inline-flex items-center gap-1.5">
+          {IconDownload} Report
+        </Button>
       </div>
 
       <FiltersPanel open={filtersOpen} hasActive={activeCount > 0} onClear={clearAll}>

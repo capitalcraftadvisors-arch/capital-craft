@@ -29,7 +29,7 @@ import {
 } from "@/lib/loan-lenders";
 import LenderPickerModal, { type LenderKey } from "@/components/LenderPickerModal";
 import EmailComposerModal from "@/components/EmailComposerModal";
-import ProfileTabBar, { TabButton, DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
+import { TabButton, DownloadMenu, KebabMenu, ProfileRail } from "@/components/ProfileTabBar";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
 import { deadlineState, DEADLINE_PILL, remainingAmount, fmtDateShort } from "@/lib/disbursement";
@@ -883,13 +883,13 @@ function Inner() {
             ))}
       </header>
 
-      <div className="w-full px-5 sm:px-8 py-4" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
+      <div className="w-full px-5 sm:px-8 py-4 lg:flex lg:gap-6" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
 
-        {/* ── TAB / ACTION ROW — tabs (left) + stage actions (right) ────── */}
-        <ProfileTabBar
-          left={
-            <>
-              <TabButton label="Profile" icon={I.user} active />
+        {/* ── LEFT NAV RAIL — a slim icon strip that expands on hover, so the
+             profile uses the whole window until you reach for an action
+             (mirrors the main-console sidebar). ── */}
+        <ProfileRail>
+              <TabButton label="Profile" icon={I.user} active rail />
               {/* After approval, Edit becomes a dropdown of the three editable
                   sections (each editable once, then locked). Before approval it's
                   the normal jump to the step flow. */}
@@ -897,6 +897,7 @@ function Inner() {
                 <DownloadMenu
                   label="Edit"
                   icon={I.edit}
+                  rail
                   items={[
                     {
                       // Chatbot — resumes the chat and asks only what's missing.
@@ -923,11 +924,12 @@ function Inner() {
                   ]}
                 />
               ) : aborted ? (
-                <TabButton label="Edit" icon={I.edit} disabled title="Aborted — cannot edit" />
+                <TabButton label="Edit" icon={I.edit} disabled rail title="Aborted — cannot edit" />
               ) : (
                 <DownloadMenu
                   label="Edit"
                   icon={I.edit}
+                  rail
                   items={[
                     {
                       // Chatbot — asks only for what's still missing.
@@ -942,9 +944,10 @@ function Inner() {
                   ]}
                 />
               )}
-              <TabButton label="Activity Log" icon={I.eye} onClick={() => setActivityOpen(true)} />
+              <TabButton label="Activity Log" icon={I.eye} rail onClick={() => setActivityOpen(true)} />
               <DownloadMenu
                 icon={I.download}
+                rail
                 disabled={downloading}
                 busyLabel={downloading ? "Preparing…" : null}
                 items={[
@@ -954,28 +957,30 @@ function Inner() {
                   ...(tranche2Exists ? [{ label: "Download Tranche 2", onClick: () => void downloadTranche("2"), disabled: trancheBusy === "2" }] : []),
                 ]}
               />
-            </>
-          }
-          right={
-            aborted ? (
+        </ProfileRail>
+
+        {/* ── CONTENT COLUMN ─────────────────────────────────────────── */}
+        <div className="flex-1 min-w-0">
+
+        {/* ── ACTION STRIP — stage actions (were the right side of the tab bar). ── */}
+        <div className="flex items-center gap-2 flex-wrap justify-end mb-4">
+          {aborted ? (
+            <KebabMenu items={kebabItems} />
+          ) : (
+            <>
+              {statusActions}
+              {/* Disbursement page hosts the Tranche-1 upload; the 1st-amount
+                  field there opens once both Tranche-1 docs are uploaded. */}
+              {anyApprovedLender && (
+                <HAction variant="amber" icon={I.money} onClick={() => router.push(`/admin/app/${loan.id}/disbursement` as any)}>
+                  Disbursement
+                </HAction>
+              )}
+              {/* Three-dot menu — Change review (undo lender decision) + Delete. */}
               <KebabMenu items={kebabItems} />
-            ) : (
-              <>
-                {statusActions}
-                {/* Disbursement page hosts the Tranche-1 upload; the 1st-amount
-                    field there opens once both Tranche-1 docs are uploaded. */}
-                {anyApprovedLender && (
-                  <HAction variant="amber" icon={I.money} onClick={() => router.push(`/admin/app/${loan.id}/disbursement` as any)}>
-                    Disbursement
-                  </HAction>
-                )}
-                {/* Three-dot menu — Change review (undo lender decision) + Delete
-                    (type-DELETE modal). Available at every stage. */}
-                <KebabMenu items={kebabItems} />
-              </>
-            )
-          }
-        />
+            </>
+          )}
+        </div>
 
         {/* ── PROGRESS TRACKER — hidden once all stages are complete (2nd disbursement) ── */}
         {!secondDone && (
@@ -1312,6 +1317,7 @@ function Inner() {
             </SectionCard>
           </div>
         </div>
+        </div>{/* /content column */}
       </div>
 
       <LenderPickerModal

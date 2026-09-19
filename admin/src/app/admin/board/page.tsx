@@ -293,6 +293,21 @@ function dmy(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   return m ? `${m[3]}/${m[2]}` : iso;
 }
+// "Act today" — who is blocking each case, so the day reads as a ranked list.
+type WaitParty = "Customer" | "Lender" | "EPC" | "Internal";
+const WAIT_COLOR: Record<WaitParty, string> = { Customer: "#dc2626", Lender: "#d97706", EPC: "#185fa5", Internal: "#64748b" };
+function waitingOn(c: OpsCase): WaitParty {
+  if (c.source === "epc") return "EPC";
+  if (c.source === "lead" || c.source === "insurance") return "Customer";
+  switch (c.column) {
+    case "send_lender":
+    case "approved_rejected": return "Lender";
+    case "docs_pending": return "Customer";
+    case "phase1": return "EPC";
+    default: return "Internal"; // ready_login etc. — our move next
+  }
+}
+
 function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defaultSrc, rmName, todayStr, onStampContact, onSetFollowUp, onAddNote, onDetectDocs }: {
   items: OpsCase[]; onOpen: (href: string) => void; q: string; onSearch: (v: string) => void;
   showOwner: boolean; ownerControl?: React.ReactNode; defaultSrc: CaseSource; rmName: string;
@@ -357,26 +372,37 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
   const byColour = colour === "all" ? inSrc : inSrc.filter((c) => lvlOf(c) === colour);
   const shown = ql ? byColour.filter((c) => `${c.name} ${c.lender ?? ""} ${c.epcName ?? ""} ${c.ownerName ?? ""}`.toLowerCase().includes(ql)) : byColour;
   const urgent = shown.filter((c) => lvlOf(c) === "red").length;
+  // Rank the day: idle days × loan value → biggest exposure first, work top-down.
+  const rankVal = (c: OpsCase) => Math.max(1, Math.floor(c.stageHours / 24)) * (c.amount || 1);
+  const ranked = [...shown].sort((a, b) => rankVal(b) - rankVal(a));
+  const custCases = shown.filter((c) => waitingOn(c) === "Customer");
+  const blocked = shown.filter((c) => Math.floor(c.stageHours / 24) >= 2).reduce((s, c) => s + (c.amount || 0), 0);
+  const recoverable = custCases.reduce((s, c) => s + (c.amount || 0), 0);
+  const delayCats: WaitParty[] = ["Customer", "Lender", "EPC", "Internal"];
+  const delayCounts = delayCats.map((k) => ({ k, n: shown.filter((c) => waitingOn(c) === k).length }));
+  const delayMax = Math.max(1, ...delayCounts.map((d) => d.n));
+  const todayLabel = (() => { try { return new Date(todayStr + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short" }).toUpperCase(); } catch { return ""; } })();
   return (
-    <div className="max-w-3xl">
-      <div className="flex items-center gap-3 mb-3 flex-wrap">
-        <div className="text-[16px] font-bold text-text">
-          My Day <span className="text-text-muted font-medium text-[13px]">· {shown.length} to action{urgent > 0 ? ` · ${urgent} urgent` : ""}</span>
-        </div>
-        <div className="flex items-center gap-2 ml-auto">
-          {ownerControl}
-          {/* Filter by urgency colour (red / yellow / green). */}
-          <select value={colour} onChange={(e) => setColour(e.target.value as "all" | "red" | "yellow" | "green")}
-            className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-[12px] font-medium text-text outline-none focus:border-[#0f766e] cursor-pointer">
-            <option value="all">All colours</option>
-            <option value="red">🔴 Red</option>
-            <option value="yellow">🟡 Yellow</option>
-            <option value="green">🟢 Green</option>
-          </select>
-          <div className="relative">
-            <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
-            <input value={q} onChange={(e) => onSearch(e.target.value)} placeholder="Search my cases…"
-              className="w-44 sm:w-56 border-2 border-line rounded-lg pl-9 pr-3 py-1.5 text-[13px] outline-none focus:border-[#0f766e]" />
+    <div>
+      <div className="mb-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">{todayLabel} · one ranked list, work top-down</p>
+        <div className="flex items-center gap-3 flex-wrap mt-1">
+          <h2 className="text-[22px] font-display font-bold text-text">Act today</h2>
+          <span className="text-[13px] text-text-muted">· {shown.length} to action{urgent > 0 ? ` · ${urgent} urgent` : ""}</span>
+          <div className="ml-auto flex items-center gap-2">
+            {ownerControl}
+            <select value={colour} onChange={(e) => setColour(e.target.value as "all" | "red" | "yellow" | "green")}
+              className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-[12px] font-medium text-text outline-none focus:border-[#0f766e] cursor-pointer">
+              <option value="all">All colours</option>
+              <option value="red">🔴 Red</option>
+              <option value="yellow">🟡 Yellow</option>
+              <option value="green">🟢 Green</option>
+            </select>
+            <div className="relative">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
+              <input value={q} onChange={(e) => onSearch(e.target.value)} placeholder="Search my cases…"
+                className="w-40 sm:w-52 border-2 border-line rounded-lg pl-9 pr-3 py-1.5 text-[13px] outline-none focus:border-[#0f766e]" />
+            </div>
           </div>
         </div>
       </div>
@@ -390,59 +416,90 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
           </button>
         ))}
       </div>
-      {shown.length === 0 ? (
-        <div className="text-[13px] text-text-muted border border-dashed border-line rounded-lg p-10 text-center">
-          Nothing in {MYDAY_SRC_TABS.find((t) => t.key === src)?.label} needs action right now. 🎉
+
+      <div className="lg:flex lg:gap-5 items-start">
+        {/* Ranked worklist — # · case · waiting on · idle · do this now · owner */}
+        <div className="flex-1 min-w-0">
+          {shown.length === 0 ? (
+            <div className="text-[13px] text-text-muted border border-dashed border-line rounded-lg p-10 text-center">
+              Nothing in {MYDAY_SRC_TABS.find((t) => t.key === src)?.label} needs action right now. 🎉
+            </div>
+          ) : (
+            <div className="rounded-lg border border-line bg-white overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead className="text-[10.5px] uppercase tracking-wide text-text-muted border-b border-line bg-bg-tint/40">
+                  <tr>
+                    <th className="text-left font-medium px-2.5 py-2 w-7">#</th>
+                    <th className="text-left font-medium px-2.5 py-2">Case</th>
+                    <th className="text-left font-medium px-2.5 py-2">Waiting on</th>
+                    <th className="text-left font-medium px-2.5 py-2">Idle</th>
+                    <th className="text-left font-medium px-2.5 py-2">Do this now</th>
+                    {showOwner && <th className="text-left font-medium px-2.5 py-2">Owner</th>}
+                    <th className="px-2.5 py-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {ranked.map((c, i) => {
+                    const act = nextAction(c)!;
+                    const days = Math.max(0, Math.floor(c.stageHours / 24));
+                    const w = waitingOn(c);
+                    const tel = myDayTel(c.mobile);
+                    const hasNote = !!COMMENT_TBL[c.source];
+                    const fuDue = !!c.followUpAt && c.followUpAt <= todayStr;
+                    return (
+                      <tr key={c.source + c.id} className="border-b border-[#f0f4f2] last:border-0 hover:bg-[#f7fcfa] cursor-pointer" onClick={() => onOpen(c.href)}>
+                        <td className="px-2.5 py-2.5 align-top text-text-muted font-semibold">{i + 1}</td>
+                        <td className="px-2.5 py-2.5 align-top">
+                          <div className="font-semibold text-text truncate max-w-[190px] flex items-center gap-1.5">
+                            {c.name}{fuDue && <span title="Follow-up due" className="text-[10px]">⏰</span>}
+                          </div>
+                          <div className="text-[11px] text-text-muted truncate max-w-[190px]">{c.lender ? `${c.lender} · ` : ""}{c.epcName ?? c.statusLabel}{c.amount > 0 ? ` · ${fmtFull(c.amount)}` : ""}</div>
+                        </td>
+                        <td className="px-2.5 py-2.5 align-top whitespace-nowrap">
+                          <span className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold" style={{ color: WAIT_COLOR[w] }}>
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: WAIT_COLOR[w] }} />{w}
+                          </span>
+                        </td>
+                        <td className="px-2.5 py-2.5 align-top font-semibold whitespace-nowrap" style={{ color: days >= 2 ? "#b42318" : "#5a8a76" }}>{days}d</td>
+                        <td className="px-2.5 py-2.5 align-top text-text-mid"><span className="block truncate max-w-[230px]">{act.text}</span></td>
+                        {showOwner && <td className="px-2.5 py-2.5 align-top text-text-mid whitespace-nowrap">{c.ownerName ?? "—"}</td>}
+                        <td className="px-2.5 py-2.5 align-top whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
+                          <span className="inline-flex items-center gap-2 text-[13px]">
+                            {tel && <button type="button" title="WhatsApp" onClick={() => openWa(c)} className="text-[#128C7E] font-semibold hover:underline">WA</button>}
+                            <button type="button" title="Remind" onClick={() => { setRemindCase(c); setRemindDate(c.followUpAt || ""); }} className="hover:opacity-70">⏰</button>
+                            {hasNote && <button type="button" title="Comment" onClick={() => { setNoteCase(c); setNoteText(""); }} className="hover:opacity-70">✎</button>}
+                            {(c.source === "loan" || c.source === "epc") && <button type="button" title="Activity" onClick={() => setLogCase(c)} className="hover:opacity-70">🕘</button>}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-      ) : (
-        <ul className="flex flex-col gap-2">
-          {shown.map((c) => {
-            const act = nextAction(c)!;
-            const days = Math.max(0, Math.floor(c.stageHours / 24));
-            const lvl = lvlOf(c);
-            const tel = myDayTel(c.mobile);
-            const fuDue = !!c.followUpAt && c.followUpAt <= todayStr; // due today / overdue
-            const contacted = daysAgo(c.lastContactedAt);
-            const hasNote = !!COMMENT_TBL[c.source];
-            return (
-              <li key={c.source + c.id} className="flex items-center gap-3 rounded-lg border border-line bg-white px-3.5 py-3 transition-shadow hover:shadow-md">
-                <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: OUTLINE[lvl] }} title={lvl === "red" ? "Overdue" : lvl === "yellow" ? "Watch" : "On track"} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <strong className="text-[14px] text-text truncate">{c.name}</strong>
-                    {c.lender && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-[#eef2f7] text-[#334155] shrink-0">{c.lender}</span>}
-                    {showOwner && c.ownerName && <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-[#f0f7ff] text-[#185fa5] shrink-0">{c.ownerName}</span>}
-                    {c.followUpAt && (
-                      <span className={["text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0", fuDue ? "bg-[#fde7e7] text-[#b42318]" : "bg-[#fff4e0] text-[#b45309]"].join(" ")}>
-                        ⏰ {fuDue ? (c.followUpAt < todayStr ? "Overdue" : "Due today") : dmy(c.followUpAt)}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[12.5px] text-text-mid truncate">{act.text}{c.epcName ? ` · ${c.epcName}` : ""}</div>
-                  <div className="flex items-center gap-3 mt-1 text-[11.5px] flex-wrap">
-                    {c.amount > 0 && <span className="font-semibold text-[#0f3d2e]">{fmtFull(c.amount)}</span>}
-                    {tel && (
-                      <button type="button" onClick={(e) => { e.stopPropagation(); openWa(c); }} className="inline-flex items-center gap-1 text-[#128C7E] font-semibold hover:underline">WhatsApp</button>
-                    )}
-                    <button type="button" onClick={(e) => { e.stopPropagation(); setRemindCase(c); setRemindDate(c.followUpAt || ""); }} className="inline-flex items-center gap-1 text-[#b45309] font-semibold hover:underline">⏰ Remind</button>
-                    {hasNote && <button type="button" onClick={(e) => { e.stopPropagation(); setNoteCase(c); setNoteText(""); }} className="inline-flex items-center gap-1 text-[#4338ca] font-semibold hover:underline">✎ Comment</button>}
-                    {(c.source === "loan" || c.source === "epc") && <button type="button" onClick={(e) => { e.stopPropagation(); setLogCase(c); }} className="inline-flex items-center gap-1 text-[#5a6b7b] font-semibold hover:underline">🕘 Activity</button>}
-                    {c.commentCount > 0 && <span className="inline-flex items-center gap-1 text-text-muted">💬 {c.commentCount}</span>}
-                    {contacted !== null && <span className="text-text-muted">contacted {contacted === 0 ? "today" : `${contacted}d ago`}</span>}
-                  </div>
-                </div>
-                <span className="text-[12px] font-semibold shrink-0 whitespace-nowrap" style={{ color: lvl === "red" ? "#b42318" : "#5a8a76" }}>
-                  {lvl === "red" ? "⚠ " : ""}{days}d
-                </span>
-                <button type="button" onClick={() => onOpen(c.href)}
-                  className="shrink-0 text-[12px] font-semibold px-3.5 py-1.5 rounded-lg bg-[#0f766e] text-white hover:bg-[#0c5f58]">
-                  {act.cta}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      )}
+
+        {/* Today's math + Who is delaying */}
+        <aside className="lg:w-72 shrink-0 mt-4 lg:mt-0 space-y-4">
+          <div className="rounded-lg border border-[#f2c4c4] bg-[#fdf0f0] p-4">
+            <p className="text-[12px] font-bold uppercase tracking-wide text-[#b42318] mb-2">Today&rsquo;s math</p>
+            <div className="flex justify-between items-baseline text-[13px] py-1 border-b border-[#f2c4c4]/60"><span className="text-[#8a3a3a]">₹ blocked (stuck &gt; 2d)</span><span className="font-bold text-[#b42318]">{fmtFull(blocked)}</span></div>
+            <div className="flex justify-between items-baseline text-[13px] py-1 border-b border-[#f2c4c4]/60"><span className="text-[#8a3a3a]">Recoverable by {custCases.length} call{custCases.length === 1 ? "" : "s"}</span><span className="font-bold text-[#b42318]">{fmtFull(recoverable)}</span></div>
+            <div className="flex justify-between items-baseline text-[13px] py-1"><span className="text-[#8a3a3a]">Cases to action</span><span className="font-bold text-[#b42318]">{shown.length}</span></div>
+          </div>
+          <div className="rounded-lg border border-line bg-white p-4">
+            <p className="text-[12px] font-bold uppercase tracking-wide text-text-mid mb-3">Who is delaying</p>
+            {delayCounts.map((d) => (
+              <div key={d.k} className="mb-2.5 last:mb-0">
+                <div className="flex justify-between text-[12px] mb-1"><span className="text-text">{d.k}</span><span className="font-semibold text-text">{d.n} case{d.n === 1 ? "" : "s"}</span></div>
+                <div className="h-2 rounded-full bg-[#eef1f4] overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(d.n / delayMax) * 100}%`, backgroundColor: WAIT_COLOR[d.k] }} /></div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10.5px] text-text-muted leading-snug">Ranked by idle days × loan value — work the top of the list first.</p>
+        </aside>
+      </div>
 
       {/* WhatsApp composer — pick pending items → Hindi message → open WhatsApp. */}
       {waCase && (
@@ -981,11 +1038,14 @@ function Inner() {
   }, [users, isMainAdmin, isManager, me]);
 
   // My Day scope: an RM sees only their own cases; a manager sees their whole
-  // team (self + own RMs), narrowable via the owner control.
+  // team (self + own RMs); the Main Admin oversees everyone (all managers +
+  // RMs). All narrowable via the owner control.
   const myTeamIds = useMemo(() => {
-    const ids: (string | null | undefined)[] = isManager ? [me?.id, ...myRms.map((r) => r.id)] : [me?.id];
+    const ids: (string | null | undefined)[] = isMainAdmin
+      ? boardPeople.map((u) => u.id)
+      : isManager ? [me?.id, ...myRms.map((r) => r.id)] : [me?.id];
     return new Set(ids.filter(Boolean) as string[]);
-  }, [isManager, myRms, me]);
+  }, [isMainAdmin, isManager, boardPeople, myRms, me]);
   // Today in IST ("YYYY-MM-DD") — for follow-up due/overdue comparisons.
   const todayStr = useMemo(() => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()), []);
   const myDay = useMemo(() => {
@@ -998,10 +1058,10 @@ function Inner() {
       .sort((a, b) => dueRank(a) - dueRank(b) || outlineRank(a) - outlineRank(b) || contactRank(a) - contactRank(b) || b.stageHours - a.stageHours);
   }, [cases, myTeamIds, outlineRank, todayStr]);
   const myDayScoped = useMemo(() => {
-    if (!isManager || myDayOwner === "all") return myDay;
+    if (!canOversee || myDayOwner === "all") return myDay;
     const want = myDayOwner === "me" ? me?.id : myDayOwner;
     return myDay.filter((c) => c.ownerUserId === want);
-  }, [myDay, isManager, myDayOwner, me]);
+  }, [myDay, canOversee, myDayOwner, me]);
 
   const ownerTabs = useMemo(
     () => [
@@ -1065,28 +1125,15 @@ function Inner() {
               </h1>
             </div>
             <div className="flex items-center gap-3 flex-wrap">
-              {/* Owner tabs live up here now (above the filters) so the filter row
-                  stays light. Board view only. */}
-              {canOversee && view === "board" && (
-                <div className="inline-flex border border-line rounded-lg overflow-hidden">
-                  {ownerTabs.map((o) => (
-                    <button key={o.id} type="button" onClick={() => setOwnerFilter(o.id)}
-                      className={["px-3 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", ownerFilter === o.id ? "bg-[#178a5c] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
-                      {o.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {!isMainAdmin && (
-                <div className="inline-flex border border-line rounded-lg overflow-hidden">
-                  {(["myday", "board"] as const).map((v) => (
-                    <button key={v} type="button" onClick={() => { setView(v); if (v === "myday") setSel(null); }}
-                      className={["px-3.5 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", view === v ? "bg-[#0f766e] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
-                      {v === "myday" ? "My Day" : "Board"}
-                    </button>
-                  ))}
-                </div>
-              )}
+              {/* View switch sits at the top-right, just before the bell + Target. */}
+              <div className="inline-flex border border-line rounded-lg overflow-hidden">
+                {(["myday", "board"] as const).map((v) => (
+                  <button key={v} type="button" onClick={() => { setView(v); if (v === "myday") setSel(null); }}
+                    className={["px-3.5 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", view === v ? "bg-[#0f766e] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
+                    {v === "myday" ? "My Day" : "Board"}
+                  </button>
+                ))}
+              </div>
               <NotificationBell />
               {isMainAdmin && (
                 <label className="text-[12px] text-text-muted flex items-center gap-1.5">Target
@@ -1133,15 +1180,29 @@ function Inner() {
                   className="rounded-lg border border-line bg-white px-2.5 py-2 text-[12px] outline-none focus:border-[#0f766e]" aria-label="To month" />
               </div>
             )}
-            {/* Quick filters */}
-            {([["myoverdue", "My overdue", "all"], ["unassigned", "Unassigned", "admin"], ["breaches", "Breaches", "oversee"]] as const)
-              .filter(([, , vis]) => vis === "all" || (vis === "admin" && isMainAdmin) || (vis === "oversee" && canOversee))
-              .map(([k, lbl]) => (
-              <button key={k} type="button" onClick={() => setQuick(quick === k ? "none" : k)}
-                className={["px-3 py-1.5 text-[12px] font-semibold rounded-lg border", quick === k ? "bg-[#b45309] text-white border-[#b45309]" : "bg-white text-text-mid border-line hover:bg-bg-tint"].join(" ")}>
-                {lbl}
-              </button>
-            ))}
+            {/* Owner tabs + quick filters are pushed to the right-most of the
+                filter row (whose board, then the My-overdue/Unassigned/Breaches
+                quick filters). */}
+            <div className="ml-auto flex items-center gap-2 flex-wrap justify-end">
+              {canOversee && (
+                <div className="inline-flex border border-line rounded-lg overflow-hidden">
+                  {ownerTabs.map((o) => (
+                    <button key={o.id} type="button" onClick={() => setOwnerFilter(o.id)}
+                      className={["px-3 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", ownerFilter === o.id ? "bg-[#178a5c] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
+                      {o.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {([["myoverdue", "My overdue", "all"], ["unassigned", "Unassigned", "admin"], ["breaches", "Breaches", "oversee"]] as const)
+                .filter(([, , vis]) => vis === "all" || (vis === "admin" && isMainAdmin) || (vis === "oversee" && canOversee))
+                .map(([k, lbl]) => (
+                <button key={k} type="button" onClick={() => setQuick(quick === k ? "none" : k)}
+                  className={["px-3 py-1.5 text-[12px] font-semibold rounded-lg border", quick === k ? "bg-[#b45309] text-white border-[#b45309]" : "bg-white text-text-mid border-line hover:bg-bg-tint"].join(" ")}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
           </div>
           )}
         </header>
@@ -1151,16 +1212,16 @@ function Inner() {
           <div className="flex-1 overflow-auto p-4 sm:p-6">
             {view === "myday" ? (
               loading ? <p className="text-text-muted">Loading…</p> : (
-                <MyDayQueue items={myDayScoped} q={q} onSearch={setQ} showOwner={isManager}
-                  defaultSrc={isManager ? "epc" : "loan"} rmName={me?.contact_name || greetingName(me) || "Capital Craft"}
+                <MyDayQueue items={myDayScoped} q={q} onSearch={setQ} showOwner={canOversee}
+                  defaultSrc={canOversee ? "epc" : "loan"} rmName={me?.contact_name || greetingName(me) || "Capital Craft"}
                   todayStr={todayStr} onStampContact={(c) => void stampContact(c)} onSetFollowUp={(c, d) => void setFollowUp(c, d)}
                   onAddNote={(c, t) => void addNote(c, t)} onDetectDocs={detectPendingDocs}
-                  ownerControl={isManager ? (
+                  ownerControl={canOversee ? (
                     <select value={myDayOwner} onChange={(e) => setMyDayOwner(e.target.value)}
                       className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-[12px] font-medium text-text outline-none focus:border-[#0f766e] cursor-pointer">
                       <option value="all">Everyone</option>
-                      <option value="me">Me</option>
-                      {myRms.map((r) => (<option key={r.id} value={r.id}>{r.name}</option>))}
+                      {isManager && <option value="me">Me</option>}
+                      {boardPeople.map((r) => (<option key={r.id} value={r.id}>{r.name}</option>))}
                     </select>
                   ) : undefined}
                   onOpen={(href) => { sessionStorage.setItem("ccReturnTo", "/admin/board"); router.push(href as unknown as string); }} />
@@ -1211,11 +1272,13 @@ function Inner() {
                       onDrop={(e) => { e.preventDefault(); if (canDrag) onDropTo(col.key); }}
                       className={dragId && canDrag ? "rounded-lg outline-dashed outline-1 outline-[#9ccbb7] outline-offset-2" : ""}>
                       <div className="pb-2 mb-2 border-b-2 border-line">
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] font-bold uppercase tracking-wide text-text-mid">{col.label}</span>
-                          <span className="text-[12px] font-semibold text-text-muted">{items.length}</span>
+                        <div className="text-[11px] font-bold uppercase tracking-wide text-text-mid">{col.label}</div>
+                        {/* Count in front of the ₹ value — e.g. "5 · ₹39.2 L".
+                            EPC has no loan value, so it shows the count only. */}
+                        <div className="text-[11px] font-semibold text-[#0f3d2e] mt-0.5">
+                          <span className="text-text-muted">{items.length}</span>
+                          {srcFilter !== "epc" && <> · {fmt(colValue)}</>}
                         </div>
-                        {srcFilter !== "epc" && <div className="text-[11px] font-semibold text-[#0f3d2e] mt-0.5">{fmt(colValue)}</div>}
                       </div>
                       <div className="flex flex-col gap-2">
                         {items.map((c) => {

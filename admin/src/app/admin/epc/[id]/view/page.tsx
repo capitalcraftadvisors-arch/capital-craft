@@ -30,7 +30,7 @@ import CommentsSection from "@/components/CommentsSection";
 import OwnershipCard from "@/components/OwnershipCard";
 import ActivityLogModal from "@/components/ActivityLogModal";
 import DeleteEpcModal from "@/components/DeleteEpcModal";
-import ProfileTabBar, { TabButton, DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
+import { TabButton, DownloadMenu, KebabMenu, ProfileRail } from "@/components/ProfileTabBar";
 import { computeEpcHealth, scoreTone, type TatBands, type HealthBucket } from "@/lib/epc-score";
 // Shared view chrome — the SAME kit the Loan Application View imports, so the
 // two dashboards can't drift apart. EPC-specific pieces stay in this file.
@@ -410,7 +410,20 @@ function Inner() {
         </div>
       </header>
 
-      <div className="w-full px-5 sm:px-8 py-6" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
+      <div className="w-full px-5 sm:px-8 py-6 lg:flex lg:gap-6" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
+
+        {/* ── LEFT NAV RAIL — a slim icon strip that expands on hover, so the
+             profile uses the whole window until you reach for an action
+             (mirrors the main-console sidebar). ── */}
+        <ProfileRail>
+          <TabButton label="Profile" icon={I.building} active rail />
+          <TabButton label="Edit" icon={I.edit} rail onClick={() => router.push(`/admin/epc/${biz.id}` as any)} />
+          <TabButton label="Activity Log" icon={I.eye} rail onClick={() => setActivityOpen(true)} />
+          <TabButton label="Download ZIP" icon={I.download} rail disabled={downloading} onClick={() => setZipPickerOpen(true)} />
+        </ProfileRail>
+
+        {/* ── CONTENT COLUMN ─────────────────────────────────────────── */}
+        <div className="flex-1 min-w-0">
 
         {/* ── HEADER CARD ─────────────────────────────────────────── */}
         <div className="rounded-[12px] border border-[#cdeadd] bg-[#f0faf5] p-5 sm:p-6 mb-4">
@@ -448,77 +461,64 @@ function Inner() {
           )}
         </div>
 
-        {/* ── TAB / ACTION ROW — tabs (left); Review-by-CC → status + lender
-             dropdown → ⋯ menu (right), mirroring the loan-application bar. ── */}
-        <ProfileTabBar
-          left={
-            <>
-              <TabButton label="Profile" icon={I.building} active />
-              <TabButton label="Edit" icon={I.edit} onClick={() => router.push(`/admin/epc/${biz.id}` as any)} />
-              <TabButton label="Activity Log" icon={I.eye} onClick={() => setActivityOpen(true)} />
-              <TabButton label="Download ZIP" icon={I.download} disabled={downloading} onClick={() => setZipPickerOpen(true)} />
-            </>
-          }
-          right={
-            <>
-              {/* Before a CC decision (docs uploaded, not yet decided): the
-                  Review-by-CC dropdown to set Approved / Rejected. */}
-              {biz.status !== "draft" && biz.status !== "approved" && biz.status !== "rejected" && (
-                <DownloadMenu
-                  label="Review by CC"
-                  items={[
-                    { label: "Approved", onClick: () => void changeStatus("approved") },
-                    { label: "Rejected", onClick: () => { setRejectReason(""); setRejectOther(""); setRejectOpen(true); } },
-                  ]}
-                />
-              )}
-              {/* After the CC decision: a status box (Approved/Rejected by CC). */}
-              {(biz.status === "approved" || biz.status === "rejected") && (
-                <span
-                  className={
-                    "inline-flex items-center px-3 py-1.5 rounded-[8px] text-[13px] font-semibold border whitespace-nowrap " +
-                    (biz.status === "approved"
-                      ? "bg-[#e6f6ee] text-[#0f7a52] border-[#bfe6d5]"
-                      : "bg-red-50 text-red-700 border-red-200")
-                  }
-                >
-                  {biz.status === "approved" ? "Approved by CC" : "Rejected by CC"}
-                </span>
-              )}
-              {/* Lender-status dropdown — available once the EPC has submitted
-                  (not draft), even before CC review. Sending docs (or approving)
-                  before CC approval prompts to approve the profile in the same
-                  step (see setLenderExclusive). */}
-              {biz.status !== "draft" && (
-                <LenderCell
-                  state={lenderMap}
-                  lenders={lenderList}
-                  onSet={(l, target) => void setLenderExclusive(l, target)}
-                  onAddLender={addLender}
-                />
-              )}
-              {biz.business_type !== "admin" && (
-                <KebabMenu
-                  items={[
-                    ...((biz.status === "approved" || biz.status === "rejected")
-                      ? [{
-                          label: "Change review",
-                          icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></svg>),
-                          onClick: () => { if (window.confirm("Revert the CC review back to Under Review?")) void changeStatus("under_review"); },
-                        }]
-                      : []),
-                    {
-                      label: "Delete",
-                      icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>),
-                      onClick: () => setDeleteOpen(true),
-                      danger: true,
-                    },
-                  ]}
-                />
-              )}
-            </>
-          }
-        />
+        {/* ── ACTION STRIP — Review-by-CC → status + lender dropdown → ⋯ menu. ── */}
+        <div className="flex items-center gap-2 flex-wrap justify-end mb-4">
+          {/* Before a CC decision (docs uploaded, not yet decided): the
+              Review-by-CC dropdown to set Approved / Rejected. */}
+          {biz.status !== "draft" && biz.status !== "approved" && biz.status !== "rejected" && (
+            <DownloadMenu
+              label="Review by CC"
+              items={[
+                { label: "Approved", onClick: () => void changeStatus("approved") },
+                { label: "Rejected", onClick: () => { setRejectReason(""); setRejectOther(""); setRejectOpen(true); } },
+              ]}
+            />
+          )}
+          {/* After the CC decision: a status box (Approved/Rejected by CC). */}
+          {(biz.status === "approved" || biz.status === "rejected") && (
+            <span
+              className={
+                "inline-flex items-center px-3 py-1.5 rounded-[8px] text-[13px] font-semibold border whitespace-nowrap " +
+                (biz.status === "approved"
+                  ? "bg-[#e6f6ee] text-[#0f7a52] border-[#bfe6d5]"
+                  : "bg-red-50 text-red-700 border-red-200")
+              }
+            >
+              {biz.status === "approved" ? "Approved by CC" : "Rejected by CC"}
+            </span>
+          )}
+          {/* Lender-status dropdown — available once the EPC has submitted
+              (not draft), even before CC review. Sending docs (or approving)
+              before CC approval prompts to approve the profile in the same
+              step (see setLenderExclusive). */}
+          {biz.status !== "draft" && (
+            <LenderCell
+              state={lenderMap}
+              lenders={lenderList}
+              onSet={(l, target) => void setLenderExclusive(l, target)}
+              onAddLender={addLender}
+            />
+          )}
+          {biz.business_type !== "admin" && (
+            <KebabMenu
+              items={[
+                ...((biz.status === "approved" || biz.status === "rejected")
+                  ? [{
+                      label: "Change review",
+                      icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></svg>),
+                      onClick: () => { if (window.confirm("Revert the CC review back to Under Review?")) void changeStatus("under_review"); },
+                    }]
+                  : []),
+                {
+                  label: "Delete",
+                  icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>),
+                  onClick: () => setDeleteOpen(true),
+                  danger: true,
+                },
+              ]}
+            />
+          )}
+        </div>
 
         {/* ── PROGRESS TRACKER — hidden once a lender approves (diminishes) ── */}
         {!anyApproved && (
@@ -826,6 +826,7 @@ function Inner() {
           </div>
         </div>
 
+        </div>{/* /content column */}
       </div>
 
       <LenderPickerModal
