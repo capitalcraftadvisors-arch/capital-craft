@@ -40,7 +40,7 @@ import { isValidPan, isValidIfsc, isValidAadhaar } from "@/lib/doc-validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const SUPABASE_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL || "https://hpebydmrpimyuxgsgtmu.supabase.co";
@@ -285,7 +285,7 @@ const BUNDLE_SCHEMA = {
       items: {
         type: "OBJECT",
         properties: {
-          type: STR, page_start: NUM, page_end: NUM,
+          source_index: NUM, type: STR, page_start: NUM, page_end: NUM,
           // PAN
           pan: STR, father_name: STR,
           // shared (PAN + Aadhaar)
@@ -302,9 +302,9 @@ const BUNDLE_SCHEMA = {
   },
 };
 const BUNDLE_PROMPT =
-  "This file may contain several distinct Indian KYC / loan documents. Identify each one, its 1-indexed page range, its type, and extract its fields. " +
-  "Return a `documents` array. Set `type` to EXACTLY one of: applicant_pan, applicant_aadhaar_front, applicant_aadhaar_back, ebill, bank_statement, rooftop_photo, applicant_photo, coapp_pan, coapp_aadhaar_front, coapp_aadhaar_back, other. " +
-  "page_start and page_end = the 1-indexed first and last page of that document within THIS file (use 1 and 1 for a single image). " +
+  "You are given one or more document files, numbered from 0 in the order provided. Read ALL of the files in this request. For EVERY distinct Indian KYC / loan document you find across all files, add one entry to the `documents` array — do not skip any file. " +
+  "For each entry set: source_index = the 0-based number of the FILE the document came from; page_start and page_end = the 1-indexed page range within THAT file (use 1 and 1 for a single-page image); type = EXACTLY one of: applicant_pan, applicant_aadhaar_front, applicant_aadhaar_back, ebill, bank_statement, rooftop_photo, applicant_photo, coapp_pan, coapp_aadhaar_front, coapp_aadhaar_back, other; and the fields for that type. " +
+  "Most files contain exactly one document (one entry). A single file (e.g. a combined PDF) may contain several — then return one entry per document, all with that file's source_index. " +
   "Extract ONLY what is literally printed; if a field is absent, return null — never guess or invent. Fields per type: " +
   "PAN card (applicant_pan / coapp_pan): pan = 10-char PAN, name = cardholder name, father_name, dob. " +
   "Aadhaar (applicant_aadhaar_front / applicant_aadhaar_back / coapp_aadhaar_front / coapp_aadhaar_back): the FRONT carries name, aadhaar_number (12 digits), dob, gender (Male/Female/Transgender); the BACK carries care_of (S/O, D/O, W/O, C/O) and address (full, ending with the 6-digit PIN). Return the front and back as SEPARATE documents when both are present. " +
@@ -314,7 +314,7 @@ const BUNDLE_PROMPT =
   "A quotation / proforma invoice / cost estimate is 'other' (it is handled separately). Classify anything you cannot place as 'other'. " +
   "The first PAN/Aadhaar person is the applicant; a clearly second person's PAN/Aadhaar is the co-applicant (coapp_*).";
 
-type RawDoc = Record<string, unknown> & { type?: string; page_start?: number; page_end?: number };
+type RawDoc = Record<string, unknown> & { type?: string; page_start?: number; page_end?: number; source_index?: number };
 
 // ── Name-based applicant / co-applicant assignment ───────────────────────────
 // Normalize a person's name for fuzzy matching: lowercase, strip honorifics,
@@ -414,59 +414,59 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const dbPatch: Record<string, unknown> = {};
     const formPatch: Record<string, string> = {};
 
-    // ── Phase 1: classify + normalize every file (one Gemini call each). No
-    // upload yet — we first decide each PAN/Aadhaar's person by name so the file
-    // lands in the correct GCS folder / column.
-    // Classify + normalize every file with ONE Gemini call each, run CONCURRENTLY
-    // (capped) so several separate files read in parallel instead of one-by-one.
-    // Per-file grouping/order is preserved for the name-assignment phase below.
-    const perFile = await mapLimit(files, 6, async (file): Promise<{ pend: Pending[]; skip: Array<{ file_name: string; reason: string }> }> => {
+    // ── Phase 1: read the WHOLE batch in ONE Gemini call, not one call per file.
+    // Separate files used to read back-to-back (N slow round-trips → minutes, and
+    // hitting the server's request timeout). We now prep each file cheaply
+    // (compress images / load PDFs — no network), then classify + extract every
+    // file at once; each returned document carries its source_index so we know
+    // which file it came from. Files can be PDF / JPEG / PNG, in any order.
+    const pendings: Pending[] = [];
+    type Scan = { file: File; isPdf: boolean; srcPdf: PDFDocument | null; pageCount: number; buffer: Buffer; mime: string };
+    const scans: Scan[] = [];
+    for (const file of files) {
       const fileLabel = file.name || "file";
-      const pend: Pending[] = [];
-      const skip: Array<{ file_name: string; reason: string }> = [];
       try {
-        if (!ACCEPTED.has(file.type)) { skip.push({ file_name: fileLabel, reason: "Unsupported file type" }); return { pend, skip }; }
+        if (!ACCEPTED.has(file.type)) { skipped.push({ file_name: fileLabel, reason: "Unsupported file type" }); continue; }
         const input = Buffer.from(await file.arrayBuffer());
         const isPdf = file.type.includes("pdf");
-
-        // The buffer we send to Gemini + split from. Images are compressed once
-        // (same pipeline as the per-doc routes); PDFs pass through whole.
-        const scanBuffer = isPdf ? input : await compressImage(input);
-        const scanMime = isPdf ? "application/pdf" : "image/jpeg";
-
-        const result = await geminiExtract<{ documents?: RawDoc[] }>({
-          images: [{ buffer: scanBuffer, mime: scanMime }], prompt: BUNDLE_PROMPT, schema: BUNDLE_SCHEMA, label: "bundle",
-        });
-        const docs = Array.isArray(result?.documents) ? result!.documents! : [];
-        if (docs.length === 0) {
-          // Classification unavailable — let the RM add this file one-by-one
-          // rather than mis-file it. (Applies to both PDFs and images.)
-          skip.push({ file_name: fileLabel, reason: "Couldn't read this as a known document — please add it one at a time." });
-          return { pend, skip };
-        }
-
-        // For a PDF, load once so we can copy page ranges into per-doc PDFs later.
+        const buffer = isPdf ? input : await compressImage(input);
+        const mime = isPdf ? "application/pdf" : "image/jpeg";
         let srcPdf: PDFDocument | null = null;
         let pageCount = 1;
-        if (isPdf) {
-          srcPdf = await PDFDocument.load(input, { ignoreEncryption: true });
-          pageCount = srcPdf.getPageCount();
-        }
+        if (isPdf) { srcPdf = await PDFDocument.load(input, { ignoreEncryption: true }); pageCount = srcPdf.getPageCount(); }
+        scans.push({ file, isPdf, srcPdf, pageCount, buffer, mime });
+      } catch (e) {
+        console.error("[bundle-docs] prep failed:", fileLabel, (e as Error)?.message);
+        skipped.push({ file_name: fileLabel, reason: "Couldn't process this file." });
+      }
+    }
 
+    if (scans.length > 0) {
+      try {
+        const result = await geminiExtract<{ documents?: RawDoc[] }>({
+          images: scans.map((s) => ({ buffer: s.buffer, mime: s.mime })), prompt: BUNDLE_PROMPT, schema: BUNDLE_SCHEMA, label: "bundle",
+        });
+        const docs = Array.isArray(result?.documents) ? result!.documents! : [];
+        const seen = new Set<number>();
         for (const d of docs) {
+          const si = clamp(Math.round(Number(d.source_index) || 0), 0, scans.length - 1);
+          const scan = scans[si];
+          seen.add(si);
           const rawType = String(d.type || "other").trim() as DocType;
           const type: DocType = ALLOWED_TYPES.has(rawType) ? rawType : "other";
           if (type === "other") continue; // quotation / unknown → separate step, not stored here
-          pend.push({ file, isPdf, srcPdf, pageCount, scanBuffer, scanMime, raw: d, type, fields: normalizeFields(type, d) });
+          pendings.push({ file: scan.file, isPdf: scan.isPdf, srcPdf: scan.srcPdf, pageCount: scan.pageCount, scanBuffer: scan.buffer, scanMime: scan.mime, raw: d, type, fields: normalizeFields(type, d) });
         }
+        // Any file the model returned nothing for → let the RM add it one at a time.
+        scans.forEach((s, i) => { if (!seen.has(i)) skipped.push({ file_name: s.file.name || "file", reason: "Couldn't read this as a known document — please add it one at a time." }); });
       } catch (e) {
-        console.error("[bundle-docs] file failed:", fileLabel, (e as Error)?.message);
-        skip.push({ file_name: fileLabel, reason: "Couldn't process this file." });
+        console.error("[bundle-docs] batch read failed:", (e as Error)?.message);
+        for (const s of scans) skipped.push({ file_name: s.file.name || "file", reason: "Couldn't read the documents — please add them one at a time." });
       }
-      return { pend, skip };
-    });
-    const pendings: Pending[] = [];
-    for (const r of perFile) { pendings.push(...r.pend); skipped.push(...r.skip); }
+    }
+    // Group same-file docs together, in page order, so the name-assignment phase
+    // (Aadhaar-back follows the nearest preceding front in the same file) works.
+    pendings.sort((a, b) => (Number(a.raw.source_index) || 0) - (Number(b.raw.source_index) || 0) || (Number(a.raw.page_start) || 0) - (Number(b.raw.page_start) || 0));
 
     // ── Phase 2: name-based person assignment (overrides Gemini's applicant_/
     // coapp_ guess when names are provided). PAN + Aadhaar-front carry a name and
