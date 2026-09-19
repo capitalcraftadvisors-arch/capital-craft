@@ -46,7 +46,7 @@ type Form = Record<string, string>;
 type Turn = {
   id: string;
   bot: string;
-  kind: "epc" | "text" | "pincode" | "choice" | "consent" | "docs" | "save" | "loanconfig" | "leadsave" | "namecheck";
+  kind: "epc" | "text" | "pincode" | "choice" | "consent" | "docs" | "save" | "loanconfig" | "leadsave" | "bundle" | "paste";
   field?: string;
   placeholder?: string;
   optional?: boolean;
@@ -61,6 +61,9 @@ type Turn = {
   uploadCategory?: string; // docs turn with NO OCR — POST the file to /api/upload under this category
   pathField?: string;      // where to store the returned storage_path in the form
   applicantPan?: boolean;  // reuse extract-coapp-pan OCR but map fields to the APPLICANT
+  // docs turn shown as a REVIEW card when the bundle already read this doc:
+  reviewBot?: string;                     // prompt used when reviewing (vs re-asking) a bundle-read doc
+  reviewFields?: (f: Form) => Fetched[];  // editable rows built from the current form for the review card
   // save turn:
   step?: number;
   method?: "POST" | "PATCH";
@@ -70,74 +73,103 @@ type Turn = {
 const MOBILE_RE = /^[6-9]\d{9}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const hasCoapp = (f: Form) => f._has_coapp === "1"; // set by the name-check (mandatory) or the optional "add co-applicant" choice
+// Did the bulk "bundle" upload already provide this doc turn's file(s)? Drives
+// the per-doc turns' `when` gate — a turn the bundle covered is skipped, and
+// anything it missed is still asked one-by-one (nothing is ever missed).
+function docProvided(turnId: string, f: Form): boolean {
+  const keys = DOC_PATHS[turnId] || [];
+  return keys.length > 0 && keys.every((k) => !!(f[k] && String(f[k]).trim()));
+}
+
+// Build one editable review row from a bundle-read value.
+function frow(label: string, value: string | undefined, field: string): Fetched {
+  const v = (value ?? "").trim();
+  return { label, value: v, ok: !!v, field };
+}
 
 const SCRIPT: Turn[] = [
-  // ── Registration basics (least typing — name/DOB come from the documents) ──
+  // 1) EPC partner
   { id: "epc", bot: "Which EPC partner is this application for?", kind: "epc" },
+  // 2) Installation pincode (→ state / district / city lookup)
   { id: "install_pincode", bot: "Installation pincode?", kind: "pincode", field: "install_pincode" },
-  { id: "borrower_mobile", bot: "Customer's phone number?", kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile", validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile.") },
-  { id: "borrower_email", bot: "Email ID? (optional)", kind: "text", field: "borrower_email", placeholder: "name@example.com", optional: true, validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email or skip.") },
-  { id: "lead_owner_name", bot: "Lead owner's name? (optional)", kind: "text", field: "lead_owner_name", placeholder: "Who owns this lead", optional: true },
+  // 3) Info sheet — paste the labeled RM sheet; parsed locally (no AI), confirmed, written.
+  { id: "info_sheet", bot: "Paste the applicant's info sheet here — I'll read the labels and fill in the details for you to confirm. (Or skip and add them later.)", kind: "paste", optional: true, docLabel: "Info sheet" },
+  // 4) Residential / commercial (not on the sheet)
   { id: "plant_use_type", bot: "Residential or commercial use?", kind: "choice", field: "plant_use_type", choices: [
     { value: "residential", label: "Residential", sub: "Home / society" },
     { value: "commercial", label: "Commercial", sub: "Shop / office / factory" },
   ] },
+  // 5) How the documents will arrive (a UI preference — optional, not profile data)
+  { id: "doc_choice", bot: "How are the documents coming in?", kind: "choice", field: "_doc_choice", optional: true, choices: [
+    { value: "single", label: "One combined PDF", sub: "Everything in a single file" },
+    { value: "multi", label: "Separate PDFs", sub: "Upload them all at once" },
+  ] },
+  // 6) Bundle upload — classify, split + file every document in one pass, and send
+  //    the applicant + co-applicant names so each PAN / Aadhaar is assigned to the
+  //    right person by name. The quotation is never bundled (its own step below).
+  { id: "doc_bundle", bot: "Drop the documents here and I'll sort them out. Then I'll walk through each one so you can confirm the reading — and re-ask for anything I couldn't read clearly.", kind: "bundle" },
 
-  // ── Documents, one at a time — OCR fills as much as possible so the RM types least ──
-  { id: "pan", bot: "Upload the applicant's PAN — I'll read it.", kind: "docs", docLabel: "Applicant PAN", applicantPan: true,
-    uploads: [{ name: "file", label: "PAN card" }], extractRoute: "extract-coapp-pan" },
-  { id: "aadhaar", bot: "Upload the applicant's Aadhaar (front & back).", kind: "docs", docLabel: "Applicant Aadhaar",
-    uploads: [{ name: "front", label: "Aadhaar front" }, { name: "back", label: "Aadhaar back" }], extractRoute: "extract-aadhaar" },
-  { id: "selfie", bot: "Upload the applicant's photo / selfie.", kind: "docs", docLabel: "Applicant photo",
-    uploads: [{ name: "file", label: "Applicant photo" }], uploadCategory: "customer_photo", pathField: "customer_photo_path" },
-  { id: "ebill", bot: "Upload the latest electricity bill.", kind: "docs", docLabel: "Electricity bill",
-    uploads: [{ name: "ebill", label: "Electricity bill" }], extractRoute: "extract-loan-docs" },
-  { id: "quotation", bot: "Upload the quotation / proforma invoice.", kind: "docs", docLabel: "Quotation / invoice",
-    uploads: [{ name: "proforma", label: "Quotation / invoice" }], extractRoute: "extract-loan-docs" },
-  { id: "rooftop", bot: "Upload the geo-tagged rooftop photo.", kind: "docs", docLabel: "Rooftop photo",
-    // category MUST be "borrower_photo" — that's the rooftop slot the classic form,
-    // the profile view and the ZIP all read. ("customer_photo" = applicant selfie,
-    // "other" = additional docs — don't use those here.)
-    uploads: [{ name: "photo", label: "Rooftop photo" }], uploadCategory: "borrower_photo", pathField: "rooftop_photo_path" },
-  { id: "bank", bot: "Upload the bank statement.", kind: "docs", docLabel: "Bank statement",
+  // 7) Step-by-step review / re-ask, driven by the bundle result. If the bundle
+  //    READ the doc → an editable review card (Replace + Skip). If it did NOT →
+  //    a single-doc upload turn that reads it with its own extractor.
+  //    Order: applicant Aadhaar → applicant PAN → e-bill → co-app Aadhaar → co-app PAN.
+  { id: "aadhaar", kind: "docs", docLabel: "Applicant Aadhaar",
+    bot: "I didn't get the applicant's Aadhaar from the bundle — upload the front & back and I'll read it.",
+    reviewBot: "Here's what I read from the applicant's Aadhaar. Check each field, replace the document, or skip.",
+    uploads: [{ name: "front", label: "Aadhaar front" }, { name: "back", label: "Aadhaar back" }], extractRoute: "extract-aadhaar",
+    reviewFields: (f) => [frow("Name", f.aadhaar_name || f.borrower_name, "aadhaar_name"), frow("DOB", f.aadhaar_dob, "aadhaar_dob"), frow("Gender", f.aadhaar_gender, "aadhaar_gender"), frow("Aadhaar", f.aadhaar_number, "aadhaar_number"), frow("Address", f.aadhaar_address, "aadhaar_address")] },
+  { id: "pan", kind: "docs", docLabel: "Applicant PAN", applicantPan: true,
+    bot: "I didn't get the applicant's PAN from the bundle — upload it and I'll read it.",
+    reviewBot: "Here's what I read from the applicant's PAN. Check each field, replace the document, or skip.",
+    uploads: [{ name: "file", label: "PAN card" }], extractRoute: "extract-coapp-pan",
+    reviewFields: (f) => [frow("PAN", f.borrower_pan, "borrower_pan"), frow("Name", f.borrower_name, "borrower_name"), frow("Father", f.borrower_father_name, "borrower_father_name")] },
+  { id: "ebill", kind: "docs", docLabel: "Electricity bill",
+    bot: "I didn't get the electricity bill from the bundle — upload the latest bill.",
+    reviewBot: "Here's what I read from the electricity bill. Check each field, replace the document, or skip.",
+    uploads: [{ name: "ebill", label: "Electricity bill" }], extractRoute: "extract-loan-docs",
+    reviewFields: (f) => [frow("Monthly bill", f.monthly_bill_amount ? `₹${f.monthly_bill_amount}` : "", "monthly_bill_amount"), frow("DISCOM", f.discom_name, "discom_name"), frow("Bill name", f.ebill_name, "ebill_name")] },
+  { id: "coapp_aadhaar", kind: "docs", docLabel: "Co-applicant Aadhaar", when: hasCoapp, extraForm: { _coapp: "1" },
+    bot: "I didn't get the co-applicant's Aadhaar from the bundle — upload the front & back.",
+    reviewBot: "Here's what I read from the co-applicant's Aadhaar. Check each field, replace the document, or skip.",
+    uploads: [{ name: "front", label: "Aadhaar front" }, { name: "back", label: "Aadhaar back" }], extractRoute: "extract-aadhaar",
+    reviewFields: (f) => [frow("Name", f.coapp_aadhaar_name || f.coapp_name, "coapp_aadhaar_name"), frow("DOB", f.coapp_aadhaar_dob, "coapp_aadhaar_dob"), frow("Aadhaar", f.coapp_aadhaar_number, "coapp_aadhaar_number"), frow("Address", f.coapp_aadhaar_address, "coapp_aadhaar_address")] },
+  { id: "coapp_pan", kind: "docs", docLabel: "Co-applicant PAN", when: hasCoapp,
+    bot: "I didn't get the co-applicant's PAN from the bundle — upload it.",
+    reviewBot: "Here's what I read from the co-applicant's PAN. Check each field, replace the document, or skip.",
+    uploads: [{ name: "file", label: "Co-applicant PAN" }], extractRoute: "extract-coapp-pan",
+    reviewFields: (f) => [frow("PAN", f.coapp_pan, "coapp_pan"), frow("Name", f.coapp_name, "coapp_name"), frow("Father", f.coapp_father_name, "coapp_father_name")] },
+
+  // Bank statement — stored from the bundle if present (self-skips); otherwise a
+  // single-doc upload turn (skippable). No mandatory review card.
+  { id: "bank", bot: "Upload the bank statement.", kind: "docs", docLabel: "Bank statement", when: (f) => !docProvided("bank", f),
     uploads: [{ name: "file", label: "Bank statement" }], extractRoute: "extract-bank-statement", extraForm: { method: "manual_epdf" } },
 
-  // ── Ask only what OCR couldn't fill ──
-  { id: "borrower_name", bot: "I couldn't read the applicant's name from the documents — what is it?", kind: "text", field: "borrower_name", placeholder: "Full name", when: (f) => !f.borrower_name, validate: (v) => (v.trim().length < 2 ? "Enter the applicant's name." : null) },
+  // 8) Rooftop photo — separate on-site capture (self-skips if the bundle had one).
+  { id: "rooftop", bot: "Upload the geo-tagged rooftop photo.", kind: "docs", docLabel: "Rooftop photo", when: (f) => !docProvided("rooftop", f),
+    // category MUST be "borrower_photo" — the rooftop slot the classic form, the
+    // profile view and the ZIP all read.
+    uploads: [{ name: "photo", label: "Rooftop photo" }], uploadCategory: "borrower_photo", pathField: "rooftop_photo_path" },
+  // 9) Applicant photo / selfie (self-skips if the bundle had one).
+  { id: "selfie", bot: "Upload the applicant's photo / selfie.", kind: "docs", docLabel: "Applicant photo", when: (f) => !docProvided("selfie", f),
+    uploads: [{ name: "file", label: "Applicant photo" }], uploadCategory: "customer_photo", pathField: "customer_photo_path" },
+  // 10) Quotation / proforma — its own step (never bundled; Gemini tags it "other").
+  { id: "quotation", bot: "Upload the quotation / proforma invoice — I'll read the project cost & size.", kind: "docs", docLabel: "Quotation / invoice",
+    uploads: [{ name: "proforma", label: "Quotation / invoice" }], extractRoute: "extract-loan-docs" },
 
-  // ── Co-applicant, driven by the name check (PAN=Aadhaar, then vs e-bill owner) ──
-  { id: "namecheck", bot: "", kind: "namecheck" },
-  // A co-applicant is NEVER forced — we always ask. The name check above just
-  // advises (recommends one when the e-bill owner differs from the applicant).
-  { id: "add_coapp", bot: "Is there a co-applicant for this case?", kind: "choice", field: "_has_coapp", choices: [
-    { value: "1", label: "Yes — add co-applicant" },
-    { value: "", label: "No co-applicant" },
-  ] },
-  { id: "coapp_pan", bot: "Upload the co-applicant's PAN.", kind: "docs", when: hasCoapp, docLabel: "Co-applicant PAN",
-    uploads: [{ name: "file", label: "Co-applicant PAN" }], extractRoute: "extract-coapp-pan" },
-  { id: "coapp_aadhaar", bot: "Upload the co-applicant's Aadhaar (front & back).", kind: "docs", when: hasCoapp, docLabel: "Co-applicant Aadhaar",
-    uploads: [{ name: "front", label: "Aadhaar front" }, { name: "back", label: "Aadhaar back" }], extractRoute: "extract-aadhaar", extraForm: { _coapp: "1" } },
-  { id: "coapp_relation", bot: "Co-applicant's relation to the applicant?", kind: "text", field: "coapp_relation", placeholder: "e.g. Spouse, Father", when: hasCoapp, optional: true },
-
-  // ── Employment ──
+  // 11) Employment
   { id: "employment_type", bot: "Employment type?", kind: "choice", field: "employment_type", choices: [
     { value: "salaried", label: "Salaried" }, { value: "self_employed", label: "Self-employed" },
   ] },
   { id: "profession", bot: "Profession? (optional)", kind: "text", field: "profession", placeholder: "e.g. Engineer", optional: true },
-  { id: "organization_name", bot: "Organization / business name? (optional)", kind: "text", field: "organization_name", placeholder: "Organization", optional: true },
+  // Employer / business name may already be filled from the sheet — skip when so.
+  { id: "organization_name", bot: "Organization / business name? (optional)", kind: "text", field: "organization_name", placeholder: "Organization", optional: true, when: (f) => !(f.organization_name && f.organization_name.trim()) },
   { id: "annual_income", bot: "Annual income (₹)? (optional)", kind: "text", field: "annual_income", placeholder: "e.g. 600000", optional: true },
 
-  // ── Additional documents (optional) ──
+  // Additional documents (optional)
   { id: "additional_docs", bot: "Any other documents to add? (optional — skip if none)", kind: "docs", docLabel: "Additional documents", optional: true,
     uploads: [{ name: "file", label: "Additional document" }], uploadCategory: "other" },
 
-  // ── Loan information ──
-  { id: "system_type", bot: "Solar system preference?", kind: "choice", field: "system_type", choices: [
-    { value: "on_grid", label: "On-Grid", sub: "Sells excess to grid" },
-    { value: "off_grid", label: "Off-Grid", sub: "Battery, independent" },
-    { value: "hybrid", label: "Hybrid", sub: "Grid + battery" },
-  ] },
-  { id: "loan_amount_required", bot: "How much loan does the customer need (₹)?", kind: "text", field: "loan_amount_required", placeholder: "e.g. 200000", validate: (v) => (Number(v) > 0 ? null : "Enter a valid amount.") },
+  // 12) Consent + loan configuration
   { id: "consent", bot: "Does the customer consent to the Terms, Privacy & Cookie policies and allow credit-information access?", kind: "consent", field: "consent" },
   { id: "loanconfig", bot: "Last step — loan configuration.", kind: "loanconfig" },
 ];
@@ -174,7 +206,7 @@ const STEP_PAYLOAD: Record<number, (f: Form) => Record<string, unknown>> = {
     // the applicant alone. Keeps the profile's co-applicant section in sync with
     // the explicit Yes/No answer (a co-applicant is optional, never forced).
     bill_on_applicant_name: f._has_coapp !== "1",
-    coapp_name: f.coapp_name || "", coapp_father_name: f.coapp_father_name || "", coapp_dob: f.coapp_dob || "",
+    coapp_name: f.coapp_name || "", coapp_mobile: f.coapp_mobile || "", coapp_email: f.coapp_email || "", coapp_father_name: f.coapp_father_name || "", coapp_dob: f.coapp_dob || "",
     coapp_pan: f.coapp_pan || "", coapp_pan_path: f.coapp_pan_path || "", coapp_relation: f.coapp_relation || "",
     coapp_aadhaar_name: f.coapp_aadhaar_name || "", coapp_aadhaar_dob: f.coapp_aadhaar_dob || "", coapp_aadhaar_gender: f.coapp_aadhaar_gender || "",
     coapp_aadhaar_number: f.coapp_aadhaar_number || "", coapp_aadhaar_care_of: f.coapp_aadhaar_care_of || "", coapp_aadhaar_address: f.coapp_aadhaar_address || "",
@@ -203,6 +235,116 @@ const LEAD_SCRIPT: Turn[] = [
 ];
 
 type Fetched = { label: string; value: string; ok: boolean; field?: string };
+
+// ── Info-sheet paste parser (local, deterministic — no AI) ───────────────────
+// The RM pastes a labeled sheet; we split each line on the FIRST ":", normalize
+// the label, clean the value, and map it to a Form field. Everything the sheet
+// can carry (co-applicant included) is handled; the EPC is chosen separately and
+// is never overwritten (the merchant name is kept display-only).
+const normLabel = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+// Clean a text value: strip a leading dash, a trailing "/-", and surrounding space.
+function cleanText(raw: string): string {
+  return raw.replace(/^\s*[-–—]\s*/, "").replace(/\s*\/-\s*$/, "").trim();
+}
+// Digits only (for amounts / subsidy): drop commas, "/-", "Rs", "₹", spaces.
+function digitsOnly(raw: string): string {
+  return cleanText(raw).replace(/rs\.?/gi, "").replace(/[,₹\s/-]/g, "").replace(/[^\d]/g, "");
+}
+// The leading number in a value ("3KW" → 3, "5 YEAR" → 5, "5year" → 5).
+function leadingNumber(raw: string): string {
+  const m = cleanText(raw).match(/-?\d+(?:\.\d+)?/);
+  return m ? m[0] : "";
+}
+// Last 10 digits of a phone value.
+function last10(raw: string): string {
+  const d = cleanText(raw).replace(/\D/g, "");
+  return d.length >= 10 ? d.slice(-10) : d;
+}
+function normSystemType(raw: string): string {
+  const s = cleanText(raw).toLowerCase();
+  if (s.includes("off")) return "off_grid";
+  if (s.includes("hybrid")) return "hybrid";
+  if (s.includes("on")) return "on_grid";
+  return "";
+}
+
+function parseInfoSheet(text: string): Partial<Form> {
+  const out: Form = {};
+  const lines = String(text || "").split(/\r?\n/);
+  for (const line of lines) {
+    const ci = line.indexOf(":");
+    if (ci < 0) continue;
+    const nl = normLabel(line.slice(0, ci));
+    if (!nl) continue;
+    const rawVal = line.slice(ci + 1);
+    const val = cleanText(rawVal);
+    const isCo = nl.includes("coapp") || nl.includes("coapplicant") || (nl.startsWith("co") && nl.includes("app"));
+
+    // Co-applicant fields (checked first so "co-app name" never matches applicant).
+    if (isCo && nl.includes("name")) { if (val) { out.coapp_name = val; out._has_coapp = "1"; } continue; }
+    if (isCo && (nl.includes("mob") || nl.includes("phone") || nl.includes("contact"))) { if (val) out.coapp_mobile = last10(rawVal); continue; }
+    if (isCo && nl.includes("email")) { if (val) out.coapp_email = val; continue; }
+    // Employer / business, and the display-only merchant name (never the EPC).
+    if (nl.includes("employer") || nl.includes("business")) { if (val) out.organization_name = val; continue; }
+    if (nl.includes("merchant")) { if (val) out._merchant_name = val; continue; }
+    // Applicant contact
+    if (!isCo && (nl.includes("mob") || nl.includes("phone") || nl.includes("contact"))) { if (val) out.borrower_mobile = last10(rawVal); continue; }
+    if (!isCo && nl.includes("email")) { if (val) out.borrower_email = val; continue; }
+    if (!isCo && nl.includes("name") && (nl.includes("app") || nl.includes("borrower") || nl.includes("customer"))) { if (val) out.borrower_name = val; continue; }
+    // Loan / project money
+    if (nl.includes("project") && nl.includes("cost")) { const d = digitsOnly(rawVal); if (d) out.total_project_cost = d; continue; }
+    if (nl.includes("loan") && nl.includes("tenure")) { const n = leadingNumber(rawVal); if (n) out.selected_tenure_years = String(parseInt(n, 10)); continue; }
+    if (nl.includes("tenure")) { const n = leadingNumber(rawVal); if (n) out.selected_tenure_years = String(parseInt(n, 10)); continue; }
+    if (nl.includes("loan") && nl.includes("amount")) { const d = digitsOnly(rawVal); if (d) out.loan_amount_required = d; continue; }
+    if (nl.includes("subsidy")) { const d = digitsOnly(rawVal); if (d) out.central_subsidy = d; continue; }
+    // System / capacity / place
+    if (nl.includes("capacity")) { const n = leadingNumber(rawVal); if (n) { out.project_size = n; out.project_size_unit = "kw"; } continue; }
+    if (nl.includes("grid")) { const st = normSystemType(rawVal); if (st) out.system_type = st; continue; }
+    if ((nl.includes("place") && nl.includes("install")) || nl.includes("installation") || nl.includes("location")) { if (val) out.install_city = val; continue; }
+  }
+  return out;
+}
+
+// The order + labels the parsed info sheet is shown in on the confirm card.
+const SHEET_ROWS: { field: string; label: string; render?: (v: string) => string }[] = [
+  { field: "borrower_name", label: "Applicant name" },
+  { field: "borrower_mobile", label: "Applicant mobile" },
+  { field: "borrower_email", label: "Applicant email" },
+  { field: "coapp_name", label: "Co-applicant name" },
+  { field: "coapp_mobile", label: "Co-applicant mobile" },
+  { field: "coapp_email", label: "Co-applicant email" },
+  { field: "organization_name", label: "Employer / business" },
+  { field: "_merchant_name", label: "Merchant (for reference)" },
+  { field: "total_project_cost", label: "Project cost", render: (v) => `₹${Number(v).toLocaleString("en-IN")}` },
+  { field: "loan_amount_required", label: "Loan amount", render: (v) => `₹${Number(v).toLocaleString("en-IN")}` },
+  { field: "central_subsidy", label: "Subsidy", render: (v) => `₹${Number(v).toLocaleString("en-IN")}` },
+  { field: "selected_tenure_years", label: "Loan tenure", render: (v) => `${v} year${v === "1" ? "" : "s"}` },
+  { field: "project_size", label: "Capacity", render: (v) => `${v} kW` },
+  { field: "system_type", label: "System", render: (v) => ({ on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" }[v] || v) },
+  { field: "install_city", label: "Place of installation" },
+];
+// One document detected + split + filed by the bundle route.
+type BundleDoc = {
+  type: string; category: string; storage_path: string; mime_type: string;
+  file_name: string; page_start: number; page_end: number; summary: string; signed_url: string | null;
+  name?: string | null; name_confidence?: string | null;
+};
+// The correctable classification options shown in the review card's dropdown.
+// Values MUST match the DocType strings the bundle-docs route understands.
+const BUNDLE_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: "applicant_pan", label: "Applicant PAN" },
+  { value: "applicant_aadhaar_front", label: "Applicant Aadhaar — front" },
+  { value: "applicant_aadhaar_back", label: "Applicant Aadhaar — back" },
+  { value: "ebill", label: "Electricity bill" },
+  { value: "bank_statement", label: "Bank statement" },
+  { value: "rooftop_photo", label: "Rooftop photo" },
+  { value: "applicant_photo", label: "Applicant photo" },
+  { value: "coapp_pan", label: "Co-applicant PAN" },
+  { value: "coapp_aadhaar_front", label: "Co-applicant Aadhaar — front" },
+  { value: "coapp_aadhaar_back", label: "Co-applicant Aadhaar — back" },
+  { value: "other", label: "Other / ignore" },
+];
+const bundleTypeLabel = (v: string) => BUNDLE_TYPE_OPTIONS.find((o) => o.value === v)?.label || v;
 type Msg = {
   id: string;
   from: "bot" | "user";
@@ -264,6 +406,13 @@ function Inner() {
   const [files, setFiles] = useState<Record<string, File>>({});
   const [thumbs, setThumbs] = useState<Record<string, string | null>>({});
   const [confirm, setConfirm] = useState<{ fields: Fetched[]; note: string; thumbs: (string | null)[]; edit?: boolean } | null>(null);
+  // Bulk "bundle" upload: staged multi-file drop → classify/split, then the flow
+  // walks each document as a review-or-re-ask turn.
+  const [bundleFiles, setBundleFiles] = useState<File[]>([]);
+  // Info-sheet paste → editable confirm card (raw parsed values).
+  const [sheetReview, setSheetReview] = useState<{ parsed: Form } | null>(null);
+  // Per-doc review card (shown when the bundle already read a document turn).
+  const [docReview, setDocReview] = useState<{ turnId: string; label: string; fields: Fetched[] } | null>(null);
   const [donId, setDonId] = useState<string | null>(null);
   const [donDraft, setDonDraft] = useState(false);
   const [missing, setMissing] = useState<string[]>([]);
@@ -408,19 +557,31 @@ function Inner() {
   // Advance the script, running `when` skips and `save` boundaries.
   useEffect(() => {
     if (!turn) return;
-    if (turn.when && !turn.when(form)) { setIdx((i) => i + 1); return; }
+    // In edit mode a turn the RM explicitly picked always runs (so a filled-and-
+    // gated turn can still be edited); otherwise the `when` gate applies.
+    const isSelectedTarget = editMode && editStage === "selected" && editStep === "flow" && editTargets.has(turn.id);
+    if (!isSelectedTarget && turn.when && !turn.when(form)) { setIdx((i) => i + 1); return; }
     if (editMode) {
       if (editStep !== "flow") return; // paused during the Q1/Q2 intro
       if (editStage === "selected") { if (!editTargets.has(turn.id)) { setIdx((i) => i + 1); return; } } // re-ask only the picked ones
       else if (isTurnFilled(turn, form)) { setIdx((i) => i + 1); return; } // "complete" → ask only missing
     }
     if (turn.kind === "leadsave") { void createLead(); return; }
-    if (turn.kind === "namecheck") { runNameCheck(); return; }
-    pushBot(turn.bot, turn.id);
-    setInput(""); setError(null); setFiles({}); setThumbs({}); setConfirm(null); setEditing(null);
+    // A doc turn the bundle already read → show its editable REVIEW card (with
+    // Replace + Skip) instead of a fresh upload. Create mode only — in edit mode
+    // a picked doc turn means "replace it", so keep the upload dock.
+    const reviewing = !editMode && !!turn.reviewFields && docProvided(turn.id, form);
+    pushBot(reviewing ? (turn.reviewBot || turn.bot) : turn.bot, turn.id);
+    setInput(""); setError(null); setFiles({}); setThumbs({}); setConfirm(null); setEditing(null); setBundleFiles([]); setSheetReview(null); setDocReview(null);
+    if (reviewing && turn.reviewFields) setDocReview({ turnId: turn.id, label: turn.docLabel || turn.id, fields: turn.reviewFields(form) });
     // Re-editing a filled field → prefill the input with its current value.
     if (editMode && editStage === "selected" && (turn.kind === "text" || turn.kind === "pincode") && turn.field) setInput(form[turn.field] || "");
-    if (turn.kind === "loanconfig") setCentralSub(String(form.plant_use_type === "commercial" ? 0 : computeCentralSubsidy(kwOf(form))));
+    if (turn.kind === "loanconfig") {
+      // Prefer the subsidy/tenure the info sheet already carried; else the tier default.
+      const sheetSub = Number(form.central_subsidy);
+      setCentralSub(Number.isFinite(sheetSub) && form.central_subsidy ? String(sheetSub) : String(form.plant_use_type === "commercial" ? 0 : computeCentralSubsidy(kwOf(form))));
+      if (form.selected_tenure_years && tenure == null) { const t = Number(form.selected_tenure_years); if (TENURES.includes(t as (typeof TENURES)[number])) setTenure(t); }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx, leadMode, editStep, editStage]);
 
@@ -453,16 +614,21 @@ function Inner() {
   useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
 
   // Paste-to-attach while on a document turn (RM copies an image, hits Ctrl+V).
+  // The bundle turn accepts multiple pasted files; single-doc turns take one.
   useEffect(() => {
-    if (!active || active.kind !== "docs" || confirm) return;
+    if (!active || confirm || docReview || sheetReview) return;
+    if (active.kind !== "docs" && active.kind !== "bundle") return;
     const h = (e: ClipboardEvent) => {
-      const f = e.clipboardData?.files?.[0];
-      if (f) { e.preventDefault(); fillNextSlot(f); }
+      const pasted = e.clipboardData?.files;
+      if (!pasted || pasted.length === 0) return;
+      e.preventDefault();
+      if (active.kind === "bundle") addBundleFiles(pasted);
+      else fillNextSlot(pasted[0]);
     };
     window.addEventListener("paste", h);
     return () => window.removeEventListener("paste", h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, files, confirm]);
+  }, [active, files, confirm, docReview, sheetReview]);
 
   const advance = () => setIdx((i) => i + 1);
   const merge = (patch: Form) => setForm((f) => ({ ...f, ...patch }));
@@ -682,6 +848,123 @@ function Inner() {
     advance();
   }
 
+  // ── Bulk "bundle" upload (auto-split) ──
+  function addBundleFiles(list: FileList | File[]) {
+    const incoming = Array.from(list).filter((f) => f.type.startsWith("image/") || f.type.includes("pdf"));
+    if (!incoming.length) return;
+    // "One combined PDF" → keep a single file (the latest); "Separate PDFs" → many.
+    if (form._doc_choice === "single") setBundleFiles(incoming.slice(-1));
+    else setBundleFiles((s) => [...s, ...incoming]);
+  }
+  function removeBundleFile(i: number) { setBundleFiles((s) => s.filter((_, k) => k !== i)); }
+
+  // POST every staged file to bundle-docs → classify, split, store, extract in
+  // one pass, with the applicant + co-applicant names so each PAN / Aadhaar is
+  // assigned to the right person by name. Then merge the readings and walk each
+  // document (review-or-re-ask). Robust: any failure shows a friendly message and
+  // the one-by-one turns still cover everything.
+  async function runBundle() {
+    if (!appId || !bundleFiles.length) { setError("Add at least one file, or skip to add them one at a time."); return; }
+    pushUndo();
+    setBusy(true); setError(null);
+    pushUser(bundleFiles.map((f) => f.name).join(" · "), { turnId: "doc_bundle", files: bundleFiles.map((f) => ({ name: f.name, thumb: f.type.startsWith("image/") ? URL.createObjectURL(f) : null })) });
+    try {
+      const fd = new FormData();
+      for (const f of bundleFiles) fd.append("files", f);
+      // Names drive the server's per-person assignment (override Gemini's guess).
+      if (form.borrower_name?.trim()) fd.append("applicant_name", form.borrower_name.trim());
+      if (form.coapp_name?.trim()) fd.append("coapp_name", form.coapp_name.trim());
+      const res = await fetch(`/api/admin/loan-app/${appId}/bundle-docs`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) {
+        setError(j?.error || "Couldn't sort those documents. You can try again, or skip and add them one at a time below.");
+        setBusy(false); return;
+      }
+      const documents: BundleDoc[] = Array.isArray(j.documents) ? j.documents : [];
+      const patch: Form = (j.form && typeof j.form === "object") ? j.form : {};
+      // The route already persisted to epc_applications; keep chat state in sync.
+      const nextForm = { ...form, ...patch };
+      setForm(nextForm);
+      void persistForm(nextForm);
+      setBundleFiles([]);
+      if (documents.length === 0) {
+        say("bot", "I couldn't read any documents from that — no problem, I'll ask for each one below.");
+      } else {
+        const kinds = documents.map((d) => bundleTypeLabel(d.type)).join(", ");
+        say("bot", `Read ${documents.length} document${documents.length === 1 ? "" : "s"}: ${kinds}. Let's confirm each one — I'll re-ask for anything I couldn't read.`);
+      }
+      advance();
+    } catch {
+      setError("Something went wrong sorting those documents. Try again, or skip and add them one at a time.");
+    } finally { setBusy(false); }
+  }
+  function skipBundle() {
+    pushUndo();
+    pushUser("I'll add them one at a time", {});
+    setBundleFiles([]); setError(null);
+    advance();
+  }
+
+  // ── Per-document review card (bundle already read this doc) ──
+  // Edit one field inline → reflects on the profile immediately + updates the card.
+  function saveReviewField(field: string, value: string) {
+    const nextForm = { ...form, [field]: value };
+    setForm(nextForm);
+    void persistForm(nextForm);
+    setDocReview((r) => r ? { ...r, fields: r.fields.map((ff) => (ff.field === field ? { ...ff, value, ok: !!value.trim() } : ff)) } : r);
+  }
+  function acceptReview() {
+    if (!docReview) return;
+    // Drop the reading into the permanent chat as a "read from the document" card.
+    const fields = docReview.fields;
+    setMsgs((m) => [...m, { id: uid(), from: "bot", time: nowLabel(), fetched: fields }]);
+    setDocReview(null);
+    advance();
+  }
+  function replaceReview() {
+    // Reveal the upload dock for this same turn → re-read via its per-doc extractor.
+    setDocReview(null); setFiles({}); setThumbs({}); setConfirm(null); setError(null);
+  }
+  function skipReview() {
+    const t = active; if (!t) return;
+    pushUndo();
+    setMissing((s) => (s.includes(t.docLabel || t.id) ? s : [...s, t.docLabel || t.id]));
+    pushUser(`Skipped — ${t.docLabel || "document"} left as read`, {});
+    setDocReview(null);
+    advance();
+  }
+
+  // ── Info-sheet paste → parse locally → editable confirm card ──
+  function parseSheet() {
+    const parsed = parseInfoSheet(input);
+    const hasAny = SHEET_ROWS.some((r) => parsed[r.field] != null && String(parsed[r.field]).trim() !== "");
+    if (!hasAny) { setError("I couldn't find any labeled details in that. Check the sheet, or skip and add them later."); return; }
+    setError(null);
+    setSheetReview({ parsed: parsed as Form });
+  }
+  function editSheetField(field: string, value: string) {
+    setSheetReview((r) => r ? { ...r, parsed: { ...r.parsed, [field]: value } } : r);
+  }
+  function confirmSheet() {
+    if (!sheetReview) return;
+    pushUndo();
+    const patch: Form = {};
+    for (const r of SHEET_ROWS) { const v = sheetReview.parsed[r.field]; if (v != null && String(v).trim() !== "") patch[r.field] = String(v).trim(); }
+    if (patch.coapp_name && patch.coapp_name.trim()) patch._has_coapp = "1";
+    const nextForm = { ...form, ...patch };
+    setForm(nextForm);
+    pushUser("Info-sheet details confirmed", { turnId: "info_sheet" });
+    void persistForm(nextForm);
+    setSheetReview(null); setInput("");
+    advance();
+  }
+  function skipSheet() {
+    pushUndo();
+    pushUser("— skipped —", { turnId: "info_sheet", editable: false });
+    setSheetReview(null); setInput("");
+    advance();
+  }
+
   // ── Persistence ──
   // Silent background write of the accumulated form (any order — no step advance,
   // no status change) so a close/refresh keeps everything gathered so far. The
@@ -754,39 +1037,6 @@ function Inner() {
     } finally { setBusy(false); }
   }
   function say(from: "bot" | "user", text: string) { setMsgs((m) => [...m, { id: uid(), from, text, time: nowLabel() }]); }
-
-  // Name check → decides whether a co-applicant is required. Compares the PAN
-  // and Aadhaar names (same person?), then the applicant's first name against
-  // the e-bill owner's: match → co-applicant optional; different → mandatory.
-  function runNameCheck() {
-    const fn = (s?: string) => (s || "").trim().toLowerCase().split(/\s+/)[0] || "";
-    const panName = form._pan_name || "";
-    const aadhaarName = form.aadhaar_name || form.borrower_name || "";
-    const ebillName = form.ebill_name || "";
-    const idName = aadhaarName || panName;
-
-    if (panName && aadhaarName && fn(panName) !== fn(aadhaarName)) {
-      say("bot", `⚠️ The PAN name (“${panName}”) and the Aadhaar name (“${aadhaarName}”) look different — please double-check it's the same person.`);
-    }
-
-    let mode: "optional" | "mandatory";
-    if (!ebillName || !idName) {
-      mode = "optional";
-      say("bot", "I couldn't read the electricity-bill owner's name to compare, so a co-applicant is optional.");
-    } else if (fn(idName) === fn(ebillName)) {
-      mode = "optional";
-      say("bot", `✓ “${idName}” matches the electricity-bill owner — a co-applicant is optional.`);
-    } else {
-      mode = "mandatory";
-      say("bot", `Note: the electricity bill is in a different name (“${ebillName}”) than the applicant (“${idName}”) — a co-applicant is recommended. I'll ask next.`);
-    }
-
-    // Only record the advisory mode. Whether there's actually a co-applicant is
-    // decided by the explicit "Is there a co-applicant?" question — never forced.
-    setForm((f) => ({ ...f, _coapp_mode: mode }));
-    void persistForm({ ...form, _coapp_mode: mode });
-    advance();
-  }
 
   // ── Edit-in-chat Q1/Q2 ──
   function startFlow(stage: "selected" | "complete") { setEditStage(stage); setEditStep("flow"); setIdx(1); }
@@ -864,7 +1114,7 @@ function Inner() {
   const progFilled = progApplicable.filter((t) => isTurnFilled(t, form)).length;
   const progress = progApplicable.length ? Math.min(100, Math.round((progFilled / progApplicable.length) * 100)) : 0;
   const showEditIntro = editMode && (editStep === "q1" || editStep === "pick" || editStep === "q2");
-  const showDock = !donId && !leadDoneId && !showEditIntro && active && !confirm && active.kind !== "save" && active.kind !== "leadsave" && active.kind !== "namecheck" && (editing ? true : turn === active);
+  const showDock = !donId && !leadDoneId && !showEditIntro && active && !confirm && !docReview && !sheetReview && active.kind !== "save" && active.kind !== "leadsave" && (editing ? true : turn === active);
 
   if (resuming) {
     return (
@@ -937,6 +1187,16 @@ function Inner() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Info-sheet confirm card — parsed fields, every one editable */}
+          {sheetReview && (
+            <SheetConfirmCard parsed={sheetReview.parsed} onEdit={editSheetField} onConfirm={confirmSheet} onSkip={skipSheet} />
+          )}
+
+          {/* Per-document review card — bundle already read this doc */}
+          {docReview && (
+            <DocReviewCard review={docReview} onEditField={saveReviewField} onAccept={acceptReview} onReplace={replaceReview} onSkip={skipReview} />
           )}
 
           {error && <div className="self-center text-[12px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5 my-1">{error}</div>}
@@ -1102,8 +1362,24 @@ function Inner() {
               </div>
             )}
 
+            {active.kind === "paste" && (
+              <div className="flex flex-col gap-2">
+                <textarea autoFocus value={input} onChange={(e) => setInput(e.target.value)} rows={6}
+                  placeholder={active.placeholder || "Paste the applicant's info sheet here…"}
+                  className="w-full border border-line rounded-xl px-3.5 py-2.5 text-[13.5px] leading-snug bg-white focus:outline-none focus:border-[#178a5c] focus:ring-2 focus:ring-[#178a5c]/15 resize-y" />
+                <div className="flex items-center gap-2">
+                  <button onClick={parseSheet} disabled={!input.trim()} className="px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">Read the sheet →</button>
+                  <button onClick={skipSheet} className="px-3 py-2 rounded-lg text-[12.5px] text-text-muted hover:text-text hover:bg-bg-soft">Skip</button>
+                </div>
+              </div>
+            )}
+
             {active.kind === "docs" && (
               <DocDock active={active} files={files} thumbs={thumbs} onPick={setFileFor} onDrop={fillNextSlot} onClear={clearFileFor} onRun={() => void runDocs()} onSkip={skipDoc} replacing={!!editing} />
+            )}
+
+            {active.kind === "bundle" && (
+              <BundleDock files={bundleFiles} single={form._doc_choice === "single"} onAdd={addBundleFiles} onRemove={removeBundleFile} onRun={() => void runBundle()} onSkip={skipBundle} busy={busy} />
             )}
 
             {active.kind === "loanconfig" && (
@@ -1261,6 +1537,140 @@ function DocDock({ active, files, thumbs, onPick, onDrop, onClear, onRun, onSkip
   );
 }
 
+// Bulk-upload dock — stage files (click / drag / paste), then "Sort". `single`
+// (one combined PDF) keeps a single file; otherwise many files are accepted.
+function BundleDock({ files, single, onAdd, onRemove, onRun, onSkip, busy }: {
+  files: File[]; single?: boolean; onAdd: (l: FileList | File[]) => void; onRemove: (i: number) => void; onRun: () => void; onSkip: () => void; busy: boolean;
+}) {
+  const [drag, setDrag] = useState(false);
+  return (
+    <div className="flex flex-col gap-2">
+      <div
+        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
+        onDragLeave={() => setDrag(false)}
+        onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files?.length) onAdd(e.dataTransfer.files); }}
+        className={["rounded-xl border-2 border-dashed p-3 transition", drag ? "border-[#178a5c] bg-[#f0faf5]" : "border-line bg-white"].join(" ")}
+      >
+        <label className="flex flex-col items-center justify-center gap-1 py-3 cursor-pointer text-center">
+          <span className="w-10 h-10 rounded-full bg-bg-soft grid place-items-center text-[18px]">📥</span>
+          <span className="text-[13px] font-semibold text-[#0f3d2e]">{single ? "Drop the combined PDF here" : "Drop the documents here"}</span>
+          <span className="text-[11px] text-text-muted">Tap to choose · drag in · or paste (Ctrl+V). PAN, Aadhaar, e-bill, bank, photo…</span>
+          <input type="file" accept="image/*,application/pdf" multiple={!single} className="hidden" onChange={(e) => { if (e.target.files?.length) onAdd(e.target.files); e.currentTarget.value = ""; }} />
+        </label>
+        {files.length > 0 && (
+          <div className="mt-1 flex flex-col gap-1.5 border-t border-line/70 pt-2">
+            {files.map((f, i) => (
+              <div key={i} className="flex items-center gap-2 text-[12.5px]">
+                <span className="w-7 h-7 rounded-md bg-bg-soft grid place-items-center text-[13px] shrink-0">{f.type.includes("pdf") ? "📄" : "🖼️"}</span>
+                <span className="min-w-0 flex-1 truncate text-text">{f.name}</span>
+                <button type="button" onClick={() => onRemove(i)} className="text-text-muted hover:text-red-500 text-[15px] leading-none px-1">×</button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        <button onClick={onRun} disabled={busy || files.length === 0} className="px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">{busy ? "Sorting…" : files.length ? `Sort ${files.length} file${files.length === 1 ? "" : "s"} →` : "Sort them out →"}</button>
+        <button onClick={onSkip} disabled={busy} className="px-3 py-2 rounded-lg text-[12.5px] text-text-muted hover:text-text hover:bg-bg-soft disabled:opacity-50">Skip — add one at a time</button>
+      </div>
+    </div>
+  );
+}
+
+// Info-sheet confirm card — the parsed values, every one editable, shown before
+// they're written to the profile. Values are stored raw; friendly labels/format
+// (₹, "years", "kW", "On-Grid") are display-only.
+function SheetConfirmCard({ parsed, onEdit, onConfirm, onSkip }: {
+  parsed: Form; onEdit: (field: string, value: string) => void; onConfirm: () => void; onSkip: () => void;
+}) {
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const [val, setVal] = useState("");
+  const rows = SHEET_ROWS.filter((r) => parsed[r.field] != null && String(parsed[r.field]).trim() !== "");
+  return (
+    <div className="self-start w-full max-w-[92%] rounded-2xl rounded-tl-md border border-[#cdeadd] bg-white shadow-sm overflow-hidden">
+      <div className="px-3.5 py-2 bg-[#f0faf5] border-b border-[#e0f0e8] flex items-center gap-2">
+        <span className="text-[12px]">📝</span>
+        <span className="text-[12.5px] font-semibold text-[#0f3d2e]">Read from the info sheet — check before continuing</span>
+      </div>
+      <div className="p-3.5 flex flex-col gap-2">
+        {rows.map((r) => {
+          const raw = String(parsed[r.field]);
+          return (
+            <div key={r.field} className="flex items-center justify-between gap-3 text-[13px] min-h-[24px]">
+              <span className="text-text-muted shrink-0">{r.label}</span>
+              {editKey === r.field ? (
+                <span className="flex items-center gap-1.5">
+                  <input autoFocus value={val} onChange={(e) => setVal(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") { onEdit(r.field, val.trim()); setEditKey(null); } if (e.key === "Escape") setEditKey(null); }}
+                    className="border border-[#178a5c] rounded-lg px-2.5 py-1 text-[13px] w-44 text-right outline-none" />
+                  <button onClick={() => { onEdit(r.field, val.trim()); setEditKey(null); }} className="text-[#178a5c] text-[12px] font-semibold">Save</button>
+                </span>
+              ) : (
+                <span className="flex items-center gap-2 min-w-0">
+                  <span className="text-text font-medium text-right break-words">{r.render ? r.render(raw) : raw}</span>
+                  <button onClick={() => { setEditKey(r.field); setVal(raw); }} className="opacity-60 hover:opacity-100 text-[#178a5c] text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>
+                </span>
+              )}
+            </div>
+          );
+        })}
+        <p className="text-[11px] text-text-muted leading-snug mt-0.5">The EPC partner stays as you chose it — the merchant name is kept only for reference.</p>
+        <div className="flex flex-wrap gap-2 mt-1">
+          <button onClick={onConfirm} className="px-3.5 py-1.5 rounded-lg bg-[#178a5c] text-white text-[12.5px] font-semibold hover:bg-[#12734c]">Confirm & continue →</button>
+          <button onClick={onSkip} className="px-3 py-1.5 rounded-lg border border-line text-[12.5px] text-text-mid hover:bg-bg-soft">Skip</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Per-document review card — the bundle's reading of one document, every field
+// editable, with Replace (re-upload → re-OCR) and Skip (leave as read).
+function DocReviewCard({ review, onEditField, onAccept, onReplace, onSkip }: {
+  review: { turnId: string; label: string; fields: Fetched[] };
+  onEditField: (field: string, value: string) => void; onAccept: () => void; onReplace: () => void; onSkip: () => void;
+}) {
+  const [editKey, setEditKey] = useState<string | null>(null);
+  const [val, setVal] = useState("");
+  return (
+    <div className="self-start w-full max-w-[88%] rounded-2xl rounded-tl-md border border-[#cdeadd] bg-white shadow-sm overflow-hidden">
+      <div className="px-3.5 py-2 bg-[#f0faf5] border-b border-[#e0f0e8] flex items-center gap-2">
+        <span className="text-[12px]">📄</span>
+        <span className="text-[12.5px] font-semibold text-[#0f3d2e]">{review.label} — read from the document</span>
+      </div>
+      <div className="p-3.5 flex flex-col gap-2">
+        {review.fields.map((f) => (
+          <div key={f.field} className="flex items-center justify-between gap-3 text-[13px] min-h-[24px]">
+            <span className="text-text-muted shrink-0">{f.label}</span>
+            {editKey === f.field && f.field ? (
+              <span className="flex items-center gap-1.5">
+                <input autoFocus value={val} onChange={(e) => setVal(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { onEditField(f.field!, val.trim()); setEditKey(null); } if (e.key === "Escape") setEditKey(null); }}
+                  className="border border-[#178a5c] rounded-lg px-2.5 py-1 text-[13px] w-44 text-right outline-none" />
+                <button onClick={() => { onEditField(f.field!, val.trim()); setEditKey(null); }} className="text-[#178a5c] text-[12px] font-semibold">Save</button>
+              </span>
+            ) : (
+              <span className="flex items-center gap-2 min-w-0">
+                {f.ok
+                  ? <span className="text-text font-medium text-right break-words">{f.value}</span>
+                  : <span className="text-amber-600 text-[12px] italic">not found</span>}
+                {f.field && (
+                  <button onClick={() => { setEditKey(f.field!); setVal(f.ok ? f.value : ""); }} className="opacity-60 hover:opacity-100 text-[#178a5c] text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>
+                )}
+              </span>
+            )}
+          </div>
+        ))}
+        <div className="flex flex-wrap gap-2 mt-1.5">
+          <button onClick={onAccept} className="px-3.5 py-1.5 rounded-lg bg-[#178a5c] text-white text-[12.5px] font-semibold hover:bg-[#12734c]">Looks good →</button>
+          <button onClick={onReplace} className="px-3 py-1.5 rounded-lg border border-line text-[12.5px] text-text-mid hover:bg-bg-soft">Replace document</button>
+          <button onClick={onSkip} className="px-3 py-1.5 rounded-lg text-[12.5px] text-text-muted hover:text-text hover:bg-bg-soft">Skip</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LoanConfigDock({ loanAmt, subsidyCase, setSubsidyCase, centralSub, setCentralSub, stateSub, setStateSub, tenure, setTenure, onFinish, finishLabel }: {
   loanAmt: number; subsidyCase: "subsidy" | "non_subsidy"; setSubsidyCase: (s: "subsidy" | "non_subsidy") => void;
   centralSub: string; setCentralSub: (s: string) => void; stateSub: string; setStateSub: (s: string) => void;
@@ -1342,15 +1752,20 @@ const DOC_PATHS: Record<string, string[]> = {
 // Is this turn's data already on the profile? Drives edit mode's "ask only
 // what's missing" — filled turns are skipped.
 function isTurnFilled(t: Turn, f: Form): boolean {
-  if (t.kind === "epc" || t.kind === "consent" || t.kind === "namecheck") return true; // never re-ask in edit
+  // Creation-time input aids (EPC pick, paste sheet, bundle) + transient `_`
+  // fields are never re-asked in edit mode.
+  if (t.kind === "epc" || t.kind === "consent" || t.kind === "bundle" || t.kind === "paste") return true;
+  if (t.field && t.field.startsWith("_")) return true;
   if (t.kind === "docs") { const keys = DOC_PATHS[t.id] || []; return keys.length > 0 && keys.every((k) => !!(f[k] && String(f[k]).trim())); }
   if (t.kind === "loanconfig") return !!(f.selected_tenure_years && String(f.selected_tenure_years).trim());
   if (t.field) return !!(f[t.field] && String(f[t.field]).trim());
   return false;
 }
 
-// A turn the RM can fill/edit (drives the edit "pick" list + completeness).
+// A turn the RM can fill/edit (drives the edit "pick" list + completeness). The
+// paste sheet / bundle / doc-choice are creation aids, not editable profile fields.
 function isEditableTurn(t: Turn): boolean {
+  if (t.field && t.field.startsWith("_")) return false;
   return t.kind === "text" || t.kind === "pincode" || t.kind === "choice" || t.kind === "docs" || t.kind === "loanconfig";
 }
 // Every required (non-optional, applicable) detail is present.

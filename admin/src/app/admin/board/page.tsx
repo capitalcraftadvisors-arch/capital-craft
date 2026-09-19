@@ -527,7 +527,7 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
                         </td>
                         <td className="px-2.5 py-2.5 align-top font-semibold whitespace-nowrap" style={{ color: days >= 2 ? "#b42318" : "#5a8a76" }}>{days}d</td>
                         <td className="px-2.5 py-2.5 align-top text-text-mid"><span className="block truncate max-w-[230px]">{act.text}</span></td>
-                        {showOwner && <td className="px-2.5 py-2.5 align-top text-text-mid whitespace-nowrap">{c.ownerName ?? "—"}</td>}
+                        {showOwner && <td className="px-2.5 py-2.5 align-top whitespace-nowrap">{c.ownerName ? <span className="text-text-mid">{c.ownerName}</span> : <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-[#fef0d6] text-[#854f0b]">Unassigned</span>}</td>}
                         <td className="px-2.5 py-2.5 align-top whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
                           <span className="inline-flex items-center gap-2 text-[13px]">
                             {tel && <button type="button" title="WhatsApp" aria-label="WhatsApp" onClick={() => openWa(c)} className="text-[#25D366] hover:opacity-70 inline-flex align-middle"><WhatsAppIcon size={18} /></button>}
@@ -1119,11 +1119,20 @@ function Inner() {
     const dueRank = (c: OpsCase) => (c.followUpAt && c.followUpAt <= todayStr ? 0 : 1);
     const contactRank = (c: OpsCase) => (c.lastContactedAt ? new Date(c.lastContactedAt).getTime() : 0);
     return cases
-      .filter((c) => c.ownerUserId && myTeamIds.has(c.ownerUserId) && !!nextAction(c))
+      .filter((c) => {
+        if (!nextAction(c)) return false;
+        if (c.ownerUserId && myTeamIds.has(c.ownerUserId)) return true;
+        // Admin / manager also see UNASSIGNED actionable cases (e.g. a newly
+        // added EPC that hasn't been assigned yet) so nothing slips through
+        // unowned — they can work it or assign it from here.
+        if (canOversee && !c.ownerUserId) return true;
+        return false;
+      })
       .sort((a, b) => dueRank(a) - dueRank(b) || outlineRank(a) - outlineRank(b) || contactRank(a) - contactRank(b) || b.stageHours - a.stageHours);
-  }, [cases, myTeamIds, outlineRank, todayStr]);
+  }, [cases, myTeamIds, canOversee, outlineRank, todayStr]);
   const myDayScoped = useMemo(() => {
     if (!canOversee || myDayOwner === "all") return myDay;
+    if (myDayOwner === "unassigned") return myDay.filter((c) => !c.ownerUserId);
     const want = myDayOwner === "me" ? me?.id : myDayOwner;
     return myDay.filter((c) => c.ownerUserId === want);
   }, [myDay, canOversee, myDayOwner, me]);
@@ -1285,6 +1294,7 @@ function Inner() {
                     <select value={myDayOwner} onChange={(e) => setMyDayOwner(e.target.value)}
                       className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-[12px] font-medium text-text outline-none focus:border-[#0f766e] cursor-pointer">
                       <option value="all">Everyone</option>
+                      <option value="unassigned">Unassigned</option>
                       {isManager && <option value="me">Me</option>}
                       {boardPeople.map((r) => (<option key={r.id} value={r.id}>{r.name}</option>))}
                     </select>

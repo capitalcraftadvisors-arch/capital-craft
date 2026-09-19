@@ -38,7 +38,7 @@ const TEXT_COLS = new Set([
   "aadhaar_front_path", "aadhaar_back_path", "aadhaar_face_path",
   "project_size_unit", "discom_name", "ca_number", "ebill_address_line", "ebill_name",
   "ebill_path", "proforma_invoice_path", "rooftop_photo_path",
-  "coapp_name", "coapp_father_name", "coapp_pan", "coapp_pan_path", "coapp_relation",
+  "coapp_name", "coapp_mobile", "coapp_email", "coapp_father_name", "coapp_pan", "coapp_pan_path", "coapp_relation",
   "coapp_aadhaar_name", "coapp_aadhaar_gender", "coapp_aadhaar_number", "coapp_aadhaar_care_of", "coapp_aadhaar_address",
   "coapp_aadhaar_front_path", "coapp_aadhaar_back_path", "coapp_aadhaar_face_path",
   "employment_type", "profession", "profession_other", "organization_name",
