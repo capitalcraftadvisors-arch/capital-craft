@@ -39,7 +39,7 @@ import {
 } from "@/components/view/ViewKit";
 
 type Loan = Record<string, any>;
-type Doc  = { id: string; category: string; storage_path: string; file_name: string | null; mime_type: string | null };
+type Doc  = { id: string; category: string; storage_path: string; file_name: string | null; mime_type: string | null; created_at?: string | null };
 
 // Slot key → epc_applications *_path column, for admin doc-removal (trash) on
 // path-backed slots. Keys NOT listed here are doc-row backed (deleted by id).
@@ -129,7 +129,23 @@ function fmtApproval(v: number | null | undefined, money: boolean, suffix?: stri
 type LoanSlot = { key: string; label: string; docId: string | null; path: string | null };
 type LoanDocGroup = { title: string; slots: LoanSlot[] };
 
-function buildLoanDocGroups(loan: Loan, docs: Doc[]): LoanDocGroup[] {
+// Every user_application_docs category that a NAMED slot below owns. Any row in
+// one of these categories belongs to its slot — never to "Other documents".
+// This keeps a duplicate upload (e.g. a rooftop photo uploaded twice, or via
+// both the chatbot and the classic form) from leaking a second "Rooftop photo" /
+// "Applicant photo" card into the Other bucket. Extra copies are simply hidden;
+// the slot shows the latest one.
+const NAMED_SLOT_CATEGORIES = new Set<string>([
+  "borrower_pan", "customer_photo", "borrower_photo", "quotation", "electricity_bill",
+  "bank_statement", "sanction_letter", "feasibility_report", "mmr_advance_receipt",
+  "completion_invoice", "completion_panel_photo", "completion_inverter_photo",
+  "completion_meter_photo", "completion_report",
+]);
+
+function buildLoanDocGroups(loan: Loan, docsIn: Doc[]): LoanDocGroup[] {
+  // Newest first, so a slot that matches by category shows the LATEST upload and
+  // any older duplicate is superseded (not the stale first copy).
+  const docs = [...docsIn].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
   const usedRowIds = new Set<string>();
   const slot = (
     key: string, label: string, cats: string[], path: string | null | undefined,
@@ -223,7 +239,10 @@ function buildLoanDocGroups(loan: Loan, docs: Doc[]): LoanDocGroup[] {
     ],
   });
 
-  const others = docs.filter((d) => !usedRowIds.has(d.id));
+  // "Other documents" = rows not consumed by a slot AND not owned by any named
+  // category. A duplicate of a named category (borrower_photo / customer_photo /
+  // borrower_pan / …) is never shown here — its slot already shows the latest.
+  const others = docs.filter((d) => !usedRowIds.has(d.id) && !NAMED_SLOT_CATEGORIES.has(d.category));
   if (others.length > 0) {
     groups.push({
       title: "Other documents",
@@ -290,7 +309,7 @@ function Inner() {
           .eq("id", params.id)
           .maybeSingle(),
         supabase().from("user_application_docs")
-          .select("id, category, storage_path, file_name, mime_type")
+          .select("id, category, storage_path, file_name, mime_type, created_at")
           .eq("application_id", params.id),
         supabase().from("loan_application_lenders")
           .select(LOAN_LENDER_COLS)

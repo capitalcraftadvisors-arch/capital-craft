@@ -1526,6 +1526,7 @@ async function callDocRoute(unit: DocUnit, appId: string, files: Partial<Record<
   fd.append("category", category);
   fd.append("application_id", appId);
   fd.append("uploaded_by", "admin");
+  fd.append("replace", "true"); // one row per photo slot — re-upload replaces, never duplicates (→ no stray "Other documents" copy)
   const res = await fetch("/api/upload", { method: "POST", headers: auth, body: fd });
   const j = await res.json().catch(() => ({}));
   if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't upload the photo.");

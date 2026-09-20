@@ -60,6 +60,28 @@ function err(message: string, status: number) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
+// Normalize a date/timestamp value to something Postgres always accepts, or
+// null. Critically, OCR returns DOBs "exactly as printed" — i.e. Indian
+// DD/MM/YYYY — which a bare .update() would reject, failing the WHOLE patch and
+// silently dropping the *_path columns alongside it. So we convert the common
+// forms and null anything unparseable rather than let one bad date poison the
+// save. ISO timestamps (the *_uploaded_at columns) pass through untouched.
+function toIsoDate(raw: unknown): string | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  if (s.includes("T")) return s;                 // ISO datetime (…_uploaded_at) — keep as-is
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;   // already YYYY-MM-DD
+  // DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY → YYYY-MM-DD (validate ranges).
+  const m = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
+  if (m) {
+    const d = +m[1], mo = +m[2], y = +m[3];
+    if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12 && y >= 1900 && y <= 2100) {
+      return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    }
+  }
+  return null; // year-only or unparseable → drop the value, never the whole save
+}
+
 function coerce(key: string, raw: unknown): unknown {
   if (NUM_COLS.has(key)) {
     if (raw === "" || raw == null) return null;
@@ -67,8 +89,7 @@ function coerce(key: string, raw: unknown): unknown {
     return Number.isFinite(n) ? n : null;
   }
   if (DATE_COLS.has(key)) {
-    const s = String(raw ?? "").trim();
-    return s ? s : null;
+    return toIsoDate(raw);
   }
   if (BOOL_COLS.has(key)) {
     if (typeof raw === "boolean") return raw;
@@ -122,6 +143,17 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (updErr?.code === "42703" && /lead_owner_name/.test(updErr.message ?? "")) {
       const { lead_owner_name: _dropped, ...rest } = patch; void _dropped;
       ({ error: updErr } = await supabase.from("epc_applications").update(rest).eq("id", appId));
+    }
+    // Last-resort self-heal: if the write still fails (e.g. a value that slipped
+    // coercion), retry once WITHOUT the date columns rather than lose the whole
+    // save — the document `_path` columns must land even if one date is bad.
+    if (updErr) {
+      const safe = { ...patch };
+      let droppedAny = false;
+      for (const k of Object.keys(safe)) if (DATE_COLS.has(k)) { delete safe[k]; droppedAny = true; }
+      if (droppedAny && Object.keys(safe).length > 0) {
+        ({ error: updErr } = await supabase.from("epc_applications").update(safe).eq("id", appId));
+      }
     }
     if (updErr) return err(`Save failed: ${updErr.message}`, 500);
 
