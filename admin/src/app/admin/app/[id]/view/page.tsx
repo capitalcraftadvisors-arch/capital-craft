@@ -17,6 +17,7 @@ import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness } from "@/lib/auth";
 import { getDocumentUrl, deleteDocument } from "@/lib/storage";
 import DeleteLoanAppModal from "@/components/DeleteLoanAppModal";
+import { invalidate } from "@/lib/list-cache";
 import CommentsSection from "@/components/CommentsSection";
 import OwnershipCard from "@/components/OwnershipCard";
 import LoanActivityLogModal from "@/components/LoanActivityLogModal";
@@ -1404,7 +1405,7 @@ function Inner() {
       <DeleteLoanAppModal
         open={delOpen}
         onClose={() => setDelOpen(false)}
-        onDeleted={() => router.replace("/admin" as any)}
+        onDeleted={() => { invalidate("dash.apps"); invalidate("dashkpis"); router.replace("/admin" as any); }}
         applicationId={loan.id}
         displayId={displayId(loan)}
         applicant={applicantName}

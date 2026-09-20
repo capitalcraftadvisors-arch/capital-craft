@@ -1137,9 +1137,12 @@ function Inner() {
         </div>
       )}
 
-      {/* Dock — the controls for the active question */}
+      {/* Dock — the controls for the active question. Caps its height and scrolls
+          internally so a tall dock (e.g. the document table, once rows expand
+          their extracted fields) can never overflow the fixed chat frame and
+          strand the lower rows / the "Done" button out of reach. */}
       {showDock && active && (
-        <div className="shrink-0 bg-white/85 backdrop-blur border-t border-line">
+        <div className="shrink-0 max-h-[75vh] overflow-y-auto bg-white/85 backdrop-blur border-t border-line">
           <div className="max-w-xl mx-auto px-3 sm:px-4 py-3">
             {editing && (
               <div className="flex items-center justify-between mb-2 text-[12px]">
@@ -1456,6 +1459,13 @@ const DOC_UNIT_FIELDS: Partial<Record<DocUnit, (f: Form) => Fetched[]>> = {
   coapp_pan: (f) => [frow("PAN", f.coapp_pan, "coapp_pan"), frow("Name", f.coapp_name, "coapp_name"), frow("Father", f.coapp_father_name, "coapp_father_name")],
 };
 
+// Friendly per-unit label — used in the combined-PDF (single) review list.
+const UNIT_LABEL: Record<DocUnit, string> = {
+  aadhaar: "Applicant Aadhaar", applicant_pan: "Applicant PAN", ebill: "E-bill",
+  rooftop: "Rooftop photo", selfie: "Applicant photo",
+  coapp_aadhaar: "Co-applicant Aadhaar", coapp_pan: "Co-applicant PAN",
+};
+
 // Applicable rows / units for the current form (co-app rows only with a co-app).
 function docTableRowsFor(f: Form): DocRow[] { return DOC_TABLE_ROWS.filter((r) => !r.coappOnly || hasCoapp(f)); }
 function docTableUnitsFor(f: Form): DocUnit[] { return Array.from(new Set(docTableRowsFor(f).map((r) => r.unit))); }
@@ -1574,6 +1584,7 @@ function DocTable({ appId, form, onPatch, onSkipChange, onDone }: {
   // Optional shortcut: drop ONE combined PDF (all documents) → auto-split + fill
   // the boxes below. The rows read `form`, so patching it here fills them.
   const [combo, setCombo] = useState<{ status: "reading" | "done" | "error"; error?: string; filled?: number } | null>(null);
+  const [comboName, setComboName] = useState<string>("");
   const filesRef = useRef<Partial<Record<DocSlot, DocSlotFile>>>({});
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
@@ -1609,6 +1620,7 @@ function DocTable({ appId, form, onPatch, onSkipChange, onDone }: {
   // the RM then reviews the filled rows + adds anything it couldn't read.
   async function runCombo(file: File) {
     if (!(file.type.includes("pdf") || file.type.startsWith("image/"))) return;
+    setComboName(file.name || "combined PDF");
     setCombo({ status: "reading" });
     try {
       const fd = new FormData();
@@ -1663,6 +1675,7 @@ function DocTable({ appId, form, onPatch, onSkipChange, onDone }: {
   }
 
   function done() {
+    if (form._doc_choice === "single") { onDone(comboName ? [{ name: comboName, thumb: null }] : []); return; }
     const receipt = rows.filter((r) => slotFiles[r.slot]).map((r) => ({ name: slotFiles[r.slot]!.file.name, thumb: slotFiles[r.slot]!.thumb }));
     onDone(receipt);
   }
@@ -1744,27 +1757,61 @@ function DocTable({ appId, form, onPatch, onSkipChange, onDone }: {
     return null;
   }
 
+  // ── SINGLE combined-PDF mode: one upload, OCR reads the whole PDF, review. ──
+  if (form._doc_choice === "single") {
+    const units = docTableUnitsFor(form);
+    const foundUnits = units.filter((u) => unitDone(u) || unitPrefilled(u));
+    const missingUnits = units.filter((u) => !(unitDone(u) || unitPrefilled(u)));
+    const canContinue = combo?.status === "done" || foundUnits.length > 0;
+    return (
+      <div className="flex flex-col gap-2">
+        <div className="rounded-xl border border-dashed border-[#cdeadd] bg-[#f7fcf9] px-3 py-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="text-[12.5px] text-text-mid">
+              <span className="font-semibold text-[#0f3d2e]">Upload the combined PDF</span> — I&rsquo;ll read every document inside it.
+            </div>
+            <label onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) void runCombo(f); }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#178a5c] bg-white px-3 py-1.5 cursor-pointer text-[12px] font-semibold text-[#178a5c] hover:bg-[#f0faf5] shrink-0">
+              {combo?.status === "reading"
+                ? <><span className="w-3.5 h-3.5 rounded-full border-2 border-[#178a5c]/30 border-t-[#178a5c] animate-spin" /> Reading…</>
+                : <>＋ {combo?.status === "done" ? "Re-upload PDF" : "Upload combined PDF"}</>}
+              <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void runCombo(f); e.currentTarget.value = ""; }} />
+            </label>
+          </div>
+          {combo?.status === "reading" && <div className="text-[11.5px] text-text-muted mt-1">Reading the PDF and pulling out each document…</div>}
+          {combo?.status === "error" && <div className="text-[11.5px] text-red-600 mt-1">{combo.error}</div>}
+        </div>
+
+        {combo?.status === "done" && (
+          <div className="rounded-xl border border-line bg-white divide-y divide-line/70">
+            {foundUnits.map((u) => {
+              const build = DOC_UNIT_FIELDS[u];
+              return (
+                <div key={u} className="px-3 py-2.5">
+                  <div className="text-[12px] font-semibold text-[#0f3d2e] mb-1">{UNIT_LABEL[u]} <span className="text-[#178a5c]">✓</span></div>
+                  {build ? <DocFieldRows fields={build(form)} onEdit={(field, value) => onPatch({ [field]: value })} /> : <span className="text-[11.5px] text-text-muted">Uploaded</span>}
+                </div>
+              );
+            })}
+            {missingUnits.length > 0 && (
+              <div className="px-3 py-2.5 text-[11.5px] text-amber-700">
+                Not found in the PDF: {missingUnits.map((u) => UNIT_LABEL[u]).join(", ")}. Re-upload a fuller PDF, or continue and add them later.
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={done} disabled={!canContinue} className="px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">Done with documents →</button>
+          {!canContinue && <span className="text-[11px] text-text-muted">Upload the combined PDF to continue.</span>}
+        </div>
+      </div>
+    );
+  }
+
+  // ── SEPARATE mode: the labeled-slot table (one box per document). ──
   return (
     <div className="flex flex-col gap-2">
-      {/* One combined PDF — shown ONLY when the RM chose "One combined PDF" — auto-fills the boxes below. */}
-      {form._doc_choice === "single" && (
-      <div className="rounded-xl border border-dashed border-[#cdeadd] bg-[#f7fcf9] px-3 py-2.5">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div className="text-[12px] text-text-mid">
-            <span className="font-semibold text-[#0f3d2e]">Got one combined PDF?</span> Drop it here and I&rsquo;ll fill the boxes below.
-          </div>
-          <label onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) void runCombo(f); }}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[#178a5c] bg-white px-3 py-1.5 cursor-pointer text-[12px] font-semibold text-[#178a5c] hover:bg-[#f0faf5] shrink-0">
-            {combo?.status === "reading"
-              ? <><span className="w-3.5 h-3.5 rounded-full border-2 border-[#178a5c]/30 border-t-[#178a5c] animate-spin" /> Reading…</>
-              : <>＋ Upload combined PDF</>}
-            <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void runCombo(f); e.currentTarget.value = ""; }} />
-          </label>
-        </div>
-        {combo?.status === "done" && <div className="text-[11.5px] text-[#178a5c] mt-1">Filled {combo.filled ?? 0} document{combo.filled === 1 ? "" : "s"} — check the boxes below and add anything missing.</div>}
-        {combo?.status === "error" && <div className="text-[11.5px] text-red-600 mt-1">{combo.error} You can still add each document below.</div>}
-      </div>
-      )}
       <div className="rounded-xl border border-line bg-white overflow-hidden">
         <table className="w-full border-collapse">
           <thead>

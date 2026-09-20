@@ -30,6 +30,7 @@ import CommentsSection from "@/components/CommentsSection";
 import OwnershipCard from "@/components/OwnershipCard";
 import ActivityLogModal from "@/components/ActivityLogModal";
 import DeleteEpcModal from "@/components/DeleteEpcModal";
+import { invalidate } from "@/lib/list-cache";
 import { TabButton, DownloadMenu, KebabMenu, ProfileRail } from "@/components/ProfileTabBar";
 import { computeEpcHealth, scoreTone, type TatBands, type HealthBucket } from "@/lib/epc-score";
 // Shared view chrome — the SAME kit the Loan Application View imports, so the
@@ -846,9 +847,9 @@ function Inner() {
       <DeleteEpcModal
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
-        onDeleted={(payload) => {
+        onDeleted={() => {
           setDeleteOpen(false);
-          alert(`Deleted ${payload.display_id ?? "EPC"}${payload.contact_name ? ` — ${payload.contact_name}` : ""}.`);
+          invalidate("dash.epcs");
           router.push("/admin");
         }}
         businessId={biz.id}
