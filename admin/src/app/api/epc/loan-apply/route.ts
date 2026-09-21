@@ -98,16 +98,19 @@ export async function POST(req: NextRequest) {
       const system_type      = strOrNull(b.system_type);
       const plant_use_type   = strOrNull(b.plant_use_type);
 
-      if (!borrower_name)                   return err("Applicant name is required.", 400);
+      // Only the mobile is required up front — it drives the loan_display_id and
+      // identifies the draft. The classic 3-page flow still sends every field
+      // (its client enforces them); the chatbot registers with JUST the mobile
+      // and fills the rest — plus consent — at submit, after documents are read.
+      // Anything present is still format-validated.
       if (!MOBILE_RE.test(borrower_mobile)) return err("Enter a valid 10-digit mobile.", 400);
-      if (!borrower_email || !EMAIL_RE.test(borrower_email)) return err("Enter a valid email.", 400);
-      if (!install_pincode || !PIN_RE.test(install_pincode)) return err("Enter a valid 6-digit pincode.", 400);
-      if (!install_state)                   return err("Installation state is required.", 400);
-      if (!system_type || !SYSTEM_TYPES.has(system_type)) return err("Choose a system type.", 400);
-      if (plant_use_type !== "residential" && plant_use_type !== "commercial") {
+      if (borrower_email && !EMAIL_RE.test(borrower_email)) return err("Enter a valid email.", 400);
+      if (install_pincode && !PIN_RE.test(install_pincode)) return err("Enter a valid 6-digit pincode.", 400);
+      if (system_type && !SYSTEM_TYPES.has(system_type)) return err("Choose a valid system type.", 400);
+      if (plant_use_type && plant_use_type !== "residential" && plant_use_type !== "commercial") {
         return err("Choose Residential or Commercial.", 400);
       }
-      if (b.consented !== true)             return err("Consent is required to continue.", 400);
+      const consented = b.consented === true;
 
       // INSERT + field save in one statement. The 0017 gate trigger
       // rejects EPCs without lender approval; RLS scopes to own rows.
@@ -131,10 +134,12 @@ export async function POST(req: NextRequest) {
           install_city,
           system_type,
           plant_use_type,
-          consent_at: new Date().toISOString(),
-          consent_policies: CONSENT_POLICIES,
-          consent_ip: firstIp(req),
-          consent_user_agent: (req.headers.get("user-agent") ?? "").slice(0, 500),
+          ...(consented ? {
+            consent_at: new Date().toISOString(),
+            consent_policies: CONSENT_POLICIES,
+            consent_ip: firstIp(req),
+            consent_user_agent: (req.headers.get("user-agent") ?? "").slice(0, 500),
+          } : {}),
         })
         .select("id, loan_display_id")
         .single();
@@ -222,6 +227,9 @@ export async function POST(req: NextRequest) {
       }
 
       const now = new Date().toISOString();
+      // In the docs-first chatbot, plant_use_type (and other register fields)
+      // arrive at submit rather than register — use the freshest value.
+      const useType = strOrNull(b.plant_use_type) ?? (app as any).plant_use_type;
       const { error: updErr } = await supabase
         .from("epc_applications")
         .update({
@@ -277,11 +285,27 @@ export async function POST(req: NextRequest) {
           loan_amount_required,
           roi_percent:      DEFAULT_INDICATIVE_ROI,
           // Subsidy is residential-only — commercial (C&I) is forced to 0.
-          central_subsidy:  (app as any).plant_use_type === "commercial" ? 0 : (central_subsidy ?? 0),
+          central_subsidy:  useType === "commercial" ? 0 : (central_subsidy ?? 0),
           state_subsidy:    0,
           selected_tenure_years,
           selected_monthly_emi,
           selected_subsidy_emi,
+          // Register fields the docs-first chatbot collects AFTER documents.
+          // Written ONLY when the caller sends them, so the classic 3-page
+          // flow's register values are never overwritten with null.
+          ...(b.borrower_name    !== undefined ? { borrower_name:    strOrNull(b.borrower_name) } : {}),
+          ...(b.borrower_email   !== undefined ? { borrower_email:   strOrNull(b.borrower_email) } : {}),
+          ...(b.install_pincode  !== undefined ? { install_pincode:  strOrNull(b.install_pincode) } : {}),
+          ...(b.install_state    !== undefined ? { install_state:    strOrNull(b.install_state) } : {}),
+          ...(b.install_district !== undefined ? { install_district: strOrNull(b.install_district) } : {}),
+          ...(b.install_city     !== undefined ? { install_city:     strOrNull(b.install_city) } : {}),
+          ...(b.system_type      !== undefined ? { system_type:      strOrNull(b.system_type) } : {}),
+          ...(b.plant_use_type   !== undefined ? { plant_use_type:   strOrNull(b.plant_use_type) } : {}),
+          // Consent is captured at the end of the chatbot (just before submit).
+          ...(b.consented === true ? {
+            consent_at: now, consent_policies: CONSENT_POLICIES,
+            consent_ip: firstIp(req), consent_user_agent: (req.headers.get("user-agent") ?? "").slice(0, 500),
+          } : {}),
           step3_completed_at: now,
           step5_completed_at: now,
           // Enter the pipeline exactly like an admin-created application.

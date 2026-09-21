@@ -9,10 +9,11 @@
 //                for the owning EPC), read into the in-memory form
 //   • submit   → POST /api/epc/loan-apply { phase:"submit", ...all fields }
 //
-// Flow: warm greeting → profile questions one-by-one → create → labelled
-// document TABLE (incl. bank statement) → quotation → loan amount → tenure →
-// success screen. All uploads/OCR run against the EPC's own token; RLS scopes
-// every write to their own rows.
+// Flow: greeting → mobile (creates the draft) → applicant document TABLE (incl.
+// bank statement) → co-applicant TABLE only when the Aadhaar/PAN/e-bill names
+// differ (+ co-applicant mobile) → quotation → the few details not on any
+// document (email, pincode, system type, use) → loan amount → tenure → consent
+// → success. All uploads/OCR run against the EPC's own token; RLS scopes writes.
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -30,17 +31,38 @@ type Choice = { value: string; label: string; sub?: string };
 type Turn = {
   id: string;
   bot: string;
-  kind: "text" | "pincode" | "choice" | "consent" | "doc_table" | "quotation" | "number" | "tenure";
+  kind: "text" | "pincode" | "choice" | "consent" | "doc_table" | "coapp_docs" | "quotation" | "number" | "tenure";
   field?: string;
   placeholder?: string;
   choices?: Choice[];
   validate?: (v: string) => string | null;
+  when?: (f: Form) => boolean; // conditional turn — skipped when this returns false
 };
 
+// Normalize an Indian name for comparison: strip honorifics/punctuation/spaces.
+function normName(s: string | undefined): string {
+  return (s || "").toLowerCase()
+    .replace(/\b(m\/s|mr|mrs|ms|smt|shri|sri|km|kumari|dr|late)\.?\b/g, "")
+    .replace(/[^a-z]/g, "");
+}
+// A co-applicant is needed when the names read from the applicant's Aadhaar, PAN
+// and e-bill don't all match — the differing document usually belongs to a
+// second person (e.g. the electricity bill in a parent's/spouse's name).
+function coappNeeded(f: Form): boolean {
+  const names = [f.aadhaar_name, f._pan_name, f.ebill_name].map(normName).filter((n) => n.length >= 3);
+  return names.length >= 2 && new Set(names).size > 1;
+}
+
+// Docs-first flow: the mobile creates the draft, then documents + quotation are
+// collected up front (name/PAN/Aadhaar/bill/project details are read from them),
+// then only the things NOT on any document are asked, and consent is last.
 const SCRIPT: Turn[] = [
-  { id: "borrower_name", bot: "Let's start with the applicant. What is the customer's full name?", kind: "text", field: "borrower_name", placeholder: "Full name", validate: (v) => (v.trim().length < 2 ? "Please enter the applicant's name." : null) },
-  { id: "borrower_mobile", bot: "What is the applicant's 10-digit mobile number?", kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile", validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile number.") },
-  { id: "borrower_email", bot: "And their email address?", kind: "text", field: "borrower_email", placeholder: "name@example.com", validate: (v) => (EMAIL_RE.test(v.trim()) ? null : "Enter a valid email address.") },
+  { id: "borrower_mobile", bot: "What's the applicant's 10-digit mobile number?", kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile", validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile number.") },
+  { id: "doc_table", bot: "Let's collect the documents. Add each one into its box below — I'll read it as it lands. Tick “Don't have it” for anything you can't add right now.", kind: "doc_table" },
+  { id: "coapp_docs", bot: "The documents are in more than one name — please add the co-applicant's Aadhaar and PAN.", kind: "coapp_docs", when: coappNeeded },
+  { id: "coapp_mobile", bot: "What's the co-applicant's 10-digit mobile number?", kind: "text", field: "coapp_mobile", placeholder: "10-digit mobile", when: coappNeeded, validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile number.") },
+  { id: "quotation", bot: "Now the quotation / proforma invoice — upload it and I'll read the project size and cost, or enter them yourself.", kind: "quotation" },
+  { id: "borrower_email", bot: "What's the applicant's email address?", kind: "text", field: "borrower_email", placeholder: "name@example.com", validate: (v) => (EMAIL_RE.test(v.trim()) ? null : "Enter a valid email address.") },
   { id: "install_pincode", bot: "Which area is the plant being installed in? Share the 6-digit pincode.", kind: "pincode", field: "install_pincode" },
   { id: "system_type", bot: "What type of solar system is this?", kind: "choice", field: "system_type", choices: [
     { value: "on_grid", label: "On-Grid", sub: "Connected to the grid" },
@@ -51,15 +73,9 @@ const SCRIPT: Turn[] = [
     { value: "residential", label: "Residential", sub: "Home / society" },
     { value: "commercial", label: "Commercial", sub: "Shop / office / factory" },
   ] },
-  { id: "_has_coapp", bot: "Is there a co-applicant on this loan?", kind: "choice", field: "_has_coapp", choices: [
-    { value: "1", label: "Yes", sub: "Add co-applicant documents" },
-    { value: "", label: "No", sub: "Single applicant" },
-  ] },
-  { id: "consent", bot: "Before we upload documents — does the customer agree to the Terms, Privacy & Cookie policies and allow a credit check?", kind: "consent" },
-  { id: "doc_table", bot: "Now the documents. Add each one into its box below — I'll read it as it lands. Tick “Don't have it” for anything you can't add right now.", kind: "doc_table" },
-  { id: "quotation", bot: "Great. Now the quotation / proforma invoice — upload it and I'll read the project size and cost, or enter them yourself.", kind: "quotation" },
   { id: "loan_amount", bot: "How much loan does the customer need? (₹)", kind: "number", field: "loan_amount_required", placeholder: "e.g. 210000" },
-  { id: "tenure", bot: "Last step — choose the loan tenure and I'll estimate the EMI.", kind: "tenure" },
+  { id: "tenure", bot: "Choose the loan tenure and I'll estimate the EMI.", kind: "tenure" },
+  { id: "consent", bot: "Almost done — does the customer agree to the Terms, Privacy & Cookie policies and allow a credit check?", kind: "consent" },
 ];
 
 const uidGen = () => "m" + Math.random().toString(36).slice(2, 9);
@@ -101,7 +117,7 @@ function ChatInner() {
     started.current = true;
     const name = rmName && rmName !== "there" ? ` ${rmName}` : "";
     pushBot(`नमस्ते${name}! 🙏`, "g1");
-    setTimeout(() => pushBot("Welcome to Capital Craft. I'll help you file this loan application in a few quick steps — it only takes a couple of minutes.", "g2"), 250);
+    setTimeout(() => pushBot("Welcome to Capital Craft. I'll help you complete your loan application in a few quick steps.", "g2"), 250);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -109,6 +125,8 @@ function ChatInner() {
   // the two greeting bubbles so the order is greeting → welcome → question.
   useEffect(() => {
     if (!turn || done) return;
+    // Skip a conditional turn (e.g. the co-applicant docs when the names match).
+    if (turn.when && !turn.when(form)) { setIdx((i) => i + 1); return; }
     const t = setTimeout(() => pushBot(turn.bot, turn.id), idx === 0 ? 800 : 300);
     setError(null); setInput("");
     if ((turn.kind === "text" || turn.kind === "pincode" || turn.kind === "number")) setTimeout(() => inputRef.current?.focus(), 350);
@@ -125,26 +143,15 @@ function ChatInner() {
   const advance = () => setIdx((i) => i + 1);
   const auth = () => ({ Authorization: `Bearer ${getToken() ?? ""}` });
 
-  // ── Register: create the application after consent ─────────────────────────
-  async function register(): Promise<boolean> {
+  // ── Register: create the draft as soon as we have the mobile, so the
+  // document uploads that follow have an application to attach to. ────────────
+  async function register(f: Form): Promise<boolean> {
     setBusy(true); setError(null);
     try {
       const res = await fetch("/api/epc/loan-apply", {
         method: "POST",
         headers: { ...auth(), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          phase: "register",
-          borrower_name: form.borrower_name,
-          borrower_mobile: form.borrower_mobile,
-          borrower_email: form.borrower_email,
-          install_pincode: form.install_pincode,
-          install_state: form.install_state,
-          install_district: form.install_district || null,
-          install_city: form.install_city || null,
-          system_type: form.system_type,
-          plant_use_type: form.plant_use_type,
-          consented: true,
-        }),
+        body: JSON.stringify({ phase: "register", borrower_mobile: f.borrower_mobile }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't start the application."); return false; }
@@ -162,8 +169,15 @@ function ChatInner() {
     const v = input.trim();
     if (turn.validate) { const e = turn.validate(v); if (e) { setError(e); return; } }
     if (!v) { setError("This field is required."); return; }
+    if (turn.id === "coapp_mobile" && v === form.borrower_mobile) { setError("Co-applicant mobile can't be the same as the applicant's."); return; }
     pushUser(v);
-    if (turn.field) merge({ [turn.field]: v });
+    const next = turn.field ? { ...form, [turn.field]: v } : form;
+    if (turn.field) setForm(next);
+    // The mobile creates the draft so the document step (next) can upload/read.
+    if (turn.id === "borrower_mobile") {
+      const ok = await register(next);
+      if (!ok) return; // stay on the mobile turn; error shown
+    }
     advance();
   }
 
@@ -208,8 +222,7 @@ function ChatInner() {
 
   async function giveConsent() {
     pushUser("Yes, the customer consents.");
-    const ok = await register();
-    if (ok) advance();
+    await submitApplication();
   }
 
   function finishDocTable(receipt: { name: string; thumb: string | null }[]) {
@@ -234,6 +247,16 @@ function ChatInner() {
         headers: { ...auth(), "Content-Type": "application/json" },
         body: JSON.stringify({
           phase: "submit", id: appId,
+          // Consent (collected at the very end) + the non-document details.
+          consented: true,
+          borrower_name: form.borrower_name || null,
+          borrower_email: form.borrower_email || null,
+          install_pincode: form.install_pincode || null,
+          install_state: form.install_state || null,
+          install_district: form.install_district || null,
+          install_city: form.install_city || null,
+          system_type: form.system_type || null,
+          plant_use_type: form.plant_use_type || null,
           // Applicant docs
           borrower_pan: form.borrower_pan || null,
           borrower_father_name: form.borrower_father_name || null,
@@ -256,8 +279,9 @@ function ChatInner() {
           // Quotation + rooftop
           proforma_invoice_path: form.proforma_invoice_path || null,
           rooftop_photo_path: form.rooftop_photo_path || null,
-          // Co-applicant
-          has_coapp: form._has_coapp === "1",
+          // Co-applicant — inferred from whether co-applicant docs were added.
+          has_coapp: !!(form.coapp_pan || form.coapp_aadhaar_number || form.coapp_pan_path || form.coapp_aadhaar_front_path),
+          coapp_mobile: form.coapp_mobile || null,
           coapp_pan: form.coapp_pan || null,
           coapp_name: form.coapp_name || null,
           coapp_dob: form.coapp_dob || null,
@@ -398,7 +422,11 @@ function ChatInner() {
             )}
 
             {turn.kind === "doc_table" && appId && (
-              <DocTable appId={appId} form={form} onPatch={merge} onDone={finishDocTable} />
+              <DocTable key="applicant-docs" appId={appId} form={form} rows={APPLICANT_ROWS} onPatch={merge} onDone={finishDocTable} />
+            )}
+
+            {turn.kind === "coapp_docs" && appId && (
+              <DocTable key="coapp-docs" appId={appId} form={form} rows={COAPP_ROWS} onPatch={merge} onDone={() => advance()} />
             )}
 
             {turn.kind === "quotation" && appId && (
@@ -406,7 +434,7 @@ function ChatInner() {
             )}
 
             {turn.kind === "tenure" && (
-              <TenureDock form={form} onPick={(t) => merge({ selected_tenure_years: String(t) })} onSubmit={() => void submitApplication()} />
+              <TenureDock form={form} onPick={(t) => merge({ selected_tenure_years: String(t) })} onSubmit={() => advance()} />
             )}
           </div>
         </div>
@@ -420,7 +448,7 @@ type Slot = "aadhaar_front" | "aadhaar_back" | "pan" | "ebill" | "rooftop" | "se
 type Unit = "aadhaar" | "pan" | "ebill" | "rooftop" | "selfie" | "bank" | "coapp_aadhaar" | "coapp_pan";
 type Row = { slot: Slot; label: string; unit: Unit; parts: Slot[]; lastOfUnit?: boolean; coappOnly?: boolean };
 
-const DOC_ROWS: Row[] = [
+const APPLICANT_ROWS: Row[] = [
   { slot: "aadhaar_front", label: "Applicant Aadhaar — front", unit: "aadhaar", parts: ["aadhaar_front", "aadhaar_back"] },
   { slot: "aadhaar_back", label: "Applicant Aadhaar — back", unit: "aadhaar", parts: ["aadhaar_front", "aadhaar_back"], lastOfUnit: true },
   { slot: "pan", label: "Applicant PAN", unit: "pan", parts: ["pan"], lastOfUnit: true },
@@ -428,9 +456,11 @@ const DOC_ROWS: Row[] = [
   { slot: "rooftop", label: "Rooftop photo", unit: "rooftop", parts: ["rooftop"], lastOfUnit: true },
   { slot: "selfie", label: "Applicant photo", unit: "selfie", parts: ["selfie"], lastOfUnit: true },
   { slot: "bank", label: "Bank statement", unit: "bank", parts: ["bank"], lastOfUnit: true },
-  { slot: "coapp_aadhaar_front", label: "Co-applicant Aadhaar — front", unit: "coapp_aadhaar", parts: ["coapp_aadhaar_front", "coapp_aadhaar_back"], coappOnly: true },
-  { slot: "coapp_aadhaar_back", label: "Co-applicant Aadhaar — back", unit: "coapp_aadhaar", parts: ["coapp_aadhaar_front", "coapp_aadhaar_back"], coappOnly: true, lastOfUnit: true },
-  { slot: "coapp_pan", label: "Co-applicant PAN", unit: "coapp_pan", parts: ["coapp_pan"], coappOnly: true, lastOfUnit: true },
+];
+const COAPP_ROWS: Row[] = [
+  { slot: "coapp_aadhaar_front", label: "Co-applicant Aadhaar — front", unit: "coapp_aadhaar", parts: ["coapp_aadhaar_front", "coapp_aadhaar_back"] },
+  { slot: "coapp_aadhaar_back", label: "Co-applicant Aadhaar — back", unit: "coapp_aadhaar", parts: ["coapp_aadhaar_front", "coapp_aadhaar_back"], lastOfUnit: true },
+  { slot: "coapp_pan", label: "Co-applicant PAN", unit: "coapp_pan", parts: ["coapp_pan"], lastOfUnit: true },
 ];
 
 // Form key that marks each unit already read (for prefill/done).
@@ -450,7 +480,7 @@ const UNIT_FIELDS: Partial<Record<Unit, (f: Form) => { label: string; field: str
 
 type SlotFile = { file: File; thumb: string | null };
 
-function DocTable({ appId, form, onPatch, onDone }: { appId: string; form: Form; onPatch: (p: Form) => void; onDone: (r: { name: string; thumb: string | null }[]) => void }) {
+function DocTable({ appId, form, rows, onPatch, onDone }: { appId: string; form: Form; rows: Row[]; onPatch: (p: Form) => void; onDone: (r: { name: string; thumb: string | null }[]) => void }) {
   const [files, setFiles] = useState<Partial<Record<Slot, SlotFile>>>({});
   const [skipped, setSkipped] = useState<Partial<Record<Slot, boolean>>>({});
   const [reads, setReads] = useState<Partial<Record<Unit, { status: "reading" | "done" | "error"; error?: string }>>>({});
@@ -458,7 +488,6 @@ function DocTable({ appId, form, onPatch, onDone }: { appId: string; form: Form;
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
 
-  const rows = DOC_ROWS.filter((r) => !r.coappOnly || form._has_coapp === "1");
   const auth = () => ({ Authorization: `Bearer ${getToken() ?? ""}` });
   const unitPrefilled = (u: Unit) => !!(form[UNIT_DONE_KEY[u]] && String(form[UNIT_DONE_KEY[u]]).trim());
   const unitDone = (u: Unit) => reads[u]?.status === "done" || unitPrefilled(u);
@@ -494,7 +523,7 @@ function DocTable({ appId, form, onPatch, onDone }: { appId: string; form: Form;
       // Applicant PAN is shown from its user_application_docs row (the route
       // registers a borrower_pan row) — no path column. Co-applicant PAN uses
       // the coapp_pan_path column, so capture the returned storage_path.
-      if (applicant) return { borrower_pan: x.pan ?? "", borrower_father_name: x.father_name ?? "", ...(x.dob ? { borrower_dob: x.dob } : {}), ...(x.name && !form.borrower_name ? { borrower_name: x.name } : {}) };
+      if (applicant) return { borrower_pan: x.pan ?? "", borrower_father_name: x.father_name ?? "", _pan_name: x.name ?? "", ...(x.dob ? { borrower_dob: x.dob } : {}), ...(x.name && !form.borrower_name ? { borrower_name: x.name } : {}) };
       return { coapp_pan: x.pan ?? "", coapp_pan_path: j.storage_path ?? "", coapp_father_name: x.father_name ?? "", ...(x.dob ? { coapp_dob: x.dob } : {}), ...(x.name && !form.coapp_name ? { coapp_name: x.name } : {}) };
     }
     // E-bill — extract-loan-docs (ebill side).
@@ -540,7 +569,7 @@ function DocTable({ appId, form, onPatch, onDone }: { appId: string; form: Form;
     const next = { ...filesRef.current, [slot]: { file, thumb } };
     filesRef.current = next; setFiles(next);
     if (skipped[slot]) setSkipped((s) => { const n = { ...s }; delete n[slot]; return n; });
-    const parts = DOC_ROWS.find((r) => r.slot === slot)!.parts;
+    const parts = rows.find((r) => r.slot === slot)!.parts;
     if (parts.every((p) => next[p])) void run(unit, next);
   }
   function toggleSkip(slot: Slot) {
@@ -550,7 +579,7 @@ function DocTable({ appId, form, onPatch, onDone }: { appId: string; form: Form;
   }
   function replace(slot: Slot, unit: Unit) {
     const n = { ...filesRef.current };
-    for (const p of DOC_ROWS.find((r) => r.slot === slot)!.parts) delete n[p];
+    for (const p of rows.find((r) => r.slot === slot)!.parts) delete n[p];
     filesRef.current = n; setFiles(n);
     setReads((s) => { const x = { ...s }; delete x[unit]; return x; });
   }
@@ -583,7 +612,7 @@ function DocTable({ appId, form, onPatch, onDone }: { appId: string; form: Form;
     const rd = reads[unit];
     if (rd?.status === "reading") return <span className="flex items-center gap-2 text-[11.5px] text-text-muted"><span className="w-3.5 h-3.5 rounded-full border-2 border-[#178a5c]/30 border-t-[#178a5c] animate-spin" /> Reading…</span>;
     if (rd?.status === "error") {
-      const canRetry = DOC_ROWS.find((r) => r.unit === unit)!.parts.every((p) => filesRef.current[p]);
+      const canRetry = rows.find((r) => r.unit === unit)!.parts.every((p) => filesRef.current[p]);
       return <span className="flex flex-wrap items-center gap-2 text-[11.5px]"><span className="text-red-600">{rd.error || "Couldn't read that."}</span>{canRetry && <button onClick={() => void run(unit, filesRef.current)} className="text-[#178a5c] font-semibold hover:underline">Try again</button>}</span>;
     }
     if (unitDone(unit)) {
@@ -733,7 +762,7 @@ function TenureDock({ form, onPick, onSubmit }: { form: Form; onPick: (t: number
         </div>
       )}
       <button onClick={onSubmit} disabled={tenure === 0} className="px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c] disabled:opacity-50">
-        Submit application
+        Continue →
       </button>
     </div>
   );

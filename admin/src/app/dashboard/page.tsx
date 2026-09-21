@@ -174,7 +174,7 @@ function DashboardInner() {
           <div className="flex items-center gap-3 min-w-0">
             <div className="text-right min-w-0 hidden sm:block">
               <div className="text-[13px] font-semibold text-[#0f3d2e] truncate max-w-[220px]">{epcName}</div>
-              <div className="text-[11px] text-text-muted">Partner Portal</div>
+              <div className="text-[11px] text-text-muted">Portal</div>
             </div>
             <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#2fbd82] to-[#0f3d2e] text-white grid place-items-center font-display font-bold text-[14px] shrink-0" aria-hidden>
               {(epcName || "C").slice(0, 1).toUpperCase()}
@@ -189,11 +189,8 @@ function DashboardInner() {
       <section className="max-w-container mx-auto px-5 sm:px-7 py-8 sm:py-10">
         <div className="mb-6">
           <h1 className="font-display text-[24px] sm:text-[30px] font-bold text-[#0f3d2e]">
-            नमस्ते, {epcName} 🙏
+            नमस्ते, {epcName}
           </h1>
-          <p className="text-text-mid mt-1">
-            Your Capital Craft partner portal — apply for and track loans{canInsurance ? " and insurance" : ""}.
-          </p>
         </div>
 
         {/* Loan / Insurance tabs — shown only when both are unlocked. */}
@@ -217,12 +214,12 @@ function DashboardInner() {
             </p>
           </div>
           {tab === "loan" && canLoan && (
-            <Button variant="primary" onClick={() => router.push("/dashboard/apply/chat" as any)}>
+            <Button variant="primary" className="!bg-[#1e3a8a] hover:!bg-[#17307a]" onClick={() => router.push("/dashboard/apply/chat" as any)}>
               Apply for Loan
             </Button>
           )}
           {tab === "insurance" && canInsurance && (
-            <Button variant="primary" onClick={() => void startInsurance()} loading={insBusy}>
+            <Button variant="primary" className="!bg-[#1e3a8a] hover:!bg-[#17307a]" onClick={() => void startInsurance()} loading={insBusy}>
               Apply for Insurance
             </Button>
           )}
@@ -241,13 +238,14 @@ function DashboardInner() {
                 <th className="px-5 py-3 font-medium">Disbursement</th>
                 <th className="px-5 py-3 font-medium">Days remaining</th>
                 <th className="px-5 py-3 font-medium">Login date &amp; time</th>
+                <th className="px-5 py-3 font-medium">Action</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={7} className="px-5 py-8 text-center text-text-muted">Loading…</td></tr>
+                <tr><td colSpan={8} className="px-5 py-8 text-center text-text-muted">Loading…</td></tr>
               ) : rows.length === 0 ? (
-                <tr><td colSpan={7} className="px-5 py-12 text-center text-text-muted">
+                <tr><td colSpan={8} className="px-5 py-12 text-center text-text-muted">
                   No applications yet. Click <span className="text-text font-semibold">Apply for Loan</span> to start one.
                 </td></tr>
               ) : rows.map((r) => {
@@ -301,6 +299,21 @@ function DashboardInner() {
                       )}
                     </td>
                     <td className="px-5 py-4 text-text-muted whitespace-nowrap">{loginDateTime(r)}</td>
+                    <td className="px-5 py-4 whitespace-nowrap">
+                      {approved ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/${r.id}/disbursement` as any); }}
+                          className="px-3 py-1.5 rounded-lg bg-[#1e3a8a] text-white text-[12px] font-semibold hover:bg-[#17307a]">
+                          Upload 2nd tranche docs
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/apply/${r.id}/docs` as any); }}
+                          className="px-4 py-1.5 rounded-lg border border-[#1e3a8a] text-[#1e3a8a] text-[12px] font-semibold hover:bg-[#1e3a8a]/[0.06]">
+                          Edit
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
