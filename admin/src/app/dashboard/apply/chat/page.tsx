@@ -39,18 +39,30 @@ type Turn = {
   when?: (f: Form) => boolean; // conditional turn — skipped when this returns false
 };
 
-// Normalize an Indian name for comparison: strip honorifics/punctuation/spaces.
-function normName(s: string | undefined): string {
+// Tokenize a name for fuzzy comparison: drop honorifics + relationship prefixes,
+// keep only real name words (≥3 letters) so minor OCR differences (case,
+// spacing, an extra middle name, initials) don't look like a different person.
+function nameTokens(s: string | undefined): string[] {
   return (s || "").toLowerCase()
-    .replace(/\b(m\/s|mr|mrs|ms|smt|shri|sri|km|kumari|dr|late)\.?\b/g, "")
-    .replace(/[^a-z]/g, "");
+    .replace(/\b(m\/s|mr|mrs|ms|smt|shri|sri|km|kumari|dr|late|s\/o|d\/o|w\/o|c\/o|h\/o)\.?\b/g, " ")
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/).filter((t) => t.length >= 3);
 }
-// A co-applicant is needed when the names read from the applicant's Aadhaar, PAN
-// and e-bill don't all match — the differing document usually belongs to a
-// second person (e.g. the electricity bill in a parent's/spouse's name).
+// Two names are the SAME person/family when they share any real name word.
+function namesLikelySame(a: string | undefined, b: string | undefined): boolean {
+  const ta = new Set(nameTokens(a)); const tb = nameTokens(b);
+  if (ta.size === 0 || tb.length === 0) return true; // unreadable → don't force a co-applicant
+  return tb.some((t) => ta.has(t));
+}
+// A co-applicant is needed ONLY when a document name is clearly different from
+// another (shares no name word) — e.g. the e-bill in a parent's/spouse's name.
+// Minor OCR variations on the SAME name never trigger it.
 function coappNeeded(f: Form): boolean {
-  const names = [f.aadhaar_name, f._pan_name, f.ebill_name].map(normName).filter((n) => n.length >= 3);
-  return names.length >= 2 && new Set(names).size > 1;
+  const nm = [f.aadhaar_name, f._pan_name, f.ebill_name].filter((n) => (n || "").trim().length >= 3);
+  for (let i = 0; i < nm.length; i++)
+    for (let j = i + 1; j < nm.length; j++)
+      if (!namesLikelySame(nm[i], nm[j])) return true;
+  return false;
 }
 
 // Docs-first flow: the mobile creates the draft, then documents + quotation are
@@ -99,6 +111,7 @@ function ChatInner() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ loanId: string | null } | null>(null);
+  const [undoStack, setUndoStack] = useState<{ msgs: Msg[]; form: Form; idx: number }[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const started = useRef(false);
@@ -143,6 +156,19 @@ function ChatInner() {
   const advance = () => setIdx((i) => i + 1);
   const auth = () => ({ Authorization: `Bearer ${getToken() ?? ""}` });
 
+  // Undo — snapshot the state before each step so the RM can step back one
+  // question and fix an answer. The created draft (appId) is kept.
+  function pushUndo() { setUndoStack((s) => [...s.slice(-24), { msgs, form, idx }]); }
+  function undo() {
+    setUndoStack((s) => {
+      if (!s.length) return s;
+      const snap = s[s.length - 1];
+      setMsgs(snap.msgs); setForm(snap.form); setIdx(snap.idx);
+      setError(null); setInput("");
+      return s.slice(0, -1);
+    });
+  }
+
   // ── Register: create the draft as soon as we have the mobile, so the
   // document uploads that follow have an application to attach to. ────────────
   async function register(f: Form): Promise<boolean> {
@@ -170,14 +196,15 @@ function ChatInner() {
     if (turn.validate) { const e = turn.validate(v); if (e) { setError(e); return; } }
     if (!v) { setError("This field is required."); return; }
     if (turn.id === "coapp_mobile" && v === form.borrower_mobile) { setError("Co-applicant mobile can't be the same as the applicant's."); return; }
-    pushUser(v);
     const next = turn.field ? { ...form, [turn.field]: v } : form;
-    if (turn.field) setForm(next);
-    // The mobile creates the draft so the document step (next) can upload/read.
-    if (turn.id === "borrower_mobile") {
+    // The mobile creates the draft (once) before the document step.
+    if (turn.id === "borrower_mobile" && !appId) {
       const ok = await register(next);
-      if (!ok) return; // stay on the mobile turn; error shown
+      if (!ok) return; // stay on the mobile turn; error shown, input kept
     }
+    pushUndo();
+    pushUser(v);
+    if (turn.field) setForm(next);
     advance();
   }
 
@@ -187,6 +214,7 @@ function ChatInner() {
     if (!Number.isFinite(n) || n <= 0) { setError("Enter a valid amount."); return; }
     const cost = Number(form.total_project_cost) || 0;
     if (cost > 0 && n > cost) { setError(`Loan amount can't exceed the project cost (₹${cost.toLocaleString("en-IN")}).`); return; }
+    pushUndo();
     pushUser(`₹${n.toLocaleString("en-IN")}`);
     if (turn.field) merge({ [turn.field]: String(n) });
     advance();
@@ -204,6 +232,7 @@ function ChatInner() {
         setError(j?.error || "Couldn't find that pincode — please check and try again.");
         return;
       }
+      pushUndo();
       pushUser(pin);
       merge({ install_pincode: pin, install_state: String(j.state), install_district: String(j.district ?? ""), install_city: String(j.city ?? "") });
       pushBot(`Got it — ${[j.city, j.state].filter(Boolean).join(", ")}.`);
@@ -215,6 +244,7 @@ function ChatInner() {
 
   async function choose(c: Choice) {
     if (!turn?.field) return;
+    pushUndo();
     pushUser(c.label);
     merge({ [turn.field]: c.value });
     advance();
@@ -226,6 +256,7 @@ function ChatInner() {
   }
 
   function finishDocTable(receipt: { name: string; thumb: string | null }[]) {
+    pushUndo();
     if (receipt.length) pushUser(receipt.map((r) => r.name).join(" · "), receipt);
     else pushUser("Continuing without documents for now.");
     advance();
@@ -348,6 +379,9 @@ function ChatInner() {
           <div className="text-[11.5px] text-white/70 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#5df2ad]" /> building the application</div>
         </div>
         <span className="text-[11px] text-white/60 tabular-nums">{progress}%</span>
+        <button onClick={undo} disabled={!undoStack.length || busy || !!done}
+          className="w-8 h-8 rounded-full hover:bg-white/10 grid place-items-center text-white/80 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent text-[17px] leading-none"
+          aria-label="Undo last step" title="Undo last step">↶</button>
       </header>
       <div className="h-1.5 bg-black/15 shrink-0"><div className="h-1.5 bg-[#34e39b] rounded-r-full transition-all duration-500" style={{ width: progress + "%" }} /></div>
 
@@ -426,15 +460,15 @@ function ChatInner() {
             )}
 
             {turn.kind === "coapp_docs" && appId && (
-              <DocTable key="coapp-docs" appId={appId} form={form} rows={COAPP_ROWS} onPatch={merge} onDone={() => advance()} />
+              <DocTable key="coapp-docs" appId={appId} form={form} rows={COAPP_ROWS} onPatch={merge} onDone={() => { pushUndo(); advance(); }} />
             )}
 
             {turn.kind === "quotation" && appId && (
-              <QuotationDock appId={appId} form={form} onPatch={merge} onDone={() => advance()} />
+              <QuotationDock appId={appId} form={form} onPatch={merge} onDone={() => { pushUndo(); advance(); }} />
             )}
 
             {turn.kind === "tenure" && (
-              <TenureDock form={form} onPick={(t) => merge({ selected_tenure_years: String(t) })} onSubmit={() => advance()} />
+              <TenureDock form={form} onPick={(t) => merge({ selected_tenure_years: String(t) })} onSubmit={() => { pushUndo(); advance(); }} />
             )}
           </div>
         </div>
