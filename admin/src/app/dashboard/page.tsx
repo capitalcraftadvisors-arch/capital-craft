@@ -248,9 +248,10 @@ function DashboardInner() {
                 <tr><td colSpan={8} className="px-5 py-12 text-center text-text-muted">
                   No applications yet. Click <span className="text-text font-semibold">Apply for Loan</span> to start one.
                 </td></tr>
-              ) : rows.map((r) => {
+              ) : [...rows].sort((a, b) => (a.status === "rejected" ? 1 : 0) - (b.status === "rejected" ? 1 : 0)).map((r) => {
                 const outcome = lenderOutcome(r.status);
                 const approved = r.status === "approved";
+                const rejected = r.status === "rejected";
                 const dl = deadlineState(r.first_disbursement_date);
                 // An approved application opens straight onto its disbursement
                 // section — that's where the EPC's remaining work lives.
@@ -304,8 +305,10 @@ function DashboardInner() {
                         <button
                           onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/${r.id}/disbursement` as any); }}
                           className="px-3 py-1.5 rounded-lg bg-[#1e3a8a] text-white text-[12px] font-semibold hover:bg-[#17307a]">
-                          Upload 2nd tranche docs
+                          2nd tranche
                         </button>
+                      ) : rejected ? (
+                        <span className="text-text-muted">—</span>
                       ) : (
                         <button
                           onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/apply/${r.id}/docs` as any); }}

@@ -100,9 +100,14 @@ export async function POST(req: NextRequest) {
       return err("missing_application_id");
     }
 
-    // ── replace=true: admin-only delete-existing-then-insert ──────────
+    // ── replace=true: delete-existing-then-insert ────────────────────
+    // Replacing an EPC BUSINESS document (epc_documents) stays admin-only. But
+    // an EPC replacing a document on ITS OWN loan application
+    // (user_application_docs) is fine — the EPC-facing chatbot/apply flow uses
+    // it so one photo/bank slot never duplicates, and RLS scopes the
+    // delete + insert to the caller's own rows.
     const replaceFlag = (form.get("replace") as string) === "true";
-    if (replaceFlag && claims.business_type !== "admin") {
+    if (replaceFlag && allowedTable === "epc_documents" && claims.business_type !== "admin") {
       return err("admin_only_replace", 403);
     }
 
