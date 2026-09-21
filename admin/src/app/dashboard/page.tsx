@@ -19,7 +19,8 @@ import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import { logout, getBusiness, getToken, loanAccess, insuranceAccess } from "@/lib/auth";
+import LoginWelcome from "@/components/LoginWelcome";
+import { logout, getBusiness, getToken, greetingName, loanAccess, insuranceAccess } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
 import {
@@ -89,6 +90,10 @@ function DashboardInner() {
   const me = getBusiness();
   const canLoan = loanAccess(me);
   const canInsurance = insuranceAccess(me);
+  // Loan / Insurance tabs. Default to whichever the EPC is entitled to (loan
+  // first). The tab bar only appears when both are unlocked.
+  const [tab, setTab] = useState<"loan" | "insurance">(canLoan ? "loan" : "insurance");
+  const epcName = me?.contact_name?.trim() || greetingName(me);
 
   // "Apply for Insurance" → create (or resume) a draft insurance application,
   // then jump to Step 1. Server enforces service_type in (insurance, both).
@@ -160,44 +165,71 @@ function DashboardInner() {
 
   return (
     <main className="min-h-screen bg-bg-soft">
+      <LoginWelcome />
       <header className="border-b border-line bg-white">
-        <div className="max-w-container mx-auto px-7 h-16 flex items-center justify-between">
-          <a href="/" className="font-display font-bold text-[20px] grad-text">Capital Craft</a>
-          <button onClick={() => { logout(); router.replace("/login"); }} className="text-[13px] text-text-muted hover:text-text">
-            Log out
-          </button>
+        <div className="max-w-container mx-auto px-5 sm:px-7 h-16 flex items-center justify-between gap-3">
+          <a href="/" className="flex items-center shrink-0">
+            <img src="/brand/capital-craft.png" alt="Capital Craft" className="h-8 w-auto" />
+          </a>
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="text-right min-w-0 hidden sm:block">
+              <div className="text-[13px] font-semibold text-[#0f3d2e] truncate max-w-[220px]">{epcName}</div>
+              <div className="text-[11px] text-text-muted">Partner Portal</div>
+            </div>
+            <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#2fbd82] to-[#0f3d2e] text-white grid place-items-center font-display font-bold text-[14px] shrink-0" aria-hidden>
+              {(epcName || "C").slice(0, 1).toUpperCase()}
+            </div>
+            <button onClick={() => { logout(); router.replace("/login"); }} className="text-[13px] text-text-muted hover:text-text whitespace-nowrap">
+              Log out
+            </button>
+          </div>
         </div>
       </header>
 
-      <section className="max-w-container mx-auto px-5 sm:px-7 py-10">
-        <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+      <section className="max-w-container mx-auto px-5 sm:px-7 py-8 sm:py-10">
+        <div className="mb-6">
+          <h1 className="font-display text-[24px] sm:text-[30px] font-bold text-[#0f3d2e]">
+            नमस्ते, {epcName} 🙏
+          </h1>
+          <p className="text-text-mid mt-1">
+            Your Capital Craft partner portal — apply for and track loans{canInsurance ? " and insurance" : ""}.
+          </p>
+        </div>
+
+        {/* Loan / Insurance tabs — shown only when both are unlocked. */}
+        {canLoan && canInsurance && (
+          <div className="flex items-center gap-1 mb-5 bg-white border border-line rounded-full p-1 w-fit">
+            <button onClick={() => setTab("loan")} className={["px-5 py-2 rounded-full text-[13px] font-semibold transition-colors", tab === "loan" ? "bg-[#0f3d2e] text-white" : "text-text-mid hover:bg-bg-soft"].join(" ")}>Loan applications</button>
+            <button onClick={() => setTab("insurance")} className={["px-5 py-2 rounded-full text-[13px] font-semibold transition-colors", tab === "insurance" ? "bg-[#0f3d2e] text-white" : "text-text-mid hover:bg-bg-soft"].join(" ")}>Insurance</button>
+          </div>
+        )}
+
+        {/* Active-tab heading + its Apply button. */}
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
-            <h1 className="font-display text-[26px] sm:text-[30px] font-bold text-[#0f3d2e]">
-              {canLoan ? "Your loan applications" : "Your applications"}
-            </h1>
-            <p className="text-text-mid mt-1">
-              {canLoan
+            <h2 className="font-display text-[19px] sm:text-[22px] font-bold text-[#0f3d2e]">
+              {tab === "loan" ? "Your loan applications" : "Your insurance applications"}
+            </h2>
+            <p className="text-text-mid mt-0.5 text-[13.5px]">
+              {tab === "loan"
                 ? "Applications you’ve submitted and where each one stands with the lender."
-                : "Apply for insurance for your installed plants."}
+                : "Plants you’ve submitted for insurance and where each one stands."}
             </p>
           </div>
-          {/* Buttons follow the admin's Service selection + lender approval. */}
-          <div className="flex gap-3 flex-wrap">
-            {canInsurance && (
-              <Button variant="primary" onClick={() => void startInsurance()} loading={insBusy}>
-                Apply for Insurance
-              </Button>
-            )}
-            {canLoan && (
-              <Button variant={canInsurance ? "outline" : "primary"} onClick={() => router.push("/dashboard/apply" as any)}>
-                Apply for Loan
-              </Button>
-            )}
-          </div>
+          {tab === "loan" && canLoan && (
+            <Button variant="primary" onClick={() => router.push("/dashboard/apply/chat" as any)}>
+              Apply for Loan
+            </Button>
+          )}
+          {tab === "insurance" && canInsurance && (
+            <Button variant="primary" onClick={() => void startInsurance()} loading={insBusy}>
+              Apply for Insurance
+            </Button>
+          )}
         </div>
 
         {/* The loan table is only meaningful for EPCs with loan access. */}
-        {canLoan && (
+        {tab === "loan" && canLoan && (
         <Card className="overflow-hidden">
           <table className="w-full text-[14px]">
             <thead className="bg-bg-soft border-b border-line">
@@ -278,14 +310,8 @@ function DashboardInner() {
         )}
 
         {/* ── Insurance applications — this EPC's own, RLS-scoped. ── */}
-        {canInsurance && (
-          <div className={canLoan ? "mt-10" : ""}>
-            <h2 className="font-display text-[20px] sm:text-[22px] font-bold text-[#0f3d2e] mb-1">
-              Your insurance applications
-            </h2>
-            <p className="text-text-mid mb-4 text-[14px]">
-              Plants you&rsquo;ve submitted for insurance and where each one stands.
-            </p>
+        {tab === "insurance" && canInsurance && (
+          <div>
             <Card className="overflow-hidden">
               <table className="w-full text-[14px]">
                 <thead className="bg-bg-soft border-b border-line">

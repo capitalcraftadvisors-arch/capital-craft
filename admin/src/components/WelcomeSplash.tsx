@@ -8,8 +8,8 @@
 import { useEffect, useState } from "react";
 
 export default function WelcomeSplash({
-  name, image, onDone,
-}: { name: string; image: string; onDone: () => void }) {
+  name, image, onDone, greeting = "Namaste,", subtitle = "Welcome back", badge = "Private Workspace",
+}: { name: string; image: string; onDone: () => void; greeting?: string; subtitle?: string; badge?: string }) {
   const [leaving, setLeaving] = useState(false);
   useEffect(() => {
     const t1 = setTimeout(() => setLeaving(true), 1850); // begin fade-out
@@ -19,12 +19,12 @@ export default function WelcomeSplash({
 
   return (
     <div className={"ccw " + (leaving ? "ccw-out" : "")} role="dialog" aria-label={`Welcome, ${name}`}>
-      <span className="ccw-badge">Private Workspace</span>
+      <span className="ccw-badge">{badge}</span>
 
       <div className="ccw-copy">
         <img src="/brand/capital-craft.png" alt="Capital Craft" className="ccw-logo" />
-        <h1 className="ccw-title">Namaste,<span>{name}</span></h1>
-        <p className="ccw-sub">Welcome back</p>
+        <h1 className="ccw-title">{greeting}<span>{name}</span></h1>
+        <p className="ccw-sub">{subtitle}</p>
       </div>
 
       <div className="ccw-stage">
