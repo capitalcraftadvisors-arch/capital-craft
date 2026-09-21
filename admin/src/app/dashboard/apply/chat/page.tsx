@@ -101,14 +101,15 @@ function ChatInner() {
     started.current = true;
     const name = rmName && rmName !== "there" ? ` ${rmName}` : "";
     pushBot(`नमस्ते${name}! 🙏`, "g1");
-    setTimeout(() => pushBot("Welcome to Capital Craft. I'll help you file this loan application in a few quick steps — it only takes a couple of minutes.", "g2"), 450);
+    setTimeout(() => pushBot("Welcome to Capital Craft. I'll help you file this loan application in a few quick steps — it only takes a couple of minutes.", "g2"), 250);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Ask the active turn's question (deduped).
+  // Ask the active turn's question (deduped). The very first question waits for
+  // the two greeting bubbles so the order is greeting → welcome → question.
   useEffect(() => {
     if (!turn || done) return;
-    const t = setTimeout(() => pushBot(turn.bot, turn.id), 300);
+    const t = setTimeout(() => pushBot(turn.bot, turn.id), idx === 0 ? 800 : 300);
     setError(null); setInput("");
     if ((turn.kind === "text" || turn.kind === "pincode" || turn.kind === "number")) setTimeout(() => inputRef.current?.focus(), 350);
     return () => clearTimeout(t);
