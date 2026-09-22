@@ -349,13 +349,23 @@ function Inner() {
       !coappMobileConflict &&
       !coappEmailConflict);
 
-  const canContinue =
-    panUploaded && PAN_FMT.test(panNumber.trim().toUpperCase()) &&
-    !!aPaths && /^\d{12}$/.test(aNumber) &&
-    !!ebill &&
-    !!quotePath &&
-    !!rooftopPath &&
-    hasCoapp !== null && coappOk;
+  // Document checklist — drives the progress sticker + per-card Pending tags.
+  // Saving is always allowed (partial edits are fine); this is just guidance.
+  void coappOk; // (kept for reference; saving no longer gates on it)
+  const docItems = [
+    { key: "pan", label: "PAN card", done: panUploaded || !!panNumber || !!panDocId },
+    { key: "aadhaar", label: "Aadhaar", done: !!aPaths },
+    { key: "ebill", label: "Electricity bill", done: !!ebill },
+    { key: "quotation", label: "Quotation", done: !!quotePath },
+    { key: "rooftop", label: "Rooftop photo", done: !!rooftopPath },
+    ...(hasCoapp ? [
+      { key: "coapp_aadhaar", label: "Co-applicant Aadhaar", done: !!cPaths },
+      { key: "coapp_pan", label: "Co-applicant PAN", done: !!cPanPath },
+    ] : []),
+  ];
+  const doneCount = docItems.filter((d) => d.done).length;
+  const pendingLabels = docItems.filter((d) => !d.done).map((d) => d.label);
+  const doneOf = (key: string) => docItems.find((d) => d.key === key)?.done ?? false;
 
   function continueToLoan() {
     const payload: EpcApplyDocsPayload = {
@@ -423,9 +433,32 @@ function Inner() {
           </p>
         </div>
 
+        {/* Progress sticker — how many documents are done, and what's pending. */}
+        <Card className="p-4 sm:p-5">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <span className={[
+                "inline-flex items-center justify-center w-12 h-12 rounded-full text-[15px] font-bold",
+                doneCount === docItems.length ? "bg-[#e6f6ee] text-[#178a5c]" : "bg-[#eef3fc] text-[#1e3a8a]",
+              ].join(" ")}>{doneCount}/{docItems.length}</span>
+              <div>
+                <div className="text-[14px] font-semibold text-[#0f3d2e]">
+                  {doneCount === docItems.length ? "All documents uploaded" : `${doneCount} of ${docItems.length} documents uploaded`}
+                </div>
+                <div className="text-[12px] text-text-muted">
+                  {pendingLabels.length ? `Pending: ${pendingLabels.join(", ")}` : "Nothing pending — you can save."}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="mt-3 h-2 rounded-full bg-line/60 overflow-hidden">
+            <div className="h-2 rounded-full bg-[#178a5c] transition-all" style={{ width: `${docItems.length ? (doneCount / docItems.length) * 100 : 0}%` }} />
+          </div>
+        </Card>
+
         {/* PAN */}
         <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">PAN card</h2>
+          <div className="flex items-center justify-between gap-2"><h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">PAN card</h2><DocStatus done={doneOf("pan")} /></div>
           <FileUpload
             applicationId={appId}
             category="borrower_pan"
@@ -447,7 +480,7 @@ function Inner() {
 
         {/* Aadhaar */}
         <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Aadhaar card</h2>
+          <div className="flex items-center justify-between gap-2"><h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Aadhaar card</h2><DocStatus done={doneOf("aadhaar")} /></div>
           <div className="grid sm:grid-cols-2 gap-3">
             <PickTile label="Aadhaar Front" file={aFront} onPick={(f) => { setAFront(f); setAPaths(null); }} busy={aBusy} done={!!aPaths} />
             <PickTile label="Aadhaar Back"  file={aBack}  onPick={(f) => { setABack(f); setAPaths(null); }}  busy={aBusy} done={!!aPaths} />
@@ -488,7 +521,7 @@ function Inner() {
 
         {/* E-bill */}
         <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Latest electricity bill</h2>
+          <div className="flex items-center justify-between gap-2"><h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Latest electricity bill</h2><DocStatus done={doneOf("ebill")} /></div>
           <EbillTile ebill={ebill} busy={ebillBusy} onFile={(f) => void uploadEbill(f)} />
           {ebill?.path && <DocOnFile label="Electricity bill on file" onView={() => void viewPath(ebill.path)} onRemove={() => setEbill(null)} />}
           {ebillErr && <p className="text-[12px] text-red-700">{ebillErr}</p>}
@@ -496,7 +529,7 @@ function Inner() {
 
         {/* Quotation / Proforma invoice */}
         <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Quotation / Proforma invoice</h2>
+          <div className="flex items-center justify-between gap-2"><h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Quotation / Proforma invoice</h2><DocStatus done={doneOf("quotation")} /></div>
           <p className="text-[13px] text-text-mid -mt-2">
             Upload the project quotation or proforma invoice for the solar system.
           </p>
@@ -513,7 +546,7 @@ function Inner() {
 
         {/* Rooftop photo — geo-tagged */}
         <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Rooftop photo (geo-tagged)</h2>
+          <div className="flex items-center justify-between gap-2"><h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Rooftop photo (geo-tagged)</h2><DocStatus done={doneOf("rooftop")} /></div>
           <p className="text-[13px] text-text-mid -mt-2">
             Take a photo of the installation rooftop so the site can be verified.
             Location is captured with the photo.
@@ -651,7 +684,7 @@ function Inner() {
             <Button type="button" variant="outline" onClick={() => router.push("/dashboard/apply" as any)}>
               ← Previous
             </Button>
-            <Button type="button" variant="primary" onClick={continueToLoan} disabled={!canContinue}>
+            <Button type="button" variant="primary" onClick={continueToLoan}>
               Save &amp; continue
             </Button>
           </div>
@@ -662,6 +695,13 @@ function Inner() {
 }
 
 // ── Small tiles ──────────────────────────────────────────────────────
+
+// A small Uploaded / Pending pill for a document card header.
+function DocStatus({ done }: { done: boolean }) {
+  return done
+    ? <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#e6f6ee] text-[#178a5c] whitespace-nowrap">Uploaded</span>
+    : <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">Pending</span>;
+}
 
 // A compact "already on file" row shown in an edit card: View + optional Remove.
 function DocOnFile({ label, onView, onRemove }: { label: string; onView: () => void; onRemove?: () => void }) {

@@ -347,6 +347,8 @@ function Inner() {
   const [files, setFiles] = useState<Record<string, File>>({});
   const [thumbs, setThumbs] = useState<Record<string, string | null>>({});
   const [confirm, setConfirm] = useState<{ fields: Fetched[]; note: string; thumbs: (string | null)[]; edit?: boolean } | null>(null);
+  const [cfEdit, setCfEdit] = useState<string | null>(null); // which "Read from the document" field is being edited
+  const [cfVal, setCfVal] = useState("");
   // Info-sheet paste → editable confirm card (raw parsed values).
   const [sheetReview, setSheetReview] = useState<{ parsed: Form } | null>(null);
   const [donId, setDonId] = useState<string | null>(null);
@@ -935,6 +937,15 @@ function Inner() {
     void persistForm(nextForm);
     setMsgs((m) => m.map((x) => (x.id === msgId ? { ...x, fetched: x.fetched!.map((ff) => (ff.field === field ? { ...ff, value, ok: !!value } : ff)) } : x)));
   }
+  // Edit a field directly on the "Read from the document" confirm card (before
+  // "Looks good") — so e.g. the bank statement can be corrected as soon as it's
+  // read, like the table documents.
+  function saveConfirmField(field: string, value: string) {
+    const nextForm = { ...form, [field]: value };
+    setForm(nextForm);
+    void persistForm(nextForm);
+    setConfirm((c) => (c ? { ...c, fields: c.fields.map((ff) => (ff.field === field ? { ...ff, value, ok: !!value } : ff)) } : c));
+  }
 
   // Unregistered EPC → switch to lead capture. A full application needs a
   // registered, lender-approved EPC, so we collect a short lead instead.
@@ -1041,11 +1052,23 @@ function Inner() {
               )}
               <div className="p-3.5 flex flex-col gap-1.5">
                 {confirm.fields.map((f, i) => (
-                  <div key={i} className="flex items-baseline justify-between gap-3 text-[13px]">
+                  <div key={i} className="flex items-center justify-between gap-3 text-[13px] min-h-[26px]">
                     <span className="text-text-muted shrink-0">{f.label}</span>
-                    {f.ok
-                      ? <span className="text-text font-medium text-right break-words">{f.value}</span>
-                      : <span className="text-amber-600 text-[12px] italic">not found</span>}
+                    {cfEdit === f.field && f.field ? (
+                      <span className="flex items-center gap-1.5">
+                        <input autoFocus value={cfVal} onChange={(e) => setCfVal(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Enter") { saveConfirmField(f.field!, cfVal.trim()); setCfEdit(null); } if (e.key === "Escape") setCfEdit(null); }}
+                          className="border border-[#178a5c] rounded-lg px-2.5 py-1 text-[13px] w-44 text-right outline-none" />
+                        <button onClick={() => { saveConfirmField(f.field!, cfVal.trim()); setCfEdit(null); }} className="text-[#178a5c] text-[11.5px] font-semibold">Save</button>
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-2 min-w-0">
+                        {f.ok
+                          ? <span className="text-text font-medium text-right break-words">{f.value}</span>
+                          : <span className="text-amber-600 text-[12px] italic">not found</span>}
+                        {f.field && <button onClick={() => { setCfEdit(f.field!); setCfVal(f.ok ? f.value : ""); }} className="opacity-60 hover:opacity-100 text-[#178a5c] text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>}
+                      </span>
+                    )}
                   </div>
                 ))}
                 <p className="text-[11.5px] text-text-muted mt-1.5 leading-snug">{confirm.note}</p>
