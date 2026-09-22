@@ -21,6 +21,7 @@ import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import LoginWelcome from "@/components/LoginWelcome";
 import { logout, getBusiness, getToken, greetingName, loanAccess, insuranceAccess } from "@/lib/auth";
+import { fetchEpcName, shortEpcName } from "@/lib/epc-name";
 import { supabase } from "@/lib/supabase";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
 import {
@@ -93,7 +94,10 @@ function DashboardInner() {
   // Loan / Insurance tabs. Default to whichever the EPC is entitled to (loan
   // first). The tab bar only appears when both are unlocked.
   const [tab, setTab] = useState<"loan" | "insurance">(canLoan ? "loan" : "insurance");
-  const epcName = me?.contact_name?.trim() || greetingName(me);
+  // Greet by the (short) BUSINESS name, not the contact person. Starts from
+  // contact_name and upgrades to the real trade/legal name once fetched.
+  const [epcName, setEpcName] = useState(() => shortEpcName(me?.contact_name) || greetingName(me));
+  useEffect(() => { void fetchEpcName().then(setEpcName); }, []);
 
   // "Apply for Insurance" → create (or resume) a draft insurance application,
   // then jump to Step 1. Server enforces service_type in (insurance, both).

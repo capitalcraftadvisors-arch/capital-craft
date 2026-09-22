@@ -18,7 +18,8 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
-import { getToken, getBusiness, greetingName } from "@/lib/auth";
+import { getToken } from "@/lib/auth";
+import { fetchEpcName } from "@/lib/epc-name";
 import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES, formatRupees } from "@/lib/emi";
 
 const MOBILE_RE = /^[6-9]\d{9}$/;
@@ -26,7 +27,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PIN_RE = /^[1-9]\d{5}$/;
 
 type Form = Record<string, string>;
-type Msg = { id: string; _id?: string; from: "bot" | "user"; text?: string; time: string; files?: { name: string; thumb: string | null }[] };
+type Msg = { id: string; _id?: string; from: "bot" | "user"; text?: string; time: string; files?: { name: string; thumb: string | null }[]; turnId?: string };
 type Choice = { value: string; label: string; sub?: string };
 type Turn = {
   id: string;
@@ -69,26 +70,47 @@ function coappNeeded(f: Form): boolean {
 // collected up front (name/PAN/Aadhaar/bill/project details are read from them),
 // then only the things NOT on any document are asked, and consent is last.
 const SCRIPT: Turn[] = [
-  { id: "borrower_mobile", bot: "What's the applicant's 10-digit mobile number?", kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile", validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile number.") },
-  { id: "doc_table", bot: "Let's collect the documents. Add each one into its box below — I'll read it as it lands. Tick “Don't have it” for anything you can't add right now.", kind: "doc_table" },
-  { id: "coapp_docs", bot: "The documents are in more than one name — please add the co-applicant's Aadhaar and PAN.", kind: "coapp_docs", when: coappNeeded },
-  { id: "coapp_mobile", bot: "What's the co-applicant's 10-digit mobile number?", kind: "text", field: "coapp_mobile", placeholder: "10-digit mobile", when: coappNeeded, validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile number.") },
-  { id: "quotation", bot: "Now the quotation / proforma invoice — upload it and I'll read the project size and cost, or enter them yourself.", kind: "quotation" },
-  { id: "borrower_email", bot: "What's the applicant's email address?", kind: "text", field: "borrower_email", placeholder: "name@example.com", validate: (v) => (EMAIL_RE.test(v.trim()) ? null : "Enter a valid email address.") },
-  { id: "install_pincode", bot: "Which area is the plant being installed in? Share the 6-digit pincode.", kind: "pincode", field: "install_pincode" },
-  { id: "system_type", bot: "What type of solar system is this?", kind: "choice", field: "system_type", choices: [
+  { id: "borrower_mobile", bot: "Applicant's 10-digit mobile number?", kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile", validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile number.") },
+  { id: "doc_table", bot: "Please upload the applicant's documents below.", kind: "doc_table" },
+  { id: "coapp_docs", bot: "Please add the co-applicant's Aadhaar and PAN.", kind: "coapp_docs", when: coappNeeded },
+  { id: "coapp_mobile", bot: "Co-applicant's 10-digit mobile number?", kind: "text", field: "coapp_mobile", placeholder: "10-digit mobile", when: coappNeeded, validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile number.") },
+  { id: "quotation", bot: "Please upload the quotation / proforma invoice.", kind: "quotation" },
+  { id: "borrower_email", bot: "Applicant's email address?", kind: "text", field: "borrower_email", placeholder: "username" },
+  { id: "install_pincode", bot: "Installation pincode?", kind: "pincode", field: "install_pincode", placeholder: "6-digit pincode" },
+  { id: "system_type", bot: "Type of solar system?", kind: "choice", field: "system_type", choices: [
     { value: "on_grid", label: "On-Grid", sub: "Connected to the grid" },
     { value: "off_grid", label: "Off-Grid", sub: "Battery / standalone" },
     { value: "hybrid", label: "Hybrid", sub: "Grid + battery" },
   ] },
-  { id: "plant_use_type", bot: "Is the plant for residential or commercial use?", kind: "choice", field: "plant_use_type", choices: [
+  { id: "plant_use_type", bot: "Residential or commercial use?", kind: "choice", field: "plant_use_type", choices: [
     { value: "residential", label: "Residential", sub: "Home / society" },
     { value: "commercial", label: "Commercial", sub: "Shop / office / factory" },
   ] },
-  { id: "loan_amount", bot: "How much loan does the customer need? (₹)", kind: "number", field: "loan_amount_required", placeholder: "e.g. 210000" },
-  { id: "tenure", bot: "Choose the loan tenure and I'll estimate the EMI.", kind: "tenure" },
-  { id: "consent", bot: "Almost done — does the customer agree to the Terms, Privacy & Cookie policies and allow a credit check?", kind: "consent" },
+  { id: "loan_amount", bot: "Loan amount required?", kind: "number", field: "loan_amount_required", placeholder: "Amount in ₹" },
+  { id: "tenure", bot: "Finally, the loan configuration — subsidy and tenure.", kind: "tenure" },
+  { id: "consent", bot: "Does the customer agree to the Terms, Privacy & Cookie policies and allow a credit check?", kind: "consent" },
 ];
+
+// Fields whose typed amount is echoed in Indian words under the input.
+const AMOUNT_FIELDS = new Set(["loan_amount_required"]);
+// Integer → Indian words (lakh / crore). Empty for non-positive / invalid.
+function amountInWords(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return "";
+  n = Math.floor(n);
+  const a = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+  const b = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  const two = (x: number): string => (x < 20 ? a[x] : b[Math.floor(x / 10)] + (x % 10 ? " " + a[x % 10] : ""));
+  const three = (x: number): string => { const h = Math.floor(x / 100), r = x % 100; return (h ? a[h] + " Hundred" + (r ? " " : "") : "") + (r ? two(r) : ""); };
+  let res = "";
+  const crore = Math.floor(n / 10000000); n %= 10000000;
+  const lakh = Math.floor(n / 100000); n %= 100000;
+  const thousand = Math.floor(n / 1000); n %= 1000;
+  if (crore) res += three(crore) + " Crore ";
+  if (lakh) res += two(lakh) + " Lakh ";
+  if (thousand) res += two(thousand) + " Thousand ";
+  if (n) res += three(n);
+  return res.trim();
+}
 
 const uidGen = () => "m" + Math.random().toString(36).slice(2, 9);
 const nowLabel = () => new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
@@ -112,25 +134,32 @@ function ChatInner() {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<{ loanId: string | null } | null>(null);
   const [undoStack, setUndoStack] = useState<{ msgs: Msg[]; form: Form; idx: number }[]>([]);
+  // Loan-config step (subsidy + tenure), mirroring the team chatbot's last step.
+  const [subsidyCase, setSubsidyCase] = useState<"subsidy" | "non_subsidy">("subsidy");
+  const [centralSub, setCentralSub] = useState("");
+  const [stateSub, setStateSub] = useState("");
+  const [tenure, setTenure] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const started = useRef(false);
 
   const turn = SCRIPT[idx] ?? null;
-  const rmName = greetingName(getBusiness());
 
   const pushBot = (text: string, id?: string) =>
     setMsgs((m) => (id && m.some((x) => x.from === "bot" && x._id === id) ? m : [...m, { id: uidGen(), _id: id, from: "bot", text, time: nowLabel() }]));
-  const pushUser = (text: string, files?: Msg["files"]) =>
-    setMsgs((m) => [...m, { id: uidGen(), from: "user", text, time: nowLabel(), files }]);
+  const pushUser = (text: string, files?: Msg["files"], turnId?: string) =>
+    setMsgs((m) => [...m, { id: uidGen(), from: "user", text, time: nowLabel(), files, turnId }]);
+  const prefillRef = useRef("");
 
   // Warm greeting on mount, then the first question.
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    const name = rmName && rmName !== "there" ? ` ${rmName}` : "";
-    pushBot(`नमस्ते${name}! 🙏`, "g1");
-    setTimeout(() => pushBot("Welcome to Capital Craft. I'll help you complete your loan application in a few quick steps.", "g2"), 250);
+    void fetchEpcName().then((epcName) => {
+      const name = epcName && epcName !== "there" ? ` ${epcName}` : "";
+      pushBot(`नमस्ते${name}! 🙏`, "g1");
+      setTimeout(() => pushBot("Welcome to Capital Craft. I'll help you complete your loan application in a few quick steps.", "g2"), 250);
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -141,7 +170,7 @@ function ChatInner() {
     // Skip a conditional turn (e.g. the co-applicant docs when the names match).
     if (turn.when && !turn.when(form)) { setIdx((i) => i + 1); return; }
     const t = setTimeout(() => pushBot(turn.bot, turn.id), idx === 0 ? 800 : 300);
-    setError(null); setInput("");
+    setError(null); setInput(prefillRef.current); prefillRef.current = "";
     if ((turn.kind === "text" || turn.kind === "pincode" || turn.kind === "number")) setTimeout(() => inputRef.current?.focus(), 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -151,6 +180,15 @@ function ChatInner() {
   useEffect(() => {
     const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [msgs, busy, done]);
+
+  // Seed the loan-config defaults (central subsidy from plant size) on arrival.
+  useEffect(() => {
+    if (turn?.id !== "tenure") return;
+    const commercial = form.plant_use_type === "commercial";
+    setCentralSub(String(commercial ? 0 : computeCentralSubsidy(Number(form.project_size) || 0)));
+    if (commercial) setSubsidyCase("non_subsidy");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turn?.id]);
 
   const merge = (patch: Form) => setForm((f) => ({ ...f, ...patch }));
   const advance = () => setIdx((i) => i + 1);
@@ -192,9 +230,16 @@ function ChatInner() {
   // ── Answer handlers ───────────────────────────────────────────────────────
   async function submitText() {
     if (!turn) return;
-    const v = input.trim();
-    if (turn.validate) { const e = turn.validate(v); if (e) { setError(e); return; } }
+    let v = input.trim();
     if (!v) { setError("This field is required."); return; }
+    // Email: the box collects only the part before @gmail.com (unless the RM
+    // typed a full address with its own domain).
+    if (turn.id === "borrower_email") {
+      v = v.includes("@") ? v : `${v}@gmail.com`;
+      if (!EMAIL_RE.test(v)) { setError("Enter a valid email address."); return; }
+    } else if (turn.validate) {
+      const e = turn.validate(v); if (e) { setError(e); return; }
+    }
     if (turn.id === "coapp_mobile" && v === form.borrower_mobile) { setError("Co-applicant mobile can't be the same as the applicant's."); return; }
     const next = turn.field ? { ...form, [turn.field]: v } : form;
     // The mobile creates the draft (once) before the document step.
@@ -203,7 +248,7 @@ function ChatInner() {
       if (!ok) return; // stay on the mobile turn; error shown, input kept
     }
     pushUndo();
-    pushUser(v);
+    pushUser(v, undefined, turn.id);
     if (turn.field) setForm(next);
     advance();
   }
@@ -215,7 +260,7 @@ function ChatInner() {
     const cost = Number(form.total_project_cost) || 0;
     if (cost > 0 && n > cost) { setError(`Loan amount can't exceed the project cost (₹${cost.toLocaleString("en-IN")}).`); return; }
     pushUndo();
-    pushUser(`₹${n.toLocaleString("en-IN")}`);
+    pushUser(`₹${n.toLocaleString("en-IN")}`, undefined, turn.id);
     if (turn.field) merge({ [turn.field]: String(n) });
     advance();
   }
@@ -233,7 +278,7 @@ function ChatInner() {
         return;
       }
       pushUndo();
-      pushUser(pin);
+      pushUser(pin, undefined, turn.id);
       merge({ install_pincode: pin, install_state: String(j.state), install_district: String(j.district ?? ""), install_city: String(j.city ?? "") });
       pushBot(`Got it — ${[j.city, j.state].filter(Boolean).join(", ")}.`);
       advance();
@@ -245,9 +290,31 @@ function ChatInner() {
   async function choose(c: Choice) {
     if (!turn?.field) return;
     pushUndo();
-    pushUser(c.label);
+    pushUser(c.label, undefined, turn.id);
     merge({ [turn.field]: c.value });
     advance();
+  }
+
+  // Edit an earlier answer: jump back to that step (prefilled) via the undo
+  // stack. Steps after it are re-asked (their answers may depend on this one).
+  function editAnswer(turnId: string) {
+    const ti = SCRIPT.findIndex((t) => t.id === turnId);
+    if (ti < 0) return;
+    setUndoStack((s) => {
+      const i = s.findIndex((snap) => snap.idx === ti);
+      if (i < 0) return s;
+      const snap = s[i];
+      const f = SCRIPT[ti].field;
+      // Prefill the box with the current value (email → the part before @gmail.com).
+      if (f && (SCRIPT[ti].kind === "text" || SCRIPT[ti].kind === "pincode" || SCRIPT[ti].kind === "number")) {
+        let cur = form[f] || "";
+        if (turnId === "borrower_email") cur = cur.replace(/@gmail\.com$/i, "");
+        prefillRef.current = cur;
+      }
+      setMsgs(snap.msgs); setForm(snap.form); setIdx(snap.idx);
+      setError(null);
+      return s.slice(0, i);
+    });
   }
 
   async function giveConsent() {
@@ -255,10 +322,9 @@ function ChatInner() {
     await submitApplication();
   }
 
-  function finishDocTable(receipt: { name: string; thumb: string | null }[]) {
+  function finishDocTable() {
+    // Keep the table only — no filename receipt bubble in the chat.
     pushUndo();
-    if (receipt.length) pushUser(receipt.map((r) => r.name).join(" · "), receipt);
-    else pushUser("Continuing without documents for now.");
     advance();
   }
 
@@ -266,13 +332,14 @@ function ChatInner() {
     if (!appId) { setError("Application not created."); return; }
     setBusy(true); setError(null);
     try {
-      const kw = Number(form.project_size) || 0;
       const commercial = form.plant_use_type === "commercial";
       const loanAmt = Number(form.loan_amount_required) || 0;
       const tenure = Number(form.selected_tenure_years) || 0;
-      const central = commercial ? 0 : computeCentralSubsidy(kw);
+      // Subsidy is chosen in the loan-config step; commercial (C&I) is always 0.
+      const central = commercial ? 0 : (Number(form.central_subsidy) || 0);
+      const stateSubsidy = commercial ? 0 : (Number(form.state_subsidy) || 0);
       const monthlyEmi = tenure ? computeEmi(loanAmt, DEFAULT_INDICATIVE_ROI, tenure) : 0;
-      const subsidyEmi = tenure ? computeEmi(Math.max(0, loanAmt - central), DEFAULT_INDICATIVE_ROI, tenure) : 0;
+      const subsidyEmi = tenure ? computeEmi(Math.max(0, loanAmt - central - stateSubsidy), DEFAULT_INDICATIVE_ROI, tenure) : 0;
       const res = await fetch("/api/epc/loan-apply", {
         method: "POST",
         headers: { ...auth(), "Content-Type": "application/json" },
@@ -350,15 +417,15 @@ function ChatInner() {
     return (
       <div className="h-screen grid place-items-center px-5" style={{ background: "linear-gradient(135deg,#e9f4ee 0%,#d6e9df 55%,#cbe3d7 100%)" }}>
         <div className="w-full max-w-[440px] bg-white rounded-3xl shadow-2xl px-7 py-9 text-center">
-          <div className="w-16 h-16 mx-auto rounded-full bg-[#e6f6ee] grid place-items-center mb-5">
-            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#178a5c" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+          <div className="w-16 h-16 mx-auto rounded-full bg-[#e8effc] grid place-items-center mb-5">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#1e3a8a" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
           </div>
-          <h1 className="font-display text-[23px] font-bold text-[#0f3d2e]">Application filed successfully</h1>
+          <h1 className="font-display text-[23px] font-bold text-[#14235c]">Application filed successfully</h1>
           {done.loanId && <div className="mt-1 text-[12px] font-mono text-[#185fa5]">{done.loanId}</div>}
           <p className="text-[14px] text-text-mid mt-3 leading-relaxed">
             Our team will reach out to you shortly.
           </p>
-          <button onClick={() => router.push("/dashboard")} className="mt-7 w-full px-5 py-3 rounded-xl bg-[#178a5c] text-white text-[15px] font-semibold hover:bg-[#12734c] transition-colors">
+          <button onClick={() => router.push("/dashboard")} className="mt-7 w-full px-5 py-3 rounded-xl bg-[#1e3a8a] text-white text-[15px] font-semibold hover:bg-[#17307a] transition-colors">
             Back to dashboard
           </button>
         </div>
@@ -369,21 +436,21 @@ function ChatInner() {
   const showDock = !!turn && !busy;
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden" style={{ background: "linear-gradient(160deg,#f2f9f5 0%,#e7f2ec 100%)" }}>
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: "linear-gradient(160deg,#f5f8fe 0%,#e9f0fc 100%)" }}>
       {/* Header */}
-      <header className="shrink-0 px-4 sm:px-5 py-2.5 bg-[#0f3d2e] text-white flex items-center gap-3 shadow-sm">
+      <header className="shrink-0 px-4 sm:px-5 py-2.5 bg-[#14235c] text-white flex items-center gap-3 shadow-sm">
         <button onClick={() => router.push("/dashboard")} className="p-1 -ml-1 text-white/80 hover:text-white text-[20px] leading-none" aria-label="Back">←</button>
-        <img src="/brand/capital-craft-mark.png" alt="" className="w-9 h-9 rounded-full bg-white/10 object-contain p-1" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+        <img src="/brand/capital-craft-mark.png" alt="" className="w-9 h-9 rounded-full bg-white object-contain p-1 shadow-sm" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
         <div className="min-w-0 flex-1">
           <div className="font-display font-bold text-[15px] leading-tight truncate">Capital Craft · New loan application</div>
-          <div className="text-[11.5px] text-white/70 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#5df2ad]" /> building the application</div>
+          <div className="text-[11.5px] text-white/70 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#93b4ff]" /> building the application</div>
         </div>
         <span className="text-[11px] text-white/60 tabular-nums">{progress}%</span>
         <button onClick={undo} disabled={!undoStack.length || busy || !!done}
           className="w-8 h-8 rounded-full hover:bg-white/10 grid place-items-center text-white/80 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent text-[17px] leading-none"
           aria-label="Undo last step" title="Undo last step">↶</button>
       </header>
-      <div className="h-1.5 bg-black/15 shrink-0"><div className="h-1.5 bg-[#34e39b] rounded-r-full transition-all duration-500" style={{ width: progress + "%" }} /></div>
+      <div className="h-1.5 bg-black/15 shrink-0"><div className="h-1.5 bg-[#5b8def] rounded-r-full transition-all duration-500" style={{ width: progress + "%" }} /></div>
 
       {/* Messages */}
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-4">
@@ -392,7 +459,7 @@ function ChatInner() {
             <div key={m.id} className={m.from === "bot" ? "self-start max-w-[88%]" : "self-end max-w-[88%]"}>
               <div className={[
                 "rounded-2xl px-3.5 py-2 text-[14px] shadow-sm whitespace-pre-wrap break-words",
-                m.from === "bot" ? "bg-white rounded-tl-md border border-[#cdeadd] text-text" : "bg-[#178a5c] rounded-tr-md text-white",
+                m.from === "bot" ? "bg-white rounded-tl-md border border-[#c7d5f0] text-text" : "bg-[#1e3a8a] rounded-tr-md text-white",
               ].join(" ")}>
                 {m.text}
                 {m.files && m.files.length > 0 && (
@@ -403,14 +470,19 @@ function ChatInner() {
                   </div>
                 )}
               </div>
+              {m.from === "user" && m.turnId && !done && (
+                <div className="text-right mt-0.5 pr-1">
+                  <button onClick={() => editAnswer(m.turnId!)} disabled={busy} className="text-[11px] text-text-muted hover:text-[#1e3a8a] disabled:opacity-40" title="Edit this answer">✎ Edit</button>
+                </div>
+              )}
             </div>
           ))}
           {busy && (
             <div className="self-start">
-              <div className="rounded-2xl rounded-tl-md bg-white border border-[#cdeadd] px-4 py-3 shadow-sm flex gap-1">
-                <span className="w-2 h-2 rounded-full bg-[#178a5c]/40 animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-2 h-2 rounded-full bg-[#178a5c]/40 animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-2 h-2 rounded-full bg-[#178a5c]/40 animate-bounce" style={{ animationDelay: "300ms" }} />
+              <div className="rounded-2xl rounded-tl-md bg-white border border-[#c7d5f0] px-4 py-3 shadow-sm flex gap-1">
+                <span className="w-2 h-2 rounded-full bg-[#1e3a8a]/40 animate-bounce" style={{ animationDelay: "0ms" }} />
+                <span className="w-2 h-2 rounded-full bg-[#1e3a8a]/40 animate-bounce" style={{ animationDelay: "150ms" }} />
+                <span className="w-2 h-2 rounded-full bg-[#1e3a8a]/40 animate-bounce" style={{ animationDelay: "300ms" }} />
               </div>
             </div>
           )}
@@ -423,25 +495,39 @@ function ChatInner() {
       {showDock && turn && (
         <div className="shrink-0 max-h-[75vh] overflow-y-auto bg-white/85 backdrop-blur border-t border-line">
           <div className="max-w-xl mx-auto px-3 sm:px-4 py-3">
-            {(turn.kind === "text" || turn.kind === "pincode" || turn.kind === "number") && (
-              <div className="flex items-center gap-2">
-                <input
-                  ref={inputRef} autoFocus value={input}
-                  inputMode={turn.kind === "text" ? "text" : "numeric"}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") void (turn.kind === "pincode" ? submitPincode() : turn.kind === "number" ? submitNumber() : submitText()); }}
-                  placeholder={turn.placeholder || "Type your answer…"}
-                  className="flex-1 border border-line rounded-full px-4 py-2.5 text-[14px] bg-white focus:outline-none focus:border-[#178a5c] focus:ring-2 focus:ring-[#178a5c]/15" />
-                <button onClick={() => void (turn.kind === "pincode" ? submitPincode() : turn.kind === "number" ? submitNumber() : submitText())} className="w-11 h-11 shrink-0 rounded-full bg-[#178a5c] text-white grid place-items-center hover:bg-[#12734c] shadow-sm" aria-label="Send">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg>
-                </button>
-              </div>
-            )}
+            {(turn.kind === "text" || turn.kind === "pincode" || turn.kind === "number") && (() => {
+              const send = () => void (turn.kind === "pincode" ? submitPincode() : turn.kind === "number" ? submitNumber() : submitText());
+              const amt = turn.field && AMOUNT_FIELDS.has(turn.field) ? Number(input.replace(/[^\d]/g, "")) : 0;
+              return (
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 flex items-center border border-line rounded-full bg-white overflow-hidden focus-within:border-[#1e3a8a] focus-within:ring-2 focus-within:ring-[#1e3a8a]/15">
+                      <input
+                        ref={inputRef} autoFocus value={input}
+                        inputMode={turn.kind === "text" ? "text" : "numeric"}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") send(); }}
+                        placeholder={turn.placeholder || "Type your answer…"}
+                        className="flex-1 min-w-0 px-4 py-2.5 text-[14px] bg-transparent focus:outline-none" />
+                      {turn.id === "borrower_email" && !input.includes("@") && (
+                        <span className="pr-4 text-[14px] text-text-muted whitespace-nowrap select-none">@gmail.com</span>
+                      )}
+                    </div>
+                    <button onClick={send} className="w-11 h-11 shrink-0 rounded-full bg-[#1e3a8a] text-white grid place-items-center hover:bg-[#17307a] shadow-sm" aria-label="Send">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg>
+                    </button>
+                  </div>
+                  {amt > 0 && amountInWords(amt) && (
+                    <div className="text-[11.5px] text-[#14235c] px-4">₹{amt.toLocaleString("en-IN")} — <span className="font-medium">{amountInWords(amt)} rupees</span></div>
+                  )}
+                </div>
+              );
+            })()}
 
             {turn.kind === "choice" && (
               <div className="grid sm:grid-cols-2 gap-2">
                 {turn.choices!.map((c) => (
-                  <button key={c.value || c.label} onClick={() => void choose(c)} className="text-left px-4 py-3 rounded-xl border border-line bg-white hover:border-[#178a5c] hover:bg-[#f7fcf9] transition">
+                  <button key={c.value || c.label} onClick={() => void choose(c)} className="text-left px-4 py-3 rounded-xl border border-line bg-white hover:border-[#1e3a8a] hover:bg-[#f4f7fd] transition">
                     <div className="text-[14px] font-semibold text-text">{c.label}</div>{c.sub && <div className="text-[12px] text-text-muted">{c.sub}</div>}
                   </button>
                 ))}
@@ -450,7 +536,7 @@ function ChatInner() {
 
             {turn.kind === "consent" && (
               <div className="flex gap-2 flex-wrap">
-                <button onClick={() => void giveConsent()} className="flex-1 px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c]">Yes, the customer consents</button>
+                <button onClick={() => void giveConsent()} className="flex-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a]">Yes, the customer consents</button>
                 <button onClick={() => router.push("/dashboard")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">Cancel</button>
               </div>
             )}
@@ -468,7 +554,19 @@ function ChatInner() {
             )}
 
             {turn.kind === "tenure" && (
-              <TenureDock form={form} onPick={(t) => merge({ selected_tenure_years: String(t) })} onSubmit={() => { pushUndo(); advance(); }} />
+              <LoanConfigDock
+                loanAmt={Number(form.loan_amount_required) || 0}
+                subsidyCase={subsidyCase} setSubsidyCase={setSubsidyCase}
+                centralSub={centralSub} setCentralSub={setCentralSub}
+                stateSub={stateSub} setStateSub={setStateSub}
+                tenure={tenure} setTenure={setTenure}
+                onFinish={() => {
+                  const central = subsidyCase === "non_subsidy" ? 0 : (Number(centralSub) || 0);
+                  const st = subsidyCase === "non_subsidy" ? 0 : (Number(stateSub) || 0);
+                  merge({ selected_tenure_years: String(tenure), central_subsidy: String(central), state_subsidy: String(st) });
+                  pushUndo(); advance();
+                }}
+              />
             )}
           </div>
         </div>
@@ -627,7 +725,7 @@ function DocTable({ appId, form, rows, onPatch, onDone }: { appId: string; form:
     if (rowOpen(r.slot, r.unit)) {
       return (
         <label onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) pick(r.slot, r.unit, f); }}
-          className="inline-flex items-center gap-1 rounded-lg border border-dashed border-line hover:border-[#178a5c] bg-white px-2.5 py-1.5 cursor-pointer text-[11.5px] font-semibold text-[#178a5c]">
+          className="inline-flex items-center gap-1 rounded-lg border border-dashed border-line hover:border-[#1e3a8a] bg-white px-2.5 py-1.5 cursor-pointer text-[11.5px] font-semibold text-[#1e3a8a]">
           <span className="text-[13px] leading-none">＋</span> Add
           <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(r.slot, r.unit, f); e.currentTarget.value = ""; }} />
         </label>
@@ -636,24 +734,24 @@ function DocTable({ appId, form, rows, onPatch, onDone }: { appId: string; form:
     const live = files[r.slot];
     return (
       <span className="inline-flex items-center gap-1.5">
-        {live?.thumb ? <img src={live.thumb} alt="" className="w-8 h-8 rounded-md object-cover border border-line" /> : <span className="w-8 h-8 rounded-md bg-[#f7fcf9] border border-[#cdeadd] grid place-items-center text-[13px]">📄</span>}
-        <button onClick={() => replace(r.slot, r.unit)} className="text-[#178a5c] text-[11px] font-semibold hover:underline">Replace</button>
+        {live?.thumb ? <img src={live.thumb} alt="" className="w-8 h-8 rounded-md object-cover border border-line" /> : <span className="w-8 h-8 rounded-md bg-[#f4f7fd] border border-[#c7d5f0] grid place-items-center text-[13px]">📄</span>}
+        <button onClick={() => replace(r.slot, r.unit)} className="text-[#1e3a8a] text-[11px] font-semibold hover:underline">Replace</button>
       </span>
     );
   }
 
   function strip(unit: Unit) {
     const rd = reads[unit];
-    if (rd?.status === "reading") return <span className="flex items-center gap-2 text-[11.5px] text-text-muted"><span className="w-3.5 h-3.5 rounded-full border-2 border-[#178a5c]/30 border-t-[#178a5c] animate-spin" /> Reading…</span>;
+    if (rd?.status === "reading") return <span className="flex items-center gap-2 text-[11.5px] text-text-muted"><span className="w-3.5 h-3.5 rounded-full border-2 border-[#1e3a8a]/30 border-t-[#1e3a8a] animate-spin" /> Reading…</span>;
     if (rd?.status === "error") {
       const canRetry = rows.find((r) => r.unit === unit)!.parts.every((p) => filesRef.current[p]);
-      return <span className="flex flex-wrap items-center gap-2 text-[11.5px]"><span className="text-red-600">{rd.error || "Couldn't read that."}</span>{canRetry && <button onClick={() => void run(unit, filesRef.current)} className="text-[#178a5c] font-semibold hover:underline">Try again</button>}</span>;
+      return <span className="flex flex-wrap items-center gap-2 text-[11.5px]"><span className="text-red-600">{rd.error || "Couldn't read that."}</span>{canRetry && <button onClick={() => void run(unit, filesRef.current)} className="text-[#1e3a8a] font-semibold hover:underline">Try again</button>}</span>;
     }
     if (unitDone(unit)) {
       const build = UNIT_FIELDS[unit];
       return build
         ? <FieldRows fields={build(form).map((x) => ({ ...x, value: form[x.field] || "" }))} onEdit={(field, value) => onPatch({ [field]: value })} />
-        : <span className="text-[11.5px] text-[#178a5c] font-medium">Uploaded ✓</span>;
+        : <span className="text-[11.5px] text-[#1e3a8a] font-medium">Uploaded ✓</span>;
     }
     return null;
   }
@@ -663,7 +761,7 @@ function DocTable({ appId, form, rows, onPatch, onDone }: { appId: string; form:
       <div className="rounded-xl border border-line bg-white overflow-hidden">
         <table className="w-full border-collapse">
           <thead>
-            <tr className="bg-[#f0faf5] border-b border-[#e0f0e8] text-[11px] font-semibold text-[#0f3d2e]">
+            <tr className="bg-[#eef3fc] border-b border-[#dbe4f6] text-[11px] font-semibold text-[#14235c]">
               <th className="text-left font-semibold px-3 py-2 w-full">Document</th>
               <th className="text-left font-semibold px-2 py-2 whitespace-nowrap">Upload</th>
               <th className="text-right font-semibold px-3 py-2 whitespace-nowrap">Don&apos;t have it</th>
@@ -677,7 +775,7 @@ function DocTable({ appId, form, rows, onPatch, onDone }: { appId: string; form:
                   <tr className={i > 0 ? "border-t border-line/70" : ""}>
                     <td className="px-3 py-2 align-middle text-[12.5px] text-text leading-snug">{r.label}</td>
                     <td className="px-2 py-2 align-middle whitespace-nowrap">{cell(r)}</td>
-                    <td className="px-3 py-2 align-middle text-right"><input type="checkbox" checked={!!skipped[r.slot]} onChange={() => toggleSkip(r.slot)} className="w-4 h-4 accent-[#178a5c] cursor-pointer align-middle" aria-label={`Don't have ${r.label}`} /></td>
+                    <td className="px-3 py-2 align-middle text-right"><input type="checkbox" checked={!!skipped[r.slot]} onChange={() => toggleSkip(r.slot)} className="w-4 h-4 accent-[#1e3a8a] cursor-pointer align-middle" aria-label={`Don't have ${r.label}`} /></td>
                   </tr>
                   {s && <tr><td colSpan={3} className="px-3 pb-2.5 pt-0">{s}</td></tr>}
                 </Fragment>
@@ -687,7 +785,7 @@ function DocTable({ appId, form, rows, onPatch, onDone }: { appId: string; form:
         </table>
       </div>
       <div className="flex items-center gap-2 flex-wrap">
-        <button onClick={done} disabled={!allSettled} className="px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">Continue →</button>
+        <button onClick={done} disabled={!allSettled} className="px-4 py-2 rounded-lg bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-50">Continue →</button>
         {!allSettled && <span className="text-[11px] text-text-muted">Add or tick “Don&apos;t have it” for every row to continue.</span>}
       </div>
     </div>
@@ -705,13 +803,13 @@ function FieldRows({ fields, onEdit }: { fields: { label: string; field: string;
           <span className="text-text-muted shrink-0">{f.label}</span>
           {editKey === f.field ? (
             <span className="flex items-center gap-1.5">
-              <input autoFocus value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { onEdit(f.field, val.trim()); setEditKey(null); } if (e.key === "Escape") setEditKey(null); }} className="border border-[#178a5c] rounded-lg px-2.5 py-1 text-[12.5px] w-40 text-right outline-none" />
-              <button onClick={() => { onEdit(f.field, val.trim()); setEditKey(null); }} className="text-[#178a5c] text-[11.5px] font-semibold">Save</button>
+              <input autoFocus value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { onEdit(f.field, val.trim()); setEditKey(null); } if (e.key === "Escape") setEditKey(null); }} className="border border-[#1e3a8a] rounded-lg px-2.5 py-1 text-[12.5px] w-40 text-right outline-none" />
+              <button onClick={() => { onEdit(f.field, val.trim()); setEditKey(null); }} className="text-[#1e3a8a] text-[11.5px] font-semibold">Save</button>
             </span>
           ) : (
             <span className="flex items-center gap-2 min-w-0">
               {f.value ? <span className="text-text font-medium text-right break-words">{f.value}</span> : <span className="text-amber-600 text-[11.5px] italic">not found</span>}
-              <button onClick={() => { setEditKey(f.field); setVal(f.value); }} className="opacity-60 hover:opacity-100 text-[#178a5c] text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>
+              <button onClick={() => { setEditKey(f.field); setVal(f.value); }} className="opacity-60 hover:opacity-100 text-[#1e3a8a] text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>
             </span>
           )}
         </div>
@@ -753,8 +851,8 @@ function QuotationDock({ appId, form, onPatch, onDone }: { appId: string; form: 
   return (
     <div className="flex flex-col gap-2.5">
       <label onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) void read(f); }}
-        className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-[#178a5c] bg-[#f7fcf9] px-4 py-3 cursor-pointer text-[13px] font-semibold text-[#178a5c] hover:bg-[#f0faf5]">
-        {status === "reading" ? <><span className="w-3.5 h-3.5 rounded-full border-2 border-[#178a5c]/30 border-t-[#178a5c] animate-spin" /> Reading…</> : <>＋ {status === "done" ? "Re-upload quotation" : "Upload quotation / proforma"}</>}
+        className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-[#1e3a8a] bg-[#f4f7fd] px-4 py-3 cursor-pointer text-[13px] font-semibold text-[#1e3a8a] hover:bg-[#eef3fc]">
+        {status === "reading" ? <><span className="w-3.5 h-3.5 rounded-full border-2 border-[#1e3a8a]/30 border-t-[#1e3a8a] animate-spin" /> Reading…</> : <>＋ {status === "done" ? "Re-upload quotation" : "Upload quotation / proforma"}</>}
         <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void read(f); e.currentTarget.value = ""; }} />
       </label>
       {err && <div className="text-[11.5px] text-red-600">{err}</div>}
@@ -768,7 +866,7 @@ function QuotationDock({ appId, form, onPatch, onDone }: { appId: string; form: 
         />
       </div>
       <div className="flex items-center gap-2 flex-wrap">
-        <button onClick={onDone} disabled={!canContinue} className="px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">Continue →</button>
+        <button onClick={onDone} disabled={!canContinue} className="px-4 py-2 rounded-lg bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-50">Continue →</button>
         {!canContinue && <span className="text-[11px] text-text-muted">Add the project size and cost to continue.</span>}
       </div>
     </div>
@@ -776,28 +874,43 @@ function QuotationDock({ appId, form, onPatch, onDone }: { appId: string; form: 
 }
 
 // ── Tenure + submit ────────────────────────────────────────────────────────
-function TenureDock({ form, onPick, onSubmit }: { form: Form; onPick: (t: number) => void; onSubmit: () => void }) {
-  const tenure = Number(form.selected_tenure_years) || 0;
-  const loanAmt = Number(form.loan_amount_required) || 0;
-  const emi = tenure ? computeEmi(loanAmt, DEFAULT_INDICATIVE_ROI, tenure) : 0;
+// Loan configuration — subsidy case + central/state subsidy + tenure with a
+// live EMI, mirroring the team chatbot's last step.
+function LoanConfigDock({ loanAmt, subsidyCase, setSubsidyCase, centralSub, setCentralSub, stateSub, setStateSub, tenure, setTenure, onFinish }: {
+  loanAmt: number; subsidyCase: "subsidy" | "non_subsidy"; setSubsidyCase: (s: "subsidy" | "non_subsidy") => void;
+  centralSub: string; setCentralSub: (s: string) => void; stateSub: string; setStateSub: (s: string) => void;
+  tenure: number | null; setTenure: (n: number) => void; onFinish: () => void;
+}) {
   return (
-    <div className="flex flex-col gap-3">
-      <div className="grid grid-cols-5 gap-2">
-        {TENURES.map((t) => (
-          <button key={t} onClick={() => onPick(t)} className={["py-2.5 rounded-xl border text-[13px] font-semibold transition", tenure === t ? "bg-[#178a5c] text-white border-[#178a5c]" : "bg-white border-line text-text-mid hover:border-[#178a5c]"].join(" ")}>
-            {t}y
-          </button>
-        ))}
+    <div className="flex flex-col gap-3 max-h-[56vh] overflow-y-auto pr-0.5">
+      <div>
+        <div className="text-[12px] text-text-muted mb-1">Subsidy</div>
+        <div className="flex gap-2">
+          {(["subsidy", "non_subsidy"] as const).map((s) => (
+            <button key={s} onClick={() => setSubsidyCase(s)} className={["px-3.5 py-1.5 rounded-lg text-[13px] font-semibold border", subsidyCase === s ? "bg-[#1e3a8a] text-white border-[#1e3a8a]" : "bg-white border-line text-text-mid hover:border-[#1e3a8a]"].join(" ")}>{s === "subsidy" ? "With subsidy" : "No subsidy"}</button>
+          ))}
+        </div>
       </div>
-      {tenure > 0 && (
-        <div className="rounded-xl border border-line bg-[#f7fcf9] px-4 py-3 text-[13px] text-[#0f3d2e]">
-          Estimated EMI <span className="font-bold">{formatRupees(emi)}</span> / month
-          <span className="text-text-muted"> · {tenure} year{tenure > 1 ? "s" : ""} · indicative</span>
+      {subsidyCase === "subsidy" && (
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-[12px] text-text-muted">Central subsidy (₹)
+            <input value={centralSub} inputMode="numeric" onChange={(e) => setCentralSub(e.target.value.replace(/[^\d]/g, ""))} className="mt-1 w-full border border-line rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus:border-[#1e3a8a]" /></label>
+          <label className="text-[12px] text-text-muted">State subsidy (₹)
+            <input value={stateSub} inputMode="numeric" onChange={(e) => setStateSub(e.target.value.replace(/[^\d]/g, ""))} placeholder="0" className="mt-1 w-full border border-line rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus:border-[#1e3a8a]" /></label>
         </div>
       )}
-      <button onClick={onSubmit} disabled={tenure === 0} className="px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c] disabled:opacity-50">
-        Continue →
-      </button>
+      <div>
+        <div className="text-[12px] text-text-muted mb-1">Tenure — live EMI on ₹{loanAmt.toLocaleString("en-IN")}</div>
+        <div className="grid grid-cols-5 gap-1.5">
+          {TENURES.map((t) => (
+            <button key={t} onClick={() => setTenure(t)} className={["px-1 py-2 rounded-lg text-center border transition", tenure === t ? "bg-[#1e3a8a] text-white border-[#1e3a8a]" : "bg-white border-line text-text-mid hover:border-[#1e3a8a]"].join(" ")}>
+              <div className="text-[13px] font-bold">{t}y</div>
+              <div className="text-[10px] opacity-80">{loanAmt > 0 ? formatRupees(computeEmi(loanAmt, DEFAULT_INDICATIVE_ROI, t)) : "—"}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+      <button onClick={onFinish} disabled={tenure == null} className="mt-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a] disabled:opacity-50">Continue →</button>
     </div>
   );
 }

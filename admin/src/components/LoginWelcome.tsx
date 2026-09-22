@@ -15,6 +15,7 @@
 
 import { useEffect, useState } from "react";
 import { getBusiness, greetingName } from "@/lib/auth";
+import { fetchEpcName } from "@/lib/epc-name";
 import WelcomeSplash from "./WelcomeSplash";
 
 type Greet = { name: string; image: string; greeting: string; subtitle: string; badge: string };
@@ -41,14 +42,14 @@ export default function LoginWelcome() {
       return;
     }
 
-    // EPC partner — a warm Hindi welcome onto their own portal.
-    setW({
-      name: greetingName(b),
+    // EPC partner — greet by the (short) BUSINESS name, not the contact person.
+    void fetchEpcName().then((name) => setW({
+      name,
       image: "/welcome/man.png",
       greeting: "नमस्ते,",
       subtitle: "Capital Craft में आपका स्वागत है",
-      badge: "Partner Portal",
-    });
+      badge: "Portal",
+    }));
   }, []);
 
   if (!w) return null;
