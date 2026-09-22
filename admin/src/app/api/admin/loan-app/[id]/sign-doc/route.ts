@@ -56,8 +56,9 @@ export async function POST(
   try {
     const token = getBearerToken(req);
     if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
+    await verifyJwt(token); // any valid session; RLS + the path whitelist below
+    // scope this to the caller's OWN application (admin sees all, an EPC only
+    // its own row), so an EPC can view the documents on its own loan too.
 
     const appId = params.id;
     if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);

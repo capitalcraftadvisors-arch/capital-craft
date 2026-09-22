@@ -11,7 +11,7 @@
 // pipeline as admin-created applications (status 'submitted') and
 // appears on the admin Loan Applications table with the EPC auto-tagged.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
@@ -19,6 +19,7 @@ import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import EpcApplyTracker from "@/components/EpcApplyTracker";
 import { getToken } from "@/lib/auth";
+import { supabase } from "@/lib/supabase";
 import {
   TENURES, DEFAULT_INDICATIVE_ROI,
   computeCentralSubsidy, computeEmi, formatRupees,
@@ -44,6 +45,23 @@ function Inner() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+
+  // Hydrate the project + loan fields when editing an existing application.
+  useEffect(() => {
+    void (async () => {
+      const { data } = await supabase()
+        .from("epc_applications")
+        .select("project_size, total_project_cost, loan_amount_required, selected_tenure_years")
+        .eq("id", appId)
+        .maybeSingle();
+      const a = (data ?? {}) as Record<string, any>;
+      if (a.project_size != null) setSizeKw(String(a.project_size));
+      if (a.total_project_cost != null) setTotalCost(String(a.total_project_cost));
+      if (a.loan_amount_required != null) setLoanAmount(String(a.loan_amount_required));
+      const t = Number(a.selected_tenure_years);
+      if (Number.isFinite(t) && (TENURES as readonly number[]).includes(t)) setTenure(t);
+    })();
+  }, [appId]);
 
   const sizeN = Number(sizeKw);
   const costN = Number(totalCost);

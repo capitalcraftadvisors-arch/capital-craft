@@ -24,6 +24,7 @@ import FileUpload from "@/components/FileUpload";
 import EpcApplyTracker from "@/components/EpcApplyTracker";
 import { getToken } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
+import { getDocumentUrl } from "@/lib/storage";
 import { extractPan } from "@/lib/ocr";
 import { MOBILE_RE, EMAIL_RE } from "@/lib/validators";
 
@@ -142,20 +143,68 @@ function Inner() {
   const [cPan, setCPan]         = useState("");
   const [cPanPath, setCPanPath] = useState<string | null>(null);
 
-  // Load applicant contact for the co-applicant conflict check.
+  // Hydrate the WHOLE application so editing shows everything already captured —
+  // every document (with View / Remove) and every reading, exactly as the chat
+  // read them. Without this the edit form opened empty.
+  const [panDocId, setPanDocId] = useState<string | null>(null);
   useEffect(() => {
     void (async () => {
-      const { data } = await supabase()
-        .from("epc_applications")
-        .select("borrower_mobile, borrower_email")
-        .eq("id", appId)
-        .maybeSingle();
-      if (data) {
-        setApplicantMobile(String((data as any).borrower_mobile ?? "").trim());
-        setApplicantEmail(String((data as any).borrower_email ?? "").trim());
+      const [{ data: la }, { data: docs }] = await Promise.all([
+        supabase().from("epc_applications").select("*").eq("id", appId).maybeSingle(),
+        supabase().from("user_application_docs").select("id, category").eq("application_id", appId),
+      ]);
+      const a = (la ?? {}) as Record<string, any>;
+      setApplicantMobile(String(a.borrower_mobile ?? "").trim());
+      setApplicantEmail(String(a.borrower_email ?? "").trim());
+      // PAN — number + card image (its user_application_docs row).
+      if (a.borrower_pan) { setPanNumber(String(a.borrower_pan)); setPanUploaded(true); }
+      if (a.borrower_father_name) setPanFather(String(a.borrower_father_name));
+      const panRow = (docs ?? []).find((d: any) => d.category === "borrower_pan");
+      if (panRow) { setPanDocId(panRow.id); setPanUploaded(true); }
+      // Aadhaar
+      if (a.aadhaar_front_path) {
+        setAPaths({ front: a.aadhaar_front_path, back: a.aadhaar_back_path ?? "", face: a.aadhaar_face_path ?? null });
+        setAName(a.aadhaar_name ?? ""); setADob(a.aadhaar_dob ?? ""); setAGender(a.aadhaar_gender ?? "");
+        setANumber(String(a.aadhaar_number ?? "").replace(/\D/g, "")); setACareOf(a.aadhaar_care_of ?? ""); setAAddress(a.aadhaar_address ?? "");
+      }
+      // E-bill
+      if (a.ebill_path) setEbill({ path: a.ebill_path, monthly_bill_amount: a.monthly_bill_amount ?? null, discom_name: a.discom_name ?? null, ca_number: a.ca_number ?? null, ebill_address_line: a.ebill_address_line ?? null, ebill_name: a.ebill_name ?? null, file_name: "Electricity bill" });
+      // Quotation + rooftop
+      if (a.proforma_invoice_path) setQuotePath(a.proforma_invoice_path);
+      if (a.rooftop_photo_path) setRooftopPath(a.rooftop_photo_path);
+      if (a.rooftop_photo_gps) setRooftopGps(a.rooftop_photo_gps);
+      // Co-applicant
+      const hasCo = a.bill_on_applicant_name === false || !!(a.coapp_pan_path || a.coapp_aadhaar_front_path || a.coapp_pan || a.coapp_aadhaar_number);
+      if (a.bill_on_applicant_name === true) setHasCoapp(false);
+      else if (hasCo) setHasCoapp(true);
+      if (hasCo) {
+        setCPan(a.coapp_pan ?? ""); setCName(a.coapp_aadhaar_name ?? a.coapp_name ?? ""); setCDob(a.coapp_aadhaar_dob ?? a.coapp_dob ?? "");
+        setCGender(a.coapp_aadhaar_gender ?? ""); setCNumber(String(a.coapp_aadhaar_number ?? "").replace(/\D/g, "")); setCCareOf(a.coapp_aadhaar_care_of ?? ""); setCAddress(a.coapp_aadhaar_address ?? "");
+        setCMobile(a.coapp_mobile ?? ""); setCEmail(a.coapp_email ?? "");
+        if (a.coapp_aadhaar_front_path) setCPaths({ front: a.coapp_aadhaar_front_path, back: a.coapp_aadhaar_back_path ?? "" });
+        if (a.coapp_pan_path) setCPanPath(a.coapp_pan_path);
       }
     })();
   }, [appId]);
+
+  // Open a stored *_path document (Aadhaar / e-bill / quotation / rooftop / co-app).
+  async function viewPath(path: string) {
+    try {
+      const res = await fetch(`/api/admin/loan-app/${appId}/sign-doc`, {
+        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({ path }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (j?.ok && j.url) window.open(j.url as string, "_blank", "noopener");
+      else alert("Couldn't open the document.");
+    } catch { alert("Couldn't open the document."); }
+  }
+  // Open a user_application_docs row (PAN card image).
+  async function openDocRow(id: string) {
+    const url = await getDocumentUrl(id);
+    if (url) window.open(url, "_blank", "noopener");
+    else alert("Couldn't open the document.");
+  }
 
   // Run applicant-Aadhaar extraction once both sides are picked.
   useEffect(() => {
@@ -385,6 +434,7 @@ function Inner() {
             onUploaded={(info) => void onPanUploaded(info)}
             hint="Photo, scan, or PDF."
           />
+          {panDocId && <DocOnFile label="PAN card on file" onView={() => void openDocRow(panDocId)} />}
           <Input
             label="PAN number"
             value={panNumber}
@@ -399,9 +449,15 @@ function Inner() {
         <Card className="p-6 space-y-4">
           <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Aadhaar card</h2>
           <div className="grid sm:grid-cols-2 gap-3">
-            <PickTile label="Aadhaar Front" file={aFront} onPick={setAFront} busy={aBusy} done={!!aPaths} />
-            <PickTile label="Aadhaar Back"  file={aBack}  onPick={setABack}  busy={aBusy} done={!!aPaths} />
+            <PickTile label="Aadhaar Front" file={aFront} onPick={(f) => { setAFront(f); setAPaths(null); }} busy={aBusy} done={!!aPaths} />
+            <PickTile label="Aadhaar Back"  file={aBack}  onPick={(f) => { setABack(f); setAPaths(null); }}  busy={aBusy} done={!!aPaths} />
           </div>
+          {aPaths?.front && (
+            <div className="grid sm:grid-cols-2 gap-2">
+              <DocOnFile label="Aadhaar front" onView={() => void viewPath(aPaths.front)} />
+              {aPaths.back && <DocOnFile label="Aadhaar back" onView={() => void viewPath(aPaths.back)} />}
+            </div>
+          )}
           {aBusy && <p className="text-[12px] text-text-muted">Extracting details…</p>}
           {aErr && <p className="text-[12px] text-red-700">{aErr}</p>}
           {aPaths && (
@@ -434,6 +490,7 @@ function Inner() {
         <Card className="p-6 space-y-4">
           <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Latest electricity bill</h2>
           <EbillTile ebill={ebill} busy={ebillBusy} onFile={(f) => void uploadEbill(f)} />
+          {ebill?.path && <DocOnFile label="Electricity bill on file" onView={() => void viewPath(ebill.path)} onRemove={() => setEbill(null)} />}
           {ebillErr && <p className="text-[12px] text-red-700">{ebillErr}</p>}
         </Card>
 
@@ -451,6 +508,7 @@ function Inner() {
             onUploaded={(info) => setQuotePath(info.storagePath)}
             hint="Photo, scan, or PDF."
           />
+          {quotePath && <DocOnFile label="Quotation on file" onView={() => void viewPath(quotePath)} onRemove={() => setQuotePath(null)} />}
         </Card>
 
         {/* Rooftop photo — geo-tagged */}
@@ -482,6 +540,7 @@ function Inner() {
               }
             }}
           />
+          {rooftopPath && <DocOnFile label="Rooftop photo on file" onView={() => void viewPath(rooftopPath)} onRemove={() => { setRooftopPath(null); setRooftopGps(null); }} />}
         </Card>
 
         {/* Co-applicant toggle */}
@@ -508,14 +567,21 @@ function Inner() {
             <div className="space-y-4 pt-2 border-t border-line">
               <p className="text-[13px] font-semibold text-text">Co-applicant Aadhaar</p>
               <div className="grid sm:grid-cols-2 gap-3">
-                <PickTile label="Aadhaar Front" file={cFront} onPick={setCFront} busy={cBusy} done={!!cPaths} />
-                <PickTile label="Aadhaar Back"  file={cBack}  onPick={setCBack}  busy={cBusy} done={!!cPaths} />
+                <PickTile label="Aadhaar Front" file={cFront} onPick={(f) => { setCFront(f); setCPaths(null); }} busy={cBusy} done={!!cPaths} />
+                <PickTile label="Aadhaar Back"  file={cBack}  onPick={(f) => { setCBack(f); setCPaths(null); }}  busy={cBusy} done={!!cPaths} />
               </div>
+              {cPaths?.front && (
+                <div className="grid sm:grid-cols-2 gap-2">
+                  <DocOnFile label="Aadhaar front" onView={() => void viewPath(cPaths.front)} />
+                  {cPaths.back && <DocOnFile label="Aadhaar back" onView={() => void viewPath(cPaths.back)} />}
+                </div>
+              )}
               {cBusy && <p className="text-[12px] text-text-muted">Extracting details…</p>}
               {cErr && <p className="text-[12px] text-red-700">{cErr}</p>}
 
               <p className="text-[13px] font-semibold text-text pt-1">Co-applicant PAN</p>
               <PanTile path={cPanPath} busy={cPanBusy} onFile={(f) => void uploadCoappPan(f)} />
+              {cPanPath && <DocOnFile label="Co-applicant PAN on file" onView={() => void viewPath(cPanPath)} onRemove={() => setCPanPath(null)} />}
               {cPanErr && <p className="text-[12px] text-red-700">{cPanErr}</p>}
 
               {(cPaths || cPanPath) && (
@@ -596,6 +662,17 @@ function Inner() {
 }
 
 // ── Small tiles ──────────────────────────────────────────────────────
+
+// A compact "already on file" row shown in an edit card: View + optional Remove.
+function DocOnFile({ label, onView, onRemove }: { label: string; onView: () => void; onRemove?: () => void }) {
+  return (
+    <div className="flex items-center gap-3 text-[13px] rounded-input bg-[#f0faf5] border border-[#cdeadd] px-3.5 py-2">
+      <span className="text-[#178a5c] font-semibold shrink-0">✓ {label}</span>
+      <button type="button" onClick={onView} className="text-blue font-semibold hover:underline">View</button>
+      {onRemove && <button type="button" onClick={onRemove} className="text-red-600 hover:underline ml-auto">Remove</button>}
+    </div>
+  );
+}
 
 function PickTile({
   label, file, onPick, busy, done,
