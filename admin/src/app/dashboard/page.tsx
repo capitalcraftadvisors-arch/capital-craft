@@ -315,7 +315,7 @@ function DashboardInner() {
                         <span className="text-text-muted">—</span>
                       ) : (
                         <button
-                          onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/apply/${r.id}/docs` as any); }}
+                          onClick={(e) => { e.stopPropagation(); router.push(`/dashboard/apply/chat?id=${r.id}&edit=1` as any); }}
                           className="px-4 py-1.5 rounded-lg border border-[#1e3a8a] text-[#1e3a8a] text-[12px] font-semibold hover:bg-[#1e3a8a]/[0.06]">
                           Edit
                         </button>
