@@ -54,6 +54,7 @@ const I_CHECK_CIRC = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="10" /><path
 const I_X_CIRC     = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="10" /><path d="m9 9 6 6M15 9l-6 6" /></svg>);
 const I_TARGET     = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1.5" /></svg>);
 const I_SEND       = (<svg {...SVG_PROPS}><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg>);
+const I_MAIL       = (<svg {...SVG_PROPS}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>);
 const I_STEP       = (<svg {...SVG_PROPS}><path d="M20 6 9 17l-5-5" /></svg>);
 const I_PENCIL     = (<svg {...SVG_PROPS}><path d="M17 3l4 4-13 13H4v-4z" /></svg>);
 
@@ -120,6 +121,8 @@ function evFromLog(r: LogRow, names: Map<string, string>): Ev {
       return { at: r.created_at, by, text: r.detail || "Rejected by lender", tone: RED, svg: I_X_CIRC };
     case "field_edit":
       return { at: r.created_at, by, text: r.detail || "Details edited", tone: BLUE, svg: I_PENCIL };
+    case "email_sent":
+      return { at: r.created_at, by, text: r.detail || "Emailed to lender", tone: BLUE, svg: I_MAIL };
     default:
       return { at: r.created_at, by, text: r.detail || `Status changed`, tone: AMBER, svg: I_TARGET };
   }

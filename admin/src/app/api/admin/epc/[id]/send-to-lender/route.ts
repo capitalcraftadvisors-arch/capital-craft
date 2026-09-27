@@ -168,6 +168,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     });
 
     await saveContacts(supabase, [to, ...cc, ...bcc]);
+    // Record the send in the EPC's activity log (best-effort; the mail already went).
+    try {
+      await supabase.from("admin_edit_log").insert({
+        business_id: bizId, actor: "admin", actor_id: claims.business_id ?? null,
+        action: "email_sent", field: lender, new_value: to,
+      });
+    } catch (e) { console.warn("[epc-send-to-lender] activity log failed:", e); }
     return NextResponse.json({ ok: true, sent_to: to, documents: links.length });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

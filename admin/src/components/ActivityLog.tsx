@@ -137,6 +137,7 @@ function iconFor(r: LogRow): IconChoice {
     case "members_edited":     return { svg: I_USERS, tone: BLUE };
     case "references_edited":  return { svg: I_STAR, tone: BLUE };
     case "self_edit_submit":   return { svg: I_SEND, tone: BLUE };
+    case "email_sent":         return { svg: I_SEND, tone: BLUE };
     case "lender_approve":     return { svg: I_CHECK_CIRC, tone: GREEN };
     case "lender_unapprove":   return { svg: I_X_CIRC, tone: AMBER };
     case "lender_docs_given":  return { svg: I_FILE_PLUS, tone: GREEN };
@@ -167,6 +168,7 @@ function describe(r: LogRow): string {
     case "members_edited":   return `Updated stakeholders`;
     case "references_edited":return `Updated references`;
     case "self_edit_submit": return `Submitted self-edit changes`;
+    case "email_sent":       return `Emailed ${prettyLender(field)}${newV ? ` — ${newV}` : ""}`;
 
     case "lender_approve":       return `Approved ${prettyLender(field)}`;
     case "lender_unapprove":     return `Un-approved ${prettyLender(field)}`;

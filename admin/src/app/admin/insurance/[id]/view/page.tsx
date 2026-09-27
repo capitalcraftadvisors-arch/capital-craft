@@ -222,6 +222,11 @@ function Inner() {
             <>
               <TabButton label="Profile" icon={I.user} active />
               <TabButton label="Edit" icon={I.edit} onClick={() => router.push(`/dashboard/insurance/${app.id}/step-1` as any)} />
+              <TabButton
+                label="Message to EPC"
+                icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>}
+                href={`/admin/insurance/${app.id}/messages`}
+              />
               <TabButton label="Download ZIP" icon={I.download} disabled={downloading} onClick={() => void downloadZip()} />
             </>
           }

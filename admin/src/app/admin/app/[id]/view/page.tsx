@@ -367,6 +367,23 @@ function Inner() {
     if (url) window.open(url, "_blank", "noopener");
   }
 
+  // Click a hidden anchor to a URL that the server signed with
+  // Content-Disposition: attachment, so the browser saves it instead of
+  // navigating away.
+  function triggerDownload(url: string) {
+    const a = document.createElement("a");
+    a.href = url;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  async function downloadDoc(id: string) {
+    const url = await getDocumentUrl(id, { download: true });
+    if (url) triggerDownload(url);
+  }
+
   // Sign a *_path column (whitelisted server-side) and RETURN the URL.
   async function signPath(path: string): Promise<string | null> {
     try {
@@ -385,6 +402,18 @@ function Inner() {
   async function openPath(path: string) {
     const url = await signPath(path);
     if (url) window.open(url, "_blank", "noopener");
+  }
+
+  async function downloadPath(path: string) {
+    try {
+      const res = await fetch(`/api/admin/loan-app/${params.id}/sign-doc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({ path, download: true }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.ok && data.url) triggerDownload(data.url as string);
+    } catch { /* best effort */ }
   }
 
   // Remove a doc-row-backed document (user_application_docs) — immediate.
@@ -419,6 +448,11 @@ function Inner() {
         ? () => void openDoc(s.docId!)
         : s.path
         ? () => void openPath(s.path!)
+        : undefined,
+      onDownload: s.docId
+        ? () => void downloadDoc(s.docId!)
+        : s.path
+        ? () => void downloadPath(s.path!)
         : undefined,
       onDelete: s.docId
         ? () => void removeDocRow(s.docId!)
@@ -809,9 +843,9 @@ function Inner() {
           icon={I.send}
           disabled={statusBusy || !appDocsComplete}
           title={appDocsComplete ? undefined : "Upload all required documents first"}
-          onClick={() => setDocSentPickerOpen(true)}
+          onClick={() => setSendOpen(true)}
         >
-          Doc Sent
+          Email
         </HAction>
         <HAction
           variant="approve"
@@ -965,6 +999,13 @@ function Inner() {
                 />
               )}
               <TabButton label="Activity Log" icon={I.eye} rail onClick={() => setActivityOpen(true)} />
+              <TabButton
+                label="Message to EPC"
+                icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>}
+                rail
+                href={`/admin/app/${loan.id}/messages`}
+                title={loan.attention_status === "open" ? "Open issue with the EPC" : "Message the EPC"}
+              />
               <DownloadMenu
                 icon={I.download}
                 rail
@@ -972,7 +1013,6 @@ function Inner() {
                 busyLabel={downloading ? "Preparing…" : null}
                 items={[
                   { label: "Download ZIP", onClick: () => setZipPickerOpen(true) },
-                  { label: "Send to Lender (email)", onClick: () => setSendOpen(true) },
                   ...(tranche1Exists ? [{ label: "Download Tranche 1", onClick: () => void downloadTranche("1"), disabled: trancheBusy === "1" }] : []),
                   ...(tranche2Exists ? [{ label: "Download Tranche 2", onClick: () => void downloadTranche("2"), disabled: trancheBusy === "2" }] : []),
                 ]}
@@ -1352,8 +1392,9 @@ function Inner() {
         open={sendOpen}
         onClose={() => setSendOpen(false)}
         endpoint={`/api/admin/loan-app/${loan.id}/send-to-lender`}
-        title="Send to lender"
+        title="Email to lender"
         defaultLender={loan.approved_lender}
+        onSent={(lenderKey) => { void sendDocsToLender({ key: lenderKey, label: LENDER_LABEL[lenderKey] ?? lenderKey }); }}
       />
       <LoanLenderPickerModal
         open={docSentPickerOpen}

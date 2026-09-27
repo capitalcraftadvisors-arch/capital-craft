@@ -135,6 +135,20 @@ const SCRIPT: Turn[] = [
   // 12) Consent + loan configuration
   { id: "consent", bot: "Does the customer consent to the Terms, Privacy & Cookie policies and allow credit-information access?", kind: "consent", field: "consent" },
   { id: "loanconfig", bot: "Last step — loan configuration.", kind: "loanconfig" },
+
+  // ── Edit-only inline fields ──────────────────────────────────────────────────
+  // These never appear in the create flow (when:()=>false). They're re-asked ONLY
+  // when the RM ticks them in the edit table (a selected target bypasses `when`).
+  // Every field is in the update-fields allow-list, so answering persists it.
+  { id: "edit_borrower_mobile", bot: "Applicant's mobile number?", kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile", when: () => false, validate: (v) => (!v.trim() || MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile, or skip.") },
+  { id: "edit_borrower_email", bot: "Applicant's email?", kind: "text", field: "borrower_email", placeholder: "name@example.com", when: () => false, validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email, or skip.") },
+  { id: "edit_system_type", bot: "Type of solar system?", kind: "choice", field: "system_type", when: () => false, choices: [
+    { value: "on_grid", label: "On-Grid" }, { value: "off_grid", label: "Off-Grid" }, { value: "hybrid", label: "Hybrid" },
+  ] },
+  { id: "edit_loan_amount", bot: "Loan amount required (₹)?", kind: "text", field: "loan_amount_required", placeholder: "e.g. 250000", when: () => false },
+  { id: "edit_coapp_relation", bot: "Co-applicant's relation to the applicant?", kind: "text", field: "coapp_relation", placeholder: "e.g. spouse", when: () => false },
+  { id: "edit_coapp_mobile", bot: "Co-applicant's mobile number?", kind: "text", field: "coapp_mobile", placeholder: "10-digit mobile", when: () => false, validate: (v) => (!v.trim() || MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile, or skip.") },
+  { id: "edit_coapp_email", bot: "Co-applicant's email?", kind: "text", field: "coapp_email", placeholder: "name@example.com", when: () => false, validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email, or skip.") },
 ];
 
 // The complete-step payloads, keyed by step. Persistence during the flow is via
@@ -361,6 +375,8 @@ function Inner() {
   const [editStep, setEditStep] = useState<"q1" | "pick" | "q2" | "flow" | "done" | null>(null);
   const [editStage, setEditStage] = useState<"selected" | "complete">("complete");
   const [editTargets, setEditTargets] = useState<Set<string>>(new Set());
+  // Document units to show when re-opening the doc_table in edit mode (empty = all).
+  const [editUnits, setEditUnits] = useState<Set<DocUnit>>(new Set());
   const [pickSel, setPickSel] = useState<string[]>([]);
   const [leadMode, setLeadMode] = useState(false);
   const [leadDoneId, setLeadDoneId] = useState<string | null>(null);
@@ -787,11 +803,10 @@ function Inner() {
   // when the RM is done. Each row reads with its OWN dedicated extractor and the
   // reads fire in parallel, so nothing here blocks another row.
   function applyDocPatch(patch: Form) {
-    // Functional merge keeps parallel reads from clobbering each other in memory;
-    // persistForm sends only this patch's keys (update-fields is a partial write),
-    // so each read's columns land independently.
-    setForm((prev) => ({ ...prev, ...patch }));
-    void persistForm({ ...form, ...patch });
+    // Functional merge keeps parallel reads (and a replace/re-upload) from
+    // clobbering each other: persist the FRESHLY-merged form, never the stale
+    // `form` closure — otherwise a re-uploaded doc's new values don't reflect.
+    setForm((prev) => { const next = { ...prev, ...patch }; void persistForm(next); return next; });
   }
   // Record / clear a table row in the pending list (draft at submit; never blocks).
   function docSkipChange(label: string, skipped: boolean) {
@@ -923,9 +938,12 @@ function Inner() {
   }
   function editSelected() {
     if (!pickSel.length) return;
-    const labels = editableFilled(form);
-    pushUser(`Edit: ${pickSel.map((id) => labels.find((e) => e.id === id)?.label || id).join(", ")}`, {});
-    setEditTargets(new Set(pickSel));
+    const rows = editTableGroups(form).flatMap((g) => g.rows);
+    const chosen = rows.filter((r) => pickSel.includes(r.key));
+    const turns = new Set<string>(); const units = new Set<DocUnit>();
+    for (const r of chosen) { r.turns.forEach((t) => turns.add(t)); (r.units ?? []).forEach((u) => units.add(u)); }
+    pushUser(`Edit: ${chosen.map((r) => r.label).join(", ")}`, {});
+    setEditTargets(turns); setEditUnits(units);
     startFlow("selected");
   }
 
@@ -1124,27 +1142,32 @@ function Inner() {
               </div>
             )}
             {editStep === "pick" && (() => {
-              const list = editableFilled(form);
+              const groups = editTableGroups(form);
               return (
                 <div className="flex flex-col gap-2">
-                  <div className="text-[12px] text-text-muted">{pickSel.length} selected</div>
-                  {list.length === 0 ? (
-                    <div className="text-[13px] text-text-muted py-2">Nothing has been filled in yet.</div>
-                  ) : (
-                    <div className="flex flex-wrap gap-2 max-h-[38vh] overflow-y-auto">
-                      {list.map((e) => {
-                        const on = pickSel.includes(e.id);
-                        return (
-                          <button key={e.id} onClick={() => setPickSel((s) => (on ? s.filter((x) => x !== e.id) : [...s, e.id]))}
-                            className={["px-3 py-1.5 rounded-full text-[13px] font-medium border capitalize transition", on ? "bg-[#178a5c] text-white border-[#178a5c]" : "bg-white border-line text-text-mid hover:border-[#178a5c]"].join(" ")}>
-                            {on ? "✓ " : ""}{e.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
+                  <div className="text-[12px] text-text-muted">{pickSel.length} selected · tick documents to re-upload (re-read) or details to edit</div>
+                  <div className="rounded-xl border border-line bg-white overflow-hidden max-h-[46vh] overflow-y-auto">
+                    {groups.map((g) => (
+                      <div key={g.title}>
+                        <div className="px-3 py-1.5 bg-[#eef7f2] border-y border-[#d7ebe1] text-[11px] font-semibold text-[#0f3d2e]">{g.title}</div>
+                        {g.rows.map((r) => {
+                          const on = pickSel.includes(r.key);
+                          return (
+                            <div key={r.key} onClick={() => setPickSel((s) => (on ? s.filter((x) => x !== r.key) : [...s, r.key]))}
+                              className="flex items-center gap-2.5 px-3 py-2 border-b border-line/70 last:border-b-0 cursor-pointer hover:bg-[#f7fcf9]">
+                              <input type="checkbox" checked={on} onChange={() => {}} onClick={(e) => e.stopPropagation()} className="w-4 h-4 accent-[#178a5c] cursor-pointer shrink-0" aria-label={r.label} />
+                              <span className="flex-1 text-[12.5px] text-text leading-snug">{r.label}</span>
+                              {r.doc
+                                ? (r.on ? <span className="text-[11px] font-semibold text-[#178a5c] shrink-0">On file</span> : <span className="text-[11px] font-semibold text-amber-600 shrink-0">Missing</span>)
+                                : <span className="text-[11.5px] text-text-muted text-right max-w-[46%] truncate shrink-0">{r.value}</span>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
                   <div className="flex gap-2 mt-1">
-                    <button onClick={editSelected} disabled={!pickSel.length} className="px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold disabled:opacity-50 hover:bg-[#12734c]">Edit selected →</button>
+                    <button onClick={editSelected} disabled={!pickSel.length} className="px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold disabled:opacity-50 hover:bg-[#12734c]">Edit selected{pickSel.length ? ` (${pickSel.length})` : ""} →</button>
                     <button onClick={() => setEditStep("q1")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid">Back</button>
                   </div>
                 </div>
@@ -1269,7 +1292,8 @@ function Inner() {
 
             {active.kind === "doc_table" && appId && (
               <DocTable key="doc_table" appId={appId} form={form}
-                onPatch={applyDocPatch} onSkipChange={docSkipChange} onDone={finishDocTable} />
+                onPatch={applyDocPatch} onSkipChange={docSkipChange} onDone={finishDocTable}
+                limitUnits={editMode && editStage === "selected" ? editUnits : undefined} />
             )}
 
             {active.kind === "loanconfig" && (
@@ -1596,10 +1620,11 @@ function DocFieldRows({ fields, onEdit }: { fields: Fetched[]; onEdit: (field: s
 // skipped; pending rows are recorded on the parent (draft at submit).
 // Co-applicant visibility and edit-mode prefill both derive from `form`, so the
 // table needs nothing else from the parent beyond the callbacks.
-function DocTable({ appId, form, onPatch, onSkipChange, onDone }: {
+function DocTable({ appId, form, onPatch, onSkipChange, onDone, limitUnits }: {
   appId: string; form: Form;
   onPatch: (patch: Form) => void; onSkipChange: (label: string, skipped: boolean) => void;
   onDone: (receipt: { name: string; thumb: string | null }[]) => void;
+  limitUnits?: Set<DocUnit>;   // edit mode: show only these document units
 }) {
   const [slotFiles, setSlotFiles] = useState<Partial<Record<DocSlot, DocSlotFile>>>({});
   const [skipped, setSkipped] = useState<Partial<Record<DocSlot, boolean>>>({});
@@ -1613,7 +1638,7 @@ function DocTable({ appId, form, onPatch, onSkipChange, onDone }: {
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
 
-  const rows = docTableRowsFor(form);
+  const rows = docTableRowsFor(form).filter((r) => !limitUnits || limitUnits.size === 0 || limitUnits.has(r.unit));
   const labelOf = (slot: DocSlot) => DOC_TABLE_ROWS.find((r) => r.slot === slot)!.label;
   const rowPrefilled = (slot: DocSlot) => !!(form[DOC_ROW_PATH[slot]] && String(form[DOC_ROW_PATH[slot]]).trim());
   const unitPrefilled = (u: DocUnit) => DOC_UNIT_PATHS[u].every((k) => !!(form[k] && String(form[k]).trim()));
@@ -2031,10 +2056,62 @@ function isProfileComplete(f: Form): boolean {
   });
 }
 // The already-filled details, for the multi-select edit list.
-function editableFilled(f: Form): { id: string; label: string }[] {
-  return SCRIPT.filter((t) => isEditableTurn(t) && (!t.when || t.when(f)) && isTurnFilled(t, f))
-    .map((t) => ({ id: t.id, label: t.docLabel || t.placeholder || (t.field ? t.field.replace(/_/g, " ") : t.id) }));
+// ── Edit table (grouped "what to edit" picker — mirrors the EPC portal chatbot) ──
+// Each row maps to the turn(s) re-asked when it's ticked; document rows also carry
+// the doc_table `units` to re-open. The co-applicant group shows only when the
+// file has a co-applicant. Documents re-upload (re-OCR); details edit inline.
+const SYS_LABEL: Record<string, string> = { on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" };
+const USE_LABEL: Record<string, string> = { residential: "Residential", commercial: "Commercial" };
+type EditRow = { key: string; label: string; doc?: boolean; on?: boolean; value?: string; turns: string[]; units?: DocUnit[] };
+type EditGroup = { title: string; rows: EditRow[] };
+function editTableGroups(f: Form): EditGroup[] {
+  const fv = (k: string) => (f[k] || "").trim();
+  const on = (k: string) => !!fv(k);
+  const rupee = (k: string) => (fv(k) ? "₹" + Number(f[k]).toLocaleString("en-IN") : "");
+  const groups: EditGroup[] = [
+    { title: "Documents", rows: [
+      { key: "aadhaar", label: "Aadhaar (front & back)", doc: true, on: on("aadhaar_front_path"), turns: ["doc_table"], units: ["aadhaar"] },
+      { key: "pan", label: "PAN card", doc: true, on: on("borrower_pan"), turns: ["doc_table"], units: ["applicant_pan"] },
+      { key: "ebill", label: "Electricity bill", doc: true, on: on("ebill_path"), turns: ["doc_table"], units: ["ebill"] },
+      { key: "rooftop", label: "Rooftop photo", doc: true, on: on("rooftop_photo_path"), turns: ["doc_table"], units: ["rooftop"] },
+      { key: "selfie", label: "Applicant photo", doc: true, on: on("customer_photo_path"), turns: ["doc_table"], units: ["selfie"] },
+      { key: "bank", label: "Bank statement", doc: true, on: on("bank_statement_path"), turns: ["bank"] },
+      { key: "quotation", label: "Quotation / proforma invoice", doc: true, on: on("proforma_invoice_path"), turns: ["quotation"] },
+      { key: "additional", label: "Additional documents", doc: true, on: false, turns: ["additional_docs"] },
+    ] },
+    { title: "Applicant details", rows: [
+      { key: "name", label: "Name & father's name", value: fv("borrower_name") || "—", turns: ["doc_table"], units: ["applicant_pan"] },
+      { key: "mobile", label: "Mobile", value: fv("borrower_mobile") || "—", turns: ["edit_borrower_mobile"] },
+      { key: "email", label: "Email", value: fv("borrower_email") || "—", turns: ["edit_borrower_email"] },
+      { key: "aadhaar_fields", label: "DOB · gender · address", value: "from Aadhaar", turns: ["doc_table"], units: ["aadhaar"] },
+      { key: "pincode", label: "Installation pincode", value: fv("install_pincode") || "—", turns: ["install_pincode"] },
+      { key: "system_type", label: "System type", value: SYS_LABEL[f.system_type] || "—", turns: ["edit_system_type"] },
+      { key: "use", label: "Property use", value: USE_LABEL[f.plant_use_type] || "—", turns: ["plant_use_type"] },
+    ] },
+  ];
+  if (hasCoapp(f)) groups.push({ title: "Co-applicant", rows: [
+    { key: "coapp_aadhaar", label: "Co-applicant Aadhaar", doc: true, on: on("coapp_aadhaar_front_path"), turns: ["doc_table"], units: ["coapp_aadhaar"] },
+    { key: "coapp_pan", label: "Co-applicant PAN", doc: true, on: on("coapp_pan_path") || on("coapp_pan"), turns: ["doc_table"], units: ["coapp_pan"] },
+    { key: "coapp_relation", label: "Relation", value: fv("coapp_relation") || "—", turns: ["edit_coapp_relation"] },
+    { key: "coapp_mobile", label: "Mobile", value: fv("coapp_mobile") || "—", turns: ["edit_coapp_mobile"] },
+    { key: "coapp_email", label: "Email", value: fv("coapp_email") || "—", turns: ["edit_coapp_email"] },
+  ] });
+  groups.push({ title: "Project & bill", rows: [
+    { key: "project", label: "Project size & total cost", value: [fv("project_size") && fv("project_size") + " " + (f.project_size_unit || "kw"), rupee("total_project_cost")].filter(Boolean).join(" · ") || "—", turns: ["quotation"] },
+    { key: "bill", label: "Monthly bill · DISCOM", value: [rupee("monthly_bill_amount"), fv("discom_name")].filter(Boolean).join(" · ") || "—", turns: ["doc_table"], units: ["ebill"] },
+  ] });
+  groups.push({ title: "Employment & bank", rows: [
+    { key: "employment", label: "Employment & profession", value: [f.employment_type, f.profession].filter(Boolean).join(" · ") || "—", turns: ["employment_type", "profession"] },
+    { key: "org_income", label: "Organization & annual income", value: [f.organization_name, rupee("annual_income")].filter(Boolean).join(" · ") || "—", turns: ["organization_name", "annual_income"] },
+    { key: "bank_details", label: "Bank a/c · IFSC · name · type", value: [f.bank_name, f.bank_ifsc].filter(Boolean).join(" · ") || "—", turns: ["bank"] },
+  ] });
+  groups.push({ title: "Loan configuration", rows: [
+    { key: "loan_amount", label: "Loan amount", value: rupee("loan_amount_required") || "—", turns: ["edit_loan_amount"] },
+    { key: "loanconfig", label: "Subsidy · tenure · EMI", value: fv("selected_tenure_years") ? f.selected_tenure_years + " yr" : "—", turns: ["loanconfig"] },
+  ] });
+  return groups;
 }
+
 
 // Map an existing application row → the chat's form field map (all strings;
 // the boolean e-bill flag becomes "yes"/"no").

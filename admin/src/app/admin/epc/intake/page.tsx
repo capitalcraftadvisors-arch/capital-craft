@@ -63,7 +63,7 @@ type Ref = { type: "customer" | "supplier"; name: string; mobile: string };
 type Turn = {
   id: string;
   bot: string;
-  kind: "mobile" | "text" | "choice" | "docs" | "confirmacct" | "stakeholders" | "references" | "submit";
+  kind: "mobile" | "text" | "choice" | "docs" | "confirmacct" | "bankstatements" | "stakeholders" | "references" | "submit";
   field?: string;      // form key (and, for text/choice, usually the epc_business column)
   filledBy?: string;   // which form key marks this turn "already filled" (edit-skip)
   placeholder?: string;
@@ -156,6 +156,9 @@ const SCRIPT: Turn[] = [
   { id: "cheque_doc", kind: "docs", bot: "Upload a cancelled cheque — I'll read the account number, IFSC & bank name.", docLabel: "Cancelled cheque", step: 5,
     uploads: [{ name: "file", label: "Cancelled cheque", category: "cancelled_cheque" }], replace: true, ocr: "cheque", filledCats: ["cancelled_cheque"] },
   { id: "confirm_acct", kind: "confirmacct", bot: "Please re-enter the bank account number to confirm it.", step: 5 },
+  { id: "bank_statements", kind: "bankstatements", bot: "Upload the last 12 months' bank statements — all 12 (duplicate files are skipped automatically).", step: 5 },
+  { id: "gst_username", kind: "text", bot: "GST username (their GST portal login)?", field: "gst_username", placeholder: "GST portal username", step: 5,
+    write: (v) => ({ gst_username: v.trim() || null }) },
 
   // ── Step 5 · Office verification ──
   { id: "office", kind: "docs", bot: "Three office photos: exterior (signboard visible), interior, and a selfie at the office.", docLabel: "Office photos", optional: true, step: 6,
@@ -247,6 +250,7 @@ function Inner() {
   const [editMode, setEditMode] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [docCats, setDocCats] = useState<Set<string>>(new Set());
+  const [bankStmtCount, setBankStmtCount] = useState(0);
 
   // Stakeholders + references seed data (from an existing row on resume/edit).
   const [stakeholders, setStakeholders] = useState<Stakeholder[]>([]);
@@ -316,7 +320,9 @@ function Inner() {
     stepReached.current = Math.max(1, Number(row.current_step) || 1);
     try {
       const { data: docs } = await supabase().from("epc_documents").select("category").eq("business_id", id);
-      setDocCats(new Set(((docs ?? []) as { category: string }[]).map((d) => d.category)));
+      const cats = ((docs ?? []) as { category: string }[]);
+      setDocCats(new Set(cats.map((d) => d.category)));
+      setBankStmtCount(cats.filter((d) => d.category === "bank_statement").length);
     } catch { /* ignore */ }
   }
 
@@ -362,6 +368,7 @@ function Inner() {
       case "text":
       case "choice": return !!((form[t.filledBy ?? t.field ?? ""] ?? "").trim());
       case "confirmacct": return !!((form.bank_account_number ?? "").trim());
+      case "bankstatements": return bankStmtCount >= 12;
       case "docs": return (t.filledCats ?? []).length > 0 && (t.filledCats ?? []).every((c) => docCats.has(c));
       case "stakeholders": return stakeholders.length > 0 && stakeholders.every((s) => !!s.name?.trim());
       case "references": return initCustomers.length + initSuppliers.length > 0;
@@ -412,6 +419,21 @@ function Inner() {
     const t = active; if (!t || editing) return;
     if (!t.optional && t.field) setMissing((s) => (s.includes(fieldLabel(t)) ? s : [...s, fieldLabel(t)]));
     pushUser("— skipped —", { turnId: t.id, editable: t.kind === "text" || t.kind === "choice" });
+    advance();
+  }
+
+  // ── 12-month bank statements ──
+  function submitBankStatements() {
+    const t = active; if (!t) return;
+    if (bankStmtCount < 12) { setError("Please upload all 12 monthly bank statements."); return; }
+    pushUser(`${bankStmtCount} bank statements uploaded`, { turnId: t.id });
+    if (t.step) maybeBumpStep(t.step);
+    if (editing) setEditing(null); else advance();
+  }
+  function skipBankStatements() {
+    const t = active; if (!t || editing) return;
+    setMissing((s) => (s.includes("Bank statements") ? s : [...s, "Bank statements"]));
+    pushUser("— skipped —", { turnId: t.id });
     advance();
   }
 
@@ -781,6 +803,19 @@ function Inner() {
 
             {active.kind === "docs" && (
               <DocDock active={active} files={files} thumbs={thumbs} onPick={setFileFor} onDrop={fillNextSlot} onClear={clearFileFor} onRun={() => void runDocs()} onSkip={skipDoc} replacing={!!editing} />
+            )}
+
+            {active.kind === "bankstatements" && epcId && (
+              <div className="flex flex-col gap-2">
+                <FileUpload businessId={epcId} table="epc_documents" category="bank_statement" maxFiles={12} dedupe uploadedBy="admin" onCountChange={setBankStmtCount} uploadHint="PDF or image — 12 monthly statements" />
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[12px] text-text-muted">{bankStmtCount}/12 uploaded</span>
+                  <div className="flex items-center gap-2">
+                    {!editing && <button onClick={skipBankStatements} className="px-3 py-2 text-[13px] text-text-muted hover:text-text">Skip</button>}
+                    <button onClick={submitBankStatements} disabled={bankStmtCount < 12} className="px-4 py-2 rounded-xl bg-[#185fa5] text-white text-[14px] font-semibold hover:bg-[#124a82] disabled:opacity-50">{editing ? "Done" : "Continue →"}</button>
+                  </div>
+                </div>
+              </div>
             )}
 
             {active.kind === "stakeholders" && epcId && (
@@ -1171,6 +1206,6 @@ const PREFILL_KEYS = [
   "contact_name", "contact_email", "contact_designation", "business_type",
   "pan_number", "legal_name", "trade_name", "gstin_number", "gst_address",
   "pm_surya_ghar", "pm_surya_ghar_other", "pm_surya_ghar_capacity",
-  "bank_account_number", "bank_ifsc", "bank_name",
+  "bank_account_number", "bank_ifsc", "bank_name", "gst_username",
   "referral_source", "referral_source_other",
 ];

@@ -44,6 +44,14 @@ type Props = {
   // Sub-line shown inside the upload box under "Click to upload".
   // Defaults to "Photo, scan, or PDF" when not provided.
   uploadHint?: string;
+  // When true, identical files are rejected: each file's SHA-256 content hash is
+  // compared against the hashes of files already in this slot (persisted in
+  // metadata.content_hash) and the current batch — a repeat file is skipped, so
+  // no duplicate is stored. Used for the 12-month bank statements.
+  dedupe?: boolean;
+  // Notifies the caller when the stored file count changes (for required-count
+  // gating, e.g. "exactly 12 bank statements").
+  onCountChange?: (n: number) => void;
 };
 
 type DocRow = {
@@ -51,19 +59,33 @@ type DocRow = {
   storage_path: string;
   mime_type: string | null;
   file_name: string | null;
+  metadata?: Record<string, unknown> | null;
 };
+
+async function sha256Hex(file: File): Promise<string | null> {
+  try {
+    const buf = await file.arrayBuffer();
+    const digest = await crypto.subtle.digest("SHA-256", buf);
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  } catch { return null; }
+}
 
 export default function FileUpload(props: Props) {
   const {
     businessId, stakeholderId, applicationId,
     category, table, maxFiles = 1, uploadedBy,
     onUploaded, captureGps = false, extraMetadata, label, hint, uploadHint,
+    dedupe = false, onCountChange,
   } = props;
   const inputRef = useRef<HTMLInputElement>(null);
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  // Content hashes of the files already in this slot — for dedupe.
+  const hashesRef = useRef<Set<string>>(new Set());
+  useEffect(() => { onCountChange?.(docs.length); }, [docs.length, onCountChange]);
 
   // Load existing docs for this slot. (We still query Supabase directly here
   // because RLS protects access — no API round-trip needed for metadata.)
@@ -71,7 +93,7 @@ export default function FileUpload(props: Props) {
     (async () => {
       const q = supabase()
         .from(table)
-        .select("id, storage_path, mime_type, file_name")
+        .select("id, storage_path, mime_type, file_name, metadata")
         .eq("category", category);
 
       const final = table === "epc_documents"
@@ -84,6 +106,13 @@ export default function FileUpload(props: Props) {
       const { data } = await final;
       const rows = (data ?? []) as DocRow[];
       setDocs(rows);
+
+      // Seed the dedupe set from already-stored files' content hashes.
+      if (dedupe) {
+        const hs = new Set<string>();
+        for (const d of rows) { const h = (d.metadata as { content_hash?: string } | null)?.content_hash; if (typeof h === "string") hs.add(h); }
+        hashesRef.current = hs;
+      }
 
       // Sign thumbnails for images
       const t: Record<string, string> = {};
@@ -99,12 +128,10 @@ export default function FileUpload(props: Props) {
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
-    if (docs.length + files.length > maxFiles) {
-      setError(`Only ${maxFiles} file${maxFiles > 1 ? "s" : ""} allowed in this slot.`);
-      return;
-    }
-    setError(null);
+    setError(null); setNotice(null);
     setUploading(true);
+    let count = docs.length;             // live count as we upload (maxFiles gate)
+    const skipped: string[] = [];        // duplicate filenames skipped
 
     // Pre-captured gps from caller wins. Falls back to on-upload capture
     // if `captureGps` was set and no extraMetadata.gps was supplied.
@@ -129,6 +156,17 @@ export default function FileUpload(props: Props) {
         setError("Only JPG, PNG, WEBP, or PDF files are allowed.");
         continue;
       }
+      if (count >= maxFiles) {
+        setError(`Only ${maxFiles} file${maxFiles > 1 ? "s" : ""} allowed in this slot.`);
+        break;
+      }
+
+      // Dedupe: skip a file whose content matches one already in this slot.
+      let hash: string | null = null;
+      if (dedupe) {
+        hash = await sha256Hex(file);
+        if (hash && hashesRef.current.has(hash)) { skipped.push(file.name); continue; }
+      }
 
       const r = await uploadDocument(file, {
         table,
@@ -138,18 +176,22 @@ export default function FileUpload(props: Props) {
         application_id: applicationId,
         uploaded_by: uploadedBy,
         gps,
+        extraMetadata: dedupe && hash ? { content_hash: hash } : undefined,
       });
 
       if (!r.ok) {
         setError(r.error);
         continue;
       }
+      if (dedupe && hash) hashesRef.current.add(hash);
+      count += 1;
 
       const row: DocRow = {
         id: r.id,
         storage_path: r.storage_path,
         mime_type: r.mime_type,
         file_name: file.name,
+        metadata: dedupe && hash ? { content_hash: hash } : null,
       };
       setDocs((d) => [...d, row]);
 
@@ -164,6 +206,7 @@ export default function FileUpload(props: Props) {
       onUploaded?.({ docId: row.id, storagePath: row.storage_path, file });
     }
 
+    if (skipped.length) setNotice(`Skipped ${skipped.length} duplicate file${skipped.length > 1 ? "s" : ""}: ${skipped.join(", ")}`);
     setUploading(false);
     if (inputRef.current) inputRef.current.value = "";
   }
@@ -174,6 +217,8 @@ export default function FileUpload(props: Props) {
       setError("Could not delete this file.");
       return;
     }
+    const h = (d.metadata as { content_hash?: string } | null)?.content_hash;
+    if (h) hashesRef.current.delete(h);
     setDocs((arr) => arr.filter((x) => x.id !== d.id));
     setThumbs((t) => { const c = { ...t }; delete c[d.id]; return c; });
   }
@@ -263,7 +308,8 @@ export default function FileUpload(props: Props) {
         </label>
       )}
 
-      {hint && !error && <p className="mt-1.5 text-[12px] text-text-muted">{hint}</p>}
+      {hint && !error && !notice && <p className="mt-1.5 text-[12px] text-text-muted">{hint}</p>}
+      {notice && !error && <p className="mt-1.5 text-[12px] text-amber-600">{notice}</p>}
       {error && <p className="mt-1.5 text-[12px] text-red-500">{error}</p>}
     </div>
   );

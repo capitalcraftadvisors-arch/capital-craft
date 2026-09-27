@@ -21,12 +21,15 @@ const LENDERS = [
 ];
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-type Preview = { subject: string; toName: string; detail: [string, string][]; docLabels: string[]; ccDefault: string[]; bccDefault: string[] };
+type Preview = { subject: string; toName: string; detail: [string, string][]; docLabels: string[]; ccDefault: string[]; bccDefault: string[]; allowedLenders?: string[] };
 
 export default function EmailComposerModal({
-  open, onClose, endpoint, title = "Send to lender", defaultLender,
-}: { open: boolean; onClose: () => void; endpoint: string; title?: string; defaultLender?: string | null }) {
+  open, onClose, endpoint, title = "Send to lender", defaultLender, onSent,
+}: { open: boolean; onClose: () => void; endpoint: string; title?: string; defaultLender?: string | null; onSent?: (lender: string) => void }) {
   const [lender, setLender] = useState<string>(defaultLender || "creditfair");
+  // Lenders that approved this application's EPC — only these can be picked. Empty
+  // = no restriction (fall back to all).
+  const [allowed, setAllowed] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [toName, setToName] = useState("");
   const [to, setTo] = useState("");
@@ -61,6 +64,12 @@ export default function EmailComposerModal({
         setSubject(p.subject || ""); setToName(p.toName || "");
         setDetail(p.detail || []); setDocLabels(p.docLabels || []);
         setCc(p.ccDefault || []); setBcc(p.bccDefault || []);
+        const allowedList = Array.isArray(p.allowedLenders) ? p.allowedLenders : [];
+        setAllowed(allowedList);
+        // Default to the approved lender if it's allowed, else the first allowed one
+        // (in the canonical LENDERS order, not the DB row order).
+        const valid = (allowedList.length ? LENDERS.filter((x) => allowedList.includes(x.v)) : LENDERS).map((x) => x.v);
+        setLender((defaultLender && valid.includes(defaultLender)) ? defaultLender : valid[0]);
       } else {
         setError(j?.error || "Couldn't load the email preview.");
       }
@@ -74,6 +83,9 @@ export default function EmailComposerModal({
   }, [open]);
 
   const dl = useMemo(() => "email-book", []);
+  // Only the lenders that approved this EPC (empty = no restriction, e.g. a
+  // grandfathered EPC — fall back to all so a legitimate send is never blocked).
+  const options = allowed.length ? LENDERS.filter((x) => allowed.includes(x.v)) : LENDERS;
 
   if (!open) return null;
 
@@ -82,7 +94,7 @@ export default function EmailComposerModal({
     if (!EMAIL_RE.test(to.trim())) { setError("Enter a valid TO email."); return; }
     setBusy(true); setError(null);
     const { ok, j } = await api({ mode: "send", lender, to: to.trim(), toName: toName.trim(), cc, bcc, subject: subject.trim(), detail });
-    if (ok) setDone(`Sent to ${to.trim()} — ${j.documents} document link${j.documents === 1 ? "" : "s"} + summary + ZIP.`);
+    if (ok) { setDone(`Sent to ${to.trim()} — ${j.documents} document link${j.documents === 1 ? "" : "s"} + summary + ZIP.`); onSent?.(lender); }
     else setError(j?.error || "Couldn't send the email.");
     setBusy(false);
   }
@@ -113,7 +125,7 @@ export default function EmailComposerModal({
               <label className="block text-[13px] font-medium text-text-mid">Lender
                 <select value={lender} onChange={(e) => setLender(e.target.value)}
                   className="mt-1 w-full rounded-input border border-line bg-white px-3 py-2.5 text-[14px] outline-none focus:border-blue">
-                  {LENDERS.map((x) => <option key={x.v} value={x.v}>{x.l}</option>)}
+                  {options.map((x) => <option key={x.v} value={x.v}>{x.l}</option>)}
                 </select>
               </label>
               <label className="block text-[13px] font-medium text-text-mid">Name (for greeting)

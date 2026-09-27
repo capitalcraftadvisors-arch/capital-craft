@@ -31,11 +31,17 @@ export async function uploadBuffer(
 export async function getSignedReadUrl(
   path: string,
   expiresInSec = 3600,
+  opts?: { downloadName?: string },
 ): Promise<string> {
   const [url] = await bucket.file(path).getSignedUrl({
     version: "v4",
     action: "read",
     expires: Date.now() + expiresInSec * 1000,
+    // When a download name is given, force the browser to save (not inline-
+    // display) the object under that name via Content-Disposition.
+    ...(opts?.downloadName
+      ? { responseDisposition: `attachment; filename="${opts.downloadName.replace(/"/g, "")}"` }
+      : {}),
   });
   return url;
 }

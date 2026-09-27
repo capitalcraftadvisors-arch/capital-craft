@@ -37,6 +37,17 @@ type Biz = Record<string, any>;
 type Stakeholder = { id: string; name: string; designation: string; mobile: string; email: string; father_name: string; dob: string; aadhaar_number: string; aadhaar_address: string };
 type Reference = { type: "customer" | "supplier"; name: string; mobile: string };
 
+// "How did you hear about us?" options — same set as onboarding step 6.
+const REFERRAL_OPTIONS = [
+  { value: "facebook", label: "Facebook" },
+  { value: "instagram", label: "Instagram" },
+  { value: "website", label: "Website" },
+  { value: "linkedin", label: "LinkedIn" },
+  { value: "friend", label: "Friend" },
+  { value: "epc_partner", label: "EPC Partner" },
+  { value: "others", label: "Others (Please specify)" },
+];
+
 // Backward-compat: legacy stakeholder rows may be missing mobile/email.
 function normStakeholder(raw: unknown): Stakeholder {
   const r = raw as Record<string, unknown>;
@@ -314,8 +325,13 @@ function Inner() {
             validate={(v) => (!v ? null : IFSC_RE.test(v.toUpperCase()) ? null : "Invalid IFSC")}
           />
           <EditableField label="Bank name" value={biz.bank_name} onSave={saveField("bank_name")} />
+          <EditableField label="GST username" value={biz.gst_username} onSave={saveField("gst_username")} />
           <div className="mt-3">
             <AdminDocSlot businessId={params.id} category="cancelled_cheque" label="Cancelled cheque" />
+          </div>
+          <div className="mt-3">
+            <p className="text-[13px] font-medium text-text-mid mb-2">Last 12 months&rsquo; bank statements</p>
+            <FileUpload businessId={params.id} table="epc_documents" category="bank_statement" maxFiles={12} dedupe uploadedBy="admin" uploadHint="PDF or image — 12 monthly statements" />
           </div>
         </Section>
 
@@ -341,6 +357,18 @@ function Inner() {
             value={(biz.business_references ?? []) as Reference[]}
             onSave={saveReferences}
           />
+          <div className="mt-4 pt-4 border-t border-line">
+            <EditableField
+              label="How did you hear about us?"
+              value={biz.referral_source}
+              display={REFERRAL_OPTIONS.find((o) => o.value === biz.referral_source)?.label ?? biz.referral_source}
+              options={REFERRAL_OPTIONS}
+              onSave={saveField("referral_source")}
+            />
+            {biz.referral_source === "others" && (
+              <EditableField label="Please specify" value={biz.referral_source_other} onSave={saveField("referral_source_other")} />
+            )}
+          </div>
         </Section>
 
         <Section title="Documents">

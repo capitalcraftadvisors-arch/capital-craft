@@ -162,11 +162,19 @@ export async function POST(req: NextRequest) {
       // can reject a co-applicant that reuses it.
       const { data: app, error: loadErr } = await supabase
         .from("epc_applications")
-        .select("id, epc_business_id, current_step, borrower_mobile, borrower_email, plant_use_type")
+        .select("id, epc_business_id, current_step, status, borrower_mobile, borrower_email, plant_use_type, submitted_at, edit_locked, edit_allow, aadhaar_front_path, aadhaar_back_path, project_size, total_project_cost, loan_amount_required, selected_tenure_years, attention_status")
         .eq("id", appId)
         .maybeSingle();
       if (loadErr) return err(loadErr.message, 500);
       if (!app || app.epc_business_id !== claims.business_id) return err("forbidden", 403);
+      // A submitted file is LOCKED. The Capital Craft team opens editing by
+      // granting specific rows (edit_allow, set from the Message-to-EPC window);
+      // a resubmit is allowed only while that grant is non-empty, and is cleared
+      // below so the grant is single-use. (The first submit is never locked.)
+      const grant = Array.isArray((app as any).edit_allow) ? ((app as any).edit_allow as string[]) : [];
+      if ((app as any).submitted_at && (app as any).edit_locked && grant.length === 0) {
+        return err("This application is locked. The Capital Craft team will open it for edits when a change is needed.", 403);
+      }
 
       // Page 2 — documents + OCR results (all optional-shaped; server
       // validates what's present).
@@ -209,21 +217,55 @@ export async function POST(req: NextRequest) {
           ? b.rooftop_photo_gps
           : null;
 
-      // Page 3 — project + loan + tenure.
-      const project_size         = numOrNull(b.project_size);
-      const total_project_cost   = numOrNull(b.total_project_cost);
-      const loan_amount_required = numOrNull(b.loan_amount_required);
-      const selected_tenure_years = numOrNull(b.selected_tenure_years);
-      const selected_monthly_emi  = numOrNull(b.selected_monthly_emi);
-      const selected_subsidy_emi  = numOrNull(b.selected_subsidy_emi);
+      // An EDIT re-submit (client sets edit:true) only touches the rows Capital
+      // Craft opened for the EPC — it must NOT be blocked by, or overwrite, the
+      // project/loan/tenure/Aadhaar fields that are outside that scope (and may be
+      // blank on legacy/seeded rows). So on an edit we coalesce every such field
+      // with the value already stored, and skip the first-submit "required" gates.
+      const isEdit = b.edit === true;
+      const prevSize = numOrNull((app as any).project_size);
+      const prevCost = numOrNull((app as any).total_project_cost);
+      const prevLoan = numOrNull((app as any).loan_amount_required);
+      const prevTenure = numOrNull((app as any).selected_tenure_years);
+
+      // Page 3 — project + loan + tenure (coalesced with stored on an edit).
+      const project_size         = numOrNull(b.project_size)         ?? (isEdit ? prevSize : null);
+      const total_project_cost   = numOrNull(b.total_project_cost)   ?? (isEdit ? prevCost : null);
+      const loan_amount_required = numOrNull(b.loan_amount_required) ?? (isEdit ? prevLoan : null);
+      // A 0/invalid tenure (the chatbot sends 0 when nothing was picked) must NOT
+      // be written — the column has a CHECK (1..5). Treat it as absent → coalesce
+      // to the stored value on an edit, else null (the fresh-submit gate catches it).
+      const bodyTenure = numOrNull(b.selected_tenure_years);
+      const selected_tenure_years = (bodyTenure != null && [1, 2, 3, 4, 5].includes(bodyTenure))
+        ? bodyTenure
+        : (isEdit ? prevTenure : null);
+      // EMI figures only make sense with a tenure — null them out otherwise.
+      const selected_monthly_emi  = selected_tenure_years != null ? numOrNull(b.selected_monthly_emi) : null;
+      const selected_subsidy_emi  = selected_tenure_years != null ? numOrNull(b.selected_subsidy_emi) : null;
       const central_subsidy       = numOrNull(b.central_subsidy);
 
-      if (project_size === null || project_size <= 0) return err("Project size is required.", 400);
-      if (total_project_cost === null || total_project_cost <= 0) return err("Total project cost is required.", 400);
-      if (loan_amount_required === null || loan_amount_required <= 0) return err("Loan amount is required.", 400);
-      if (loan_amount_required > total_project_cost) return err("Loan amount cannot exceed project cost.", 400);
-      if (selected_tenure_years === null || ![1, 2, 3, 4, 5].includes(selected_tenure_years)) {
-        return err("Select a tenure between 1 and 5 years.", 400);
+      if (!isEdit) {
+        if (project_size === null || project_size <= 0) return err("Project size is required.", 400);
+        if (total_project_cost === null || total_project_cost <= 0) return err("Total project cost is required.", 400);
+        if (loan_amount_required === null || loan_amount_required <= 0) return err("Loan amount is required.", 400);
+        if (selected_tenure_years === null || ![1, 2, 3, 4, 5].includes(selected_tenure_years)) {
+          return err("Select a tenure between 1 and 5 years.", 400);
+        }
+      }
+      // Enforce loan ≤ cost only when this submission actually CHANGES the loan
+      // amount or project cost (so a doc-only edit re-sending the hydrated figures
+      // unchanged is never blocked by a pre-existing inconsistency it can't edit).
+      const financialsChanged = total_project_cost !== prevCost || loan_amount_required !== prevLoan;
+      if (financialsChanged && loan_amount_required != null && total_project_cost != null && loan_amount_required > total_project_cost) {
+        return err("Loan amount cannot exceed project cost.", 400);
+      }
+      // A blank profile can't be FIRST-submitted — the applicant's Aadhaar (front &
+      // back) is the minimum. Accept it from this submit or already on the app; on
+      // an edit it's coalesced (and the gate below only runs for a fresh submit).
+      const aadhaarFront = strOrNull(b.aadhaar_front_path) ?? (app as any).aadhaar_front_path;
+      const aadhaarBack  = strOrNull(b.aadhaar_back_path)  ?? (app as any).aadhaar_back_path;
+      if (!isEdit && (!aadhaarFront || !aadhaarBack)) {
+        return err("Please upload the applicant's Aadhaar (front and back) before submitting.", 400);
       }
 
       const now = new Date().toISOString();
@@ -308,10 +350,25 @@ export async function POST(req: NextRequest) {
           } : {}),
           step3_completed_at: now,
           step5_completed_at: now,
-          // Enter the pipeline exactly like an admin-created application.
-          status: "submitted",
-          submitted_at: now,
-          current_step: 6,
+          // A RESUBMIT (the app was already submitted once) marks the case
+          // "Updated" on the EPC portal + floats it up by recency of change.
+          ...((app as any).submitted_at ? { epc_updated_at: now } : {}),
+          // The EPC re-submitting an edited application AUTO-RESOLVES any open
+          // attention — editing IS the fix, so they never mark it resolved by
+          // hand. Notify the admin via epc_last_activity_at (unseen update).
+          ...((app as any).attention_status === "open" ? {
+            attention_status: "resolved", attention_resolved_at: now,
+            attention_resolved_by: "epc", epc_last_activity_at: now,
+          } : {}),
+          // A FRESH submit enters the pipeline as "submitted". An EDIT re-submit
+          // must NOT move the file backward — an approved/disbursed/rfd app stays
+          // where it is (only a still-draft app becomes "submitted"). Always LOCK
+          // and clear the (single-use) grant.
+          ...(!isEdit || (app as any).status === "draft"
+            ? { status: "submitted", submitted_at: now, current_step: 6 }
+            : {}),
+          edit_locked: true,
+          edit_allow: [],
         })
         .eq("id", appId);
       if (updErr) return err(`Submit failed: ${updErr.message}`, 500);

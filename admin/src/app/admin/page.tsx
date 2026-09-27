@@ -18,6 +18,7 @@ import NotificationBell from "@/components/NotificationBell";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
 import { getCached, setCached, invalidate } from "@/lib/list-cache";
 import { useAdminNames } from "@/lib/use-admin-names";
+import { useEpcUpdates } from "@/lib/use-epc-updates";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import LoginWelcome from "@/components/LoginWelcome";
 import {
@@ -1262,6 +1263,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     aadhaar_number_masked: string | null;
     borrower_pan: string | null;
     borrower_mobile: string | null;
+    borrower_father_name: string | null;
     loan_display_id: string | null;
     // Loan amount lives in loan_amount_required (Step 3). loan_amount is
     // the legacy 0001 column — read both, prefer the newer one.
@@ -1295,9 +1297,15 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     // Which lender decided — powers the Lender filter (display/filter only).
     approved_lender: string | null;
     rejected_lender: string | null;
+    // "Message to EPC" attention (0082) — for the "EPC updates" notice.
+    attention_status: string | null;
+    attention_resolved_at: string | null;
+    epc_last_activity_at: string | null;
+    msg_admin_seen_at: string | null;
     epc_business: { contact_name: string | null; trade_name: string | null; legal_name: string | null; epc_display_id: string | null } | null;
   };
   const adminNames = useAdminNames();
+  const { loanCounts } = useEpcUpdates();   // per-admin unseen EPC-reply counts
   const [rows, setRows] = useState<Row[]>([]);
   // 6h — per-application latest lender status label (most-recent event).
   const [lenderLatest, setLenderLatest] = useState<Record<string, string>>({});
@@ -1391,7 +1399,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         .from("epc_applications")
         .select(
           "id, borrower_name, aadhaar_name, aadhaar_number_masked, loan_display_id, " +
-          "borrower_pan, borrower_mobile, " +
+          "borrower_pan, borrower_mobile, borrower_father_name, " +
           "loan_amount, loan_amount_required, " +
           "sanctioned_amount, first_disbursement_amount, first_disbursement_date, second_disbursement_amount, " +
           // NOTE: rfd_at is intentionally NOT selected — it doesn't exist until
@@ -1401,6 +1409,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
           "aadhaar_front_path, aadhaar_back_path, ebill_path, proforma_invoice_path, " +
           "rooftop_photo_path, bank_statement_path, customer_photo_path, bill_on_applicant_name, " +
           "coapp_pan_path, coapp_aadhaar_front_path, coapp_aadhaar_back_path, " +
+          "attention_status, attention_resolved_at, epc_last_activity_at, msg_admin_seen_at, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .order("created_at", { ascending: false });
@@ -1426,17 +1435,31 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
   function displayBorrower(r: Row): string {
     return r.borrower_name || r.aadhaar_name || "—";
   }
-  // Applications that share a PAN or mobile with another loan — flagged ⚠ so
-  // duplicates get caught before double-work.
+  // Applications that look like the SAME person as another loan — flagged ⚠ so
+  // duplicates get caught before double-work. A shared PAN or mobile is a
+  // definitive match; a shared name is only flagged when the FATHER'S name also
+  // matches (so two unrelated people with the same name aren't falsely flagged).
+  const dupNorm = (s: string | null | undefined) => (s || "").toLowerCase().replace(/\s+/g, " ").trim();
+  const dupNameKey = (r: Row) => {
+    const nm = dupNorm(r.borrower_name || r.aadhaar_name), fn = dupNorm(r.borrower_father_name);
+    return nm && fn ? `nf:${nm}|${fn}` : "";
+  };
   const dupKeys = useMemo(() => {
     const count = new Map<string, number>();
+    const bump = (k: string) => { if (k) count.set(k, (count.get(k) || 0) + 1); };
     for (const r of rows) {
-      const k = (r.borrower_pan || "").toUpperCase().trim() || (r.borrower_mobile || "").trim();
-      if (k) count.set(k, (count.get(k) || 0) + 1);
+      bump((r.borrower_pan || "").toUpperCase().trim());
+      bump((r.borrower_mobile || "").trim());
+      bump(dupNameKey(r));
     }
     return new Set([...count.entries()].filter(([, c]) => c > 1).map(([k]) => k));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
-  const isDup = (r: Row) => { const k = (r.borrower_pan || "").toUpperCase().trim() || (r.borrower_mobile || "").trim(); return !!k && dupKeys.has(k); };
+  const isDup = (r: Row) => {
+    const pan = (r.borrower_pan || "").toUpperCase().trim(); if (pan && dupKeys.has(pan)) return true;
+    const mob = (r.borrower_mobile || "").trim(); if (mob && dupKeys.has(mob)) return true;
+    const nf = dupNameKey(r); return !!nf && dupKeys.has(nf);
+  };
   // Document completeness from the *_path columns on the row. Co-applicant docs
   // count only when a co-applicant exists (bill_on_applicant_name === false).
   // Applicant PAN lives in user_application_docs (not fetched here), so it's not
@@ -1564,7 +1587,12 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
       });
     }
-    return out.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const upd = (r: Row) => !!r.epc_last_activity_at && (!r.msg_admin_seen_at || r.msg_admin_seen_at < r.epc_last_activity_at);
+    return out.sort((a, b) => {
+      const au = upd(a) ? 1 : 0, bu = upd(b) ? 1 : 0; // EPC-updated profiles float up
+      if (au !== bu) return bu - au;
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, q, categoryFilter, statusFilter, epcFilter, lenderFilter, dateFrom, dateTo, sortKey, period, pFrom, pTo]);
 
@@ -1605,13 +1633,14 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         STAGE[loanStage(r)] ?? loanStage(r),
         `${d.have}/${d.need}`,
         r.created_at,
-        r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : (r.created_by === "admin" ? "Admin" : "EPC"),
+        r.created_by === "epc" ? "EPC" : r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : "Admin",
         r.first_disbursement_amount ?? "",
         r.second_disbursement_amount ?? "",
       ];
     });
     downloadCsv("loan-applications", header, rows);
   }
+
 
   return (
     <>
@@ -1675,15 +1704,15 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
           {/* Percentage widths — the table fills the page evenly and never
               needs a horizontal scrollbar. */}
           <colgroup>
-            <col style={{ width: "17%" }} />
-            <col style={{ width: "14%" }} />
+            <col style={{ width: "15%" }} />
+            <col style={{ width: "13%" }} />
             <col style={{ width: "9%"  }} />
             <col style={{ width: "11%" }} />
+            <col style={{ width: "9%"  }} />
+            <col style={{ width: "9%"  }} />
             <col style={{ width: "10%" }} />
-            <col style={{ width: "9%"  }} />
-            <col style={{ width: "11%" }} />
             <col style={{ width: "8%"  }} />
-            <col style={{ width: "11%" }} />
+            <col style={{ width: "16%" }} />
           </colgroup>
           {/* Everything centred except Borrower details, which stays left. */}
           <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-[#5a8a76]">
@@ -1729,7 +1758,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                     <div className="min-w-0">
                       <p className="text-[13px] font-semibold text-[#0f3d2e] truncate flex items-center gap-1">
                         <span className="truncate">{displayBorrower(r)}</span>
-                        {isDup(r) && <span title="Shares a PAN / mobile with another application — possible duplicate" className="text-[#d97706] shrink-0">⚠</span>}
+                        {isDup(r) && <span title="Same person as another application — matches on PAN / mobile, or name + father's name — possible duplicate" className="text-[#d97706] shrink-0">⚠</span>}
                       </p>
                       {r.loan_display_id && (
                         <p className="text-[11px] font-mono text-[#185fa5] mt-0.5">{r.loan_display_id}</p>
@@ -1835,20 +1864,37 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                   <p className="text-[11px] text-[#5a8a76] mt-0.5">{fmtAddedTime(r.created_at)}</p>
                 </td>
                 <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">
-                  {r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : (r.created_by === "admin" ? "Admin" : "EPC")}
+                  {r.created_by === "epc" ? "EPC" : r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : "Admin"}
                 </td>
-                {/* Action: Email (send to lender). stopPropagation so the
-                    button doesn't also trigger the row's navigate. */}
+                {/* Action: Email (send to lender) + Message to EPC (with this
+                    admin's unseen-reply count). stopPropagation so the buttons
+                    don't also trigger the row's navigate. */}
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                  <button
-                    type="button"
-                    onClick={() => setEmailRow(r)}
-                    title="Send this application to a lender by email"
-                    className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 bg-[#178a5c] text-white hover:bg-[#12734c] transition-colors"
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
-                    Email
-                  </button>
+                  <div className="inline-flex items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEmailRow(r)}
+                      title="Send this application to a lender by email"
+                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 bg-[#178a5c] text-white hover:bg-[#12734c] transition-colors"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
+                      Email
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/admin/app/${r.id}/messages` as any)}
+                      title="Message to EPC"
+                      aria-label="Message to EPC"
+                      className="relative grid place-items-center w-8 h-8 rounded-input border border-[#cdeadd] bg-white text-[#178a5c] hover:bg-[#f0faf5] transition-colors"
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                      {(loanCounts.get(r.id) ?? 0) > 0 && (
+                        <span className="absolute -top-1.5 -right-1.5 min-w-[17px] h-[17px] px-1 grid place-items-center rounded-full bg-[#dc2626] text-white text-[10px] font-bold leading-none">
+                          {(loanCounts.get(r.id) ?? 0) > 9 ? "9+" : (loanCounts.get(r.id) ?? 0)}
+                        </span>
+                      )}
+                    </button>
+                  </div>
                 </td>
               </tr>
               );
@@ -1881,6 +1927,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
 function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
   const router = useRouter();
   const adminNames = useAdminNames();
+  const { insCounts } = useEpcUpdates();   // per-admin unseen EPC-reply counts
   type Row = {
     id: string;
     insurance_display_id: string | null;
@@ -1905,6 +1952,11 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
     status: string;
     created_at: string;
     created_by_user_id: string | null;
+    // "Message to EPC" attention (0082) — for the "EPC updates" notice.
+    attention_status: string | null;
+    attention_resolved_at: string | null;
+    epc_last_activity_at: string | null;
+    msg_admin_seen_at: string | null;
     epc_business: { contact_name: string | null; trade_name: string | null; legal_name: string | null; epc_display_id: string | null } | null;
   };
   const [rows, setRows] = useState<Row[]>([]);
@@ -1932,6 +1984,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
           "id, insurance_display_id, aadhaar_name, pan_number, sum_insured, invoice_confirmed_amount, " +
           "invoice_amount, insurance_partner, policy_from_date, policy_to_date, policy_path, status, created_at, created_by_user_id, " +
           "pan_path, aadhaar_front_path, aadhaar_back_path, plant_photo_path, ebill_path, invoice_path, " +
+          "attention_status, attention_resolved_at, epc_last_activity_at, msg_admin_seen_at, " +
           "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
         )
         .order("created_at", { ascending: false });
@@ -2085,7 +2138,10 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
       return true;
     });
 
+    const upd = (r: Row) => !!r.epc_last_activity_at && (!r.msg_admin_seen_at || r.msg_admin_seen_at < r.epc_last_activity_at);
     return out.sort((a, b) => {
+      const au = upd(a) ? 1 : 0, bu = upd(b) ? 1 : 0; // EPC-updated profiles float up
+      if (au !== bu) return bu - au;
       const da = daysOf(a), db = daysOf(b);
       const ha = da !== null, hb = db !== null;
       if (ha !== hb) return ha ? -1 : 1;
@@ -2286,10 +2342,22 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
                 </td>
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <div className="flex flex-col gap-1.5">
-                    <button type="button" onClick={() => editRow(r)}
-                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5] inline-flex items-center justify-center gap-1.5">
-                      Edit
-                    </button>
+                    <div className="flex items-center justify-center gap-1.5">
+                      <button type="button" onClick={() => editRow(r)}
+                        className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5] inline-flex items-center justify-center gap-1.5">
+                        Edit
+                      </button>
+                      <button type="button" onClick={() => router.push(`/admin/insurance/${r.id}/messages` as any)}
+                        title="Message to EPC" aria-label="Message to EPC"
+                        className="relative grid place-items-center w-8 h-8 rounded-input border border-[#cdeadd] bg-white text-[#178a5c] hover:bg-[#f0faf5] transition-colors">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        {(insCounts.get(r.id) ?? 0) > 0 && (
+                          <span className="absolute -top-1.5 -right-1.5 min-w-[17px] h-[17px] px-1 grid place-items-center rounded-full bg-[#dc2626] text-white text-[10px] font-bold leading-none">
+                            {(insCounts.get(r.id) ?? 0) > 9 ? "9+" : (insCounts.get(r.id) ?? 0)}
+                          </span>
+                        )}
+                      </button>
+                    </div>
                     {/* Download Policy — only when a policy document exists. */}
                     {r.policy_path && (
                       <button type="button" disabled={zipBusy === r.id} onClick={() => void downloadPolicy(r)}

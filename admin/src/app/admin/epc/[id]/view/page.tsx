@@ -104,6 +104,7 @@ function DOC_LABEL(cat: string): string {
     extra_doc: "Extra doc",
     admin_extra: "Extra document",
     cancelled_cheque: "Cheque",
+    bank_statement: "Bank statement",
     stakeholder_pan: "Member PAN",
     stakeholder_aadhaar: "Aadhaar (legacy)",
     stakeholder_aadhaar_front: "Aadhaar F",
@@ -254,6 +255,18 @@ function Inner() {
   async function openDoc(id: string) {
     const u = await getDocumentUrl(id);
     if (u) window.open(u, "_blank");
+  }
+
+  // Save the document (server signs with Content-Disposition: attachment).
+  async function downloadDoc(id: string) {
+    const u = await getDocumentUrl(id, { download: true });
+    if (!u) return;
+    const a = document.createElement("a");
+    a.href = u;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
 
   // Remove an EPC document (epc_documents row + its GCS object) — immediate.
@@ -707,6 +720,7 @@ function Inner() {
               <KV k="Account" v={maskAcct(biz.bank_account_number)} />
               <KV k="IFSC" v={biz.bank_ifsc} />
               <KV k="Bank" v={biz.bank_name} />
+              <KV k="GST username" v={biz.gst_username} />
             </SectionCard>
           </div>
 
@@ -726,6 +740,7 @@ function Inner() {
                   businessType={biz.business_type as string | null}
                   openDoc={openDoc}
                   removeDoc={removeDoc}
+                  downloadDoc={downloadDoc}
                   eyeIcon={I.eye}
                 />
               )}
@@ -1177,7 +1192,7 @@ const STAKEHOLDER_CATS = [
   "stakeholder_aadhaar_back",
   "stakeholder_aadhaar",
 ] as const;
-const BANK_CATS   = ["cancelled_cheque"] as const;
+const BANK_CATS   = ["cancelled_cheque", "bank_statement"] as const;
 const OFFICE_CATS = ["office_exterior", "office_interior", "office_selfie"] as const;
 
 type DocSlot = { key: string; label: string; doc: Doc | null };
@@ -1204,13 +1219,14 @@ function buildSlots(
 }
 
 function DocumentsBySteps({
-  docs, stakeholders, businessType, openDoc, removeDoc, eyeIcon,
+  docs, stakeholders, businessType, openDoc, removeDoc, downloadDoc, eyeIcon,
 }: {
   docs: Doc[];
   stakeholders: Array<{ id: string; name?: string; designation?: string; mobile?: string; email?: string }>;
   businessType: string | null;
   openDoc: (id: string) => void;
   removeDoc: (id: string) => void;
+  downloadDoc: (id: string) => void;
   eyeIcon: React.ReactNode;
 }) {
   // Bucket docs by category family.
@@ -1245,7 +1261,7 @@ function DocumentsBySteps({
     ? ["pan_business", "gstin", "extra_doc"]
     : ["pan_business", "gstin"];
   const bizSlots    = buildSlots(bizDocs, bizExpected, (c) => businessDocLabel(c, businessType));
-  const bankSlots   = buildSlots(bankDocs, ["cancelled_cheque"], () => "Empty cheque copy / picture");
+  const bankSlots   = buildSlots(bankDocs, ["cancelled_cheque"], (c) => c === "cancelled_cheque" ? "Empty cheque copy / picture" : DOC_LABEL(c));
   const officeSlots = buildSlots(
     officeDocs,
     ["office_exterior", "office_interior", "office_selfie"],
@@ -1256,7 +1272,7 @@ function DocumentsBySteps({
   return (
     <div className="space-y-4">
       <StepBlock title="Business (Step 2)">
-        <DocGrid slots={toViewSlots(bizSlots, openDoc, removeDoc)} eyeIcon={eyeIcon} />
+        <DocGrid slots={toViewSlots(bizSlots, openDoc, removeDoc, downloadDoc)} eyeIcon={eyeIcon} />
       </StepBlock>
 
       {(stakeholderGroups.length > 0 || orphanStakeholderDocs.length > 0) && (
@@ -1271,6 +1287,7 @@ function DocumentsBySteps({
                   (c) => stakeholderDocLabel(businessType, i, stakeholders.length, c))}
                 openDoc={openDoc}
                 removeDoc={removeDoc}
+                downloadDoc={downloadDoc}
                 eyeIcon={eyeIcon}
               />
             ))}
@@ -1280,6 +1297,7 @@ function DocumentsBySteps({
                 slots={buildSlots(orphanStakeholderDocs, [], (c) => plainStakeholderCatLabel(c))}
                 openDoc={openDoc}
                 removeDoc={removeDoc}
+                downloadDoc={downloadDoc}
                 eyeIcon={eyeIcon}
               />
             )}
@@ -1288,16 +1306,16 @@ function DocumentsBySteps({
       )}
 
       <StepBlock title="Bank (Step 4)">
-        <DocGrid slots={toViewSlots(bankSlots, openDoc, removeDoc)} eyeIcon={eyeIcon} />
+        <DocGrid slots={toViewSlots(bankSlots, openDoc, removeDoc, downloadDoc)} eyeIcon={eyeIcon} />
       </StepBlock>
 
       <StepBlock title="Office (Step 5)">
-        <DocGrid slots={toViewSlots(officeSlots, openDoc, removeDoc)} eyeIcon={eyeIcon} />
+        <DocGrid slots={toViewSlots(officeSlots, openDoc, removeDoc, downloadDoc)} eyeIcon={eyeIcon} />
       </StepBlock>
 
       {otherDocs.length > 0 && (
         <StepBlock title="Other">
-          <DocGrid slots={toViewSlots(buildSlots(otherDocs, [], (c) => DOC_LABEL(c)), openDoc, removeDoc)} eyeIcon={eyeIcon} />
+          <DocGrid slots={toViewSlots(buildSlots(otherDocs, [], (c) => DOC_LABEL(c)), openDoc, removeDoc, downloadDoc)} eyeIcon={eyeIcon} />
         </StepBlock>
       )}
     </div>
@@ -1308,29 +1326,32 @@ function DocumentsBySteps({
 // `doc` present → eye-View button; absent → greyed "Not uploaded".
 function toViewSlots(
   slots: DocSlot[], openDoc: (id: string) => void, removeDoc?: (id: string) => void,
+  downloadDoc?: (id: string) => void,
 ): ViewDocSlot[] {
   return slots.map((s) => ({
     key: s.key,
     label: s.label,
     title: s.doc?.file_name ?? undefined,
     onView: s.doc ? () => openDoc(s.doc!.id) : undefined,
+    onDownload: s.doc && downloadDoc ? () => downloadDoc(s.doc!.id) : undefined,
     onDelete: s.doc && removeDoc ? () => removeDoc(s.doc!.id) : undefined,
   }));
 }
 
 function StakeholderDocs({
-  header, slots, openDoc, removeDoc, eyeIcon,
+  header, slots, openDoc, removeDoc, downloadDoc, eyeIcon,
 }: {
   header: string;
   slots: DocSlot[];
   openDoc: (id: string) => void;
   removeDoc?: (id: string) => void;
+  downloadDoc?: (id: string) => void;
   eyeIcon: React.ReactNode;
 }) {
   return (
     <div>
       <p className="text-[12px] font-semibold text-[#0f3d2e] mb-1.5">{header}</p>
-      <DocGrid slots={toViewSlots(slots, openDoc, removeDoc)} eyeIcon={eyeIcon} />
+      <DocGrid slots={toViewSlots(slots, openDoc, removeDoc, downloadDoc)} eyeIcon={eyeIcon} />
     </div>
   );
 }

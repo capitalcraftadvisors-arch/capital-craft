@@ -15,6 +15,7 @@ export type LoanAction =
   | "approved"
   | "rejected"
   | "status_change"
+  | "email_sent"
   | "field_edit";
 
 export async function logLoanActivityServer(

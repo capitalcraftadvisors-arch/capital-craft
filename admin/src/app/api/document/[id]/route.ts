@@ -69,6 +69,12 @@ function err(message: string, status: number) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
+// Last path segment (the stored file name) for the download's saved filename.
+function baseName(p: string): string {
+  const seg = p.split("/").pop() || "document";
+  return seg || "document";
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } },
@@ -88,7 +94,14 @@ export async function GET(
     const denial = requireAdminForCategory(doc, claims.business_type);
     if (denial) return denial;
 
-    const url = await getSignedReadUrl(doc.storage_path, 3600);
+    // ?download=1 → force a save (Content-Disposition: attachment) under the
+    // object's own file name; otherwise a plain inline-viewable URL.
+    const download = req.nextUrl.searchParams.get("download") === "1";
+    const url = await getSignedReadUrl(
+      doc.storage_path,
+      3600,
+      download ? { downloadName: baseName(doc.storage_path) } : undefined,
+    );
     return NextResponse.json({ ok: true, url });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);

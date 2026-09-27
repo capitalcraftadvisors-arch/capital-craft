@@ -59,8 +59,12 @@ export async function uploadDocument(
 
 // New signature: takes a doc id, not a storage path. The server looks up the
 // path via RLS-protected query, then mints a signed GCS URL.
-export async function getDocumentUrl(docId: string): Promise<string | null> {
-  const res = await fetch(`/api/document/${docId}`, {
+export async function getDocumentUrl(
+  docId: string,
+  opts?: { download?: boolean },
+): Promise<string | null> {
+  const qs = opts?.download ? "?download=1" : "";
+  const res = await fetch(`/api/document/${docId}${qs}`, {
     headers: { Authorization: `Bearer ${getToken() ?? ""}` },
   });
   if (!res.ok) return null;

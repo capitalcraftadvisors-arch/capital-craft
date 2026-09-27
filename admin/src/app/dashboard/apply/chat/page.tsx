@@ -20,8 +20,9 @@ import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { getToken } from "@/lib/auth";
 import { fetchEpcName } from "@/lib/epc-name";
-import { supabase } from "@/lib/supabase";
 import { getDocumentUrl } from "@/lib/storage";
+import { hydrateLoanForm } from "@/lib/loan-form";
+import EditTable from "@/components/EditTable";
 import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES, formatRupees } from "@/lib/emi";
 
 const MOBILE_RE = /^[6-9]\d{9}$/;
@@ -78,7 +79,7 @@ const SCRIPT: Turn[] = [
   { id: "coapp_docs", bot: "Please add the co-applicant's Aadhaar and PAN.", kind: "coapp_docs", when: coappNeeded },
   { id: "coapp_mobile", bot: "Co-applicant's 10-digit mobile number?", kind: "text", field: "coapp_mobile", placeholder: "10-digit mobile", when: coappNeeded, validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile number.") },
   { id: "quotation", bot: "Please upload the quotation / proforma invoice.", kind: "quotation" },
-  { id: "borrower_email", bot: "Applicant's email address?", kind: "text", field: "borrower_email", placeholder: "username" },
+  { id: "borrower_email", bot: "Applicant's email address?", kind: "text", field: "borrower_email", placeholder: "name@example.com" },
   { id: "install_pincode", bot: "Installation pincode?", kind: "pincode", field: "install_pincode", placeholder: "6-digit pincode" },
   { id: "system_type", bot: "Type of solar system?", kind: "choice", field: "system_type", choices: [
     { value: "on_grid", label: "On-Grid", sub: "Connected to the grid" },
@@ -112,8 +113,6 @@ const PICK_LABEL: Record<string, string> = {
   borrower_email: "Email", install_pincode: "Pincode", system_type: "System type", plant_use_type: "Property use",
   quotation: "Quotation", loan_amount: "Loan amount", loan_config: "Loan configuration",
 };
-const SYS_LABEL: Record<string, string> = { on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" };
-const USE_LABEL: Record<string, string> = { residential: "Residential", commercial: "Commercial" };
 
 // Fields whose typed amount is echoed in Indian words under the input.
 const AMOUNT_FIELDS = new Set(["loan_amount_required"]);
@@ -139,6 +138,14 @@ function amountInWords(n: number): string {
 const uidGen = () => "m" + Math.random().toString(36).slice(2, 9);
 const nowLabel = () => new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 
+// Falling confetti pieces for the success screen (celebratory motion).
+const CONFETTI = Array.from({ length: 18 }).map((_, i) => ({
+  left: `${(i * 5.6 + 2) % 98}%`,
+  color: ["#1db877", "#5b8def", "#f0b429", "#ffffff", "#93b4ff", "#ff8fb0"][i % 6],
+  delay: `${((i * 0.31) % 3).toFixed(2)}s`,
+  dur: `${(3 + (i % 5) * 0.7).toFixed(1)}s`,
+}));
+
 export default function EpcLoanChatPage() {
   return (
     <AuthGuard allow={["approved"]}>
@@ -156,7 +163,8 @@ function ChatInner() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<{ loanId: string | null } | null>(null);
+  const [done, setDone] = useState<{ loanId: string | null; borrowerName: string; edit: boolean } | null>(null);
+  const [epcName, setEpcName] = useState("");
   // Edit mode: the active script is stateful (apply = SCRIPT; edit = intro then a
   // dynamically-built subset). `ready` gates the first question until the mount
   // effect has decided the mode (and hydrated an existing application for edit).
@@ -164,6 +172,9 @@ function ChatInner() {
   const [editMode, setEditMode] = useState(false);
   const [ready, setReady] = useState(false);
   const [docRows, setDocRows] = useState<{ id: string; category: string; storage_path: string | null }[]>([]);
+  // Documents the EPC was asked to fix (from a "Message to EPC" deep-link) — the
+  // edit picker opens with them pre-ticked.
+  const [editDocs, setEditDocs] = useState<string[]>([]);
   const [undoStack, setUndoStack] = useState<{ msgs: Msg[]; form: Form; idx: number }[]>([]);
   // Loan-config step (subsidy + tenure), mirroring the team chatbot's last step.
   const [subsidyCase, setSubsidyCase] = useState<"subsidy" | "non_subsidy">("subsidy");
@@ -195,15 +206,27 @@ function ChatInner() {
         const qid = q.get("id")!;
         setEditMode(true);
         setAppId(qid);
-        setScript(EDIT_INTRO);
-        await hydrate(qid);
+        const allow = await hydrate(qid);
+        const dtag = q.get("doc");
+        const urlKeys = dtag ? dtag.split(",").map((s) => s.trim()).filter(Boolean) : [];
+        // Capital Craft's grant (edit_allow on the profile) is authoritative and
+        // limits the edit to exactly those rows; the deep-link's doc keys are a
+        // fallback. With no grant (an unlocked draft) the full picker shows.
+        const grant = allow.length ? allow : urlKeys;
+        if (grant.length) {
+          setEditDocs(grant);
+          setScript(buildGrantedScript(grant));
+        } else {
+          setScript(EDIT_INTRO);
+        }
       }
       const epcName = await fetchEpcName();
+      if (epcName && epcName !== "there") setEpcName(epcName);
       const name = epcName && epcName !== "there" ? ` ${epcName}` : "";
       pushBot(`नमस्ते${name}! 🙏`, "g1");
       setTimeout(() => pushBot(
         editing
-          ? "Let's update this application. I'll only ask about what you choose to change — everything else stays as it is."
+          ? "Let's update this application. I'll take you through the details, then you can re-submit."
           : "Welcome to Capital Craft. I'll help you complete your loan application in a few quick steps.",
         "g2"), 250);
       setReady(true);
@@ -223,7 +246,7 @@ function ChatInner() {
     // seed from the value already on the application (email loses its @gmail.com).
     let pre = prefillRef.current; prefillRef.current = "";
     if (!pre && turn.field && form[turn.field] && (turn.kind === "text" || turn.kind === "pincode" || turn.kind === "number")) {
-      pre = turn.id === "borrower_email" ? String(form[turn.field]).replace(/@gmail\.com$/i, "") : String(form[turn.field]);
+      pre = String(form[turn.field]);
     }
     setInput(pre);
     if ((turn.kind === "text" || turn.kind === "pincode" || turn.kind === "number")) setTimeout(() => inputRef.current?.focus(), 350);
@@ -259,43 +282,14 @@ function ChatInner() {
   // ── Edit mode: hydrate an existing application into the form ────────────────
   // Loads every persisted field + which documents are on file, so re-asked
   // questions come pre-filled and the picker can show current values + View.
-  async function hydrate(id: string) {
+  async function hydrate(id: string): Promise<string[]> {
     try {
-      const [{ data: la }, { data: docs }] = await Promise.all([
-        supabase().from("epc_applications").select("*").eq("id", id).maybeSingle(),
-        supabase().from("user_application_docs").select("id, category, storage_path").eq("application_id", id),
-      ]);
-      const a = (la ?? {}) as Record<string, any>;
-      const p: Form = {};
-      const S = (k: string, v: any) => { if (v != null && String(v).trim() !== "") p[k] = String(v); };
-      S("borrower_mobile", a.borrower_mobile); S("borrower_name", a.borrower_name); S("borrower_email", a.borrower_email);
-      S("borrower_pan", a.borrower_pan); S("borrower_father_name", a.borrower_father_name);
-      S("aadhaar_name", a.aadhaar_name); S("aadhaar_dob", a.aadhaar_dob); S("aadhaar_gender", a.aadhaar_gender);
-      S("aadhaar_number", String(a.aadhaar_number ?? "").replace(/\D/g, "")); S("aadhaar_care_of", a.aadhaar_care_of); S("aadhaar_address", a.aadhaar_address);
-      S("aadhaar_front_path", a.aadhaar_front_path); S("aadhaar_back_path", a.aadhaar_back_path); S("aadhaar_face_path", a.aadhaar_face_path);
-      S("ebill_path", a.ebill_path); S("monthly_bill_amount", a.monthly_bill_amount); S("discom_name", a.discom_name);
-      S("ca_number", a.ca_number); S("ebill_address_line", a.ebill_address_line); S("ebill_name", a.ebill_name);
-      S("proforma_invoice_path", a.proforma_invoice_path); S("rooftop_photo_path", a.rooftop_photo_path);
-      S("install_pincode", a.install_pincode); S("install_state", a.install_state); S("install_district", a.install_district); S("install_city", a.install_city);
-      S("system_type", a.system_type); S("plant_use_type", a.plant_use_type);
-      S("project_size", a.project_size); S("project_size_unit", a.project_size_unit); S("total_project_cost", a.total_project_cost); S("loan_amount_required", a.loan_amount_required);
-      S("central_subsidy", a.central_subsidy); S("state_subsidy", a.state_subsidy); S("selected_tenure_years", a.selected_tenure_years);
-      S("loan_display_id", a.loan_display_id);
-      // Co-applicant
-      S("coapp_mobile", a.coapp_mobile); S("coapp_email", a.coapp_email); S("coapp_pan", a.coapp_pan); S("coapp_pan_path", a.coapp_pan_path);
-      S("coapp_name", a.coapp_name); S("coapp_dob", a.coapp_dob);
-      S("coapp_aadhaar_name", a.coapp_aadhaar_name); S("coapp_aadhaar_dob", a.coapp_aadhaar_dob); S("coapp_aadhaar_gender", a.coapp_aadhaar_gender);
-      S("coapp_aadhaar_number", String(a.coapp_aadhaar_number ?? "").replace(/\D/g, "")); S("coapp_aadhaar_care_of", a.coapp_aadhaar_care_of); S("coapp_aadhaar_address", a.coapp_aadhaar_address);
-      S("coapp_aadhaar_front_path", a.coapp_aadhaar_front_path); S("coapp_aadhaar_back_path", a.coapp_aadhaar_back_path);
-      // Photo + bank statement live in user_application_docs (not columns) — mark
-      // them on-file from their rows so the picker/doc-table know they exist.
-      const rows = ((docs ?? []) as { id: string; category: string; storage_path: string | null }[]);
-      const byCat = (c: string) => rows.find((d) => d.category === c);
-      const selfie = byCat("customer_photo"); if (selfie?.storage_path) S("customer_photo_path", selfie.storage_path);
-      const bank = byCat("bank_statement"); if (bank?.storage_path) S("bank_statement_path", bank.storage_path);
+      const { form: p, docRows: rows, row } = await hydrateLoanForm(id);
       setDocRows(rows);
       setForm((f) => ({ ...f, ...p }));
-    } catch { /* leave the form empty; the picker still lets them re-add docs */ }
+      // The Capital-Craft-granted edit scope (0085) — empty for an unlocked draft.
+      return Array.isArray(row.edit_allow) ? (row.edit_allow as string[]).filter((k) => typeof k === "string") : [];
+    } catch { return []; /* leave the form empty; the picker still lets them re-add docs */ }
   }
 
   // A when-stripped clone of a SCRIPT turn (edit mode always asks a chosen turn).
@@ -319,6 +313,12 @@ function ChatInner() {
     if (has("loan_config")) turns.push(cloneTurn("tenure"));
     turns.push(cloneTurn("consent"));
     return turns;
+  }
+  // When Capital Craft has opened specific rows (a grant), skip the pick-what-to-
+  // edit table and go straight into editing exactly those: confirm → the granted
+  // fields → consent.
+  function buildGrantedScript(keys: string[]): Turn[] {
+    return buildEditScript(keys).filter((t) => t.id !== "edit_picker");
   }
 
   // Undo — snapshot the state before each step so the RM can step back one
@@ -359,10 +359,9 @@ function ChatInner() {
     if (!turn) return;
     let v = input.trim();
     if (!v) { setError("This field is required."); return; }
-    // Email: the box collects only the part before @gmail.com (unless the RM
-    // typed a full address with its own domain).
+    // Email: a full address is entered as-is (no @gmail.com default — the EPC's
+    // customer may use any provider).
     if (turn.id === "borrower_email") {
-      v = v.includes("@") ? v : `${v}@gmail.com`;
       if (!EMAIL_RE.test(v)) { setError("Enter a valid email address."); return; }
     } else if (turn.validate) {
       const e = turn.validate(v); if (e) { setError(e); return; }
@@ -432,11 +431,9 @@ function ChatInner() {
       if (i < 0) return s;
       const snap = s[i];
       const f = script[ti].field;
-      // Prefill the box with the current value (email → the part before @gmail.com).
+      // Prefill the box with the current value.
       if (f && (script[ti].kind === "text" || script[ti].kind === "pincode" || script[ti].kind === "number")) {
-        let cur = form[f] || "";
-        if (turnId === "borrower_email") cur = cur.replace(/@gmail\.com$/i, "");
-        prefillRef.current = cur;
+        prefillRef.current = form[f] || "";
       }
       setMsgs(snap.msgs); setForm(snap.form); setIdx(snap.idx);
       setError(null);
@@ -445,6 +442,12 @@ function ChatInner() {
   }
 
   async function giveConsent() {
+    // A blank profile can't be submitted — the Aadhaar (front & back) is the
+    // minimum. Block here with a clear message before consent/submit.
+    if (!form.aadhaar_front_path || !form.aadhaar_back_path) {
+      setError("Please upload the applicant's Aadhaar (front & back) before submitting.");
+      return;
+    }
     pushUser("Yes, the customer consents.");
     await submitApplication();
   }
@@ -472,6 +475,9 @@ function ChatInner() {
         headers: { ...auth(), "Content-Type": "application/json" },
         body: JSON.stringify({
           phase: "submit", id: appId,
+          // Edit re-submit: the server then only validates/writes what's in scope,
+          // never blocking on project/loan fields outside the granted rows.
+          edit: editMode,
           // Consent (collected at the very end) + the non-document details.
           consented: true,
           borrower_name: form.borrower_name || null,
@@ -524,14 +530,14 @@ function ChatInner() {
           total_project_cost: form.total_project_cost || null,
           loan_amount_required: form.loan_amount_required || null,
           central_subsidy: central,
-          selected_tenure_years: tenure,
-          selected_monthly_emi: monthlyEmi,
-          selected_subsidy_emi: subsidyEmi,
+          selected_tenure_years: tenure || null,
+          selected_monthly_emi: tenure ? monthlyEmi : null,
+          selected_subsidy_emi: tenure ? subsidyEmi : null,
         }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't submit the application."); return; }
-      setDone({ loanId: form.loan_display_id || null });
+      setDone({ loanId: form.loan_display_id || null, borrowerName: form.borrower_name || form.aadhaar_name || "your customer", edit: editMode });
     } catch (e) {
       setError((e as Error)?.message || "Network error.");
     } finally { setBusy(false); }
@@ -539,23 +545,50 @@ function ChatInner() {
 
   const progress = done ? 100 : Math.round((idx / Math.max(script.length, 1)) * 100);
 
-  // ── Success screen ─────────────────────────────────────────────────────────
+  // ── Success screen (premium + animated) ─────────────────────────────────────
   if (done) {
+    const title = done.edit ? "Application updated" : "Application filed successfully";
     return (
-      <div className="h-screen grid place-items-center px-5" style={{ background: "linear-gradient(135deg,#e9f4ee 0%,#d6e9df 55%,#cbe3d7 100%)" }}>
-        <div className="w-full max-w-[440px] bg-white rounded-3xl shadow-2xl px-7 py-9 text-center">
-          <div className="w-16 h-16 mx-auto rounded-full bg-[#e8effc] grid place-items-center mb-5">
-            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#1e3a8a" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+      <div className="relative h-screen grid place-items-center px-5 overflow-hidden" style={{ background: "linear-gradient(160deg,#14235c 0%,#1e3a8a 55%,#2a4bb8 100%)" }}>
+        {/* Falling confetti */}
+        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+          {CONFETTI.map((c, i) => (
+            <span key={i} className="cc-confetti" style={{ left: c.left, background: c.color, animationDelay: c.delay, animationDuration: c.dur }} />
+          ))}
+        </div>
+
+        <div className="cc-card relative w-full max-w-[460px] bg-white rounded-[28px] shadow-2xl px-8 py-10 text-center">
+          <div className="relative w-20 h-20 mx-auto mb-6">
+            <span className="absolute inset-0 rounded-full opacity-25 animate-ping" style={{ background: "#1db877" }} />
+            <div className="relative w-20 h-20 rounded-full grid place-items-center shadow-[0_12px_30px_-8px_rgba(23,138,92,0.6)]" style={{ background: "linear-gradient(135deg,#1db877,#0f7a52)" }}>
+              <svg className="cc-check" width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+            </div>
           </div>
-          <h1 className="font-display text-[23px] font-bold text-[#14235c]">Application filed successfully</h1>
-          {done.loanId && <div className="mt-1 text-[12px] font-mono text-[#185fa5]">{done.loanId}</div>}
-          <p className="text-[14px] text-text-mid mt-3 leading-relaxed">
+          <div className="text-[11px] uppercase tracking-[0.22em] font-bold text-[#178a5c]">{title}</div>
+          <h1 className="mt-2 font-display text-[27px] font-bold text-[#14235c] leading-tight">{done.borrowerName}</h1>
+          {done.loanId && (
+            <div className="mt-3 inline-flex items-center gap-1.5 bg-[#eef3fc] text-[#1e3a8a] font-mono text-[13px] font-semibold px-3.5 py-1.5 rounded-full">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#1db877]" /> {done.loanId}
+            </div>
+          )}
+          <p className="text-[14px] text-text-mid mt-4 leading-relaxed">
+            {done.edit ? "The changes were submitted" : "This application has been successfully created"} by{" "}
+            <span className="font-semibold text-[#14235c]">{epcName || "your team"}</span>.<br />
             Our team will reach out to you shortly.
           </p>
           <button onClick={() => router.push("/dashboard")} className="mt-7 w-full px-5 py-3 rounded-xl bg-[#1e3a8a] text-white text-[15px] font-semibold hover:bg-[#17307a] transition-colors">
             Back to dashboard
           </button>
         </div>
+
+        <style jsx>{`
+          .cc-card { animation: ccUp .5s cubic-bezier(.2,.8,.2,1) both; }
+          @keyframes ccUp { from { opacity: 0; transform: translateY(18px) scale(.97); } to { opacity: 1; transform: none; } }
+          .cc-check { stroke-dasharray: 30; stroke-dashoffset: 30; animation: ccDraw .5s .25s ease-out forwards; }
+          @keyframes ccDraw { to { stroke-dashoffset: 0; } }
+          .cc-confetti { position: absolute; top: -20px; width: 9px; height: 15px; border-radius: 2px; opacity: .9; animation-name: ccFall; animation-timing-function: linear; animation-iteration-count: infinite; }
+          @keyframes ccFall { 0% { transform: translateY(-12vh) rotate(0deg); } 100% { transform: translateY(112vh) rotate(560deg); } }
+        `}</style>
       </div>
     );
   }
@@ -636,9 +669,6 @@ function ChatInner() {
                         onKeyDown={(e) => { if (e.key === "Enter") send(); }}
                         placeholder={turn.placeholder || "Type your answer…"}
                         className="flex-1 min-w-0 px-4 py-2.5 text-[14px] bg-transparent focus:outline-none" />
-                      {turn.id === "borrower_email" && !input.includes("@") && (
-                        <span className="pr-4 text-[14px] text-text-muted whitespace-nowrap select-none">@gmail.com</span>
-                      )}
                     </div>
                     <button onClick={send} className="w-11 h-11 shrink-0 rounded-full bg-[#1e3a8a] text-white grid place-items-center hover:bg-[#17307a] shadow-sm" aria-label="Send">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg>
@@ -681,7 +711,7 @@ function ChatInner() {
 
             {turn.kind === "edit_picker" && appId && (
               <EditPicker
-                appId={appId} form={form} docRows={docRows}
+                appId={appId} form={form} docRows={docRows} preselect={editDocs}
                 onPick={(keys) => {
                   const built = buildEditScript(keys);
                   pushUndo();
@@ -984,95 +1014,21 @@ function DocTable({ appId, form, rows, docRows = [], onPatch, onDone }: { appId:
 // The multi-select "what do you want to change?" table shown in edit mode.
 // Each row shows the current value (or On file · View for documents); ticked
 // rows become the edit script. Documents already on file get a View button.
-function EditPicker({ appId, form, docRows, onPick }: {
+function EditPicker({ appId, form, docRows, preselect = [], onPick }: {
   appId: string; form: Form;
   docRows: { id: string; category: string; storage_path: string | null }[];
+  preselect?: string[];
   onPick: (keys: string[]) => void;
 }) {
-  const [sel, setSel] = useState<Set<string>>(new Set());
-  const toggle = (k: string) => setSel((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
-  const auth = () => ({ Authorization: `Bearer ${getToken() ?? ""}` });
-  const has = (k: string) => !!(form[k] && String(form[k]).trim());
-
-  // Open a stored document — by *_path (sign-doc) or by its docs row (PAN image).
-  async function view(path?: string | null, rowId?: string) {
-    try {
-      if (path) {
-        const res = await fetch(`/api/admin/loan-app/${appId}/sign-doc`, {
-          method: "POST", headers: { ...auth(), "Content-Type": "application/json" }, body: JSON.stringify({ path }),
-        });
-        const j = await res.json().catch(() => ({}));
-        if (j?.ok && j.url) { window.open(j.url as string, "_blank", "noopener"); return; }
-      }
-      if (rowId) { const url = await getDocumentUrl(rowId); if (url) { window.open(url, "_blank", "noopener"); return; } }
-      alert("Couldn't open the document.");
-    } catch { alert("Couldn't open the document."); }
-  }
-
-  const panRow = docRows.find((d) => d.category === "borrower_pan");
-  const hasCoapp = has("coapp_aadhaar_front_path") || has("coapp_pan_path") || has("coapp_pan") || has("coapp_aadhaar_number") || has("coapp_mobile");
-
-  type Item = { key: string; label: string; doc?: boolean; on?: boolean; path?: string | null; rowId?: string; value?: string };
-  const groups: { title: string; items: Item[] }[] = [
-    { title: "Documents", items: [
-      { key: "aadhaar", label: "Aadhaar (front & back)", doc: true, on: has("aadhaar_front_path"), path: form.aadhaar_front_path },
-      { key: "pan", label: "PAN card", doc: true, on: has("borrower_pan") || !!panRow, rowId: panRow?.id, path: panRow?.storage_path ?? undefined },
-      { key: "ebill", label: "Electricity bill", doc: true, on: has("ebill_path"), path: form.ebill_path },
-      { key: "rooftop", label: "Rooftop photo", doc: true, on: has("rooftop_photo_path"), path: form.rooftop_photo_path },
-      { key: "selfie", label: "Applicant photo", doc: true, on: has("customer_photo_path"), path: form.customer_photo_path },
-      { key: "bank", label: "Bank statement", doc: true, on: has("bank_statement_path"), path: form.bank_statement_path },
-    ] },
-    ...(hasCoapp ? [{ title: "Co-applicant", items: [
-      { key: "coapp_aadhaar", label: "Co-applicant Aadhaar", doc: true, on: has("coapp_aadhaar_front_path"), path: form.coapp_aadhaar_front_path },
-      { key: "coapp_pan", label: "Co-applicant PAN", doc: true, on: has("coapp_pan_path") || has("coapp_pan"), path: form.coapp_pan_path },
-      { key: "coapp_mobile", label: "Co-applicant mobile", value: form.coapp_mobile || "—" },
-    ] }] : []),
-    { title: "Applicant details", items: [
-      { key: "borrower_email", label: "Email", value: form.borrower_email || "—" },
-      { key: "install_pincode", label: "Installation pincode", value: form.install_pincode || "—" },
-      { key: "system_type", label: "System type", value: SYS_LABEL[form.system_type] || "—" },
-      { key: "plant_use_type", label: "Property use", value: USE_LABEL[form.plant_use_type] || "—" },
-    ] },
-    { title: "Quotation & loan", items: [
-      { key: "quotation", label: "Quotation document", doc: true, on: has("proforma_invoice_path"), path: form.proforma_invoice_path },
-      { key: "loan_amount", label: "Loan amount", value: form.loan_amount_required ? `₹${Number(form.loan_amount_required).toLocaleString("en-IN")}` : "—" },
-      { key: "loan_config", label: "Loan configuration", value: form.selected_tenure_years ? `${form.selected_tenure_years} yr tenure` : "—" },
-    ] },
-  ];
-
+  const [sel, setSel] = useState<string[]>(() => [...preselect]);
   return (
     <div className="flex flex-col gap-2">
-      <div className="rounded-xl border border-line bg-white overflow-hidden">
-        {groups.map((g) => (
-          <div key={g.title}>
-            <div className="px-3 py-2 bg-[#eef3fc] border-y border-[#dbe4f6] text-[11px] font-semibold text-[#14235c]">{g.title}</div>
-            {g.items.map((it) => {
-              const checked = sel.has(it.key);
-              return (
-                <div key={it.key} onClick={() => toggle(it.key)} className="flex items-center gap-2.5 px-3 py-2 border-b border-line/70 last:border-b-0 cursor-pointer hover:bg-[#f7f9fe]">
-                  <input type="checkbox" checked={checked} onChange={() => toggle(it.key)} onClick={(e) => e.stopPropagation()} className="w-4 h-4 accent-[#1e3a8a] cursor-pointer shrink-0" aria-label={`Edit ${it.label}`} />
-                  <span className="flex-1 text-[12.5px] text-text leading-snug">{it.label}</span>
-                  {it.doc ? (
-                    it.on ? (
-                      <span className="flex items-center gap-2 shrink-0">
-                        <span className="text-[11px] font-semibold text-[#178a5c]">On file</span>
-                        <button onClick={(e) => { e.stopPropagation(); void view(it.path, it.rowId); }} className="text-[#1e3a8a] text-[11px] font-semibold hover:underline">View</button>
-                      </span>
-                    ) : <span className="text-[11px] font-semibold text-amber-600 shrink-0">Missing</span>
-                  ) : (
-                    <span className="text-[11.5px] text-text-muted text-right max-w-[46%] truncate shrink-0">{it.value}</span>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        ))}
-      </div>
+      <EditTable appId={appId} form={form} docRows={docRows} value={sel} onChange={setSel} />
       <div className="flex items-center gap-2 flex-wrap">
-        <button onClick={() => sel.size > 0 && onPick([...sel])} disabled={sel.size === 0} className="px-4 py-2 rounded-lg bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-50">
-          Edit selected{sel.size ? ` (${sel.size})` : ""} →
+        <button onClick={() => sel.length > 0 && onPick(sel)} disabled={sel.length === 0} className="px-4 py-2 rounded-lg bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-50">
+          Edit selected{sel.length ? ` (${sel.length})` : ""} →
         </button>
-        {sel.size === 0 && <span className="text-[11px] text-text-muted">Tick the fields or documents you want to change.</span>}
+        {sel.length === 0 && <span className="text-[11px] text-text-muted">Tick the fields or documents you want to change.</span>}
       </div>
     </div>
   );

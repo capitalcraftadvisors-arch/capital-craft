@@ -29,7 +29,10 @@ type Form = {
   confirm_account_number: string; // UI-only; not persisted
   bank_ifsc: string;
   bank_name: string;
+  gst_username: string;
 };
+
+const BANK_STMT_REQUIRED = 12; // exactly 12 monthly statements
 
 // Masks all but the last 4 digits, e.g. "1000009414001643" → "••••••••••••1643".
 function maskAccount(s: string): string {
@@ -51,6 +54,7 @@ export default function Step4Page() {
   //                the re-entry doesn't match, so the EPC can fix a bad OCR read).
   const [fromOcr, setFromOcr] = useState(false);
   const [revealEdit, setRevealEdit] = useState(false);
+  const [bankStmtCount, setBankStmtCount] = useState(0);
 
   // Admin (impersonating) → relaxed like a non-draft self-edit (Skip shown,
   // no required cheque / account / IFSC). Real EPCs on a draft stay strict.
@@ -65,10 +69,12 @@ export default function Step4Page() {
       confirm_account_number: "",
       bank_ifsc: "",
       bank_name: "",
+      gst_username: "",
     },
   });
 
   const acct = watch("bank_account_number");
+  const gstUser = watch("gst_username");
   const acctConfirm = watch("confirm_account_number");
   const acctMatches =
     acct.length > 0 && acctConfirm.length > 0 && acct === acctConfirm;
@@ -99,7 +105,7 @@ export default function Step4Page() {
     (async () => {
       const { data } = await supabase()
         .from("epc_business")
-        .select("bank_account_number, bank_ifsc, bank_name")
+        .select("bank_account_number, bank_ifsc, bank_name, gst_username")
         .eq("id", biz.id)
         .maybeSingle();
       reset({
@@ -107,6 +113,7 @@ export default function Step4Page() {
         confirm_account_number: data?.bank_account_number ?? "",
         bank_ifsc: data?.bank_ifsc ?? "",
         bank_name: data?.bank_name ?? "",
+        gst_username: (data as { gst_username?: string | null })?.gst_username ?? "",
       });
       // A previously-saved account number shows masked + read-only on return.
       setFromOcr(!!data?.bank_account_number);
@@ -194,6 +201,7 @@ export default function Step4Page() {
         bank_branch: null,
         bank_name: values.bank_name || null,
         bank_account_holder: null,
+        gst_username: values.gst_username?.trim() || null,
         cheque_ocr_raw: ocrRaw,
         current_step: nextStep,
       })
@@ -221,6 +229,12 @@ export default function Step4Page() {
       if (!v.bank_name.trim()) {
         return alert("Please enter the bank name.");
       }
+      if (bankStmtCount < BANK_STMT_REQUIRED) {
+        return alert(`Please upload all ${BANK_STMT_REQUIRED} monthly bank statements (${bankStmtCount}/${BANK_STMT_REQUIRED} so far).`);
+      }
+      if (!v.gst_username.trim()) {
+        return alert("Please enter the GST username.");
+      }
     } else {
       // Non-draft path: if the account number is present it must match confirm.
       if (v.bank_account_number && v.bank_account_number !== v.confirm_account_number) return;
@@ -235,7 +249,9 @@ export default function Step4Page() {
   // number matches the fetched one. Non-draft / admin: only gate when a value
   // is present (they can also Skip). Saving always disables.
   const continueDisabled =
-    saving || (isDraft ? !acctMatches : acct.length > 0 && !acctMatches);
+    saving || (isDraft
+      ? (!acctMatches || bankStmtCount < BANK_STMT_REQUIRED || !gstUser.trim())
+      : acct.length > 0 && !acctMatches);
 
   return (
     <>
@@ -355,6 +371,36 @@ export default function Step4Page() {
               {...register("bank_name")}
             />
           </form>
+        </Card>
+
+        {/* 12 months of bank statements — exactly 12, deduplicated on upload. */}
+        {businessId && (
+          <Card className="p-6 sm:p-7">
+            <h2 className="font-display font-semibold text-[16px]">Last 12 months&rsquo; bank statements</h2>
+            <p className="text-[13px] text-text-mid mt-1 mb-3">
+              Upload all 12 monthly statements for the account above. Duplicate files are skipped automatically.
+              <span className="font-semibold text-[#0f3d2e]"> {bankStmtCount}/{BANK_STMT_REQUIRED} uploaded.</span>
+            </p>
+            <FileUpload
+              businessId={businessId}
+              table="epc_documents"
+              category="bank_statement"
+              maxFiles={BANK_STMT_REQUIRED}
+              uploadedBy="epc"
+              dedupe
+              onCountChange={setBankStmtCount}
+              uploadHint="PDF or image — 12 monthly statements"
+            />
+          </Card>
+        )}
+
+        {/* GST username */}
+        <Card className="p-6 sm:p-7">
+          <Input
+            label="GST username"
+            placeholder="GST portal login username"
+            {...register("gst_username")}
+          />
         </Card>
       </div>
 

@@ -87,7 +87,13 @@ export async function POST(
     const allowed = PATH_COLUMNS.some((col) => row[col] === path);
     if (!allowed) return err("Document does not belong to this application.", 403);
 
-    const url = await getSignedReadUrl(path, 3600);
+    // download:true → force a save under the object's file name.
+    const download = (body as Record<string, unknown>).download === true;
+    const url = await getSignedReadUrl(
+      path,
+      3600,
+      download ? { downloadName: path.split("/").pop() || "document" } : undefined,
+    );
     return NextResponse.json({ ok: true, url });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

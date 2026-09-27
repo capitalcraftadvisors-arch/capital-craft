@@ -27,15 +27,19 @@ export function shortEpcName(name: string | null | undefined): string {
   return words.join(" ");
 }
 
-let cached: string | null = null;
+// Cache keyed by business id — so logging in as a DIFFERENT EPC (without a full
+// page reload, which would clear this module) refetches the correct name rather
+// than showing the previous partner's cached name.
+let cached: { id: string; name: string } | null = null;
 
-// Fetch the current EPC's short business name (cached for the session). Falls
-// back to a shortened contact_name, then "there", so a greeting always renders.
+// Fetch the current EPC's short business name (cached per business for the
+// session). Falls back to a shortened contact_name, then "there", so a greeting
+// always renders.
 export async function fetchEpcName(): Promise<string> {
-  if (cached) return cached;
   const b = getBusiness();
   const fallback = shortEpcName(b?.contact_name) || "there";
   if (!b?.id) return fallback;
+  if (cached && cached.id === b.id) return cached.name;
   try {
     const { data } = await supabase()
       .from("epc_business")
@@ -43,8 +47,9 @@ export async function fetchEpcName(): Promise<string> {
       .eq("id", b.id)
       .maybeSingle();
     const name = data?.trade_name || data?.legal_name || data?.contact_name || b.contact_name;
-    cached = shortEpcName(name) || fallback;
-    return cached;
+    const short = shortEpcName(name) || fallback;
+    cached = { id: b.id, name: short };
+    return short;
   } catch {
     return fallback;
   }

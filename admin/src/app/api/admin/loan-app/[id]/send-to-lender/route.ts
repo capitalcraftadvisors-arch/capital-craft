@@ -123,6 +123,20 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     // ── PREVIEW ──
     if (mode === "preview") {
+      // Lenders that have APPROVED this application's EPC — the only ones this
+      // file can be sent to. The composer filters its dropdown to these.
+      let allowedLenders: string[] = [];
+      try {
+        const { data: ls } = await supabase
+          .from("epc_lender_status")
+          .select("lender")
+          .eq("business_id", loan.epc_business_id)
+          .eq("approved", true);
+        allowedLenders = ((ls ?? []) as { lender: string }[])
+          .map((r) => r.lender)
+          .filter((l): l is LenderKey => LENDER_KEYS.includes(l as LenderKey));
+      } catch { /* best effort — fall back to all lenders in the composer */ }
+
       return NextResponse.json({
         ok: true,
         subject: `Loan application — ${borrowerName}`,
@@ -131,6 +145,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         docLabels: docList.map((d) => d.label),
         ccDefault: LOAN_CC_DEFAULT,
         bccDefault: [],
+        allowedLenders,
       });
     }
 
@@ -208,7 +223,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     });
 
     await saveContacts(supabase, [to, ...cc, ...bcc]);
-    await logLoanActivityServer(supabase, appId, "status_change", claims.business_id ?? null, { detail: `Documents emailed to ${LENDER_LABEL[lender]} — ${to}` });
+    await logLoanActivityServer(supabase, appId, "email_sent", claims.business_id ?? null, { detail: `Emailed to ${LENDER_LABEL[lender]} — ${to}` });
 
     return NextResponse.json({ ok: true, sent_to: to, documents: links.length });
   } catch (e) {

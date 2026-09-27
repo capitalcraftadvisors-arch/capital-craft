@@ -208,6 +208,7 @@ export type ViewDocSlot = {
   label: string;
   title?: string;          // tooltip — usually the file name
   onView?: () => void;     // undefined = not uploaded
+  onDownload?: () => void; // set → show a download button beside the eye
   onDelete?: () => void;   // set → show a trash button beside the eye (admin)
 };
 
@@ -243,6 +244,16 @@ export function DocGrid({
               >
                 {eyeIcon}
               </button>
+              {s.onDownload && (
+                <button
+                  type="button"
+                  onClick={s.onDownload}
+                  title="Download" aria-label="Download"
+                  className="text-[#185fa5] hover:text-[#0f3d2e]"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
+                </button>
+              )}
               {s.onDelete && (
                 <button
                   type="button"
