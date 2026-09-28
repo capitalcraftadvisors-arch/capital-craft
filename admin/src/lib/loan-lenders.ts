@@ -47,20 +47,24 @@ export type LatestStatus =
   | null;
 
 export function latestLenderStatus(rows: LoanLenderRow[]): LatestStatus {
-  let best: LatestStatus = null;
+  // Rank by each lender's RESOLVED state, not by raw max-timestamp. A rejected
+  // lender's row still carries docs_sent_at, and an admin can back-date the
+  // rejection to BEFORE the docs date — so a pure max-timestamp pick wrongly
+  // showed "Doc sent to X" for an already-rejected case. Significance order:
+  // an approval is the outcome; else a lender still PENDING (docs sent, not yet
+  // decided) keeps the case in progress; else a rejection. Newest within a kind.
+  let approved: LatestStatus = null, pending: LatestStatus = null, rejected: LatestStatus = null;
   for (const r of rows) {
-    const events: Array<{ kind: "docs" | "approved" | "rejected"; at: string | null }> = [
-      { kind: "rejected", at: r.rejected_at },
-      { kind: "approved", at: r.approved_at },
-      { kind: "docs", at: r.docs_sent_at },
-    ];
-    for (const e of events) {
-      if (e.at && (!best || e.at > best.at)) {
-        best = { kind: e.kind, lenderKey: r.lender_key, lenderLabel: r.lender_label, at: e.at };
-      }
+    const st = lenderStateOf(r);
+    if (st === "approved" && r.approved_at) {
+      if (!approved || r.approved_at > approved.at) approved = { kind: "approved", lenderKey: r.lender_key, lenderLabel: r.lender_label, at: r.approved_at };
+    } else if (st === "rejected" && r.rejected_at) {
+      if (!rejected || r.rejected_at > rejected.at) rejected = { kind: "rejected", lenderKey: r.lender_key, lenderLabel: r.lender_label, at: r.rejected_at };
+    } else if (st === "docs" && r.docs_sent_at) {
+      if (!pending || r.docs_sent_at > pending.at) pending = { kind: "docs", lenderKey: r.lender_key, lenderLabel: r.lender_label, at: r.docs_sent_at };
     }
   }
-  return best;
+  return approved || pending || rejected;
 }
 
 export function latestStatusLabel(s: LatestStatus): string | null {
