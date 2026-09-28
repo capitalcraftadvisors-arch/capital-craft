@@ -716,15 +716,28 @@ function Inner() {
   async function syncHeadline(rows: LoanLenderRow[]) {
     if (!loan) return;
     const approvedNow = rows.filter((r) => r.approved_at);
-    const anyDocs = rows.some((r) => r.docs_sent_at);
-    const anyRej = rows.some((r) => r.rejected_at);
+    // "Docs pending" = a lender that has docs sent but is NOT yet decided. A
+    // REJECTED lender's row still carries docs_sent_at, so this must exclude
+    // approved/rejected rows — otherwise a lender rejection could never move the
+    // headline to "rejected" (it stayed stuck at "docs_sent").
+    const anyPending = rows.some((r) => r.docs_sent_at && !r.approved_at && !r.rejected_at);
+    const rejectedRows = rows.filter((r) => r.rejected_at);
     let next: string = loan.status ?? "under_review";
     if (approvedNow.length) next = "approved";
-    else if (anyDocs) next = "docs_sent";
-    else if (anyRej) next = "rejected";
+    else if (anyPending) next = "docs_sent";
+    else if (rejectedRows.length) next = "rejected";
     const latestApproved = approvedNow.slice().sort((a, b) => (String(b.approved_at) > String(a.approved_at) ? 1 : -1))[0]?.lender_key ?? null;
     const patch: Record<string, unknown> = { status: next };
     if (approvedNow.length) patch.approved_lender = latestApproved;
+    // When the case lands on "rejected" (every lender rejected, none approved),
+    // reflect the latest lender rejection onto the application itself so BOTH the
+    // admin table and the EPC portal (status + timeline reason) show it.
+    if (next === "rejected") {
+      const latestRej = rejectedRows.slice().sort((a, b) => (String(b.rejected_at) > String(a.rejected_at) ? 1 : -1))[0];
+      patch.rejected_lender = latestRej?.lender_key ?? null;
+      patch.rejected_at = latestRej?.rejected_at ?? new Date().toISOString();
+      patch.rejection_reason = latestRej?.rejection_reason ?? null;
+    }
     await supabase().from("epc_applications").update(patch).eq("id", loan.id);
     setLoan((prev) => (prev ? ({ ...prev, ...patch } as Loan) : prev));
   }
