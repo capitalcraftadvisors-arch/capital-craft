@@ -361,7 +361,7 @@ function Inner() {
             <EditableField
               label="How did you hear about us?"
               value={biz.referral_source}
-              display={REFERRAL_OPTIONS.find((o) => o.value === biz.referral_source)?.label ?? biz.referral_source}
+              display={(v) => (v ? (REFERRAL_OPTIONS.find((o) => o.value === v)?.label ?? v) : "")}
               options={REFERRAL_OPTIONS}
               onSave={saveField("referral_source")}
             />
