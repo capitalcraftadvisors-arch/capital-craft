@@ -103,21 +103,24 @@ export function summaryRows(
 
 // EPC detail table — the editable applicant/partner table for the EPC
 // "send to lender" email (mirrors creditFairEmailRows for loans).
+const EPC_BUSINESS_TYPE: Record<string, string> = {
+  proprietorship: "Proprietorship", pvt_ltd: "Private Limited", partnership: "Partnership", llp: "LLP",
+};
+
 export function epcSummaryRows(epc: Record<string, any>): Array<[string, string]> {
   const name = epc.trade_name || epc.legal_name || epc.contact_name || "—";
   return [
     ["EPC name", name],
-    ["EPC ID", epc.epc_display_id ?? "—"],
     ["Legal name", epc.legal_name ?? "—"],
     ["Contact person", epc.contact_name ?? "—"],
     ["Designation", epc.contact_designation ?? "—"],
     ["Mobile number", epc.contact_mobile ? `+91 ${epc.contact_mobile}` : "—"],
     ["Email", epc.contact_email ?? "—"],
     ["GSTIN", epc.gstin_number ?? "—"],
-    ["Business type", epc.business_type ?? "—"],
-    ["Years in business", epc.years_in_business != null ? String(epc.years_in_business) : "—"],
-    ["Address", [epc.address, epc.city, epc.state, epc.pincode].filter(Boolean).join(", ") || "—"],
-    ["Status", epc.status ?? "—"],
+    ["GST User Name", epc.gst_username ?? "—"],
+    ["Business constitution", epc.business_type ? (EPC_BUSINESS_TYPE[epc.business_type] ?? epc.business_type) : "—"],
+    // Address = the GST-registered address (the only address stored on the EPC).
+    ["Address", epc.gst_address ?? "—"],
   ];
 }
 
