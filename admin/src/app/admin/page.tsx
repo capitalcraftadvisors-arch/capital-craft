@@ -1823,8 +1823,9 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                       Approved by {LENDER_LABEL[String(r.approved_lender)] ?? String(r.approved_lender)}
                     </span>
                   ) : lenderLatest[r.id] ? (
-                    // 6h — latest status across all lenders (most-recent event).
-                    <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide bg-[#eef0fb] text-[#4338ca]">
+                    // 6h — latest status across all lenders. A rejection shows RED;
+                    // other events (e.g. "Doc sent to …") keep the neutral indigo.
+                    <span className={["inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide", lenderLatest[r.id].startsWith("Rejected") ? "bg-red-50 text-red-700" : "bg-[#eef0fb] text-[#4338ca]"].join(" ")}>
                       {lenderLatest[r.id]}
                     </span>
                   ) : (

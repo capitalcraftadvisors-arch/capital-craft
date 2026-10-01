@@ -23,6 +23,8 @@ import { supabase } from "@/lib/supabase";
 import { getBusiness } from "@/lib/auth";
 import { logLoanActivity } from "@/lib/loanAudit";
 import CompletionDocsSection from "@/components/CompletionDocsSection";
+import EmailComposerModal from "@/components/EmailComposerModal";
+import { LENDER_LABEL } from "@/lib/lender-summary";
 import DateField from "@/components/ui/DateField";
 import { I, SectionCard, KV, Pill, StatusBtn } from "@/components/view/ViewKit";
 import {
@@ -61,6 +63,7 @@ function Inner() {
   const [secondAmt, setSecondAmt]   = useState("");
   const [secondDate, setSecondDate] = useState(todayISO());
   const [busy, setBusy] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [docsUploaded, setDocsUploaded] = useState(0);
@@ -325,7 +328,7 @@ function Inner() {
 
             {/* Admin review — gate for the 2nd disbursement. */}
             {firstSaved && (
-              <SectionCard title="Review" accent="blue" icon={I.lock} adminOnly>
+              <SectionCard title="Completion documents" accent="blue" icon={I.lock} adminOnly>
                 <KV k="Status" v={reviewState ? reviewState[0].toUpperCase() + reviewState.slice(1) : "Not reviewed"} />
                 {loan.completion_reviewed_at && (
                   <KV k="Reviewed" v={`${fmtDateShort(loan.completion_reviewed_at)}${loan.completion_reviewed_by ? ` · ${loan.completion_reviewed_by}` : ""}`} />
@@ -335,7 +338,21 @@ function Inner() {
                     All {docsTotal} completion documents must be uploaded before review.
                   </p>
                 )}
-                <div className="flex gap-2 mt-3">
+                <div className="flex gap-2 mt-3 flex-wrap">
+                  {/* Email the 2nd-tranche completion docs to the lender who approved
+                      this loan (opens the editable email popup). */}
+                  {loan.approved_lender && (
+                    <button
+                      type="button"
+                      disabled={busy || !allDocsIn}
+                      onClick={() => setEmailOpen(true)}
+                      title={allDocsIn ? "Email the completion documents to the lender" : "Upload all completion documents first"}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[8px] text-[13px] font-semibold bg-[#178a5c] text-white hover:bg-[#12734c] disabled:opacity-50"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>
+                      Email to {LENDER_LABEL[loan.approved_lender as "creditfair" | "aerem" | "solfin"] ?? "lender"}
+                    </button>
+                  )}
                   <StatusBtn kind="approve" busy={busy || !allDocsIn} onClick={() => void saveReview("approved")}>
                     Approve documents
                   </StatusBtn>
@@ -385,6 +402,17 @@ function Inner() {
           </div>
         )}
       </div>
+      {loan && (
+        <EmailComposerModal
+          open={emailOpen}
+          onClose={() => setEmailOpen(false)}
+          endpoint={`/api/admin/loan-app/${loan.id}/send-to-lender`}
+          extraParams={{ scope: "completion" }}
+          defaultLender={(loan.approved_lender as string) ?? null}
+          title="Email completion documents"
+          onSent={() => { setEmailOpen(false); setMsg("Completion documents emailed to the lender."); }}
+        />
+      )}
     </main>
   );
 }

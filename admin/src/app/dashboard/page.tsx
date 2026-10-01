@@ -105,9 +105,12 @@ function fmtDateTime(iso: string | null): string {
 }
 function borrower(r: AppRow): string { return r.borrower_name || r.aadhaar_name || "—"; }
 function capacity(r: AppRow): string { return r.project_size == null ? "—" : `${r.project_size} ${(r.project_size_unit ?? "kw").toUpperCase()}`; }
-// An EPC may edit an unlocked draft, or a locked file only for the specific rows
-// Capital Craft opened via a Message to EPC (the edit_allow grant, 0085).
-function canEpcEdit(r: AppRow): boolean { return !r.edit_locked || (Array.isArray(r.edit_allow) && r.edit_allow.length > 0); }
+// An EPC can edit a file ONLY for the specific rows Capital Craft opened via a
+// Message to EPC (the edit_allow grant, 0085). Everything else — drafts AND
+// submitted applications — is locked; the EPC has no self-edit without a grant.
+function canEpcEdit(r: AppRow): boolean {
+  return Array.isArray(r.edit_allow) && r.edit_allow.length > 0;
+}
 function stage4(r: AppRow): Stage4 {
   if (r.status === "rejected") return "rejected";
   if (["approved", "sent_to_nbfc", "disbursed"].includes(r.status)) return "approved";

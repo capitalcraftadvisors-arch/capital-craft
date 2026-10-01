@@ -144,7 +144,7 @@ function Inner() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const [biz, setBiz] = useState<Biz | null>(null);
-  const [loans, setLoans] = useState<{ status: string; plant_use_type: string | null; loan_display_id: string | null; sanctioned_amount: number | null; first_disbursement_amount: number | null; second_disbursement_amount: number | null; created_at: string | null; borrower_pan: string | null; borrower_mobile: string | null }[]>([]);
+  const [loans, setLoans] = useState<{ status: string; aborted_at: string | null; plant_use_type: string | null; loan_display_id: string | null; sanctioned_amount: number | null; first_disbursement_amount: number | null; second_disbursement_amount: number | null; created_at: string | null; borrower_pan: string | null; borrower_mobile: string | null }[]>([]);
   // EPC Health period filter ("all" = every application this EPC has, ever).
   const [hPeriod, setHPeriod] = useState<Period | "all">("all");
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -176,7 +176,7 @@ function Inner() {
         supabase().from("epc_documents").select("id, category, file_name, mime_type, stakeholder_id, metadata").eq("business_id", params.id),
         supabase().from("epc_lender_status").select("lender, docs_given, approved, rejected").eq("business_id", params.id),
         supabase().from("epc_admin_info").select("*").eq("business_id", params.id).maybeSingle(),
-        supabase().from("epc_applications").select("status, plant_use_type, loan_display_id, sanctioned_amount, first_disbursement_amount, second_disbursement_amount, created_at, borrower_pan, borrower_mobile").eq("epc_business_id", params.id),
+        supabase().from("epc_applications").select("status, aborted_at, plant_use_type, loan_display_id, sanctioned_amount, first_disbursement_amount, second_disbursement_amount, created_at, borrower_pan, borrower_mobile").eq("epc_business_id", params.id),
       ]);
       setBiz(b);
       setDocs((d ?? []) as Doc[]);

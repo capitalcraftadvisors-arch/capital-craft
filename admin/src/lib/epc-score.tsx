@@ -20,6 +20,7 @@
 
 export type EpcLoan = {
   status?: string | null;
+  aborted_at?: string | null;   // an aborted application — counted as rejected
   plant_use_type?: string | null;
   loan_display_id?: string | null;
   sanctioned_amount?: number | null;
@@ -29,6 +30,12 @@ export type EpcLoan = {
   borrower_pan?: string | null;
   borrower_mobile?: string | null;
 };
+
+// A dead application — rejected OR aborted. Aborted profiles count as rejected
+// in EPC Health (and never as approved / in-progress).
+function isDead(l: EpcLoan): boolean {
+  return l.status === "rejected" || l.aborted_at != null;
+}
 
 const APPROVED = new Set(["approved", "rfd", "sent_to_nbfc", "disbursed"]);
 
@@ -91,8 +98,9 @@ function isCom(l: EpcLoan): boolean {
 
 function bucket(rows: EpcLoan[]): HealthBucket {
   const submitted = rows.length; // caller passes non-draft rows only
-  const approved = rows.filter((r) => r.first_disbursement_amount != null || (r.status ? APPROVED.has(r.status) : false)).length;
-  const rejected = rows.filter((r) => r.status === "rejected").length;
+  // Aborted apps are dead — never approved, always counted as rejected.
+  const approved = rows.filter((r) => !isDead(r) && (r.first_disbursement_amount != null || (r.status ? APPROVED.has(r.status) : false))).length;
+  const rejected = rows.filter(isDead).length;
   const approvalAmount = rows.reduce((s, r) => s + nz(r.sanctioned_amount), 0);
   const disbursed = rows.reduce((s, r) => s + nz(r.first_disbursement_amount) + nz(r.second_disbursement_amount), 0);
   return {
@@ -110,7 +118,7 @@ function bucket(rows: EpcLoan[]): HealthBucket {
 // An application still "in installation" — submitted, not rejected, and its 2nd
 // (final) tranche not yet paid.
 function inProgress(l: EpcLoan): boolean {
-  return l.status !== "rejected" && l.second_disbursement_amount == null;
+  return !isDead(l) && l.second_disbursement_amount == null;
 }
 
 export function computeEpcHealth(all: EpcLoan[]): EpcHealth | null {

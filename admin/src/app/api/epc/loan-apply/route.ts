@@ -112,6 +112,23 @@ export async function POST(req: NextRequest) {
       }
       const consented = b.consented === true;
 
+      // Duplicate warning (NON-blocking): other loan applications already on file
+      // for this EPC with the SAME mobile (RLS scopes the query to the caller's
+      // own apps). The client shows these so the EPC can avoid making the same
+      // profile twice — but creation is never blocked.
+      let duplicates: Array<{ id: string; loan_display_id: string | null; borrower_name: string | null; status: string | null }> = [];
+      try {
+        const { data: dups } = await supabase
+          .from("epc_applications")
+          .select("id, loan_display_id, borrower_name, aadhaar_name, status")
+          .eq("borrower_mobile", borrower_mobile)
+          .limit(5);
+        duplicates = ((dups ?? []) as Array<Record<string, any>>).map((d) => ({
+          id: d.id, loan_display_id: d.loan_display_id,
+          borrower_name: d.borrower_name || d.aadhaar_name || null, status: d.status,
+        }));
+      } catch { /* non-blocking */ }
+
       // INSERT + field save in one statement. The 0017 gate trigger
       // rejects EPCs without lender approval; RLS scopes to own rows.
       const { data: inserted, error: insErr } = await supabase
@@ -149,7 +166,7 @@ export async function POST(req: NextRequest) {
           : insErr.message;
         return err(msg, 403);
       }
-      return NextResponse.json({ ok: true, id: inserted.id, loan_display_id: inserted.loan_display_id });
+      return NextResponse.json({ ok: true, id: inserted.id, loan_display_id: inserted.loan_display_id, duplicates });
     }
 
     // ── Phase 2: submit ───────────────────────────────────────

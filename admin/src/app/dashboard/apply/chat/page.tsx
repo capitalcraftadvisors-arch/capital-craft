@@ -348,6 +348,14 @@ function ChatInner() {
       if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't start the application."); return false; }
       setAppId(j.id);
       if (j.loan_display_id) merge({ loan_display_id: j.loan_display_id });
+      // Non-blocking duplicate warning — a profile with this mobile already exists.
+      if (Array.isArray(j.duplicates) && j.duplicates.length) {
+        const names = j.duplicates
+          .map((d: { borrower_name: string | null; loan_display_id: string | null }) =>
+            `${d.borrower_name || "a profile"}${d.loan_display_id ? ` (${d.loan_display_id})` : ""}`)
+          .join(", ");
+        pushBot(`⚠️ This mobile already has ${j.duplicates.length} application${j.duplicates.length > 1 ? "s" : ""} on file — ${names}. You can continue, but please check this isn't a duplicate.`);
+      }
       return true;
     } catch (e) {
       setError((e as Error)?.message || "Network error."); return false;

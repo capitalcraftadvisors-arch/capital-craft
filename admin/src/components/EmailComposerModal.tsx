@@ -24,8 +24,8 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 type Preview = { subject: string; toName: string; detail: [string, string][]; docLabels: string[]; ccDefault: string[]; bccDefault: string[]; allowedLenders?: string[] };
 
 export default function EmailComposerModal({
-  open, onClose, endpoint, title = "Send to lender", defaultLender, onSent,
-}: { open: boolean; onClose: () => void; endpoint: string; title?: string; defaultLender?: string | null; onSent?: (lender: string) => void }) {
+  open, onClose, endpoint, title = "Send to lender", defaultLender, onSent, extraParams,
+}: { open: boolean; onClose: () => void; endpoint: string; title?: string; defaultLender?: string | null; onSent?: (lender: string) => void; extraParams?: Record<string, unknown> }) {
   const [lender, setLender] = useState<string>(defaultLender || "creditfair");
   // Lenders that approved this application's EPC — only these can be picked. Empty
   // = no restriction (fall back to all).
@@ -47,7 +47,7 @@ export default function EmailComposerModal({
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...(extraParams ?? {}), ...payload }),
     });
     const j = await res.json().catch(() => ({}));
     return { ok: res.ok && j?.ok, j };

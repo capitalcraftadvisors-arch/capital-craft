@@ -79,6 +79,37 @@ function loanDocList(loan: Record<string, any>, docs: Array<{ category: string; 
   return list;
 }
 
+// 2nd-tranche completion documents (uploaded in the disbursement section). Sent
+// to the lender who APPROVED the loan, so they can release the 2nd tranche.
+const COMPLETION_LABELS: Record<string, string> = {
+  completion_invoice: "Final invoice",
+  completion_report: "Completion report",
+  completion_panel_photo: "Customer with panel",
+  completion_inverter_photo: "Customer with inverter",
+  completion_meter_photo: "Customer with meter",
+  completion_plant_photo: "Plant photo",
+};
+function completionDocList(docs: Array<{ category: string; storage_path: string }>): Array<{ label: string; path: string }> {
+  const seen = new Set<string>();
+  const list: Array<{ label: string; path: string }> = [];
+  for (const d of docs ?? []) {
+    const label = COMPLETION_LABELS[d.category];
+    if (!label || !d.storage_path || seen.has(d.storage_path)) continue;
+    seen.add(d.storage_path);
+    list.push({ label, path: d.storage_path });
+  }
+  return list;
+}
+function completionDetail(loan: Record<string, any>, epcName: string): [string, string][] {
+  return [
+    ["Applicant", loan.borrower_name || loan.aadhaar_name || "—"],
+    ["Loan ID", loan.loan_display_id || "—"],
+    ["EPC Partner", epcName || "—"],
+    ["Sanctioned amount", loan.sanctioned_amount != null ? "₹" + Math.round(Number(loan.sanctioned_amount)).toLocaleString("en-IN") : "—"],
+    ["1st disbursement", loan.first_disbursement_amount != null ? "₹" + Math.round(Number(loan.first_disbursement_amount)).toLocaleString("en-IN") : "—"],
+  ];
+}
+
 async function saveContacts(supabase: SupabaseClient, emails: string[]) {
   const now = new Date().toISOString();
   for (const email of emails) {
@@ -97,10 +128,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);
 
     const body = (await req.json().catch(() => ({}))) as {
-      mode?: string; lender?: string; to?: string; toName?: string;
+      mode?: string; lender?: string; scope?: string; to?: string; toName?: string;
       cc?: string[]; bcc?: string[]; subject?: string; detail?: [string, string][];
     };
     const mode = body.mode === "send" ? "send" : "preview";
+    // scope "completion" = email the 2nd-tranche completion documents (to the
+    // lender who approved the loan); default = the full loan application.
+    const scope = body.scope === "completion" ? "completion" : "application";
     const lender = String(body.lender ?? "").toLowerCase() as LenderKey;
     if (!LENDER_KEYS.includes(lender)) return err("Pick a lender.", 400);
 
@@ -119,7 +153,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const borrowerName: string = loan.borrower_name || loan.aadhaar_name || "applicant";
     const epcName: string =
       loan.epc_business?.trade_name || loan.epc_business?.legal_name || loan.epc_business?.contact_name || "";
-    const docList = loanDocList(loan, (docs ?? []) as Array<{ category: string; storage_path: string }>);
+    const allDocs = (docs ?? []) as Array<{ category: string; storage_path: string }>;
+    const isCompletion = scope === "completion";
+    const docList = isCompletion ? completionDocList(allDocs) : loanDocList(loan, allDocs);
+    const defaultSubject = isCompletion
+      ? `Completion documents (2nd tranche) — ${borrowerName}`
+      : `Loan application — ${borrowerName}`;
+    const defaultDetail = isCompletion ? completionDetail(loan, epcName) : creditFairEmailRows(loan, epcName);
 
     // ── PREVIEW ──
     if (mode === "preview") {
@@ -137,11 +177,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           .filter((l): l is LenderKey => LENDER_KEYS.includes(l as LenderKey));
       } catch { /* best effort — fall back to all lenders in the composer */ }
 
+      // Completion docs go to the lender who APPROVED this loan — lock the picker
+      // to that lender so the 2nd-tranche pack can't be sent to the wrong one.
+      const approvedLender = String(loan.approved_lender ?? "").toLowerCase();
+      if (isCompletion && LENDER_KEYS.includes(approvedLender as LenderKey)) {
+        allowedLenders = [approvedLender];
+      }
+
       return NextResponse.json({
         ok: true,
-        subject: `Loan application — ${borrowerName}`,
+        subject: defaultSubject,
         toName: "",
-        detail: creditFairEmailRows(loan, epcName),
+        detail: defaultDetail,
         docLabels: docList.map((d) => d.label),
         ccDefault: LOAN_CC_DEFAULT,
         bccDefault: [],
@@ -155,11 +202,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (!EMAIL_RE.test(to)) return err("Enter a valid recipient (TO) email.", 400);
     const cc = cleanEmails(body.cc);
     const bcc = cleanEmails(body.bcc);
-    const subject = String(body.subject ?? "").trim() || `Loan application — ${borrowerName}`;
+    const subject = String(body.subject ?? "").trim() || defaultSubject;
     const toName = String(body.toName ?? "").trim();
     const detail = Array.isArray(body.detail) && body.detail.length
       ? body.detail.map((r) => [String(r?.[0] ?? ""), String(r?.[1] ?? "")] as [string, string])
-      : creditFairEmailRows(loan, epcName);
+      : defaultDetail;
 
     // summary.xlsx built from the (edited) detail rows.
     const wb = new ExcelJS.Workbook();
@@ -202,7 +249,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const html = `
       <div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;font-size:14px;color:#12271f;line-height:1.55">
         <p>Dear ${esc(toName || "Team")},</p>
-        <p>Please find the applicant details for <b>${esc(borrowerName)}</b> below, along with the supporting documents. Kindly review and revert at the earliest.</p>
+        <p>${isCompletion
+          ? `Please find the completion (2nd tranche) documents for <b>${esc(borrowerName)}</b> below. Kindly review and release the second tranche.`
+          : `Please find the applicant details for <b>${esc(borrowerName)}</b> below, along with the supporting documents. Kindly review and revert at the earliest.`}</p>
         ${detailHtml}
         <p style="margin:16px 0 6px"><b>Documents</b></p>
         <ul style="margin:0 0 16px;padding-left:20px">${linksHtml || "<li>(no documents on file)</li>"}</ul>
@@ -223,7 +272,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     });
 
     await saveContacts(supabase, [to, ...cc, ...bcc]);
-    await logLoanActivityServer(supabase, appId, "email_sent", claims.business_id ?? null, { detail: `Emailed to ${LENDER_LABEL[lender]} — ${to}` });
+    await logLoanActivityServer(supabase, appId, "email_sent", claims.business_id ?? null, { detail: `Emailed ${isCompletion ? "completion documents" : "to"} ${LENDER_LABEL[lender]} — ${to}` });
 
     return NextResponse.json({ ok: true, sent_to: to, documents: links.length });
   } catch (e) {
