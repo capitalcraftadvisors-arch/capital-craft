@@ -35,7 +35,7 @@ type Choice = { value: string; label: string; sub?: string };
 type Turn = {
   id: string;
   bot: string;
-  kind: "text" | "pincode" | "choice" | "consent" | "doc_table" | "coapp_docs" | "quotation" | "number" | "tenure" | "confirm_edit" | "edit_picker";
+  kind: "text" | "pincode" | "choice" | "consent" | "doc_table" | "coapp_docs" | "doc_review" | "quotation" | "number" | "tenure" | "confirm_edit" | "edit_picker";
   field?: string;
   rows?: Row[]; // edit mode: limits a doc_table / coapp_docs to only the selected documents
   placeholder?: string;
@@ -76,9 +76,15 @@ function coappNeeded(f: Form): boolean {
 const SCRIPT: Turn[] = [
   { id: "borrower_mobile", bot: "Applicant's 10-digit mobile number?", kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile", validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile number.") },
   { id: "doc_table", bot: "Please upload the applicant's documents below.", kind: "doc_table" },
-  { id: "coapp_docs", bot: "Please add the co-applicant's Aadhaar and PAN.", kind: "coapp_docs", when: coappNeeded },
-  { id: "coapp_mobile", bot: "Co-applicant's 10-digit mobile number?", kind: "text", field: "coapp_mobile", placeholder: "10-digit mobile", when: coappNeeded, validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile number.") },
   { id: "quotation", bot: "Please upload the quotation / proforma invoice.", kind: "quotation" },
+  // Co-applicant: the applicant's PAN/Aadhaar name and the e-bill owner name
+  // don't match (coappNeeded), so this is likely a co-applicant — add their
+  // Aadhaar + PAN (names read from the cards) and take just their mobile.
+  { id: "coapp_docs", bot: "The electricity bill is in a different name — please add the co-applicant's Aadhaar and PAN.", kind: "coapp_docs", when: coappNeeded },
+  { id: "coapp_mobile", bot: "Co-applicant's 10-digit mobile number?", kind: "text", field: "coapp_mobile", placeholder: "10-digit mobile", when: coappNeeded, validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile number.") },
+  // Everything uploaded so far, in one editable table (incl. the quotation) —
+  // the EPC can review, open, replace, or fix any read-out value before moving on.
+  { id: "doc_review", bot: "Here's everything you've uploaded. Check it, fix anything, then continue.", kind: "doc_review" },
   { id: "borrower_email", bot: "Applicant's email address?", kind: "text", field: "borrower_email", placeholder: "name@example.com" },
   { id: "install_pincode", bot: "Installation pincode?", kind: "pincode", field: "install_pincode", placeholder: "6-digit pincode" },
   { id: "system_type", bot: "Type of solar system?", kind: "choice", field: "system_type", choices: [
@@ -92,6 +98,10 @@ const SCRIPT: Turn[] = [
   ] },
   { id: "loan_amount", bot: "Loan amount required?", kind: "number", field: "loan_amount_required", placeholder: "Amount in ₹" },
   { id: "tenure", bot: "Finally, the loan configuration — subsidy and tenure.", kind: "tenure" },
+  // Lead owner — the EPC's team member who brought this lead, asked just before
+  // consent. Phone is optional but, when given, must be a valid mobile.
+  { id: "lead_owner_name", bot: "Who is the lead owner on your team?", kind: "text", field: "lead_owner_name", placeholder: "Lead owner's name" },
+  { id: "lead_owner_phone", bot: "Lead owner's phone number?", kind: "text", field: "lead_owner_phone", placeholder: "10-digit mobile", validate: (v) => (!v.trim() || MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile number.") },
   { id: "consent", bot: "Does the customer agree to the Terms, Privacy & Cookie policies and allow a credit check?", kind: "consent" },
 ];
 
@@ -112,6 +122,7 @@ const PICK_LABEL: Record<string, string> = {
   coapp_aadhaar: "Co-applicant Aadhaar", coapp_pan: "Co-applicant PAN", coapp_mobile: "Co-applicant mobile",
   borrower_email: "Email", install_pincode: "Pincode", system_type: "System type", plant_use_type: "Property use",
   quotation: "Quotation", loan_amount: "Loan amount", loan_config: "Loan configuration",
+  lead_owner_name: "Lead owner name", lead_owner_phone: "Lead owner phone",
 };
 
 // Fields whose typed amount is echoed in Indian words under the input.
@@ -184,6 +195,8 @@ function ChatInner() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const started = useRef(false);
+  // The consent bubble is echoed at most once even across submit retries.
+  const consentSent = useRef(false);
 
   const turn = script[idx] ?? null;
 
@@ -311,6 +324,8 @@ function ChatInner() {
     if (has("plant_use_type")) turns.push(cloneTurn("plant_use_type"));
     if (has("loan_amount")) turns.push(cloneTurn("loan_amount"));
     if (has("loan_config")) turns.push(cloneTurn("tenure"));
+    if (has("lead_owner_name")) turns.push(cloneTurn("lead_owner_name"));
+    if (has("lead_owner_phone")) turns.push(cloneTurn("lead_owner_phone"));
     turns.push(cloneTurn("consent"));
     return turns;
   }
@@ -450,13 +465,18 @@ function ChatInner() {
   }
 
   async function giveConsent() {
+    // Guard against a double-tap (a laggy click firing twice before the dock
+    // hides) — never submit or echo the consent bubble more than once.
+    if (busy) return;
     // A blank profile can't be submitted — the Aadhaar (front & back) is the
     // minimum. Block here with a clear message before consent/submit.
     if (!form.aadhaar_front_path || !form.aadhaar_back_path) {
       setError("Please upload the applicant's Aadhaar (front & back) before submitting.");
       return;
     }
-    pushUser("Yes, the customer consents.");
+    // Echo the consent only once; a retry after a failed submit reuses it rather
+    // than stacking another "Yes, the customer consents." bubble.
+    if (!consentSent.current) { pushUser("Yes, the customer consents."); consentSent.current = true; }
     await submitApplication();
   }
 
@@ -547,7 +567,13 @@ function ChatInner() {
       if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't submit the application."); return; }
       setDone({ loanId: form.loan_display_id || null, borrowerName: form.borrower_name || form.aadhaar_name || "your customer", edit: editMode });
     } catch (e) {
-      setError((e as Error)?.message || "Network error.");
+      // A network-level failure (server unreachable / dropped connection) throws
+      // "Failed to fetch". Show a human message; the consent button stays so the
+      // EPC can retry without re-answering anything.
+      const raw = (e as Error)?.message || "";
+      setError(/failed to fetch|networkerror|load failed/i.test(raw)
+        ? "Couldn't reach the server. Check your connection and tap “Yes, the customer consents” again."
+        : (raw || "Network error."));
     } finally { setBusy(false); }
   }
 
@@ -705,7 +731,7 @@ function ChatInner() {
 
             {turn.kind === "consent" && (
               <div className="flex gap-2 flex-wrap">
-                <button onClick={() => void giveConsent()} className="flex-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a]">Yes, the customer consents</button>
+                <button onClick={() => void giveConsent()} disabled={busy} className="flex-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a] disabled:opacity-60">Yes, the customer consents</button>
                 <button onClick={() => router.push("/dashboard")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">Cancel</button>
               </div>
             )}
@@ -738,6 +764,18 @@ function ChatInner() {
               <DocTable key={"coapp-docs-" + idx} appId={appId} form={form} docRows={docRows} rows={turn.rows ?? COAPP_ROWS} onPatch={merge} onDone={() => { pushUndo(); advance(); }} />
             )}
 
+            {turn.kind === "doc_review" && appId && (
+              <DocTable
+                key={"doc-review-" + idx} appId={appId} form={form} docRows={docRows}
+                rows={[
+                  ...APPLICANT_ROWS,
+                  ...((coappNeeded(form) || form.coapp_aadhaar_front_path || form.coapp_pan_path) ? COAPP_ROWS : []),
+                  QUOTATION_ROW,
+                ]}
+                review onPatch={merge} onDone={() => { pushUndo(); advance(); }}
+              />
+            )}
+
             {turn.kind === "quotation" && appId && (
               <QuotationDock appId={appId} form={form} onPatch={merge} onDone={() => { pushUndo(); advance(); }} />
             )}
@@ -765,8 +803,8 @@ function ChatInner() {
 }
 
 // ── Document table ────────────────────────────────────────────────────────────
-type Slot = "aadhaar_front" | "aadhaar_back" | "pan" | "ebill" | "rooftop" | "selfie" | "bank" | "coapp_aadhaar_front" | "coapp_aadhaar_back" | "coapp_pan";
-type Unit = "aadhaar" | "pan" | "ebill" | "rooftop" | "selfie" | "bank" | "coapp_aadhaar" | "coapp_pan";
+type Slot = "aadhaar_front" | "aadhaar_back" | "pan" | "ebill" | "rooftop" | "selfie" | "bank" | "coapp_aadhaar_front" | "coapp_aadhaar_back" | "coapp_pan" | "quotation";
+type Unit = "aadhaar" | "pan" | "ebill" | "rooftop" | "selfie" | "bank" | "coapp_aadhaar" | "coapp_pan" | "quotation";
 type Row = { slot: Slot; label: string; unit: Unit; parts: Slot[]; lastOfUnit?: boolean; coappOnly?: boolean };
 
 const APPLICANT_ROWS: Row[] = [
@@ -783,12 +821,16 @@ const COAPP_ROWS: Row[] = [
   { slot: "coapp_aadhaar_back", label: "Co-applicant Aadhaar — back", unit: "coapp_aadhaar", parts: ["coapp_aadhaar_front", "coapp_aadhaar_back"], lastOfUnit: true },
   { slot: "coapp_pan", label: "Co-applicant PAN", unit: "coapp_pan", parts: ["coapp_pan"], lastOfUnit: true },
 ];
+// Quotation row — used in the review table so the uploaded quotation / proforma
+// is visible (View + Replace) with its read-out project size & cost editable.
+const QUOTATION_ROW: Row = { slot: "quotation", label: "Quotation / proforma invoice", unit: "quotation", parts: ["quotation"], lastOfUnit: true };
 
 // Form key that marks each unit already read (for prefill/done).
 const UNIT_DONE_KEY: Record<Unit, string> = {
   aadhaar: "aadhaar_front_path", pan: "borrower_pan", ebill: "ebill_path",
   rooftop: "rooftop_photo_path", selfie: "customer_photo_path", bank: "bank_statement_path",
   coapp_aadhaar: "coapp_aadhaar_front_path", coapp_pan: "coapp_pan_path",
+  quotation: "proforma_invoice_path",
 };
 // Editable read-out fields shown under a unit once read.
 const UNIT_FIELDS: Partial<Record<Unit, (f: Form) => { label: string; field: string }[]>> = {
@@ -797,11 +839,12 @@ const UNIT_FIELDS: Partial<Record<Unit, (f: Form) => { label: string; field: str
   ebill: () => [{ label: "Monthly bill (₹)", field: "monthly_bill_amount" }, { label: "DISCOM", field: "discom_name" }, { label: "Bill name", field: "ebill_name" }],
   coapp_aadhaar: () => [{ label: "Name", field: "coapp_aadhaar_name" }, { label: "DOB", field: "coapp_aadhaar_dob" }, { label: "Aadhaar", field: "coapp_aadhaar_number" }],
   coapp_pan: () => [{ label: "PAN", field: "coapp_pan" }, { label: "Name", field: "coapp_name" }, { label: "Father", field: "coapp_father_name" }],
+  quotation: () => [{ label: "Project size (kW)", field: "project_size" }, { label: "Total project cost (₹)", field: "total_project_cost" }],
 };
 
 type SlotFile = { file: File; thumb: string | null };
 
-function DocTable({ appId, form, rows, docRows = [], onPatch, onDone }: { appId: string; form: Form; rows: Row[]; docRows?: { id: string; category: string; storage_path: string | null }[]; onPatch: (p: Form) => void; onDone: (r: { name: string; thumb: string | null }[]) => void }) {
+function DocTable({ appId, form, rows, docRows = [], review = false, onPatch, onDone }: { appId: string; form: Form; rows: Row[]; docRows?: { id: string; category: string; storage_path: string | null }[]; review?: boolean; onPatch: (p: Form) => void; onDone: (r: { name: string; thumb: string | null }[]) => void }) {
   const [files, setFiles] = useState<Partial<Record<Slot, SlotFile>>>({});
   const [skipped, setSkipped] = useState<Partial<Record<Slot, boolean>>>({});
   // Slots the user re-opened via "Replace" — shows the file picker again even
@@ -837,6 +880,7 @@ function DocTable({ appId, form, rows, docRows = [], onPatch, onDone }: { appId:
       case "bank":          return { path: form.bank_statement_path };
       case "coapp_aadhaar": return { path: form.coapp_aadhaar_front_path };
       case "coapp_pan":     return { path: form.coapp_pan_path };
+      case "quotation":     return { path: form.proforma_invoice_path };
       default:              return {};
     }
   };
@@ -844,7 +888,9 @@ function DocTable({ appId, form, rows, docRows = [], onPatch, onDone }: { appId:
   const unitDone = (u: Unit) => reads[u]?.status === "done" || unitPrefilled(u);
   const rowOpen = (slot: Slot, u: Unit) => !files[slot] && !skipped[slot] && (!!reopened[slot] || !unitPrefilled(u));
   const rowSettled = (r: Row) => !!skipped[r.slot] || (!!files[r.slot] && reads[r.unit]?.status !== "error") || unitPrefilled(r.unit);
-  const allSettled = rows.every(rowSettled);
+  // In review mode every row is already uploaded (or optional), so Continue is
+  // always available — the table is for checking/fixing, not forced completion.
+  const allSettled = review || rows.every(rowSettled);
 
   async function callRoute(unit: Unit, f: Partial<Record<Slot, SlotFile>>): Promise<Form> {
     const fileOf = (s: Slot) => { const x = f[s]?.file; if (!x) throw new Error("File missing — re-attach it."); return x; };
@@ -886,6 +932,22 @@ function DocTable({ appId, form, rows, docRows = [], onPatch, onDone }: { appId:
       if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the bill.");
       const e = j.ebill?.fields ?? {}; const path = j.ebill?.storage_path ?? "";
       return { ebill_path: path, monthly_bill_amount: e.monthly_bill_amount != null ? String(e.monthly_bill_amount) : "", discom_name: e.discom_name ?? "", ca_number: e.ca_number ?? "", ebill_address_line: e.ebill_address_line ?? "", ebill_name: e.ebill_name ?? "" };
+    }
+    // Quotation / proforma — extract-loan-docs (proforma side); reads project
+    // size + total cost. Used in the review table's Replace.
+    if (unit === "quotation") {
+      const fd = new FormData();
+      fd.append("proforma", fileOf("quotation"));
+      const res = await fetch(`/api/admin/loan-app/${appId}/extract-loan-docs`, { method: "POST", headers: auth(), body: fd });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the quotation.");
+      const p = j.proforma?.fields ?? {}; const path = j.proforma?.storage_path ?? "";
+      return {
+        proforma_invoice_path: path,
+        ...(p.total_project_cost != null ? { total_project_cost: String(p.total_project_cost) } : {}),
+        ...(p.project_size != null ? { project_size: String(p.project_size) } : {}),
+        ...(p.project_size_unit ? { project_size_unit: String(p.project_size_unit) } : {}),
+      };
     }
     // Photos + bank statement — upload only (no OCR); replace keeps one row/slot.
     const category = unit === "rooftop" ? "borrower_photo" : unit === "selfie" ? "customer_photo" : "bank_statement";

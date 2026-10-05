@@ -28,6 +28,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { DEFAULT_INDICATIVE_ROI } from "@/lib/emi";
+import { isUndefinedColumn, omitKeys } from "@/lib/optional-column";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -234,6 +235,16 @@ export async function POST(req: NextRequest) {
           ? b.rooftop_photo_gps
           : null;
 
+      // Lead owner — the EPC's team member who owns this lead (name + phone),
+      // captured just before consent. Written best-effort: the columns ship in
+      // migrations 0074 (name) / 0089 (phone), so a DB without them yet (42703)
+      // simply drops these fields instead of failing the whole submit.
+      const lead_owner_name  = strOrNull(b.lead_owner_name);
+      const lead_owner_phone = String(b.lead_owner_phone ?? "").replace(/\D/g, "") || null;
+      if (lead_owner_phone && !MOBILE_RE.test(lead_owner_phone)) {
+        return err("Enter a valid 10-digit lead owner phone number.", 400);
+      }
+
       // An EDIT re-submit (client sets edit:true) only touches the rows Capital
       // Craft opened for the EPC — it must NOT be blocked by, or overwrite, the
       // project/loan/tenure/Aadhaar fields that are outside that scope (and may be
@@ -289,9 +300,7 @@ export async function POST(req: NextRequest) {
       // In the docs-first chatbot, plant_use_type (and other register fields)
       // arrive at submit rather than register — use the freshest value.
       const useType = strOrNull(b.plant_use_type) ?? (app as any).plant_use_type;
-      const { error: updErr } = await supabase
-        .from("epc_applications")
-        .update({
+      const payload: Record<string, unknown> = {
           // Page 2 — applicant docs
           borrower_pan,
           borrower_father_name,
@@ -321,6 +330,10 @@ export async function POST(req: NextRequest) {
           rooftop_photo_path,
           rooftop_photo_uploaded_at: rooftop_photo_path ? now : null,
           rooftop_photo_gps,
+          // Lead owner (name + phone) — written only when the caller sends them,
+          // so the classic flow never nulls an existing value.
+          ...(b.lead_owner_name  !== undefined ? { lead_owner_name } : {}),
+          ...(b.lead_owner_phone !== undefined ? { lead_owner_phone } : {}),
           // Page 2 — co-applicant (only when toggled on)
           coapp_pan,
           coapp_name:                  strOrNull(b.coapp_name),
@@ -386,8 +399,19 @@ export async function POST(req: NextRequest) {
             : {}),
           edit_locked: true,
           edit_allow: [],
-        })
+      };
+      let { error: updErr } = await supabase
+        .from("epc_applications")
+        .update(payload)
         .eq("id", appId);
+      // Self-heal: if the lead-owner columns aren't on this DB yet (migrations
+      // 0074/0089 not applied), drop them and retry so submit still succeeds.
+      if (updErr && isUndefinedColumn(updErr)) {
+        ({ error: updErr } = await supabase
+          .from("epc_applications")
+          .update(omitKeys(payload, ["lead_owner_name", "lead_owner_phone"]))
+          .eq("id", appId));
+      }
       if (updErr) return err(`Submit failed: ${updErr.message}`, 500);
 
       return NextResponse.json({ ok: true, id: appId });
