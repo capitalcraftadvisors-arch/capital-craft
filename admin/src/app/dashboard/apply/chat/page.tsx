@@ -53,21 +53,27 @@ function nameTokens(s: string | undefined): string[] {
     .replace(/[^a-z\s]/g, " ")
     .split(/\s+/).filter((t) => t.length >= 3);
 }
-// Two names are the SAME person/family when they share any real name word.
+// Two names are the SAME person when the GIVEN NAME (first real word) matches, or
+// one name's words are fully contained in the other (handles "Vimla Devi" vs
+// "Vimla Devi W/O Sharwan Lal", extra middle names, reordering). Sharing only a
+// common SURNAME (Singh/Devi/Kumar/Sharma…) is NOT enough — "Surendra Singh Gaur"
+// and "Kiran Devi Kanwar Singh" are different people and need a co-applicant.
 function namesLikelySame(a: string | undefined, b: string | undefined): boolean {
-  const ta = new Set(nameTokens(a)); const tb = nameTokens(b);
-  if (ta.size === 0 || tb.length === 0) return true; // unreadable → don't force a co-applicant
-  return tb.some((t) => ta.has(t));
+  const ta = nameTokens(a); const tb = nameTokens(b);
+  if (ta.length === 0 || tb.length === 0) return true; // unreadable → don't force a co-applicant
+  if (ta[0] === tb[0]) return true;
+  const sa = new Set(ta); const sb = new Set(tb);
+  return ta.every((t) => sb.has(t)) || tb.every((t) => sa.has(t));
 }
-// A co-applicant is needed ONLY when a document name is clearly different from
-// another (shares no name word) — e.g. the e-bill in a parent's/spouse's name.
-// Minor OCR variations on the SAME name never trigger it.
+// A co-applicant is needed when the e-bill owner is clearly a DIFFERENT person
+// from the applicant (their Aadhaar/PAN name) — e.g. the bill in a parent's or
+// spouse's name. Minor OCR variations on the SAME name never trigger it, and a
+// name we couldn't read doesn't force it.
 function coappNeeded(f: Form): boolean {
-  const nm = [f.aadhaar_name, f._pan_name, f.ebill_name].filter((n) => (n || "").trim().length >= 3);
-  for (let i = 0; i < nm.length; i++)
-    for (let j = i + 1; j < nm.length; j++)
-      if (!namesLikelySame(nm[i], nm[j])) return true;
-  return false;
+  const idName = (f.aadhaar_name || f._pan_name || "").trim();
+  const billName = (f.ebill_name || "").trim();
+  if (idName.length < 3 || billName.length < 3) return false;
+  return !namesLikelySame(idName, billName);
 }
 
 // Docs-first flow: the mobile creates the draft, then documents + quotation are
