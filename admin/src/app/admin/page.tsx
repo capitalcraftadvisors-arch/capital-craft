@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
@@ -28,7 +28,7 @@ import {
 import { policyValidityParts, VALIDITY_TEXT } from "@/lib/insurance-validity";
 import LenderCell from "@/components/LenderCell";
 import LoanLeadsTab from "@/components/LoanLeadsTab";
-import { LOAN_LENDER_COLS, latestLenderStatus, latestStatusLabel, type LoanLenderRow } from "@/lib/loan-lenders";
+import { latestLenderStatus, latestStatusLabel, type LoanLenderRow } from "@/lib/loan-lenders";
 import { LENDER_LABEL } from "@/components/ApprovalDetailsTable";
 
 type Tab = "epcs" | "apps" | "loanleads" | "insurance" | "leads";
@@ -1309,6 +1309,9 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
   const [rows, setRows] = useState<Row[]>([]);
   // 6h — per-application latest lender status label (most-recent event).
   const [lenderLatest, setLenderLatest] = useState<Record<string, string>>({});
+  // Latest docs-sent (email-to-lender) timestamp per application — drives the
+  // "Sent <date>" line under the status pill so the team can track it at a glance.
+  const [lenderSentAt, setLenderSentAt] = useState<Record<string, string>>({});
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   // Client-side filters over the already-loaded list.
@@ -1388,48 +1391,118 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     router.push(`/admin/app/${row.id}/view` as any);
   }
 
-  useEffect(() => {
-    (async () => {
-      // Short per-tab cache (45s) so switching tabs / returning to the console
-      // reuses the last result instead of re-querying — cuts Supabase egress.
-      const CK = "dash.apps";
-      const cached = getCached<{ rows: Row[]; lenderLatest: Record<string, string> }>(CK, 45000);
-      if (cached) { setRows(cached.rows); setLenderLatest(cached.lenderLatest); return; }
-      const { data } = await supabase()
-        .from("epc_applications")
-        .select(
-          "id, borrower_name, aadhaar_name, aadhaar_number_masked, loan_display_id, " +
-          "borrower_pan, borrower_mobile, borrower_father_name, " +
-          "loan_amount, loan_amount_required, " +
-          "sanctioned_amount, first_disbursement_amount, first_disbursement_date, second_disbursement_amount, " +
-          // NOTE: rfd_at is intentionally NOT selected — it doesn't exist until
-          // migration 0059 is applied, and the dashboard doesn't need it (new
-          // RFD rows carry status='rfd'; disbursed rows are detected by amount).
-          "status, created_at, created_by, created_by_user_id, reviewed_at, aborted_at, approved_lender, rejected_lender, " +
-          "aadhaar_front_path, aadhaar_back_path, ebill_path, proforma_invoice_path, " +
-          "rooftop_photo_path, bank_statement_path, customer_photo_path, bill_on_applicant_name, " +
-          "coapp_pan_path, coapp_aadhaar_front_path, coapp_aadhaar_back_path, " +
-          "attention_status, attention_resolved_at, epc_last_activity_at, msg_admin_seen_at, " +
-          "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
-        )
-        .order("created_at", { ascending: false });
-      const rows = (data ?? []) as unknown as Row[];
-      setRows(rows);
+  // Loader, extracted so it can be re-run after a send (force=true bypasses the
+  // cache) and when the tab regains focus — that's how one admin's "Email sent"
+  // becomes visible on the other admin's dashboard.
+  const loadApps = useCallback(async (force = false) => {
+    // Short per-tab cache (45s) so switching tabs / returning to the console
+    // reuses the last result instead of re-querying — cuts Supabase egress.
+    const CK = "dash.apps";
+    if (!force) {
+      const cached = getCached<{ rows: Row[]; lenderLatest: Record<string, string>; lenderSentAt?: Record<string, string> }>(CK, 45000);
+      if (cached) { setRows(cached.rows); setLenderLatest(cached.lenderLatest); setLenderSentAt(cached.lenderSentAt ?? {}); return; }
+    }
+    const { data } = await supabase()
+      .from("epc_applications")
+      .select(
+        "id, borrower_name, aadhaar_name, aadhaar_number_masked, loan_display_id, " +
+        "borrower_pan, borrower_mobile, borrower_father_name, " +
+        "loan_amount, loan_amount_required, " +
+        "sanctioned_amount, first_disbursement_amount, first_disbursement_date, second_disbursement_amount, " +
+        // NOTE: rfd_at is intentionally NOT selected — it doesn't exist until
+        // migration 0059 is applied, and the dashboard doesn't need it (new
+        // RFD rows carry status='rfd'; disbursed rows are detected by amount).
+        "status, created_at, created_by, created_by_user_id, reviewed_at, aborted_at, approved_lender, rejected_lender, " +
+        "aadhaar_front_path, aadhaar_back_path, ebill_path, proforma_invoice_path, " +
+        "rooftop_photo_path, bank_statement_path, customer_photo_path, bill_on_applicant_name, " +
+        "coapp_pan_path, coapp_aadhaar_front_path, coapp_aadhaar_back_path, " +
+        "attention_status, attention_resolved_at, epc_last_activity_at, msg_admin_seen_at, " +
+        "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
+      )
+      .order("created_at", { ascending: false });
+    const rows = (data ?? []) as unknown as Row[];
+    setRows(rows);
 
-      // Per-lender latest status (6h) — group loan_application_lenders by app,
-      // then the most-recent event across each app's lenders becomes its label.
-      const { data: ll } = await supabase().from("loan_application_lenders").select(LOAN_LENDER_COLS);
-      const byApp: Record<string, LoanLenderRow[]> = {};
-      for (const lr of ((ll ?? []) as unknown as LoanLenderRow[])) (byApp[lr.application_id] ??= []).push(lr);
-      const map: Record<string, string> = {};
-      for (const [appId, appRows] of Object.entries(byApp)) {
-        const label = latestStatusLabel(latestLenderStatus(appRows));
-        if (label) map[appId] = label;
-      }
-      setLenderLatest(map);
-      setCached("dash.apps", { rows, lenderLatest: map });
-    })();
+    // Per-lender latest status (6h) — group loan_application_lenders by app,
+    // then the most-recent event across each app's lenders becomes its label.
+    // Also capture the most-recent docs_sent_at so the row can show "Sent <date>".
+    // Only the timeline columns are needed here — the heavy approval_details JSON
+    // (and rejection_reason) are left out to cut payload + parse time on the list.
+    const { data: ll } = await supabase().from("loan_application_lenders")
+      .select("id, application_id, lender_key, lender_label, docs_sent_at, approved_at, rejected_at");
+    const byApp: Record<string, LoanLenderRow[]> = {};
+    for (const lr of ((ll ?? []) as unknown as LoanLenderRow[])) (byApp[lr.application_id] ??= []).push(lr);
+    const map: Record<string, string> = {};
+    const sentMap: Record<string, string> = {};
+    for (const [appId, appRows] of Object.entries(byApp)) {
+      const label = latestStatusLabel(latestLenderStatus(appRows));
+      if (label) map[appId] = label;
+      const latestSent = appRows.reduce<string | null>(
+        (acc, r) => (r.docs_sent_at && (!acc || r.docs_sent_at > acc) ? r.docs_sent_at : acc), null);
+      if (latestSent) sentMap[appId] = latestSent;
+    }
+    setLenderLatest(map);
+    setLenderSentAt(sentMap);
+    setCached("dash.apps", { rows, lenderLatest: map, lenderSentAt: sentMap });
   }, []);
+
+  useEffect(() => { void loadApps(); }, [loadApps]);
+
+  // Cross-admin freshness: when this tab regains focus, re-pull the list
+  // (bypassing the cache) so a send/decision another admin just made shows up.
+  // Throttled to once per 20s to keep Supabase egress low.
+  const lastFocusLoad = useRef(0);
+  useEffect(() => {
+    const onFocus = () => {
+      if (document.visibilityState !== "visible") return;
+      const now = Date.now();
+      if (now - lastFocusLoad.current < 20000) return;
+      lastFocusLoad.current = now;
+      invalidate("dash.apps");
+      void loadApps(true);
+    };
+    document.addEventListener("visibilitychange", onFocus);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onFocus);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [loadApps]);
+
+  // After an email goes out from the LIST, record the shared docs-sent marker
+  // (loan_application_lenders.docs_sent_at) — the same state the View page writes
+  // via sendDocsToLender — so the status pill + "Sent <date>" show for EVERY
+  // admin, not just the one who sent it. Previously the list send recorded
+  // nothing, so another admin had no way to know it had already gone out.
+  async function recordDocsSentFromList(app: Row, lenderKey: string) {
+    const label = LENDER_LABEL[lenderKey] ?? lenderKey;
+    const now = new Date().toISOString();
+    try {
+      const { data: existing } = await supabase()
+        .from("loan_application_lenders")
+        .select("id, docs_sent_at")
+        .eq("application_id", app.id)
+        .eq("lender_key", lenderKey)
+        .maybeSingle();
+      if (existing) {
+        if (!(existing as { docs_sent_at: string | null }).docs_sent_at) {
+          await supabase().from("loan_application_lenders")
+            .update({ docs_sent_at: now }).eq("id", (existing as { id: string }).id);
+        }
+      } else {
+        await supabase().from("loan_application_lenders")
+          .insert({ application_id: app.id, lender_key: lenderKey, lender_label: label, docs_sent_at: now });
+      }
+      // Advance the headline to Docs Sent only while still pre-decision, so this
+      // never overrides an existing approval/rejection.
+      if (["draft", "submitted", "under_review"].includes(String(app.status))) {
+        await supabase().from("epc_applications")
+          .update({ status: "docs_sent", docs_sent_at: now }).eq("id", app.id);
+      }
+    } catch { /* best-effort — the email already went; the marker is a convenience */ }
+    invalidate("dash.apps");
+    await loadApps(true);
+  }
 
   // Display helpers — encapsulated so the render below stays clean.
   function displayBorrower(r: Row): string {
@@ -1535,19 +1608,23 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     }
   }
   // Filters-panel "Status" predicate (Draft / Under Review / Docs Sent / Hold /
-  // Approved / Rejected by lender / 1st & 2nd Tranche Done).
+  // Approved / Rejected by lender / 1st & 2nd Tranche Done). Every bucket is
+  // mutually exclusive and driven off loanStage() so the filter matches what the
+  // row's Status column actually shows. Aborted rows only ever match "aborted" —
+  // an aborted draft/approved/rejected does NOT leak into those filters.
   function statusMatch(r: Row, key: string): boolean {
+    if (key === "aborted") return r.aborted_at != null;
+    if (r.aborted_at != null) return false; // aborted belongs only to the Aborted filter
     switch (key) {
-      case "draft":        return r.status === "draft";
+      case "draft":        return loanStage(r) === "draft";
       case "under_review": return loanStage(r) === "under_review";
-      case "docs_sent":    return r.status === "docs_sent";
-      case "hold":         return r.status === "on_hold";
-      case "approved":     return ["approved", "sent_to_nbfc", "disbursed"].includes(r.status);
+      case "docs_sent":    return loanStage(r) === "docs_sent";
+      case "hold":         return loanStage(r) === "hold";
+      case "approved":     return loanStage(r) === "approved"; // approved only — not RFD/disbursed
       case "rfd":          return loanStage(r) === "rfd";
-      case "rejected":     return r.status === "rejected";
-      case "tranche1":     return r.first_disbursement_amount != null;
+      case "rejected":     return loanStage(r) === "rejected";
+      case "tranche1":     return r.first_disbursement_amount != null && r.second_disbursement_amount == null;
       case "tranche2":     return r.second_disbursement_amount != null;
-      case "aborted":      return r.aborted_at != null;
       default:             return true;
     }
   }
@@ -1833,6 +1910,11 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                       {OUTCOME_LABEL[lenderOutcome(r.status)]}
                     </span>
                   )}
+                  {/* Mail-sent date — when docs were emailed to a lender, so the
+                      team can track it without opening the activity log. */}
+                  {r.aborted_at == null && lenderSentAt[r.id] && (
+                    <p className="text-[11px] text-[#5a8a76] mt-1">Sent {fmtDateShort(lenderSentAt[r.id])}</p>
+                  )}
                 </td>
                 {/* Disbursement + countdown — only meaningful once approved. */}
                 <td className="px-3 py-3 text-center">
@@ -1914,6 +1996,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         endpoint={emailRow ? `/api/admin/loan-app/${emailRow.id}/send-to-lender` : ""}
         title="Send to lender"
         defaultLender={emailRow?.approved_lender}
+        onSent={(lenderKey) => { const app = emailRow; if (app) void recordDocsSentFromList(app, lenderKey); }}
       />
     </>
   );

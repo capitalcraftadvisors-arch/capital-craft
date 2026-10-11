@@ -69,7 +69,10 @@ type Turn = {
 
 const MOBILE_RE = /^[6-9]\d{9}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const hasCoapp = (f: Form) => f._has_coapp === "1"; // set by the name-check (mandatory) or the optional "add co-applicant" choice
+// A co-applicant is present when the name-check / paste set the flag, OR the RM
+// answered the explicit "co-applicant required?" question with Yes. Either one
+// reveals the co-applicant document slots in the table and its detail turns.
+const hasCoapp = (f: Form) => f._has_coapp === "1" || f.coapp_needed === "yes";
 // Is this doc turn's file already on the profile? Drives the standalone doc
 // turns' `when` gate (e.g. the bank statement self-skips once uploaded).
 function docProvided(turnId: string, f: Form): boolean {
@@ -95,6 +98,24 @@ const SCRIPT: Turn[] = [
     { value: "residential", label: "Residential", sub: "Home / society" },
     { value: "commercial", label: "Commercial", sub: "Shop / office / factory" },
   ] },
+  // 4a) Solar system type (on/off grid). Asked when still unknown — the info
+  //     sheet may already carry it; a converted lead never does. Needed for the
+  //     lender summary + Credit Fair email.
+  { id: "system_type", bot: "Type of solar system?", kind: "choice", field: "system_type", optional: true,
+    when: (f) => !(f.system_type && f.system_type.trim()), choices: [
+      { value: "on_grid", label: "On-Grid" }, { value: "off_grid", label: "Off-Grid" }, { value: "hybrid", label: "Hybrid" },
+    ] },
+  // 4b) Applicant email — asked when missing (a converted lead may not carry one).
+  { id: "borrower_email", bot: "Applicant's email? (optional)", kind: "text", field: "borrower_email", placeholder: "name@example.com", optional: true,
+    when: (f) => !(f.borrower_email && f.borrower_email.trim()),
+    validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email, or skip.") },
+  // 4c) Co-applicant required? Asked when the decision hasn't been made yet (no
+  //     flag, no co-applicant name on file). "Yes" reveals the co-applicant
+  //     document slots in the table below and its detail turns.
+  { id: "coapp_needed", bot: "Is a co-applicant required for this application?", kind: "choice", field: "coapp_needed", optional: true,
+    when: (f) => !f.coapp_needed && f._has_coapp !== "1" && !(f.coapp_name && f.coapp_name.trim()), choices: [
+      { value: "yes", label: "Yes, add a co-applicant" }, { value: "no", label: "No co-applicant" },
+    ] },
   // 5a) How the documents will be given. "Separate file per document" → the table
   //     (drop each into its box). "One combined PDF" → the table shows a combined-PDF
   //     box that auto-splits and fills the rows for review.
@@ -182,7 +203,7 @@ const STEP_PAYLOAD: Record<number, (f: Form) => Record<string, unknown>> = {
     // Derive from the co-applicant decision: co-applicant present ⇒ bill not on
     // the applicant alone. Keeps the profile's co-applicant section in sync with
     // the explicit Yes/No answer (a co-applicant is optional, never forced).
-    bill_on_applicant_name: f._has_coapp !== "1",
+    bill_on_applicant_name: !hasCoapp(f),
     coapp_name: f.coapp_name || "", coapp_mobile: f.coapp_mobile || "", coapp_email: f.coapp_email || "", coapp_father_name: f.coapp_father_name || "", coapp_dob: f.coapp_dob || "",
     coapp_pan: f.coapp_pan || "", coapp_pan_path: f.coapp_pan_path || "", coapp_relation: f.coapp_relation || "",
     coapp_aadhaar_name: f.coapp_aadhaar_name || "", coapp_aadhaar_dob: f.coapp_aadhaar_dob || "", coapp_aadhaar_gender: f.coapp_aadhaar_gender || "",

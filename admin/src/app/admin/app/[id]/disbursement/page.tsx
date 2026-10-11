@@ -104,6 +104,10 @@ function Inner() {
 
   async function saveFirst() {
     if (!loan || busy) return;
+    if (!["approved", "rfd", "sent_to_nbfc", "disbursed"].includes(String(loan.status))) {
+      setError("This application is not approved yet. A lender must approve it before any disbursement.");
+      return;
+    }
     const amt = Number(firstAmt);
     if (!Number.isFinite(amt) || amt <= 0) { setError("Enter a valid first disbursement amount."); return; }
     const sanctioned = Number(loan.sanctioned_amount ?? 0);
@@ -178,9 +182,13 @@ function Inner() {
   const dl = deadlineState(loan.first_disbursement_date);
   const sanctioned = loan.sanctioned_amount != null ? Number(loan.sanctioned_amount) : null;
   const firstSaved = loan.first_disbursement_amount != null;
+  // No disbursement is allowed until a lender has APPROVED the application (which
+  // also means docs were sent). Gating on the app-level status keeps the tracker
+  // honest — a case still at submitted/docs_sent can never record a disbursement.
+  const isApproved = ["approved", "rfd", "sent_to_nbfc", "disbursed"].includes(String(loan.status));
   // The 1st-disbursement entry opens once both Tranche-1 documents are uploaded
-  // (or it was already recorded). RFD is no longer required.
-  const tranche1Complete = firstSaved || (t1Total > 0 && t1Uploaded >= t1Total);
+  // (or it was already recorded) AND the application is approved.
+  const tranche1Complete = isApproved && (firstSaved || (t1Total > 0 && t1Uploaded >= t1Total));
   const remaining = remainingAmount(sanctioned, loan.first_disbursement_amount);
   const reviewState: string | null = loan.completion_docs_status ?? null;
   const allDocsIn = docsUploaded >= docsTotal;
@@ -246,6 +254,11 @@ function Inner() {
 
         {tab === "disbursement" && (
           <div className="space-y-4">
+            {!isApproved && (
+              <div className="rounded-[8px] border border-[#f3d9a4] bg-[#fef8ee] px-4 py-3 text-[13px] text-[#854f0b]">
+                This application is not approved yet. Disbursement opens only after a lender approves it (which requires the documents to have been sent). Approve it from the application page first.
+              </div>
+            )}
             {/* 1st disbursement — opens once both Tranche-1 docs are uploaded. */}
             <SectionCard title="1st Tranche documents" accent="blue" icon={I.files}>
               <p className="text-[13px] text-[#5a8a76] mb-3">
@@ -265,7 +278,9 @@ function Inner() {
             <SectionCard title="First disbursement" accent="green" icon={I.money}>
               {!tranche1Complete ? (
                 <p className="text-[13px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2">
-                  Upload both Tranche-1 documents above to open the 1st disbursement.
+                  {!isApproved
+                    ? "The application must be approved by a lender before the 1st disbursement can be entered."
+                    : "Upload both Tranche-1 documents above to open the 1st disbursement."}
                 </p>
               ) : (
                 <>

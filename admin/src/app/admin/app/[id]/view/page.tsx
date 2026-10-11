@@ -932,22 +932,39 @@ function Inner() {
         {aborted && loan.abort_reason && (
           <div className="px-5 sm:px-8 pb-2 text-[12px] font-medium text-red-700">Aborted — {loan.abort_reason}</div>
         )}
-        {rejected && loan.rejection_reason && (
-          <div className="px-5 sm:px-8 pb-2 text-[12px] font-medium text-red-700">Rejection reason: {loan.rejection_reason}</div>
-        )}
-        {/* Per-lender rejection reason(s). The full-case Reject writes the reason
-            onto the lender row (loan_application_lenders), and syncHeadline may keep
-            the app at docs_sent — so the app-level line above never fires for it.
-            Surface each lender's reason here so it reads the same as an app-level
-            reject. Hidden once a lender approves (the approval is then the headline). */}
-        {loan.status !== "approved" &&
-          lenderRows
-            .filter((r) => r.rejected_at && (r.rejection_reason ?? "").trim())
-            .map((r) => (
+        {/* ONE rejection-reason line. syncHeadline copies the latest lender's
+            reason into loan.rejection_reason, so showing both the app-level line
+            and the per-lender line repeats the same text. Per-lender rows (which
+            name the lender) take precedence and are de-duplicated by reason text;
+            the app-level reason is the fallback when no lender row carries one.
+            Hidden once a lender approves (the approval is then the headline). */}
+        {(() => {
+          const lenderRej = loan.status !== "approved"
+            ? lenderRows.filter((r) => r.rejected_at && (r.rejection_reason ?? "").trim())
+            : [];
+          if (lenderRej.length > 0) {
+            const seen = new Set<string>();
+            const uniq = lenderRej.filter((r) => {
+              const k = (r.rejection_reason ?? "").trim().toLowerCase();
+              if (seen.has(k)) return false;
+              seen.add(k);
+              return true;
+            });
+            return uniq.map((r) => (
               <div key={r.id} className="px-5 sm:px-8 pb-2 text-[12px] font-medium text-red-700">
                 Rejection reason{r.lender_label ? ` (${r.lender_label})` : ""}: {r.rejection_reason}
               </div>
-            ))}
+            ));
+          }
+          if (rejected && loan.rejection_reason) {
+            return (
+              <div className="px-5 sm:px-8 pb-2 text-[12px] font-medium text-red-700">
+                Rejection reason: {loan.rejection_reason}
+              </div>
+            );
+          }
+          return null;
+        })()}
       </header>
 
       <div className="w-full px-5 sm:px-8 py-4 lg:flex lg:gap-6" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
@@ -1043,8 +1060,11 @@ function Inner() {
             <>
               {statusActions}
               {/* Disbursement page hosts the Tranche-1 upload; the 1st-amount
-                  field there opens once both Tranche-1 docs are uploaded. */}
-              {anyApprovedLender && (
+                  field there opens once both Tranche-1 docs are uploaded. Gated on
+                  the application being APPROVED at the app level (not merely a
+                  lender row carrying approved_at) so a case whose headline is still
+                  submitted/docs_sent can never be disbursed. */}
+              {approvedPlus && (
                 <HAction variant="amber" icon={I.money} onClick={() => router.push(`/admin/app/${loan.id}/disbursement` as any)}>
                   Disbursement
                 </HAction>
