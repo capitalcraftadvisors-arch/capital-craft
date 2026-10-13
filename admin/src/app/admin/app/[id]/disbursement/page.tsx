@@ -22,6 +22,7 @@ import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { getBusiness } from "@/lib/auth";
 import { logLoanActivity } from "@/lib/loanAudit";
+import { invalidateLoanBoards } from "@/lib/ops-board";
 import CompletionDocsSection from "@/components/CompletionDocsSection";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import { LENDER_LABEL } from "@/lib/lender-summary";
@@ -126,6 +127,7 @@ function Inner() {
     await logLoanActivity(loan.id, "status_change", {
       detail: `First disbursement ${fmtRupees(amt)} on ${fmtDateShort(firstDate)} — 45-day clock started`,
     });
+    invalidateLoanBoards(); // disbursement moves the case on the Task Manager / list
     setMsg("First disbursement saved — the 45-day clock has started.");
     await load();
     setBusy(false);
@@ -167,6 +169,7 @@ function Inner() {
     await logLoanActivity(loan.id, "status_change", {
       detail: `Second disbursement ${fmtRupees(amt)} on ${fmtDateShort(secondDate)}`,
     });
+    invalidateLoanBoards(); // 2nd disbursement moves the case on the Task Manager / list
     setMsg("Second disbursement saved.");
     await load();
     setBusy(false);

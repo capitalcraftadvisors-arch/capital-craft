@@ -20,6 +20,7 @@ import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { getBusiness } from "@/lib/auth";
 import { logLoanActivity } from "@/lib/loanAudit";
+import { invalidateLoanBoards } from "@/lib/ops-board";
 import ApprovalDetailsTable, { LENDER_LABEL, type ApprovalDetails } from "@/components/ApprovalDetailsTable";
 import type { LenderKey } from "@/components/LenderPickerModal";
 import { rupeesInWords } from "@/lib/numberToWords";
@@ -216,6 +217,7 @@ function Inner() {
         : `Approved by ${LENDER_LABEL[String(details.approved_by)] ?? details.approved_by}`,
     });
 
+    invalidateLoanBoards(); // approval reflects on the Task Manager / Loans list / KPIs
     router.push(`/admin/app/${loan.id}/view` as any);
   }
 

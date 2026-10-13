@@ -35,6 +35,7 @@ import { logLoanActivity } from "@/lib/loanAudit";
 import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
 import { deadlineState, DEADLINE_PILL, remainingAmount, fmtDateShort } from "@/lib/disbursement";
 import { fmtDateTime } from "@/lib/dates";
+import { invalidateLoanBoards } from "@/lib/ops-board";
 import {
   I, SectionCard, KV, StepBlock, DocGrid, BigProgressStep, BigConnector, type ViewDocSlot,
 } from "@/components/view/ViewKit";
@@ -480,6 +481,7 @@ function Inner() {
       return;
     }
     setLoan({ ...loan, ...patch });
+    invalidateLoanBoards(); // Task Manager / Loans list / KPIs re-read on next open
     setStatusMsg("Status updated.");
     await logLoanActivity(loan.id, next === "approved" ? "approved" : next === "rejected" ? "rejected" : "status_change", {
       detail: note || `Status → ${LOAN_STATUS_LABEL[next] ?? next}`,
@@ -755,6 +757,7 @@ function Inner() {
     }
     await supabase().from("epc_applications").update(patch).eq("id", loan.id);
     setLoan((prev) => (prev ? ({ ...prev, ...patch } as Loan) : prev));
+    invalidateLoanBoards(); // docs-sent / approve / reject reflect on next board/list open
   }
 
   async function sendDocsToLender(lender: PickerLender) {
@@ -841,10 +844,19 @@ function Inner() {
     const me = getBusiness();
     const by = me?.contact_name || "admin";
     const now = new Date().toISOString();
-    const patch = { aborted_at: now, abort_reason: reason, reviewed_by: by, reviewed_at: now };
+    const patch: Record<string, unknown> = { aborted_at: now, abort_reason: reason, reviewed_by: by, reviewed_at: now };
+    // Aborting is terminal — don't leave the case parked "on hold" (that made the
+    // Task Manager still show it as On hold). Restore its pre-hold status and clear
+    // the hold overlay so nothing reads it as on_hold anymore.
+    if (loan.status === "on_hold") {
+      patch.status = loan.status_before_hold || "under_review";
+      patch.hold_at = null;
+      patch.status_before_hold = null;
+    }
     const { error } = await supabase().from("epc_applications").update(patch).eq("id", loan.id);
     if (error) { setStatusMsg("Couldn't abort — " + error.message); setStatusBusy(false); return; }
     setLoan({ ...loan, ...patch });
+    invalidateLoanBoards(); // abort reflects on the Task Manager / Loans list immediately
     setStatusMsg("Application aborted.");
     await logLoanActivity(loan.id, "status_change", { detail: `Aborted — ${reason}` });
     setStatusBusy(false);

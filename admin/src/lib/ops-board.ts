@@ -11,7 +11,7 @@
 import { supabase } from "./supabase";
 import { getBusiness } from "./auth";
 import { isUndefinedColumn } from "./optional-column";
-import { getCached, setCached } from "./list-cache";
+import { getCached, setCached, invalidate } from "./list-cache";
 
 export type CaseSource = "loan" | "insurance" | "lead" | "epc";
 export type ColumnDef = { key: string; label: string };
@@ -216,6 +216,17 @@ function loanLenderLabel(rows: Record<string, any>[]): string | null {
 // `force` bypasses the short cache — the board passes it after every action so
 // the user sees fresh data immediately; plain navigation to the board reuses a
 // result up to 20s old to cut egress.
+// After a loan's state changes (approve / reject / abort / docs-sent / hold…),
+// clear EVERY cached view that shows it — the Task Manager board, the admin Loans
+// list, and the KPI tiles — so all of them re-read fresh the next time they open.
+// No background polling: just one fresh read on next open, so the whole portal
+// stays consistent with the change you just made.
+export function invalidateLoanBoards(): void {
+  invalidate(`opscases.${getBusiness()?.id ?? "anon"}`); // Task Manager board
+  invalidate("dash.apps");                               // admin Loans list
+  invalidate("dashkpis");                                // KPI tiles
+}
+
 export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ cases: OpsCase[]; users: TeamUser[] }> {
   const db = supabase();
   const nowISO = new Date().toISOString(); // active cases → current month
@@ -295,7 +306,9 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
     const { column, label, stageSince } = loanColumn(r, midDecision);
     cases.push({
       id: r.id, source: "loan",
-      name: r.borrower_name || r.aadhaar_name || "—",
+      // Verified KYC (Aadhaar) name first — matches the list/profile/emails.
+      // borrower_name can be a stale lead name from a converted lead.
+      name: r.aadhaar_name || r.borrower_name || "—",
       amount: num(r.loan_amount_required) || num(r.loan_amount),
       mobile: r.borrower_mobile ?? null,
       ownerUserId: r.assigned_to_user_id ?? null,
@@ -312,7 +325,9 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       // total lifetime so the two stats stay coherent.
       stageHours: Math.min(hoursSince(stageSince || r.updated_at), hoursSince(r.created_at || r.submitted_at || r.updated_at)),
       tatDays: daysSince(r.created_at || r.submitted_at || r.updated_at),
-      idleDays: daysSince(r.updated_at), onHold: r.status === "on_hold",
+      // Aborted cases are terminal — never flag "On hold" on them even if the
+      // hold status lingered when they were aborted.
+      idleDays: daysSince(r.updated_at), onHold: r.status === "on_hold" && !r.aborted_at,
       blocker: r.review_notes || null,
       createdAt: r.created_at ?? null,
       // Terminal loans (2nd-phase / abort / rejected) freeze at their finish date;

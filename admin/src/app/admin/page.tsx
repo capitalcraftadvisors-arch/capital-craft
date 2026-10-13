@@ -17,6 +17,7 @@ import { getToken, getBusiness, allowedModules, greetingName } from "@/lib/auth"
 import NotificationBell from "@/components/NotificationBell";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
 import { getCached, setCached, invalidate } from "@/lib/list-cache";
+import { invalidateLoanBoards } from "@/lib/ops-board";
 import { useAdminNames } from "@/lib/use-admin-names";
 import { useEpcUpdates } from "@/lib/use-epc-updates";
 import EmailComposerModal from "@/components/EmailComposerModal";
@@ -1505,7 +1506,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
           .update({ status: "docs_sent", docs_sent_at: now }).eq("id", app.id);
       }
     } catch { /* best-effort — the email already went; the marker is a convenience */ }
-    invalidate("dash.apps");
+    invalidateLoanBoards(); // also refreshes the Task Manager + KPIs, not just this list
     await loadApps(true);
   }
 
