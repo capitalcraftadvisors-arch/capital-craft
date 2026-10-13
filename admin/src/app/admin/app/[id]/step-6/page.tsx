@@ -1,4 +1,5 @@
 "use client";
+import { fmtDateTime } from "@/lib/dates";
 
 // Loan Application — Step 6 (Review & Submit)
 //
@@ -58,8 +59,7 @@ function fmtRupees(n: number | null | undefined): string {
 }
 
 function fmtDate(v: string | null | undefined): string {
-  if (!v) return "—";
-  return new Date(v).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return fmtDateTime(v);
 }
 
 export default function LoanAppStep6Page() {

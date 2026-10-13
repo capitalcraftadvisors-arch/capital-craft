@@ -1,4 +1,5 @@
 "use client";
+import { fmtDate } from "@/lib/dates";
 
 // A bell + dropdown that surfaces comments OTHER admins (e.g. the manager) have
 // left on the cases assigned to the signed-in user — across the loan, EPC, and
@@ -54,7 +55,7 @@ function ago(iso: string): string {
   if (diff < 60000) return "just now";
   if (diff < 3600000) return Math.floor(diff / 60000) + "m ago";
   if (diff < 86400000) return Math.floor(diff / 3600000) + "h ago";
-  return new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  return fmtDate(iso);
 }
 
 export default function NotificationBell() {

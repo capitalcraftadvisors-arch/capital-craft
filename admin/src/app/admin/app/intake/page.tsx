@@ -29,6 +29,7 @@ import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness } from "@/lib/auth";
 import { computeCentralSubsidy, computeEmi, formatRupees, DEFAULT_INDICATIVE_ROI, TENURES } from "@/lib/emi";
+import { numberToWordsIndian } from "@/lib/numberToWords";
 
 export default function IntakePage() {
   return (
@@ -2016,22 +2017,9 @@ function fieldLabel(t: Turn): string {
 const AMOUNT_FIELDS = new Set(["loan_amount_required", "annual_income", "total_project_cost", "monthly_bill_amount", "lead_loan_amount"]);
 
 // Integer → Indian words (lakh / crore). Empty for non-positive / invalid.
+// Words only (no "Rupees Only" suffix — callers append " rupees" in the UI).
 function amountInWords(num: number): string {
-  if (!Number.isFinite(num) || num <= 0) return "";
-  num = Math.floor(num);
-  const a = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
-  const b = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-  const two = (n: number): string => (n < 20 ? a[n] : b[Math.floor(n / 10)] + (n % 10 ? " " + a[n % 10] : ""));
-  const three = (n: number): string => { const h = Math.floor(n / 100), r = n % 100; return (h ? a[h] + " Hundred" + (r ? " " : "") : "") + (r ? two(r) : ""); };
-  let res = "";
-  const crore = Math.floor(num / 10000000); num %= 10000000;
-  const lakh = Math.floor(num / 100000); num %= 100000;
-  const thousand = Math.floor(num / 1000); num %= 1000;
-  if (crore) res += three(crore) + " Crore ";
-  if (lakh) res += two(lakh) + " Lakh ";
-  if (thousand) res += two(thousand) + " Thousand ";
-  if (num) res += three(num);
-  return res.trim();
+  return Number.isFinite(num) && num > 0 ? numberToWordsIndian(Math.floor(num)) : "";
 }
 
 // The path column(s) that make a document turn "already present" in edit mode.

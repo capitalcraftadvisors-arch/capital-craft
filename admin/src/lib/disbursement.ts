@@ -9,6 +9,8 @@
 // Overdue is a FLAG, not a gate: it turns the countdown red for admin review
 // and never blocks anything on its own.
 
+import { fmtDate } from "./dates";
+
 export const DISBURSEMENT_WINDOW_DAYS = 45;
 
 // Amber once the remaining window drops under this.
@@ -123,10 +125,7 @@ export function fmtRupees(n: number | null | undefined): string {
   return "₹" + Math.round(Number(n)).toLocaleString("en-IN");
 }
 
-/** "12 Jul 2026" — compact date for tables/headers. */
+/** Portal-wide compact date for tables/headers — DD/MM/YYYY (see lib/dates). */
 export function fmtDateShort(v: string | null | undefined): string {
-  if (!v) return "—";
-  const d = parseDateOnly(v);
-  if (!d) return "—";
-  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  return fmtDate(v);
 }

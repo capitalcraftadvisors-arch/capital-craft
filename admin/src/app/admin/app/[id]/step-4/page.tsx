@@ -1,4 +1,5 @@
 "use client";
+import { fmtDateTime } from "@/lib/dates";
 
 // Loan Application — Step 4 (Personal Details)
 //
@@ -754,7 +755,7 @@ function BankDocSlot({
           <p className="text-[13px] font-semibold text-[#0f3d2e]">{doc!.file_name}</p>
           {uploaded && (
             <p className="text-[11px] text-[#5a8a76]">
-              Uploaded on {uploaded.toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+              Uploaded on {fmtDateTime(uploaded)}
             </p>
           )}
           <div className="flex items-center gap-2 pt-1">

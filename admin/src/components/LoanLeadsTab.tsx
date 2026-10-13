@@ -1,4 +1,5 @@
 "use client";
+import { fmtDate } from "@/lib/dates";
 
 // Loan-lead dashboard (admin console "Lead" tab). Admin-created early-stage
 // loan leads (table `loan_leads`), DISTINCT from the non-EPC marketing leads
@@ -195,7 +196,7 @@ export default function LoanLeadsTab() {
                     </td>
                     <td className="px-4 py-3 text-center font-semibold text-[#0f3d2e]">{rupees(r.loan_amount)}</td>
                     <td className="px-4 py-3 text-center text-[13px] text-[#5a8a76]">
-                      {new Date(r.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                      {fmtDate(r.created_at)}
                     </td>
                     <td className="px-4 py-3 text-center text-[13px] text-[#5a8a76]">{r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : createdByLabel(r.created_by)}</td>
                     <td className="px-4 py-3">

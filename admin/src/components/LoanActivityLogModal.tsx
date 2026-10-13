@@ -1,4 +1,5 @@
 "use client";
+import { fmtDateTime } from "@/lib/dates";
 
 // Activity log modal for a LOAN APPLICATION — the loan-side twin of
 // ActivityLogModal. Same modal shell, same row styling, same "single button →
@@ -94,12 +95,7 @@ const STEP_STAMPS: { col: string; step: number }[] = [
 type Ev = { at: string; text: string; by?: string | null; note?: string | null; tone: string; svg: React.ReactNode };
 
 function fmtDate(v: string): string {
-  const d = new Date(v);
-  if (isNaN(d.getTime())) return v;
-  return d.toLocaleString("en-IN", {
-    day: "2-digit", month: "short", year: "numeric",
-    hour: "2-digit", minute: "2-digit",
-  });
+  return fmtDateTime(v);
 }
 
 function evFromLog(r: LogRow, names: Map<string, string>): Ev {

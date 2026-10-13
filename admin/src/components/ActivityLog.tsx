@@ -1,4 +1,5 @@
 "use client";
+import { fmtDateTime } from "@/lib/dates";
 
 // Chronological audit feed for one EPC. Reads admin_edit_log directly via
 // Supabase (admin JWT + admin_all_edit_log policy). Renders one line per
@@ -218,7 +219,7 @@ function clip(s: string | null): string {
 
 function fmtDate(iso: string): string {
   try {
-    return new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+    return fmtDateTime(iso);
   } catch {
     return iso;
   }

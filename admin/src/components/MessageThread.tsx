@@ -1,4 +1,5 @@
 "use client";
+import { fmtDateTime } from "@/lib/dates";
 
 // Shared "Message to EPC" thread — admin ⇄ EPC, for both loan and insurance.
 // Self-contained: loads its own messages + the parent's attention state under
@@ -325,5 +326,5 @@ function fmtWhen(iso: string): string {
   if (diff < 60_000) return "just now";
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+  return fmtDateTime(d);
 }

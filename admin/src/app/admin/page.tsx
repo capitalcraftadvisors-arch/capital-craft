@@ -25,6 +25,7 @@ import {
   deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort,
   displayAmount as amountFor,
 } from "@/lib/disbursement";
+import { fmtDate, fmtDateTime } from "@/lib/dates";
 import { policyValidityParts, VALIDITY_TEXT } from "@/lib/insurance-validity";
 import LenderCell from "@/components/LenderCell";
 import LoanLeadsTab from "@/components/LoanLeadsTab";
@@ -53,7 +54,15 @@ function Inner() {
     const t = CONSOLE_TABS.filter((k) => mods.includes(k));
     return t.length ? t : CONSOLE_TABS;
   });
-  const [tab, setTab] = useState<Tab>(() => allowedTabs[0]);
+  // Initialise to the LAST tab the user was on (persisted below), so returning
+  // to the console from anywhere lands where they left — not the default tab.
+  const [tab, setTab] = useState<Tab>(() => {
+    try {
+      const saved = sessionStorage.getItem("adminList.activeTab") as Tab | null;
+      if (saved && allowedTabs.includes(saved)) return saved;
+    } catch { /* sessionStorage may be unavailable */ }
+    return allowedTabs[0];
+  });
   // Summary period is owned here so the picker can sit in the section header
   // (top-right). Default is per-tab: EPCs = This Year, all others = This Month.
   const [period, setPeriod] = useState<Period>("year");
@@ -69,6 +78,13 @@ function Inner() {
     if ((t === "apps" || t === "loanleads" || t === "insurance" || t === "leads") && allowedTabs.includes(t)) setTab(t);
     sessionStorage.removeItem("adminList.tab");
   }, [allowedTabs]);
+
+  // Remember the active tab across navigation so every "back to console" button
+  // (many of which just push /admin) returns to the tab the user was last on,
+  // instead of always snapping to the default EPCs tab.
+  useEffect(() => {
+    try { sessionStorage.setItem("adminList.activeTab", tab); } catch { /* ignore */ }
+  }, [tab]);
 
   // Restore the saved period for this tab (persists the user's choice across
   // navigation — opening a case and returning keeps it, until they change it),
@@ -156,21 +172,12 @@ const BUSINESS_TYPE_LABEL: Record<string, string> = {
 type Lender = string;
 // "03 Jul 2026, 5:53 pm" — when the loan application was created.
 function fmtAddedOn(v: string | null | undefined): string {
-  if (!v) return "—";
-  const d = new Date(v);
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleString("en-IN", {
-    day: "2-digit", month: "short", year: "numeric",
-    hour: "numeric", minute: "2-digit", hour12: true,
-  });
+  return fmtDateTime(v);
 }
 // Same instant, split so the loan table can show the date bold with the time
 // muted underneath: "22 Jul 2026" / "10:43 am".
 function fmtAddedDate(v: string | null | undefined): string {
-  if (!v) return "—";
-  const d = new Date(v);
-  if (isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  return fmtDate(v);
 }
 function fmtAddedTime(v: string | null | undefined): string {
   if (!v) return "";
@@ -606,9 +613,7 @@ function FiltersPanel({ open, hasActive, onClear, children }: {
 // no visible dd-mm-yyyy field.
 function CalField({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
   const ref = useRef<HTMLInputElement>(null);
-  const display = value
-    ? new Date(value + "T00:00:00").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })
-    : placeholder;
+  const display = value ? fmtDate(value) : placeholder;
   return (
     <button
       type="button"
@@ -1204,7 +1209,7 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
                 </td>
                 <td className="px-3 py-3 text-center">
                   <p className="text-[13px] font-semibold text-[#0f3d2e]">
-                    {new Date(r.created_at).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
+                    {fmtDate(r.created_at)}
                   </p>
                   <p className="text-[11px] text-[#5a8a76] mt-0.5">
                     {new Date(r.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
@@ -1505,8 +1510,11 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
   }
 
   // Display helpers — encapsulated so the render below stays clean.
+  // Prefer the KYC (Aadhaar) name — the verified applicant — so the list matches
+  // the profile header. borrower_name can be a stale lead name (from a converted
+  // lead), which made the list disagree with the opened profile.
   function displayBorrower(r: Row): string {
-    return r.borrower_name || r.aadhaar_name || "—";
+    return r.aadhaar_name || r.borrower_name || "—";
   }
   // Applications that look like the SAME person as another loan — flagged ⚠ so
   // duplicates get caught before double-work. A shared PAN or mobile is a
@@ -1640,6 +1648,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
       if (statusFilter && !statusMatch(r, statusFilter)) return false;
       if (needle &&
           !(displayBorrower(r).toLowerCase().includes(needle) ||
+            (r.borrower_mobile ?? "").includes(needle) ||
             (r.loan_display_id ?? "").toLowerCase().includes(needle) ||
             displayEpc(r).toLowerCase().includes(needle))) return false;
       if (epcFilter && displayEpc(r) !== epcFilter) return false;
@@ -1725,7 +1734,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
 
       <div className="flex flex-wrap items-center gap-3 mb-3">
         <div className="flex-1 min-w-[220px]">
-          <Input placeholder="Search by borrower…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
+          <Input placeholder="Search by borrower or mobile…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
         </div>
         <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.apps.color} onClick={() => setFiltersOpen((o) => !o)} />
         <Button variant="primary" onClick={exportReport} style={{ backgroundColor: "#178a5c" }} className="whitespace-nowrap inline-flex items-center gap-1.5">
@@ -2082,22 +2091,22 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
 
   useEffect(() => {
     if (rows.length === 0) return;
-    const savedScroll = sessionStorage.getItem("appsList.scroll");
-    const savedRow = sessionStorage.getItem("appsList.lastRowId");
+    const savedScroll = sessionStorage.getItem("insList.scroll");
+    const savedRow = sessionStorage.getItem("insList.lastRowId");
     if (savedScroll) { const y = parseInt(savedScroll, 10); if (!isNaN(y)) window.scrollTo(0, y); }
     if (savedRow) {
       setHighlightId(savedRow);
       const t = window.setTimeout(() => setHighlightId(null), 2100);
-      sessionStorage.removeItem("appsList.lastRowId");
-      sessionStorage.removeItem("appsList.scroll");
+      sessionStorage.removeItem("insList.lastRowId");
+      sessionStorage.removeItem("insList.scroll");
       return () => window.clearTimeout(t);
     }
   }, [rows.length]);
 
   // Restore the filter/search state saved by navigateToView, so returning
   // from a View lands on the same filtered list. Mount-only + consumed
-  // immediately so a fresh visit is clean. (Own key — the scroll/row keys
-  // are shared with the Loan tab, but filters are per-tab.)
+  // immediately so a fresh visit is clean. (Insurance-specific keys so scroll
+  // / highlight / filters never collide with the Loan tab.)
   useEffect(() => {
     const raw = sessionStorage.getItem("insList.filters");
     if (!raw) return;
@@ -2118,8 +2127,8 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
   }, []);
 
   function navigateToView(row: Row) {
-    sessionStorage.setItem("appsList.scroll", String(window.scrollY));
-    sessionStorage.setItem("appsList.lastRowId", row.id);
+    sessionStorage.setItem("insList.scroll", String(window.scrollY));
+    sessionStorage.setItem("insList.lastRowId", row.id);
     sessionStorage.setItem("adminList.tab", "insurance");
     sessionStorage.setItem("insList.filters", JSON.stringify({
       q, statusFilter, epcFilter, expiryFilter,

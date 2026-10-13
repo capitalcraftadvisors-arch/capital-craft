@@ -1,4 +1,5 @@
 "use client";
+import { fmtDate } from "@/lib/dates";
 
 // Ops Board — a kanban of every ACTIVE case (loan / insurance / lead / EPC
 // onboarding) across the business, grouped by pipeline stage. One place to see
@@ -1666,5 +1667,5 @@ function when(iso: string): string {
   if (diff < 60000) return "just now";
   if (diff < 3600000) return Math.floor(diff / 60000) + "m ago";
   if (diff < 86400000) return Math.floor(diff / 3600000) + "h ago";
-  return d.toLocaleDateString("en-IN", { dateStyle: "medium" });
+  return fmtDate(d);
 }

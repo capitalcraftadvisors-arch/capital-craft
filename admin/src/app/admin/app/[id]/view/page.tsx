@@ -34,6 +34,7 @@ import { TabButton, DownloadMenu, KebabMenu, ProfileRail } from "@/components/Pr
 import { logLoanActivity } from "@/lib/loanAudit";
 import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
 import { deadlineState, DEADLINE_PILL, remainingAmount, fmtDateShort } from "@/lib/disbursement";
+import { fmtDateTime } from "@/lib/dates";
 import {
   I, SectionCard, KV, StepBlock, DocGrid, BigProgressStep, BigConnector, type ViewDocSlot,
 } from "@/components/view/ViewKit";
@@ -105,8 +106,7 @@ function fmtRupees(n: number | null | undefined): string {
   return "₹" + Math.round(Number(n)).toLocaleString("en-IN");
 }
 function fmtDate(v: string | null | undefined): string {
-  if (!v) return "—";
-  return new Date(v).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return fmtDateTime(v);
 }
 function maskAcct(a: string | null | undefined): string {
   if (!a) return "—";
@@ -293,6 +293,7 @@ function Inner() {
   const [approveOpen, setApproveOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [docSentPickerOpen, setDocSentPickerOpen] = useState(false);
+  const [changeLenderOpen, setChangeLenderOpen] = useState(false);
   const [zipPickerOpen, setZipPickerOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const [abortOpen, setAbortOpen] = useState(false);
@@ -634,6 +635,15 @@ function Inner() {
       .map((r) => ({ key: r.lender_key, label: r.lender_label })),
   ].filter((l) => !lenderRows.some((r) => r.lender_key === l.key && r.docs_sent_at));
   const withDocsOptions: PickerLender[] = withDocs.map((r) => ({ key: r.lender_key, label: r.lender_label }));
+  // ALL lenders (defaults + any custom already on the app) — used by "Change
+  // lender" so the admin can finalize a DIFFERENT lender (e.g. CF rejected,
+  // Solfin approved) even one that had no docs sent yet.
+  const allLenderOptions: PickerLender[] = [
+    ...DEFAULT_LOAN_LENDERS,
+    ...lenderRows
+      .filter((r) => !DEFAULT_LOAN_LENDERS.some((d) => d.key === r.lender_key))
+      .map((r) => ({ key: r.lender_key, label: r.lender_label })),
+  ];
   // Approval Details are shown per selected lender via chips (6h). Default to
   // the finalized lender (approved_lender), else the first approved lender.
   const selDetailsKey = detailsLender || (loan.approved_lender as string) || approvedRows[0]?.lender_key || "";
@@ -648,9 +658,12 @@ function Inner() {
   // Tracker reads an "effective" status so a held case still shows where it
   // was parked (Resume returns it there).
   const effStatus = onHold ? (loan.status_before_hold ?? "under_review") : statusVal;
-  const tDocsSent = ["docs_sent", "approved", "rfd", "rejected", "sent_to_nbfc", "disbursed"].includes(effStatus);
-  const tApproved = ["approved", "rfd", "sent_to_nbfc", "disbursed"].includes(effStatus);
-  const tRejected = effStatus === "rejected";
+  // A recorded disbursement implies docs were sent AND a lender approved, even if
+  // the headline status was never synced (legacy/inconsistent rows) — so the
+  // tracker reads coherently instead of showing "disbursed" with "Approved" blank.
+  const tDocsSent = firstDone || ["docs_sent", "approved", "rfd", "rejected", "sent_to_nbfc", "disbursed"].includes(effStatus);
+  const tApproved = firstDone || ["approved", "rfd", "sent_to_nbfc", "disbursed"].includes(effStatus);
+  const tRejected = !firstDone && effStatus === "rejected";
   const tDecided  = tApproved || tRejected;
 
   // Tranche ZIPs are offered in the Download menu only when that tranche's
@@ -689,6 +702,11 @@ function Inner() {
       icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></svg>),
       onClick: changeReview,
     }] : []),
+    ...((canChangeReview || withDocs.length > 0) && !aborted ? [{
+      label: "Change lender",
+      icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5" /><path d="M21 3l-7 7" /><path d="M8 21H3v-5" /><path d="M3 21l7-7" /></svg>),
+      onClick: () => setChangeLenderOpen(true),
+    }] : []),
     {
       label: "Delete",
       icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>),
@@ -696,9 +714,6 @@ function Inner() {
       danger: true,
     },
   ];
-
-  const markDocsSent = () =>
-    void changeStatus("docs_sent", { docs_sent_at: new Date().toISOString() }, "Docs sent to lender");
 
   // ── Per-lender actions ───────────────────────────────────────────────
   async function reloadLenders(): Promise<LoanLenderRow[]> {
@@ -928,7 +943,9 @@ function Inner() {
           </div>
 
         </div>
-        {statusMsg && <div className="px-5 sm:px-8 pb-2 text-[12px] text-[#5a8a76]">{statusMsg}</div>}
+        {/* A rejected app already shows its reason in the red line below, so the
+            grey status confirmation would just repeat it — suppress it there. */}
+        {statusMsg && !rejected && <div className="px-5 sm:px-8 pb-2 text-[12px] text-[#5a8a76]">{statusMsg}</div>}
         {aborted && loan.abort_reason && (
           <div className="px-5 sm:px-8 pb-2 text-[12px] font-medium text-red-700">Aborted — {loan.abort_reason}</div>
         )}
@@ -1373,7 +1390,7 @@ function Inner() {
               </SectionCard>
             )}
 
-            {approvedPlus && (
+            {(approvedPlus || firstDone || secondDone) && (
               <SectionCard title="Sanction details" accent="green" icon={I.money} adminOnly>
                 <StepBlock title="1st Disbursement">
                   <KV k="Amount" v={fmtRupees(loan.first_disbursement_amount)} valueClass="text-[#178a5c]" />
@@ -1449,6 +1466,17 @@ function Inner() {
         tone="green"
         onClose={() => setApproveOpen(false)}
         onConfirm={(l) => approvePickLender(l)}
+      />
+      <LoanLenderPickerModal
+        open={changeLenderOpen}
+        title="Change lender"
+        subtitle={`For ${applicantName}. Pick the lender to finalize this application with (e.g. one rejected it, another approved). You'll fill in the approval details next.`}
+        options={allLenderOptions}
+        allowAdd
+        confirmLabel="Continue to details"
+        tone="green"
+        onClose={() => setChangeLenderOpen(false)}
+        onConfirm={(l) => { setChangeLenderOpen(false); approvePickLender(l); }}
       />
       <LoanLenderPickerModal
         open={rejectOpen}

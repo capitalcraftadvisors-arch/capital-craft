@@ -1,4 +1,5 @@
 "use client";
+import { fmtDate } from "@/lib/dates";
 
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  APPROVAL DETAILS TABLE — EDIT THE FIELDS HERE                    ║
@@ -50,11 +51,7 @@ export type ApprovalDetails = {
   roi?: number | string | null;  // string while typing (e.g. "9.75") so decimals aren't stripped
 };
 
-function fmtDate(s: string | null | undefined): string {
-  if (!s) return "—";
-  const d = new Date(s.length <= 10 ? s + "T00:00:00" : s);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-}
+// fmtDate is imported from @/lib/dates (one portal-wide DD/MM/YYYY format).
 export function roiLabelFor(lender: string | null | undefined): string {
   if (lender === "creditfair") return "Flat ROI (%)";
   if (lender === "solfin") return "Reducing ROI (%)";

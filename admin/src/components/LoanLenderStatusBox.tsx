@@ -1,4 +1,5 @@
 "use client";
+import { fmtDateTime } from "@/lib/dates";
 
 // Per-application lender status box on the loan View page: one row per lender,
 // columns Docs sent / Approved / Rejected, each with its own timestamp. Mirrors
@@ -7,13 +8,7 @@
 import type { LoanLenderRow } from "@/lib/loan-lenders";
 
 function fmt(ts: string | null): string {
-  if (!ts) return "";
-  const d = new Date(ts);
-  return (
-    d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) +
-    " " +
-    d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })
-  );
+  return ts ? fmtDateTime(ts) : "";
 }
 
 function Cell({ at, color }: { at: string | null; color: string }) {

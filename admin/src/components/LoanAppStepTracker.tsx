@@ -1,4 +1,5 @@
 "use client";
+import { fmtDate } from "@/lib/dates";
 
 // Loan application step tracker card.
 //
@@ -53,7 +54,7 @@ export default function LoanAppStepTracker({
   const pct = Math.round(((clamped - 1) / total) * 100);
   const shownId = displayId || applicationId.slice(0, 8);
   const createdLabel = createdAt
-    ? new Date(createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })
+    ? fmtDate(createdAt)
     : null;
 
   return (

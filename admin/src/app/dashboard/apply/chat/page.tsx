@@ -22,6 +22,7 @@ import { getToken } from "@/lib/auth";
 import { fetchEpcName } from "@/lib/epc-name";
 import { getDocumentUrl } from "@/lib/storage";
 import { hydrateLoanForm } from "@/lib/loan-form";
+import { numberToWordsIndian } from "@/lib/numberToWords";
 import EditTable from "@/components/EditTable";
 import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES, formatRupees } from "@/lib/emi";
 
@@ -134,22 +135,9 @@ const PICK_LABEL: Record<string, string> = {
 // Fields whose typed amount is echoed in Indian words under the input.
 const AMOUNT_FIELDS = new Set(["loan_amount_required"]);
 // Integer → Indian words (lakh / crore). Empty for non-positive / invalid.
+// Words only (no "Rupees Only" suffix — callers append " rupees" in the UI).
 function amountInWords(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return "";
-  n = Math.floor(n);
-  const a = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
-  const b = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-  const two = (x: number): string => (x < 20 ? a[x] : b[Math.floor(x / 10)] + (x % 10 ? " " + a[x % 10] : ""));
-  const three = (x: number): string => { const h = Math.floor(x / 100), r = x % 100; return (h ? a[h] + " Hundred" + (r ? " " : "") : "") + (r ? two(r) : ""); };
-  let res = "";
-  const crore = Math.floor(n / 10000000); n %= 10000000;
-  const lakh = Math.floor(n / 100000); n %= 100000;
-  const thousand = Math.floor(n / 1000); n %= 1000;
-  if (crore) res += three(crore) + " Crore ";
-  if (lakh) res += two(lakh) + " Lakh ";
-  if (thousand) res += two(thousand) + " Thousand ";
-  if (n) res += three(n);
-  return res.trim();
+  return Number.isFinite(n) && n > 0 ? numberToWordsIndian(Math.floor(n)) : "";
 }
 
 const uidGen = () => "m" + Math.random().toString(36).slice(2, 9);

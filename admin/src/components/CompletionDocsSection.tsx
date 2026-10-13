@@ -211,6 +211,24 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
           <span />
         </DocSlot>
       )}
+
+      {/* Optional extra / supporting documents. Stored under "other", so they are
+          NEVER part of the required completion set and can't affect the
+          upload-count gate (docsUploaded/docsTotal count only COMPLETION_CATEGORIES). */}
+      <div className="pt-2 border-t border-[#eaf3ee]">
+        <p className="text-[13px] font-semibold text-[#0f3d2e] mb-1">Additional documents (optional)</p>
+        <p className="text-[12px] text-[#5a8a76] mb-2">Add any extra supporting documents for this tranche.</p>
+        <FileUpload
+          applicationId={applicationId}
+          table="user_application_docs"
+          category="other"
+          uploadedBy={uploadedBy}
+          maxFiles={10}
+          label=""
+          hint="JPG, PNG, WEBP or PDF."
+          onUploaded={() => setTick((n) => n + 1)}
+        />
+      </div>
       </>
       )}
     </div>

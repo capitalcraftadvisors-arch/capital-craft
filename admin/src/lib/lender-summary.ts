@@ -60,7 +60,10 @@ export function summaryRows(
   ctx: { displayId: string; epcName: string; epcDisplayId?: string | null },
   lender: LenderKey,
 ): Array<[string, string]> {
-  const name = loan.borrower_name || loan.aadhaar_name || "—";
+  // Verified KYC (Aadhaar) name first — matches the list + profile header so the
+  // lender gets the same applicant name shown in the portal (borrower_name can be
+  // a stale lead name from a converted lead).
+  const name = loan.aadhaar_name || loan.borrower_name || "—";
 
   // ALL lenders (Credit Fair included) use the same general summary sheet.
   // Credit Fair's distinct presentation now lives in the EMAIL BODY only —
@@ -142,7 +145,8 @@ export function epcSummaryRows(epc: Record<string, any>): Array<[string, string]
 //   loan amount; the borrower's down payment is the difference. Merchant ID is
 //   blank for Credit Fair; Address statuses default to "Owned".
 export function creditFairEmailRows(loan: Record<string, any>, epcName?: string | null): Array<[string, string]> {
-  const name = loan.borrower_name || loan.aadhaar_name || "—";
+  // Verified KYC (Aadhaar) name first — see summaryRows note.
+  const name = loan.aadhaar_name || loan.borrower_name || "—";
   return [
     ["Name", name],
     ["DOB", ddmmyyyy(loan.aadhaar_dob)],

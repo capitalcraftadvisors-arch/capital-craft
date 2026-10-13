@@ -19,7 +19,8 @@ function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 function fmt(d: Date): string {
-  return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  // Portal-wide DD/MM/YYYY (en-GB renders day/month/year in that order).
+  return d.toLocaleDateString("en-GB");
 }
 
 export type ValidityParts = {

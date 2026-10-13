@@ -1,4 +1,5 @@
 "use client";
+import { fmtDate } from "@/lib/dates";
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -61,7 +62,7 @@ function Inner() {
           <div>
             <h1 className="font-display text-[26px] sm:text-[30px] font-bold">{app.borrower_name || "Untitled"}</h1>
             <p className="text-text-mid mt-1">
-              ₹{app.loan_amount ? Number(app.loan_amount).toLocaleString("en-IN") : "—"} &middot; created {new Date(app.created_at).toLocaleDateString("en-IN")}
+              ₹{app.loan_amount ? Number(app.loan_amount).toLocaleString("en-IN") : "—"} &middot; created {fmtDate(app.created_at)}
             </p>
           </div>
           <StatusBadge status={app.status} />
