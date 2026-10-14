@@ -19,6 +19,11 @@ FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8080
+# LibreOffice (headless) powers the Quotation Builder's .docx -> PDF conversion
+# (/api/epc/quotation). Writer + base fonts; fc-cache so the PDF renders text.
+# If conversion is unavailable the route falls back to serving the .docx.
+RUN apk add --no-cache libreoffice-writer ttf-liberation font-noto fontconfig && fc-cache -f || true
+ENV HOME=/tmp
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 # Standalone output does NOT bundle public/ — copy it so static brand assets

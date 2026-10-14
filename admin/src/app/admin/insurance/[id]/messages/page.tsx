@@ -41,7 +41,7 @@ function Inner() {
         <div className="mb-4">
           <h1 className="font-display text-[24px] font-bold text-[#0f3d2e]">Message to EPC</h1>
           <p className="text-[13.5px] text-text-mid mt-0.5">
-            {ctx ? <>{ctx.name} · <span className="font-mono text-[#185fa5]">{ctx.ref}</span></> : "…"} — the EPC sees these on their portal and can reply.
+            {ctx ? <>{ctx.name} · <span className="font-mono text-[#185fa5]">{ctx.ref}</span></> : "…"}
           </p>
         </div>
         <MessageThread kind="insurance" id={id} role="admin" />

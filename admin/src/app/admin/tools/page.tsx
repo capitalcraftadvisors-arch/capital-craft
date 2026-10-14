@@ -58,10 +58,6 @@ function Inner() {
 
       <div className="rounded-xl border border-line bg-white p-5 max-w-md">
         <div className="text-[15px] font-semibold text-text">Straighten applicant photos</div>
-        <p className="text-[13px] text-text-muted mt-1">
-          Re-generates the applicant face from every stored Aadhaar and fixes rotated or missing
-          photos across all loan applications. Safe to run more than once.
-        </p>
         <button
           onClick={runBackfill}
           disabled={running}

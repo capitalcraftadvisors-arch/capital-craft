@@ -16,6 +16,8 @@ import { logout, getBusiness, getToken, greetingName, loanAccess, insuranceAcces
 import { fetchEpcName, shortEpcName } from "@/lib/epc-name";
 import { supabase } from "@/lib/supabase";
 import { fmtRupees, fmtDateShort, deadlineState, DEADLINE_PILL } from "@/lib/disbursement";
+import { numberToWordsIndian } from "@/lib/numberToWords";
+import { fmtDateTime as fmtDateTimeLib } from "@/lib/dates";
 import { policyValidityParts, VALIDITY_TEXT } from "@/lib/insurance-validity";
 import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES, formatRupees } from "@/lib/emi";
 
@@ -76,22 +78,9 @@ const ICON: Record<Section, ReactNode> = {
 };
 
 // Integer → Indian words (Lakh / Crore) for the EMI calculator amount bars.
+// Words only (no "Rupees Only" suffix — callers append " rupees" in the UI).
 function amountInWords(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return "";
-  n = Math.floor(n);
-  const a = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
-  const b = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-  const two = (x: number): string => (x < 20 ? a[x] : b[Math.floor(x / 10)] + (x % 10 ? " " + a[x % 10] : ""));
-  const three = (x: number): string => { const h = Math.floor(x / 100), r = x % 100; return (h ? a[h] + " Hundred" + (r ? " " : "") : "") + (r ? two(r) : ""); };
-  let res = "";
-  const crore = Math.floor(n / 10000000); n %= 10000000;
-  const lakh = Math.floor(n / 100000); n %= 100000;
-  const thousand = Math.floor(n / 1000); n %= 1000;
-  if (crore) res += three(crore) + " Crore ";
-  if (lakh) res += two(lakh) + " Lakh ";
-  if (thousand) res += two(thousand) + " Thousand ";
-  if (n) res += three(n);
-  return res.trim();
+  return Number.isFinite(n) && n > 0 ? numberToWordsIndian(Math.floor(n)) : "";
 }
 function compactRupees(n: number | null | undefined): string {
   const v = Number(n) || 0;
@@ -100,8 +89,7 @@ function compactRupees(n: number | null | undefined): string {
   return `₹${Math.round(v).toLocaleString("en-IN")}`;
 }
 function fmtDateTime(iso: string | null): string {
-  if (!iso) return "";
-  return new Date(iso).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return iso ? fmtDateTimeLib(iso) : "";
 }
 function borrower(r: AppRow): string { return r.borrower_name || r.aadhaar_name || "—"; }
 function capacity(r: AppRow): string { return r.project_size == null ? "—" : `${r.project_size} ${(r.project_size_unit ?? "kw").toUpperCase()}`; }
@@ -146,6 +134,9 @@ function DashboardInner() {
   const [loading, setLoading] = useState(true);
   const [insBusy, setInsBusy] = useState(false);
   const [openCase, setOpenCase] = useState<AppRow | null>(null);
+  // Quotation builder is rolled out per-EPC: only show it when THIS EPC has a
+  // template configured (RLS scopes the lookup to their own row).
+  const [canQuote, setCanQuote] = useState(false);
 
   const me = getBusiness();
   const canLoan = loanAccess(me);
@@ -172,6 +163,10 @@ function DashboardInner() {
         .order("created_at", { ascending: false });
       setInsRows((ins ?? []) as unknown as InsRow[]);
       setLoading(false);
+      try {
+        const { data: tpls } = await supabase().from("epc_quotation_templates").select("id").limit(1);
+        setCanQuote((tpls?.length ?? 0) > 0);
+      } catch { setCanQuote(false); }
     })();
   }, []);
 
@@ -283,7 +278,8 @@ function DashboardInner() {
               canLoan={canLoan} canInsurance={canInsurance}
               onApplyLoan={() => router.push("/dashboard/apply/chat" as any)}
               onApplyInsurance={() => void startInsurance()} applyingInsurance={insBusy}
-              onOpenCase={(r) => setOpenCase(r)} onEmi={() => setSection("emi")} onAttention={() => setSection("documents")} />
+              onOpenCase={(r) => setOpenCase(r)} onEmi={() => setSection("emi")}
+              canQuote={canQuote} onQuotation={() => router.push("/dashboard/quotation" as any)} onAttention={() => setSection("documents")} />
           )}
           {section === "loans" && (
             <LoansSection loans={sortedLoans} loading={loading} canLoan={canLoan}
@@ -381,11 +377,11 @@ function homeMetrics(list: AppRow[]) {
   };
 }
 
-function HomeSection({ loans, loading, attnCount, canLoan, canInsurance, onApplyLoan, onApplyInsurance, applyingInsurance, onOpenCase, onEmi, onAttention }: {
+function HomeSection({ loans, loading, attnCount, canLoan, canInsurance, onApplyLoan, onApplyInsurance, applyingInsurance, onOpenCase, onEmi, canQuote, onQuotation, onAttention }: {
   loans: AppRow[]; loading: boolean; attnCount: number;
   canLoan: boolean; canInsurance: boolean;
   onApplyLoan: () => void; onApplyInsurance: () => void; applyingInsurance: boolean;
-  onOpenCase: (r: AppRow) => void; onEmi: () => void; onAttention: () => void;
+  onOpenCase: (r: AppRow) => void; onEmi: () => void; canQuote: boolean; onQuotation: () => void; onAttention: () => void;
 }) {
   const [period, setPeriod] = useState<Period>("all");
   const { from, prevFrom, prevTo, comparable } = periodRange(period);
@@ -522,6 +518,15 @@ function HomeSection({ loans, loading, attnCount, canLoan, canInsurance, onApply
             <div className="text-[11.5px] text-text-muted mt-1">EMI after the PM Surya Ghar subsidy, in seconds.</div>
           </button>
 
+          {canQuote && (
+            <button onClick={onQuotation} className="bg-white rounded-2xl border border-line p-5 text-left hover:border-[#1e3a8a] transition-colors">
+              <div className="text-[12px] text-text-muted">Make a customer quotation</div>
+              <div className="text-[15px] font-semibold text-[#1e3a8a] mt-1 flex items-center gap-1.5">Open quotation builder
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+              </div>
+            </button>
+          )}
+
           <div className="bg-white rounded-2xl border border-line p-5">
             <div className="text-[12px] text-text-muted mb-3">Your relationship managers</div>
             <div className="flex flex-col gap-3">
@@ -567,8 +572,7 @@ function LoansSection({ loans, loading, canLoan, onOpenCase, onApply, onEdit, on
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div><h2 className="font-display text-[20px] font-bold text-[#0f3d2e]">Your loan applications</h2>
-          <p className="text-text-mid text-[13px] mt-0.5">Where each file stands — newest change on top.</p></div>
+        <div><h2 className="font-display text-[20px] font-bold text-[#0f3d2e]">Your loan applications</h2></div>
         {canLoan && <button onClick={onApply} className="px-4 py-2 rounded-xl text-white text-[13px] font-semibold" style={{ background: NAVY_ACCENT }}>Apply for loan</button>}
       </div>
 
@@ -663,8 +667,7 @@ function InsuranceSection({ insRows, loading, onApply, applying, onOpen }: {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div><h2 className="font-display text-[20px] font-bold text-[#0f3d2e]">Your insurance applications</h2>
-          <p className="text-text-mid text-[13px] mt-0.5">Plants you&rsquo;ve submitted for insurance and where each stands.</p></div>
+        <div><h2 className="font-display text-[20px] font-bold text-[#0f3d2e]">Your insurance applications</h2></div>
         <button onClick={onApply} disabled={applying} className="px-4 py-2 rounded-xl text-white text-[13px] font-semibold disabled:opacity-60" style={{ background: NAVY_ACCENT }}>{applying ? "Starting…" : "Apply for insurance"}</button>
       </div>
 

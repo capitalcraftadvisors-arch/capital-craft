@@ -201,10 +201,6 @@ function Inner() {
           <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
             Customer registration
           </h1>
-          <p className="text-text-mid mt-2 text-[15px]">
-            Tell us about the customer applying for the solar loan. It takes
-            three short steps.
-          </p>
         </div>
 
         <Card className="p-7 space-y-4">

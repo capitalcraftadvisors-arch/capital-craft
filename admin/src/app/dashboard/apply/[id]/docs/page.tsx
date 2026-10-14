@@ -427,10 +427,6 @@ function Inner() {
           <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
             Customer documents
           </h1>
-          <p className="text-text-mid mt-2 text-[15px]">
-            Upload the customer&rsquo;s documents — details are read automatically
-            and every field stays editable.
-          </p>
         </div>
 
         {/* Progress sticker — how many documents are done, and what's pending. */}

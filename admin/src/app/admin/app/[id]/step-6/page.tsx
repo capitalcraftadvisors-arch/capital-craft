@@ -182,11 +182,6 @@ function Inner() {
           <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
             Review &amp; Submit
           </h1>
-          <p className="text-text-mid mt-2 text-[15px]">
-            Every section captured across Steps 1-5 is shown below. Use the
-            Edit links to jump back and change anything — nothing is locked,
-            even after submitting.
-          </p>
         </div>
 
         {/* Section 1 — Registration */}

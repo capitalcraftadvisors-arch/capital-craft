@@ -171,7 +171,7 @@ function Inner() {
       <InsuranceStepHeader step={1} />
       <section className="max-w-2xl mx-auto px-5 sm:px-7 py-8">
         <h1 className="font-display text-[24px] sm:text-[28px] font-bold text-[#0f3d2e] mb-1">Insurance — your details</h1>
-        <p className="text-text-mid mb-6">Upload the PAN and Aadhaar. We&rsquo;ll read the details automatically.</p>
+        <p className="text-text-mid mb-6">Upload PAN and Aadhaar.</p>
 
         <div className="space-y-5">
           <Card className="p-6">

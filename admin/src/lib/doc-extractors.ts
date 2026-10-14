@@ -208,3 +208,35 @@ export async function geminiExtractPolicy(images: GeminiImage[]): Promise<{ from
   const to = norm(g.to);
   return from || to ? { from, to } : null;
 }
+
+// ── Solar quotation details (one-photo auto-fill for the Quotation Builder) ───
+export type QuotationExtract = {
+  customer_name: string | null; pincode: string | null; address: string | null;
+  kw: string | null; system_type: string | null; total: string | null;
+  central_subsidy: string | null; module_brand: string | null;
+  inverter_brand: string | null; battery: string | null;
+};
+export async function geminiExtractQuotation(images: GeminiImage[]): Promise<QuotationExtract | null> {
+  const g = await geminiExtract<Partial<QuotationExtract>>({
+    images, label: "quotation",
+    schema: obj({
+      customer_name: STR, pincode: STR, address: STR, kw: STR, system_type: STR,
+      total: STR, central_subsidy: STR, module_brand: STR, inverter_brand: STR, battery: STR,
+    }),
+    prompt:
+      "This image holds details for a SOLAR rooftop quotation (it may be a handwritten or typed note, a form, an electricity bill, or a screenshot). " +
+      "Extract ONLY what is clearly present; if a field is not present, return null — never guess. " +
+      "customer_name = the customer's full name. pincode = the 6-digit area PIN code. address = the installation address. " +
+      "kw = the solar system size in kW (number only, e.g. '3'). system_type = Hybrid, On-grid, or Off-grid if stated. " +
+      "total = total price in rupees (digits only, no symbols or commas). central_subsidy = central subsidy amount in rupees (digits only) if mentioned. " +
+      "module_brand = solar panel/module brand. inverter_brand = inverter brand. battery = battery voltage/capacity if mentioned.",
+  });
+  if (!g) return null;
+  const r: QuotationExtract = {
+    customer_name: s(g.customer_name), pincode: s(g.pincode), address: s(g.address),
+    kw: s(g.kw), system_type: s(g.system_type), total: s(g.total),
+    central_subsidy: s(g.central_subsidy), module_brand: s(g.module_brand),
+    inverter_brand: s(g.inverter_brand), battery: s(g.battery),
+  };
+  return Object.values(r).some(Boolean) ? r : null;
+}

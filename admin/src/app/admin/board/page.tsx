@@ -563,7 +563,6 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
               </div>
             ))}
           </div>
-          <p className="text-[10.5px] text-text-muted leading-snug">Ranked by idle days × loan value — work the top of the list first.</p>
         </aside>
       </div>
 
