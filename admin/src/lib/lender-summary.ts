@@ -6,6 +6,8 @@
 // applicant-detail table (see creditFairEmailRows) instead of the standard
 // document-forwarding text used for Solfin / Aerem.
 
+import { rupees } from "@/lib/money";
+
 export type LenderKey = "creditfair" | "aerem" | "solfin";
 
 export const LENDER_LABEL: Record<LenderKey, string> = {
@@ -16,10 +18,7 @@ export const LENDER_LABEL: Record<LenderKey, string> = {
 
 const SYSTEM_LABEL: Record<string, string> = { on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" };
 
-function rupees(n: unknown): string {
-  const v = Number(n);
-  return Number.isFinite(v) && v !== 0 ? "₹" + Math.round(v).toLocaleString("en-IN") : "—";
-}
+// rupees imported from @/lib/money
 // Monthly income for the lender email. The modern flows (EPC chat, admin intake,
 // Step 4) collect ANNUAL income only; monthly_income stays null on those rows and
 // the Credit Fair table showed a blank. Prefer the stored monthly figure when a

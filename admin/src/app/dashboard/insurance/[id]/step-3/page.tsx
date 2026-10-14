@@ -1,4 +1,5 @@
 "use client";
+import { fmtRupees } from "@/lib/money";
 
 // Insurance — Step 3: Review & Submit. On submit, an attractive thank-you
 // takeover (mirrors the loan Step-6 thank-you).
@@ -14,10 +15,7 @@ import InsuranceStepHeader from "@/components/InsuranceStepHeader";
 
 type App = Record<string, any>;
 
-function fmtRupees(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(Number(n))) return "—";
-  return "₹" + Math.round(Number(n)).toLocaleString("en-IN");
-}
+// fmtRupees imported from @/lib/money
 
 export default function InsuranceStep3() {
   return (

@@ -120,10 +120,8 @@ export function displayAmount(loan: {
   return n == null ? null : Number(n);
 }
 
-export function fmtRupees(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(Number(n))) return "—";
-  return "₹" + Math.round(Number(n)).toLocaleString("en-IN");
-}
+// fmtRupees now lives in lib/money; re-exported here so existing imports keep working.
+export { fmtRupees } from "./money";
 
 /** Portal-wide compact date for tables/headers — DD/MM/YYYY (see lib/dates). */
 export function fmtDateShort(v: string | null | undefined): string {

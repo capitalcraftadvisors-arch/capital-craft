@@ -16,6 +16,7 @@ import ExcelJS from "exceljs";
 import { Readable } from "node:stream";
 import { downloadBuffer } from "@/lib/gcs";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { rupees } from "@/lib/money";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,10 +51,7 @@ function err(message: string, status: number) {
 function baseName(path: string): string {
   return path.split("/").pop() || "file";
 }
-function rupees(n: unknown): string {
-  const v = Number(n);
-  return Number.isFinite(v) && v !== 0 ? "₹" + Math.round(v).toLocaleString("en-IN") : "—";
-}
+// rupees imported from @/lib/money
 
 export async function GET(
   req: NextRequest,

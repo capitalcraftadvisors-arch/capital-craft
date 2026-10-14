@@ -1,4 +1,5 @@
 "use client";
+import { fmtRupees } from "@/lib/money";
 
 // Insurance — Step 2: one geo-tagged plant photo + plant address + invoice.
 //
@@ -26,10 +27,7 @@ import InsuranceStepHeader from "@/components/InsuranceStepHeader";
 type App = Record<string, any>;
 type Gps = { lat: number; lng: number; captured_at: string };
 
-function fmtRupees(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(Number(n))) return "—";
-  return "₹" + Math.round(Number(n)).toLocaleString("en-IN");
-}
+// fmtRupees imported from @/lib/money
 
 export default function InsuranceStep2() {
   return (

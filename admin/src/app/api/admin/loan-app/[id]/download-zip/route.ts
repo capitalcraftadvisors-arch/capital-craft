@@ -62,10 +62,7 @@ function baseName(path: string): string {
   return path.split("/").pop() || "file";
 }
 
-function rupees(n: unknown): string {
-  const v = Number(n);
-  return Number.isFinite(v) && v !== 0 ? "₹" + Math.round(v).toLocaleString("en-IN") : "—";
-}
+// (removed a dead local rupees() helper — this route uses summaryRows from lib/lender-summary)
 
 export async function GET(
   req: NextRequest,

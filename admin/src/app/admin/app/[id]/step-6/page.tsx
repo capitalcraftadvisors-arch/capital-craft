@@ -1,5 +1,6 @@
 "use client";
 import { fmtDateTime } from "@/lib/dates";
+import { fmtRupees } from "@/lib/money";
 
 // Loan Application — Step 6 (Review & Submit)
 //
@@ -53,10 +54,7 @@ function displayId(loan: Loan): string {
   return "LA-" + String(loan.id).replace(/-/g, "").slice(0, 8).toUpperCase();
 }
 
-function fmtRupees(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(Number(n))) return "—";
-  return "₹" + Math.round(Number(n)).toLocaleString("en-IN");
-}
+// fmtRupees imported from @/lib/money
 
 function fmtDate(v: string | null | undefined): string {
   return fmtDateTime(v);

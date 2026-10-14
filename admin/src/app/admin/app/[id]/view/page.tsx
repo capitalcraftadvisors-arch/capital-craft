@@ -35,6 +35,7 @@ import { logLoanActivity } from "@/lib/loanAudit";
 import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
 import { deadlineState, DEADLINE_PILL, remainingAmount, fmtDateShort } from "@/lib/disbursement";
 import { fmtDateTime } from "@/lib/dates";
+import { fmtRupees } from "@/lib/money";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import {
   I, SectionCard, KV, StepBlock, DocGrid, BigProgressStep, BigConnector, type ViewDocSlot,
@@ -102,10 +103,7 @@ function displayId(loan: Loan): string {
   if (loan.loan_display_id) return loan.loan_display_id;
   return "LA-" + String(loan.id).replace(/-/g, "").slice(0, 8).toUpperCase();
 }
-function fmtRupees(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(Number(n))) return "—";
-  return "₹" + Math.round(Number(n)).toLocaleString("en-IN");
-}
+// fmtRupees imported from @/lib/money
 function fmtDate(v: string | null | undefined): string {
   return fmtDateTime(v);
 }

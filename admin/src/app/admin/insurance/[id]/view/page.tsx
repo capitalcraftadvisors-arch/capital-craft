@@ -1,4 +1,5 @@
 "use client";
+import { fmtRupees } from "@/lib/money";
 
 // Insurance application — full-page View for admin. Structural sibling of the
 // loan View, on the SAME ViewKit (header card, SectionCard, KV, Pill, DocGrid)
@@ -20,10 +21,7 @@ import { policyValidity } from "@/lib/insurance-validity";
 
 type App = Record<string, any>;
 
-function fmtRupees(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(Number(n))) return "—";
-  return "₹" + Math.round(Number(n)).toLocaleString("en-IN");
-}
+// fmtRupees imported from @/lib/money
 // DISPLAY-ONLY label for the insurer. The stored insurance_partner value is
 // never changed and nothing keyed on it is affected; anything that isn't SBI
 // renders exactly as stored.
