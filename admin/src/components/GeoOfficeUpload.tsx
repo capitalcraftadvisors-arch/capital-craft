@@ -29,6 +29,7 @@ import { supabase } from "@/lib/supabase";
 import { uploadDocument, getDocumentUrl, deleteDocument } from "@/lib/storage";
 import { getToken } from "@/lib/auth";
 import { isAcceptedFileType } from "@/lib/validators";
+import { I } from "@/components/view/ViewKit";
 
 // EPC office photos (epc_documents) or loan completion photos
 // (user_application_docs) — the geo rules are identical, so one component
@@ -482,6 +483,7 @@ export default function GeoOfficeUpload({
 
   async function remove() {
     if (!doc) return;
+    setError(null);
     // Custom-upload mode: just clear locally; the next upload overwrites the
     // stored path (there's no doc row to delete).
     if (uploadFn) {
@@ -495,6 +497,18 @@ export default function GeoOfficeUpload({
     setGps(null);
     setAddress(null);
   }
+
+  // Open the uploaded file: a stored row via its signed URL, otherwise (custom-
+  // upload mode, right after an upload) the local preview.
+  async function view() {
+    setError(null);
+    const url = doc?.id ? await getDocumentUrl(doc.id) : thumb;
+    if (url) window.open(url, "_blank", "noopener");
+    else setError("Could not open this file.");
+  }
+  // Something to open: a stored row, or a local preview. (A custom-upload photo
+  // seeded on revisit has neither, so no dead eye is shown.)
+  const canView = !!doc?.id || !!thumb;
 
   return (
     <div>
@@ -515,8 +529,23 @@ export default function GeoOfficeUpload({
               <p className="text-[13px] text-text truncate">{doc.file_name || "Document"}</p>
               <p className="text-[11px] text-text-muted">Geo-tagged · Uploaded</p>
             </div>
-            <button type="button" onClick={remove} className="text-[12px] text-text-muted hover:text-red-500 transition-colors">
-              Remove
+            {canView && (
+              <button
+                type="button"
+                onClick={() => void view()}
+                title="View uploaded document" aria-label="View uploaded document"
+                className="p-1.5 rounded hover:bg-bg-tint text-[#185fa5] transition-colors"
+              >
+                {I.eye}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => void remove()}
+              title="Remove" aria-label="Remove"
+              className="p-1.5 rounded hover:bg-red-50 text-red-600 transition-colors"
+            >
+              {I.trash}
             </button>
           </div>
           {gps && (

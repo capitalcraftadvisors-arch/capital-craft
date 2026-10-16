@@ -25,6 +25,7 @@ import FileUpload from "@/components/FileUpload";
 import GeoOfficeUpload from "@/components/GeoOfficeUpload";
 import { supabase } from "@/lib/supabase";
 import { getDocumentUrl, deleteDocument } from "@/lib/storage";
+import { I } from "@/components/view/ViewKit";
 
 export const COMPLETION_CATEGORIES = [
   "completion_invoice",
@@ -67,12 +68,6 @@ type Props = {
    *  mandatory — it drops out of the tranche-1 required count (still uploadable). */
   advanceReceiptOptional?: boolean;
 };
-
-const EYE = (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M1.5 12s3.5-7 10.5-7 10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z" /><circle cx="12" cy="12" r="3" />
-  </svg>
-);
 
 export default function CompletionDocsSection({ applicationId, uploadedBy, refreshKey, onCountChange, mode = "all", advanceReceiptOptional }: Props) {
   const [docs, setDocs] = useState<DocRow[]>([]);
@@ -260,7 +255,7 @@ function DocSlot({
               title="View document" aria-label="View document"
               className="text-[#185fa5] hover:text-[#144d84]"
             >
-              {EYE}
+              {I.eye}
             </button>
             {onRemove && (
               <button
@@ -269,7 +264,7 @@ function DocSlot({
                 title="Remove document" aria-label="Remove document"
                 className="text-red-600 hover:text-red-700"
               >
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
+                {I.trash}
               </button>
             )}
           </div>
