@@ -1407,11 +1407,14 @@ function Inner() {
                   <KV k="Date" v={fmtDateShort(loan.first_disbursement_date)} />
                   <div className="flex justify-between items-center text-[14px] py-[5px] gap-3">
                     <span className="text-[#5a8a76] shrink-0">Countdown to 2nd</span>
-                    <span className={["inline-flex px-2 py-0.5 rounded-[6px] text-[12px] font-semibold", DEADLINE_PILL[dl.tone]].join(" ")}>
-                      {firstDone ? dl.label : "—"}
+                    <span className={["inline-flex px-2 py-0.5 rounded-[6px] text-[12px] font-semibold", secondDone ? "bg-[#e6f6ee] text-[#178a5c]" : DEADLINE_PILL[dl.tone]].join(" ")}>
+                      {secondDone ? "Done" : firstDone ? dl.label : "—"}
                     </span>
                   </div>
-                  <KV k="Remaining (pending)" v={fmtRupees(remainingAmount(loan.sanctioned_amount, loan.first_disbursement_amount))} />
+                  {/* Once the 2nd tranche is paid there is nothing pending — hide it. */}
+                  {!secondDone && (
+                    <KV k="Remaining (pending)" v={fmtRupees(remainingAmount(loan.sanctioned_amount, loan.first_disbursement_amount))} />
+                  )}
                 </StepBlock>
                 <div className="mt-3">
                   <StepBlock title="2nd Disbursement">

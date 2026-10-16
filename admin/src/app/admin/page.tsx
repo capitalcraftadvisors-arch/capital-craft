@@ -133,8 +133,9 @@ function Inner() {
             </h1>
             <NotificationBell />
           </div>
-          {/* At-a-glance loan KPIs — MAIN_ADMIN only, compact. */}
-          {isMainAdmin && <DashboardKpis />}
+          {/* At-a-glance loan KPIs — MAIN_ADMIN only, compact. Driven by the
+              current tab's period picker (below), and a loan-money set on apps. */}
+          {isMainAdmin && <DashboardKpis tab={tab} period={period} pFrom={pFrom} pTo={pTo} />}
           {/* Section header with the console's accent bar; period picker on the
               right, aligned with the heading. */}
           <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
@@ -307,6 +308,29 @@ function inPeriod(dateStr: string | null | undefined, period: Period, from?: str
   if (isNaN(t)) return false;
   const { start, end } = periodBounds(period, from, to);
   return t >= start && t < end;
+}
+// How many "months" of the monthly disbursement target a period represents, so
+// the Disbursed ring can scale its target to ANY timeline (today → a day's
+// share, quarter → 3×, year → 12×, a custom month range → its month count).
+// Returns null when there is no finite window (All time / open-ended custom) —
+// the caller then shows a plain amount instead of a ring.
+function periodTargetMonths(period: Period, from?: string, to?: string): number | null {
+  switch (period) {
+    case "month": case "prev_month": return 1;
+    case "quarter": return 3;
+    case "year": return 12;
+    case "today": return 1 / 30;
+    case "week": return 7 / 30;
+    case "custom": {
+      const f = from ? from.slice(0, 7) : ""; const t = to ? to.slice(0, 7) : "";
+      if (!f || !t) return null;
+      const [fy, fm] = f.split("-").map(Number);
+      const [ty, tm] = t.split("-").map(Number);
+      const n = (ty - fy) * 12 + (tm - fm) + 1;
+      return n > 0 ? n : 1;
+    }
+    default: return null; // "all"
+  }
 }
 function PeriodPicker({ period, onPeriod, from, onFrom, to, onTo }: {
   period: Period; onPeriod: (p: Period) => void;
@@ -485,52 +509,98 @@ function SummaryCards({ accent, cards, active, onPick, caption }: {
 }
 
 // ── Dashboard KPI strip ──────────────────────────────────────────────────
-// A lightweight loan-wide snapshot shown above every tab. One small aggregate
-// query (cached 30s to protect egress); reuses the Task-Manager target.
-type KpiData = { pipeline: number; disbursedMonth: number; active: number; approvalRate: number; overdue: number; target: number };
+// A lightweight loan-wide snapshot shown above every tab, driven by the SAME
+// period the tab's PeriodPicker uses — so the strip always agrees with the
+// cards + list below it. One small aggregate query (cached 30s to protect
+// egress); the figures are recomputed locally when the period/tab changes, so
+// changing the period costs no extra query. The Loan-applications tab swaps in
+// a loan-money set (no Approval rate; + approved amount, 1st tranche, 2nd
+// tranche pending).
+type KpiRow = {
+  status: string | null;
+  loan_amount_required: number | null; loan_amount: number | null; sanctioned_amount: number | null;
+  first_disbursement_amount: number | null; second_disbursement_amount: number | null;
+  first_disbursement_date: string | null; second_disbursement_date: string | null;
+  created_at: string | null; updated_at: string | null; aborted_at: string | null;
+};
+type KpiData = {
+  pipeline: number; disbursed: number; active: number; approvalRate: number; overdue: number; target: number;
+  approvedAmount: number; firstTranche: number; secondTranchePending: number;
+};
 const KPI_APPROVED = new Set(["approved", "rfd", "sent_to_nbfc", "disbursed"]);
 
-function DashboardKpis() {
-  const [d, setD] = useState<KpiData | null>(null);
+function DashboardKpis({ tab, period, pFrom, pTo }: { tab: string; period: Period; pFrom: string; pTo: string }) {
+  const [rows, setRows] = useState<KpiRow[] | null>(null);
   useEffect(() => {
     let cancelled = false;
-    const cached = getCached<KpiData>("dashkpis", 30000);
-    if (cached) { setD(cached); return; }
+    const cached = getCached<KpiRow[]>("dashkpis", 30000);
+    if (cached) { setRows(cached); return; }
     void (async () => {
       const { data } = await supabase()
         .from("epc_applications")
-        .select("status, loan_amount_required, loan_amount, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, second_disbursement_date, updated_at, aborted_at");
+        .select("status, loan_amount_required, loan_amount, sanctioned_amount, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, second_disbursement_date, created_at, updated_at, aborted_at");
       if (cancelled) return;
-      const rows = (data ?? []) as Record<string, any>[];
-      const now = new Date(); const ny = now.getFullYear(); const nm = now.getMonth();
-      const inMonth = (s: string | null) => { if (!s) return false; const x = new Date(s); return x.getFullYear() === ny && x.getMonth() === nm; };
-      const num = (v: unknown) => Number(v) || 0;
-      const active = rows.filter((r) => r.status !== "draft" && r.status !== "rejected" && !r.aborted_at && r.second_disbursement_amount == null);
-      const pipeline = active.reduce((s, r) => s + (num(r.loan_amount_required) || num(r.loan_amount)), 0);
-      const submitted = rows.filter((r) => r.status !== "draft").length;
-      const approved = rows.filter((r) => r.first_disbursement_amount != null || KPI_APPROVED.has(r.status)).length;
-      const approvalRate = submitted ? Math.round((approved / submitted) * 100) : 0;
-      const disbursedMonth = rows.reduce((s, r) =>
-        s + (inMonth(r.first_disbursement_date) ? num(r.first_disbursement_amount) : 0)
-          + (inMonth(r.second_disbursement_date) ? num(r.second_disbursement_amount) : 0), 0);
-      const overdue = active.filter((r) => r.updated_at && (Date.now() - new Date(r.updated_at).getTime()) > 7 * 86400000).length;
-      let target = 65; try { target = Number(localStorage.getItem("opsboard.target")) || 65; } catch { /* default */ }
-      const result: KpiData = { pipeline, disbursedMonth, active: active.length, approvalRate, overdue, target };
-      setCached("dashkpis", result);
-      setD(result);
+      const r = (data ?? []) as unknown as KpiRow[];
+      setCached("dashkpis", r);
+      setRows(r);
     })();
     return () => { cancelled = true; };
   }, []);
+
+  const d = useMemo<KpiData | null>(() => {
+    if (!rows) return null;
+    const num = (v: unknown) => Number(v) || 0;
+    const inP = (s: string | null) => inPeriod(s, period, pFrom, pTo);
+    // Application-level metrics are scoped by created_at (same as every card +
+    // table on these tabs); disbursement money is scoped by the disbursement
+    // date, so "disbursed in this period" means money that actually went out.
+    const created = rows.filter((r) => inP(r.created_at));
+    const active = created.filter((r) => r.status !== "draft" && r.status !== "rejected" && !r.aborted_at && r.second_disbursement_amount == null);
+    const pipeline = active.reduce((s, r) => s + (num(r.loan_amount_required) || num(r.loan_amount)), 0);
+    const submitted = created.filter((r) => r.status !== "draft").length;
+    const approvedRows = created.filter((r) => r.first_disbursement_amount != null || KPI_APPROVED.has(r.status ?? ""));
+    const approvalRate = submitted ? Math.round((approvedRows.length / submitted) * 100) : 0;
+    const approvedAmount = approvedRows.reduce((s, r) => s + (num(r.sanctioned_amount) || num(r.loan_amount_required) || num(r.loan_amount)), 0);
+    const overdue = active.filter((r) => r.updated_at && (Date.now() - new Date(r.updated_at).getTime()) > 7 * 86400000).length;
+    // 1st tranche released, 2nd still pending — mirrors the EPC portal tile.
+    const secondTranchePending = created.filter((r) => r.first_disbursement_amount != null && r.second_disbursement_amount == null && !r.aborted_at).length;
+    const disbursed = rows.reduce((s, r) =>
+      s + (inP(r.first_disbursement_date) ? num(r.first_disbursement_amount) : 0)
+        + (inP(r.second_disbursement_date) ? num(r.second_disbursement_amount) : 0), 0);
+    const firstTranche = rows.reduce((s, r) => s + (inP(r.first_disbursement_date) ? num(r.first_disbursement_amount) : 0), 0);
+    let target = 65; try { target = Number(localStorage.getItem("opsboard.target")) || 65; } catch { /* default */ }
+    return { pipeline, disbursed, active: active.length, approvalRate, overdue, target, approvedAmount, firstTranche, secondTranchePending };
+  }, [rows, period, pFrom, pTo]);
+
   if (!d) return null;
   const money = (v: number) => (v >= 1e7 ? `₹${(v / 1e7).toFixed(2)} Cr` : `₹${(v / 1e5).toFixed(1)} L`);
-  const ringPct = Math.min(100, d.target > 0 ? Math.round((d.disbursedMonth / (d.target * 1e5)) * 100) : 0);
+  const periodLabel = (PERIOD_OPTIONS.find((o) => o.value === period)?.label ?? "Period").toLowerCase();
+  // Scale the monthly disbursement target to the picked period so the ring works
+  // across the whole timeline; null target (All time / open custom) → plain tile.
+  const targetMonths = periodTargetMonths(period, pFrom, pTo);
+  const periodTarget = targetMonths != null ? d.target * 1e5 * targetMonths : null;
+  const ringPct = periodTarget && periodTarget > 0 ? Math.min(100, Math.round((d.disbursed / periodTarget) * 100)) : 0;
   return (
     <div className="mb-4 grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
-      <KpiTile label="Pipeline value" value={money(d.pipeline)} sub={`${d.active} active`} accent="#178a5c" />
-      <KpiRingTile label="Disbursed · this month" value={money(d.disbursedMonth)} sub={`Target ${money(d.target * 1e5)}`} pct={ringPct} />
-      <KpiTile label="Active applications" value={String(d.active)} accent="#185fa5" />
-      <KpiTile label="Approval rate" value={`${d.approvalRate}%`} accent="#0f7a52" />
-      <KpiTile label="Overdue" value={String(d.overdue)} sub="idle > 7 days" accent={d.overdue > 0 ? "#dc2626" : "#94a3b8"} />
+      {tab === "apps" ? (
+        <>
+          <KpiTile label="Pipeline value" value={money(d.pipeline)} sub={`${d.active} active`} accent="#178a5c" />
+          <KpiTile label="Approved loan amount" value={money(d.approvedAmount)} accent="#0f7a52" />
+          <KpiTile label="1st tranche disbursed" value={money(d.firstTranche)} accent="#185fa5" />
+          <KpiTile label="2nd tranche pending" value={String(d.secondTranchePending)} sub="awaiting 2nd" accent={d.secondTranchePending > 0 ? "#854f0b" : "#94a3b8"} />
+          <KpiTile label="Overdue" value={String(d.overdue)} sub="idle > 7 days" accent={d.overdue > 0 ? "#dc2626" : "#94a3b8"} />
+        </>
+      ) : (
+        <>
+          <KpiTile label="Pipeline value" value={money(d.pipeline)} sub={`${d.active} active`} accent="#178a5c" />
+          {periodTarget != null
+            ? <KpiRingTile label={`Disbursed · ${periodLabel}`} value={money(d.disbursed)} sub={`Target ${money(periodTarget)}`} pct={ringPct} />
+            : <KpiTile label="Disbursed" value={money(d.disbursed)} sub={periodLabel} accent="#0f766e" />}
+          <KpiTile label="Active applications" value={String(d.active)} accent="#185fa5" />
+          <KpiTile label="Approval rate" value={`${d.approvalRate}%`} accent="#0f7a52" />
+          <KpiTile label="Overdue" value={String(d.overdue)} sub="idle > 7 days" accent={d.overdue > 0 ? "#dc2626" : "#94a3b8"} />
+        </>
+      )}
     </div>
   );
 }
@@ -1266,7 +1336,6 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     // Borrower fallback chain: borrower_name → aadhaar_name (Step 2 KYC) → "—".
     borrower_name: string | null;
     aadhaar_name:  string | null;
-    aadhaar_number_masked: string | null;
     borrower_pan: string | null;
     borrower_mobile: string | null;
     borrower_father_name: string | null;
@@ -1411,7 +1480,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     const { data } = await supabase()
       .from("epc_applications")
       .select(
-        "id, borrower_name, aadhaar_name, aadhaar_number_masked, loan_display_id, " +
+        "id, borrower_name, aadhaar_name, loan_display_id, " +
         "borrower_pan, borrower_mobile, borrower_father_name, " +
         "loan_amount, loan_amount_required, " +
         "sanctioned_amount, first_disbursement_amount, first_disbursement_date, second_disbursement_amount, " +
@@ -1562,13 +1631,6 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
   function displayAmount(r: Row): string {
     return fmtRupees(amountFor(r));
   }
-  // Masked Aadhaar display: "xxxxxxxx1234" (stored) → "XXXX XXXX 1234".
-  function displayMaskedAadhaar(r: Row): string | null {
-    const m = r.aadhaar_number_masked;
-    if (!m) return null;
-    const last4 = m.slice(-4);
-    return `XXXX XXXX ${last4}`;
-  }
 
   // EPC options for the filter dropdown — only EPCs actually present in the list.
   const epcOptions = useMemo(() => {
@@ -1592,7 +1654,16 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     const s = r.status;
     if (s === "draft") return "draft";
     if (s === "on_hold") return "hold";
-    if (s === "docs_sent") return "docs_sent";
+    if (s === "docs_sent") {
+      // A lender can REJECT after docs were sent while the headline status
+      // stays "docs_sent" (the rejection lives on loan_application_lenders, not
+      // the app row). Match the Status pill, which already reads lenderLatest:
+      // if the latest lender event is a rejection and nothing has since approved
+      // it, the stage is "rejected" — so a rejected file no longer leaks into
+      // the "Docs Sent" filter or its FY card.
+      if (!r.approved_lender && lenderLatest[r.id]?.startsWith("Rejected")) return "rejected";
+      return "docs_sent";
+    }
     if (s === "rejected") return "rejected";
     if (s === "rfd" || s === "approved" || s === "sent_to_nbfc" || s === "disbursed") {
       if (r.first_disbursement_amount != null) return "disbursed";
@@ -1850,9 +1921,6 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                       {r.loan_display_id && (
                         <p className="text-[11px] font-mono text-[#185fa5] mt-0.5">{r.loan_display_id}</p>
                       )}
-                      {displayMaskedAadhaar(r) && (
-                        <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{displayMaskedAadhaar(r)}</p>
-                      )}
                       {(() => {
                         const d = docStat(r);
                         const done = d.have >= d.need;
@@ -1869,12 +1937,9 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                     </div>
                   </div>
                 </td>
-                {/* EPC partner — name + EPC ID text only. */}
+                {/* EPC partner — name only. */}
                 <td className="px-3 py-3 text-center">
                   <p className="text-[13px] text-[#0f3d2e] truncate">{displayEpc(r)}</p>
-                  {r.epc_business?.epc_display_id && (
-                    <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.epc_business.epc_display_id}</p>
-                  )}
                 </td>
                 <td className="px-3 py-3 text-center text-[13px] font-semibold text-[#0f3d2e]">{displayAmount(r)}</td>
                 {/* Loan apps have no internal admin status — show the lender
@@ -1899,9 +1964,15 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                       Hold
                     </span>
                   ) : r.status === "approved" && r.first_disbursement_amount != null ? (
-                    <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#dceffb] text-[#185fa5]">
-                      1st Disbursement Done
-                    </span>
+                    r.second_disbursement_amount != null ? (
+                      <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#e6f6ee] text-[#0f7a52]">
+                        Fully Disbursed
+                      </span>
+                    ) : (
+                      <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#dceffb] text-[#185fa5]">
+                        1st Disbursement Done
+                      </span>
+                    )
                   ) : r.approved_lender ? (
                     // Finalized for disbursement — show the approval by that
                     // lender (not the latest event, which may be a different

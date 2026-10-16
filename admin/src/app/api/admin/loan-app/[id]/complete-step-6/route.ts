@@ -63,22 +63,30 @@ export async function POST(
       return err("Complete Step 5 before submitting.", 409);
     }
 
+    // Re-submitting a file that has ALREADY advanced past submission must NOT
+    // revert its headline status. An admin editing an approved / rejected /
+    // docs-sent / disbursed loan and saving Step 6 again used to knock it back to
+    // "submitted" — which dropped the decision: the board showed it in "Ready for
+    // login" and the list lost its disbursement, while the lender rows + amounts
+    // survived. Only a still-pre-submit file is actually (re)submitted here; a
+    // decided file keeps its status and original submit time untouched.
+    const PRE_SUBMIT = new Set(["draft", "submitted", "under_review"]);
+    const decided = !PRE_SUBMIT.has(app.status ?? "");
     const now = new Date().toISOString();
-    const { error: updErr } = await supabase
-      .from("epc_applications")
-      .update({
-        status: "submitted",
-        submitted_at: now,
-      })
-      .eq("id", appId);
-    if (updErr) return err(`Submit failed: ${updErr.message}`, 500);
+    if (!decided) {
+      const { error: updErr } = await supabase
+        .from("epc_applications")
+        .update({ status: "submitted", submitted_at: now })
+        .eq("id", appId);
+      if (updErr) return err(`Submit failed: ${updErr.message}`, 500);
+    }
 
     // Append-only activity trail (migration 0042). Best-effort.
     await logLoanActivityServer(supabase, appId, "submitted", claims.business_id ?? null, { step: 6 });
 
     return NextResponse.json({
       ok: true,
-      status: "submitted",
+      status: decided ? (app.status ?? "submitted") : "submitted",
       submitted_at: now,
     });
   } catch (e) {

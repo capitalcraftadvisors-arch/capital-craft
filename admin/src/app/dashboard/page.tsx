@@ -68,13 +68,14 @@ const STAGE4_PILL: Record<Stage4, string> = {
   approved: "bg-[#e6f6ee] text-[#178a5c]", rejected: "bg-red-50 text-red-700",
 };
 
-type Section = "home" | "loans" | "insurance" | "emi" | "documents";
+type Section = "home" | "loans" | "insurance" | "emi" | "documents" | "quotation";
 const ICON: Record<Section, ReactNode> = {
   home: <path d="M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5" />,
   loans: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></>,
   insurance: <path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z" />,
   emi: <><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M8 7h8M8 11h3M8 15h3" /></>,
   documents: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
+  quotation: <><path d="M3 11V4a1 1 0 0 1 1-1h7l9 9-8 8-9-9Z" /><circle cx="7.5" cy="7.5" r="1.5" /></>,
 };
 
 // Integer → Indian words (Lakh / Crore) for the EMI calculator amount bars.
@@ -189,20 +190,23 @@ function DashboardInner() {
 
   const sortedLoans = useMemo(() => [...rows].sort((a, b) => lastChangeTs(b) - lastChangeTs(a)), [rows]);
 
-  const NAV: { key: Section; label: string; show: boolean }[] = [
+  // Items with an href navigate to their own route (quotation builder lives at
+  // its own page); the rest switch the in-page section.
+  const NAV: { key: Section; label: string; show: boolean; href?: string }[] = [
     { key: "home", label: "Dashboard", show: true },
     { key: "loans", label: "Loans", show: canLoan },
     { key: "insurance", label: "Insurance", show: canInsurance },
     { key: "documents", label: "Document pending", show: true },
     { key: "emi", label: "EMI calculator", show: true },
+    { key: "quotation", label: "Quotation builder", show: canQuote, href: "/dashboard/quotation" },
   ];
   const navItems = NAV.filter((n) => n.show);
 
-  function NavButton({ n }: { n: { key: Section; label: string } }) {
-    const active = section === n.key;
+  function NavButton({ n }: { n: { key: Section; label: string; href?: string } }) {
+    const active = !n.href && section === n.key;
     const badge = n.key === "documents" ? attnCount : 0;
     return (
-      <button onClick={() => setSection(n.key)} title={n.label}
+      <button onClick={() => (n.href ? router.push(n.href as any) : setSection(n.key))} title={n.label}
         className={["relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium transition-colors justify-center group-hover/side:justify-start", active ? "bg-white/15 text-white" : "text-white/70 hover:bg-white/10 hover:text-white"].join(" ")}>
         <span className="relative shrink-0">
           <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{ICON[n.key]}</svg>
@@ -249,7 +253,7 @@ function DashboardInner() {
         <div className="md:hidden text-white px-4 py-3 flex items-center gap-3 overflow-x-auto" style={{ background: NAVY }}>
           <img src="/brand/capital-craft-mark.png" alt="" className="w-7 h-7 rounded-md bg-white object-contain p-0.5 shrink-0" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
           {navItems.map((n) => (
-            <button key={n.key} onClick={() => setSection(n.key)} className={["relative text-[13px] whitespace-nowrap px-2 py-1 rounded-lg", section === n.key ? "bg-white/20" : "text-white/70"].join(" ")}>
+            <button key={n.key} onClick={() => (n.href ? router.push(n.href as any) : setSection(n.key))} className={["relative text-[13px] whitespace-nowrap px-2 py-1 rounded-lg", !n.href && section === n.key ? "bg-white/20" : "text-white/70"].join(" ")}>
               {n.label}
               {n.key === "documents" && attnCount > 0 && (
                 <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-1 grid place-items-center rounded-full bg-[#dc2626] text-white text-[9px] font-bold leading-none">{attnCount > 9 ? "9+" : attnCount}</span>
