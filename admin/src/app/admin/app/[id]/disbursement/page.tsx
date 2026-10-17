@@ -28,6 +28,7 @@ import CompletionDocsSection from "@/components/CompletionDocsSection";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import { LENDER_LABEL } from "@/lib/lender-summary";
 import DateField from "@/components/ui/DateField";
+import FileUpload from "@/components/FileUpload";
 import { I, SectionCard, KV, Pill, StatusBtn } from "@/components/view/ViewKit";
 import {
   deadlineState, DEADLINE_PILL, remainingAmount, fmtRupeesExact, fmtDateShort,
@@ -268,6 +269,25 @@ function Inner() {
                 This application is not approved yet. Disbursement opens only after a lender approves it (which requires the documents to have been sent). Approve it from the application page first.
               </div>
             )}
+            {/* Sanction letter — the same slot as Approval details (view / delete /
+                upload here too). Uploading it clears "not available at filling". */}
+            <SectionCard title="Sanction letter" accent="blue" icon={I.files}>
+              <FileUpload
+                applicationId={loan.id}
+                category="sanction_letter"
+                table="user_application_docs"
+                uploadedBy="admin"
+                maxFiles={1}
+                uploadHint="PDF or image"
+                onUploaded={() => {
+                  if (loan.sanction_letter_unavailable) {
+                    void supabase().from("epc_applications").update({ sanction_letter_unavailable: false }).eq("id", loan.id)
+                      .then(() => setLoan((l) => (l ? { ...l, sanction_letter_unavailable: false } : l)));
+                  }
+                }}
+              />
+            </SectionCard>
+
             {/* 1st disbursement — opens once both Tranche-1 docs are uploaded. */}
             <SectionCard title="1st Tranche documents" accent="blue" icon={I.files}>
               <p className="text-[13px] text-[#5a8a76] mb-3">

@@ -524,7 +524,7 @@ function SummaryCards({ accent, cards, active, onPick, caption }: {
 // tranche pending). Pipeline value (open files' loan amount) shows only on
 // Current Month. The EPC tab shows EPC stage counts, fed by EpcsTab's own
 // period-scoped cards (no extra query).
-type EpcKpis = { total: number; unseen: number; docsSent: number; approved: number; rejected: number };
+type EpcKpis = { total: number; unseen: number; docsSent: number; lenderApproved: number; approved: number; rejected: number };
 type KpiRow = {
   status: string | null;
   loan_amount_required: number | null; loan_amount: number | null; sanctioned_amount: number | null;
@@ -584,10 +584,11 @@ function DashboardKpis({ tab, period, pFrom, pTo, epc }: { tab: string; period: 
   if (tab === "epcs") {
     if (!epc) return null;
     return (
-      <div className="mb-4 grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mb-4 grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
         <KpiTile label="Total EPCs" value={String(epc.total)} accent="#178a5c" />
         <KpiTile label="Application unseen" value={String(epc.unseen)} accent="#94a3b8" />
         <KpiTile label="Docs sent to lender" value={String(epc.docsSent)} accent="#185fa5" />
+        <KpiTile label="Approved by lender" value={String(epc.lenderApproved)} accent="#178a5c" />
         <KpiTile label="Approved by CC" value={String(epc.approved)} accent="#0f7a52" />
         <KpiTile label="Rejected by CC" value={String(epc.rejected)} accent="#dc2626" />
       </div>
@@ -1114,7 +1115,16 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
   const countOf = (key: string) => cards.find((c) => c.key === key)?.value ?? 0;
   const kpiSig = cards.map((c) => c.value).join(",");
   useEffect(() => {
-    onKpis?.({ total: countOf(""), unseen: countOf("unseen"), docsSent: countOf("docs_sent"), approved: countOf("approved"), rejected: countOf("rejected") });
+    onKpis?.({
+      total: countOf(""),
+      // KPI "Application unseen" = every profile CC hasn't acted on yet:
+      // draft + under review + self-updated.
+      unseen: countOf("unseen") + countOf("under_review") + countOf("updated"),
+      docsSent: countOf("docs_sent"),
+      lenderApproved: countOf("lender_approved"),
+      approved: countOf("approved"),
+      rejected: countOf("rejected"),
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kpiSig]);
   const panelActive = [sourceFilter, lenderFilter, lenderStateFilter, dateFrom, dateTo].filter(Boolean).length;
