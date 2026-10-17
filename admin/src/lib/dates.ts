@@ -33,3 +33,62 @@ export function fmtDateTime(v: DateInput): string {
   const time = d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true });
   return `${fmtDate(d)}, ${time}`;
 }
+
+// ── Date of birth as read by OCR ────────────────────────────────────────────
+// OCR returns a DOB "exactly as printed": DD/MM/YYYY (or - . separators),
+// DD/MM/YY, ISO YYYY-MM-DD (sometimes with a time), or — on older Aadhaar
+// cards — only a year ("Year of Birth: 1965"), often behind a "DOB:" label.
+// One parser so every DATE-column writer and the chatbot's age check agree.
+
+/** iso = "YYYY-MM-DD" when a full valid date is known; year is set whenever any year is. */
+export type ParsedDob = { iso: string | null; year: number | null };
+
+// Calendar-checked ISO date, or null (rejects 31/02, month 13, absurd years).
+function isoOf(y: number, m: number, d: number): string | null {
+  if (y < 1900 || y > 2100 || m < 1 || m > 12 || d < 1 || d > new Date(y, m, 0).getDate()) return null;
+  return `${y}-${p2(m)}-${p2(d)}`;
+}
+
+// `now` only sets the 2-digit-year pivot (YY above this year's YY → 1900s).
+// A full date that fails the calendar check is rejected outright — a garbled
+// day/month means the read can't be trusted, so it never degrades to year-only.
+function parseDobAt(raw: string | null | undefined, now: Date): ParsedDob | null {
+  const s = String(raw ?? "").trim();
+  if (!s) return null;
+  let m = /(?:^|\D)(\d{4})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{1,2})(?!\d)/.exec(s);
+  if (m) {
+    const iso = isoOf(+m[1], +m[2], +m[3]);
+    return iso ? { iso, year: +m[1] } : null;
+  }
+  m = /(?:^|\D)(\d{1,2})\s*[/\-.]\s*(\d{1,2})\s*[/\-.]\s*(\d{4}|\d{2})(?!\d)/.exec(s);
+  if (m) {
+    let y = +m[3];
+    if (m[3].length === 2) y += y > now.getFullYear() % 100 ? 1900 : 2000;
+    const iso = isoOf(y, +m[2], +m[1]);
+    return iso ? { iso, year: y } : null;
+  }
+  m = /(?:^|\D)(19\d{2}|20\d{2})(?!\d)/.exec(s);
+  return m ? { iso: null, year: +m[1] } : null;
+}
+
+/** Parse an OCR'd DOB; null when nothing usable is in it. */
+export function parseDob(raw: string | null | undefined): ParsedDob | null {
+  return parseDobAt(raw, new Date());
+}
+
+/** "YYYY-MM-DD" for a DATE column, or null (unparseable or year-only). */
+export function toIsoDate(raw: string | null | undefined): string | null {
+  return parseDob(raw)?.iso ?? null;
+}
+
+/** Age in completed years. Exact DOB → min === max; year-only → { min: Y-y-1, max: Y-y }; null when unparseable. */
+export function ageRange(raw: string | null | undefined, today: Date = new Date()): { min: number; max: number } | null {
+  const p = parseDobAt(raw, today);
+  if (!p?.year) return null;
+  const years = today.getFullYear() - p.year;
+  if (!p.iso) return { min: years - 1, max: years };
+  const [, mo, d] = p.iso.split("-").map(Number);
+  const m = today.getMonth() + 1;
+  const age = m < mo || (m === mo && today.getDate() < d) ? years - 1 : years;
+  return { min: age, max: age };
+}

@@ -20,6 +20,9 @@
 //       admin-created applications. Fields the 3-page flow doesn't ask
 //       stay NULL and remain editable later via the existing admin
 //       step pages (guards removed) or this same record's View/Edit.
+//       The chatbot also sends its applicant / co-applicant decision
+//       (final applicant mobile + PAN, earning, income, reason) —
+//       written only when sent.
 //
 // All DB access uses the CALLER's token — RLS ("own_applications")
 // scopes every read/write to the EPC's own rows; no service-role.
@@ -28,7 +31,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { DEFAULT_INDICATIVE_ROI } from "@/lib/emi";
-import { isUndefinedColumn, omitKeys } from "@/lib/optional-column";
+import { isUndefinedColumn, omitKeys, UNDEFINED_COLUMN } from "@/lib/optional-column";
+import { toIsoDate } from "@/lib/dates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,6 +53,15 @@ const CONSENT_POLICIES = [
   "terms_conditions", "privacy_policy", "cookie_policy",
   "credit_information", "loan_application",
 ];
+// Submit columns whose migration may not be on this DB yet, by migration.
+const OPTIONAL_COL_GROUPS = [
+  ["lead_owner_name", "lead_owner_phone"],                                              // 0074 / 0089
+  ["applicant_earning", "coapp_earning", "coapp_monthly_income", "coapp_role_reason"],  // 0091
+];
+// A WRITE naming an unknown column is rejected by PostgREST itself (PGRST204,
+// the message names the column) before Postgres could answer 42703.
+const missingColumn = (e: { code?: string; message?: string } | null, col?: string) =>
+  isUndefinedColumn(e?.code === "PGRST204" ? { ...e, code: UNDEFINED_COLUMN } : e, col);
 
 function err(message: string, status: number) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -211,14 +224,20 @@ export async function POST(req: NextRequest) {
       const coapp_pan = strOrNull(b.coapp_pan)?.toUpperCase() ?? null;
       if (coapp_pan && !PAN_RE.test(coapp_pan)) return err("Co-applicant PAN format is invalid.", 400);
 
+      // Final applicant mobile — the chatbot picks the applicant after the draft
+      // was registered under the customer's mobile. Written only when sent.
+      const borrower_mobile = String(b.borrower_mobile ?? "").replace(/\D/g, "") || null;
+      if (borrower_mobile && !MOBILE_RE.test(borrower_mobile)) return err("Enter a valid 10-digit mobile.", 400);
+
       // Co-applicant contact. Must NOT duplicate the applicant's own
-      // email / phone (same rule the admin flow enforces client-side).
+      // email / phone (same rule the admin flow enforces client-side) —
+      // as sent in this submit, else as stored.
       const has_coapp = b.has_coapp === true;
       const coapp_mobile = String(b.coapp_mobile ?? "").replace(/\D/g, "") || null;
       const coapp_email  = strOrNull(b.coapp_email);
       if (has_coapp) {
-        const applicantMobile = String((app as any).borrower_mobile ?? "").trim();
-        const applicantEmail  = String((app as any).borrower_email ?? "").trim().toLowerCase();
+        const applicantMobile = borrower_mobile ?? String((app as any).borrower_mobile ?? "").trim();
+        const applicantEmail  = String((b.borrower_email !== undefined ? b.borrower_email : (app as any).borrower_email) ?? "").trim().toLowerCase();
         if (coapp_mobile && applicantMobile && coapp_mobile === applicantMobile) {
           return err("Co-applicant mobile cannot be the same as the applicant's.", 400);
         }
@@ -243,6 +262,28 @@ export async function POST(req: NextRequest) {
       const lead_owner_phone = String(b.lead_owner_phone ?? "").replace(/\D/g, "") || null;
       if (lead_owner_phone && !MOBILE_RE.test(lead_owner_phone)) {
         return err("Enter a valid 10-digit lead owner phone number.", 400);
+      }
+
+      // Applicant / co-applicant roles — decided by the chatbot and sent at
+      // submit; each written only when sent. The applicant PAN is uploaded with
+      // no DB write: its storage path (this app's folder only) is filed as the
+      // borrower_pan doc row after the update. DOB arrives as printed (OCR) and
+      // is stored only when it reads as a full date.
+      const borrower_dob = toIsoDate(strOrNull(b.borrower_dob));
+      const borrower_pan_path = strOrNull(b.borrower_pan_path);
+      if (borrower_pan_path && (!borrower_pan_path.startsWith(`applications/${appId}/`) || borrower_pan_path.split("/").includes(".."))) {
+        return err("Invalid PAN file.", 400);
+      }
+      const coapp_relation    = strOrNull(b.coapp_relation);
+      const coapp_role_reason = strOrNull(b.coapp_role_reason);
+      if (coapp_relation && coapp_relation.length > 40) return err("Co-applicant relation is too long.", 400);
+      if (coapp_role_reason && coapp_role_reason.length > 120) return err("Co-applicant reason is too long.", 400);
+      for (const k of ["applicant_earning", "coapp_earning"]) {
+        if (b[k] != null && typeof b[k] !== "boolean") return err("Earning must be Yes or No.", 400);
+      }
+      for (const k of ["monthly_income", "coapp_monthly_income"]) {
+        const n = numOrNull(b[k]);
+        if (b[k] != null && b[k] !== "" && (n == null || n < 0)) return err("Enter a valid monthly income.", 400);
       }
 
       // An EDIT re-submit (client sets edit:true) only touches the rows Capital
@@ -334,6 +375,17 @@ export async function POST(req: NextRequest) {
           // so the classic flow never nulls an existing value.
           ...(b.lead_owner_name  !== undefined ? { lead_owner_name } : {}),
           ...(b.lead_owner_phone !== undefined ? { lead_owner_phone } : {}),
+          // Applicant / co-applicant roles (chatbot) — written only when sent.
+          ...(borrower_mobile ? { borrower_mobile } : {}),
+          ...(borrower_dob ? { borrower_dob } : {}),
+          ...(b.applicant_earning       !== undefined ? { applicant_earning:       b.applicant_earning } : {}),
+          ...(b.monthly_income          !== undefined ? { monthly_income:          numOrNull(b.monthly_income) } : {}),
+          ...(b.coapp_earning           !== undefined ? { coapp_earning:           b.coapp_earning } : {}),
+          ...(b.coapp_monthly_income    !== undefined ? { coapp_monthly_income:    numOrNull(b.coapp_monthly_income) } : {}),
+          ...(b.coapp_role_reason       !== undefined ? { coapp_role_reason } : {}),
+          ...(b.coapp_relation          !== undefined ? { coapp_relation } : {}),
+          ...(b.coapp_father_name       !== undefined ? { coapp_father_name:       strOrNull(b.coapp_father_name) } : {}),
+          ...(b.coapp_aadhaar_face_path !== undefined ? { coapp_aadhaar_face_path: strOrNull(b.coapp_aadhaar_face_path) } : {}),
           // Page 2 — co-applicant (only when toggled on)
           coapp_pan,
           coapp_name:                  strOrNull(b.coapp_name),
@@ -400,19 +452,35 @@ export async function POST(req: NextRequest) {
           edit_locked: true,
           edit_allow: [],
       };
+      let patch: Record<string, unknown> = payload;
       let { error: updErr } = await supabase
         .from("epc_applications")
-        .update(payload)
+        .update(patch)
         .eq("id", appId);
-      // Self-heal: if the lead-owner columns aren't on this DB yet (migrations
-      // 0074/0089 not applied), drop them and retry so submit still succeeds.
-      if (updErr && isUndefinedColumn(updErr)) {
+      // Self-heal: if a migration's columns aren't on this DB yet, drop
+      // the group the DB names and retry so submit still succeeds — a DB with
+      // 0089 but not 0091 keeps the lead owner.
+      for (let i = 0; i < OPTIONAL_COL_GROUPS.length && missingColumn(updErr); i++) {
+        const missing = OPTIONAL_COL_GROUPS.find((g) => g.some((c) => c in patch && missingColumn(updErr, c)));
+        if (!missing) break;
+        patch = omitKeys(patch, missing);
         ({ error: updErr } = await supabase
           .from("epc_applications")
-          .update(omitKeys(payload, ["lead_owner_name", "lead_owner_phone"]))
+          .update(patch)
           .eq("id", appId));
       }
       if (updErr) return err(`Submit failed: ${updErr.message}`, 500);
+
+      // Applicant PAN → its borrower_pan doc row (the profile reads it from
+      // there), replaced the same way extract-coapp-pan files it. Best-effort.
+      if (borrower_pan_path) {
+        await supabase.from("user_application_docs").delete().eq("application_id", appId).eq("category", "borrower_pan");
+        const { error: docErr } = await supabase.from("user_application_docs").insert({
+          application_id: appId, category: "borrower_pan", storage_path: borrower_pan_path,
+          file_name: strOrNull(b.borrower_pan_file_name), mime_type: strOrNull(b.borrower_pan_mime), uploaded_by: "epc",
+        });
+        if (docErr) console.warn("[epc/loan-apply] applicant PAN doc row:", docErr.message);
+      }
 
       return NextResponse.json({ ok: true, id: appId });
     }

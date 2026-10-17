@@ -43,7 +43,13 @@ export async function hydrateLoanForm(id: string): Promise<HydratedLoan> {
   S("coapp_name", a.coapp_name); S("coapp_dob", a.coapp_dob);
   S("coapp_aadhaar_name", a.coapp_aadhaar_name); S("coapp_aadhaar_dob", a.coapp_aadhaar_dob); S("coapp_aadhaar_gender", a.coapp_aadhaar_gender);
   S("coapp_aadhaar_number", String(a.coapp_aadhaar_number ?? "").replace(/\D/g, "")); S("coapp_aadhaar_care_of", a.coapp_aadhaar_care_of); S("coapp_aadhaar_address", a.coapp_aadhaar_address);
-  S("coapp_aadhaar_front_path", a.coapp_aadhaar_front_path); S("coapp_aadhaar_back_path", a.coapp_aadhaar_back_path);
+  S("coapp_aadhaar_front_path", a.coapp_aadhaar_front_path); S("coapp_aadhaar_back_path", a.coapp_aadhaar_back_path); S("coapp_aadhaar_face_path", a.coapp_aadhaar_face_path);
+  S("coapp_father_name", a.coapp_father_name); S("coapp_relation", a.coapp_relation);
+  // Roles + earning. Booleans hydrate as "true"/"false". The 0091 columns are simply
+  // absent from select("*") on a DB without that migration, so they're skipped.
+  S("bill_on_applicant_name", a.bill_on_applicant_name); S("coapp_role_reason", a.coapp_role_reason);
+  S("applicant_earning", a.applicant_earning); S("monthly_income", a.monthly_income);
+  S("coapp_earning", a.coapp_earning); S("coapp_monthly_income", a.coapp_monthly_income);
   // Photo + bank statement live in user_application_docs (not columns) — surface
   // their paths so the picker/doc-table know they exist.
   const rows = ((docs ?? []) as LoanDocRow[]);

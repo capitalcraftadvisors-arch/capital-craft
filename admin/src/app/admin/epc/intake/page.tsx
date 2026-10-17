@@ -31,6 +31,7 @@ import { uploadDocument } from "@/lib/storage";
 import { extractPan, extractGstLegalName } from "@/lib/ocr";
 import FileUpload from "@/components/FileUpload";
 import DateField from "@/components/ui/DateField";
+import { toIsoDate } from "@/lib/dates";
 import { MOBILE_RE, EMAIL_RE, PAN_RE, ACCOUNT_RE } from "@/lib/validators";
 
 export default function EpcIntakePage() {
@@ -217,13 +218,6 @@ function nowLabel(): string {
 }
 function todayLabel(): string {
   return "Today · " + new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
-}
-// "DD/MM/YYYY" or "YYYY-MM-DD" → ISO "YYYY-MM-DD"; anything else → "".
-function toIsoDate(s?: string): string {
-  const v = (s || "").trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
-  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(v);
-  return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
 }
 
 function Inner() {
@@ -1081,7 +1075,7 @@ function StakeholdersDock({ epcId, businessType, initial, busy, onContinue }: {
             <input value={s.mobile} onChange={(e) => update(s.id, "mobile", e.target.value.replace(/\D/g, "").slice(0, 10))} inputMode="numeric" placeholder="Mobile" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#185fa5]" />
             <input value={s.email} onChange={(e) => update(s.id, "email", e.target.value)} placeholder="Email" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#185fa5]" />
             <input value={s.father_name} onChange={(e) => update(s.id, "father_name", e.target.value)} placeholder="Father's name" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#185fa5]" />
-            <DateField value={toIsoDate(s.dob)} onChange={(iso) => update(s.id, "dob", iso)} className="rounded-lg border border-line py-2 text-[13px] px-2.5 outline-none focus:border-[#185fa5]" />
+            <DateField value={toIsoDate(s.dob) ?? ""} onChange={(iso) => update(s.id, "dob", iso)} className="rounded-lg border border-line py-2 text-[13px] px-2.5 outline-none focus:border-[#185fa5]" />
             <input value={s.aadhaar_number} onChange={(e) => update(s.id, "aadhaar_number", e.target.value.replace(/\D/g, "").slice(0, 12))} inputMode="numeric" placeholder="Aadhaar no." className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#185fa5]" />
             <input value={s.aadhaar_address} onChange={(e) => update(s.id, "aadhaar_address", e.target.value)} placeholder="Address (as per Aadhaar)" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#185fa5]" />
           </div>

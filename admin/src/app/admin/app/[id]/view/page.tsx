@@ -300,6 +300,9 @@ function Inner() {
   const [lenderRows, setLenderRows] = useState<LoanLenderRow[]>([]);
   // 6h — which approved lender's details are shown in the Approval Details card.
   const [detailsLender, setDetailsLender] = useState<string>("");
+  // Bumped to re-read the file (and its docs) after a server-side change.
+  const [reloadKey, setReloadKey] = useState(0);
+  const [swapBusy, setSwapBusy] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -331,9 +334,11 @@ function Inner() {
         // borrower's Aadhaar (captured at OCR time) as the applicant photo.
         const url = await signPath(la.aadhaar_face_path as string);
         if (url) setPhotoUrl(url);
+      } else {
+        setPhotoUrl(null); // a re-read (e.g. after a role swap) may leave no photo
       }
     })();
-  }, [params.id]);
+  }, [params.id, reloadKey]);
 
   // Deep-link from the Task Manager (change #10): dragging a loan into a stage
   // opens the real workflow popup here (?do=docsent | reject | abort). Approve
@@ -860,6 +865,27 @@ function Inner() {
     setStatusBusy(false);
   }
 
+  // Swap applicant ↔ co-applicant. The route moves every identity field and the
+  // two PAN files, so the whole file (and its docs) is re-read afterwards.
+  async function swapRoles() {
+    if (!loan || swapBusy || !window.confirm("Swap applicant ↔ co-applicant?")) return;
+    setSwapBusy(true);
+    try {
+      const res = await fetch(`/api/admin/loan-app/${loan.id}/swap-roles`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) { alert("Couldn't swap: " + (data?.error || res.status)); return; }
+      setReloadKey((k) => k + 1);
+      invalidateLoanBoards(); // applicant name changes on the board / Loans list
+    } catch (e) {
+      alert("Couldn't swap: " + (e as Error).message);
+    } finally {
+      setSwapBusy(false);
+    }
+  }
+
   // Header status/decision actions — Submitted → Docs Sent → Approve/Reject,
   // plus Hold/Resume. Approve/Reject handlers unchanged; the back-transitions
   // retarget to Docs Sent, and Docs Sent → Under Review is the single undo.
@@ -1177,6 +1203,8 @@ function Inner() {
               <KV k="Aadhaar" v={loan.aadhaar_number_masked} />
               <KV k="Email" v={loan.borrower_email} valueClass="text-[#185fa5]" />
               <KV k="Phone no" v={loan.borrower_mobile ? `+91 ${loan.borrower_mobile}` : null} />
+              {loan.applicant_earning != null && <KV k="Earning" v={loan.applicant_earning ? "Yes" : "No"} />}
+              {loan.monthly_income != null && <KV k="Monthly income" v={fmtRupees(loan.monthly_income)} />}
               <KV k="Address" v={loan.aadhaar_address} />
             </SectionCard>
 
@@ -1186,15 +1214,28 @@ function Inner() {
                 <KV k="Father's name" v={loan.coapp_father_name} />
                 <KV k="DOB" v={loan.coapp_dob} />
                 <KV k="Relation" v={loan.coapp_relation} />
+                {loan.coapp_role_reason && <KV k="Reason" v={loan.coapp_role_reason} wrap />}
                 <KV k="PAN" v={loan.coapp_pan} />
                 <KV k="Mobile" v={loan.coapp_mobile ? `+91 ${loan.coapp_mobile}` : null} />
                 <KV k="Email" v={loan.coapp_email} />
+                {loan.coapp_earning != null && <KV k="Earning" v={loan.coapp_earning ? "Yes" : "No"} />}
+                {loan.coapp_monthly_income != null && <KV k="Monthly income" v={fmtRupees(loan.coapp_monthly_income)} />}
                 {loan.coapp_aadhaar_number_masked && (
                   <>
                     <KV k="Aadhaar name" v={loan.coapp_aadhaar_name} />
                     <KV k="Aadhaar" v={loan.coapp_aadhaar_number_masked} />
                     <KV k="Address" v={loan.coapp_aadhaar_address} />
                   </>
+                )}
+                {!aborted && (
+                  <button
+                    type="button"
+                    disabled={swapBusy}
+                    onClick={() => void swapRoles()}
+                    className="mt-3 text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center gap-1.5 border border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5] disabled:opacity-50"
+                  >
+                    {swapBusy ? "Swapping…" : "Swap applicant ↔ co-applicant"}
+                  </button>
                 )}
               </SectionCard>
             )}

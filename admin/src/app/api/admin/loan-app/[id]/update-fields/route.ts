@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { logLoanActivityServer } from "@/lib/loan-activity-server";
+import { toIsoDate } from "@/lib/dates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,36 +61,22 @@ function err(message: string, status: number) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
-// Normalize a date/timestamp value to something Postgres always accepts, or
-// null. Critically, OCR returns DOBs "exactly as printed" — i.e. Indian
-// DD/MM/YYYY — which a bare .update() would reject, failing the WHOLE patch and
-// silently dropping the *_path columns alongside it. So we convert the common
-// forms and null anything unparseable rather than let one bad date poison the
-// save. ISO timestamps (the *_uploaded_at columns) pass through untouched.
-function toIsoDate(raw: unknown): string | null {
-  const s = String(raw ?? "").trim();
-  if (!s) return null;
-  if (s.includes("T")) return s;                 // ISO datetime (…_uploaded_at) — keep as-is
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;   // already YYYY-MM-DD
-  // DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY → YYYY-MM-DD (validate ranges).
-  const m = s.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
-  if (m) {
-    const d = +m[1], mo = +m[2], y = +m[3];
-    if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12 && y >= 1900 && y <= 2100) {
-      return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-    }
-  }
-  return null; // year-only or unparseable → drop the value, never the whole save
-}
-
 function coerce(key: string, raw: unknown): unknown {
   if (NUM_COLS.has(key)) {
     if (raw === "" || raw == null) return null;
     const n = Number(raw);
     return Number.isFinite(n) ? n : null;
   }
+  // Normalize a date/timestamp value to something Postgres always accepts, or
+  // null. Critically, OCR returns DOBs "exactly as printed" — i.e. Indian
+  // DD/MM/YYYY — which a bare .update() would reject, failing the WHOLE patch and
+  // silently dropping the *_path columns alongside it. So the shared parser
+  // converts the common forms and nulls anything unparseable (incl. year-only)
+  // rather than let one bad date poison the save. ISO timestamps (the
+  // *_uploaded_at columns) pass through untouched.
   if (DATE_COLS.has(key)) {
-    return toIsoDate(raw);
+    const s = String(raw ?? "").trim();
+    return /^\d{4}-\d{2}-\d{2}T/.test(s) ? s : toIsoDate(s);
   }
   if (BOOL_COLS.has(key)) {
     if (typeof raw === "boolean") return raw;
