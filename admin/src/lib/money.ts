@@ -7,6 +7,13 @@ export function fmtRupees(n: number | null | undefined): string {
   return "₹" + Math.round(Number(n)).toLocaleString("en-IN");
 }
 
+/** "₹57,777.5" — EXACT, never rounded (up to 6 decimal places), Indian grouping.
+ *  For sanctioned / approval / disbursement amounts. "—" for null/NaN. */
+export function fmtRupeesExact(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(Number(n))) return "—";
+  return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 6 });
+}
+
 /** Like fmtRupees but ALSO shows "—" for 0 (lender summaries / ZIP routes). */
 export function rupees(n: unknown): string {
   const v = Number(n);

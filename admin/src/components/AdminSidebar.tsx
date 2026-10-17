@@ -17,22 +17,25 @@
 // onSelectTab, so a list section navigates back to /admin (seeding the tab via
 // sessionStorage, the same key the console already restores from).
 
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { logout, getBusiness, allowedModules, canAccessModule, type ModuleKey } from "@/lib/auth";
+import { logout, getBusiness, allowedModules, canAccessModule, isMainAdmin, type ModuleKey } from "@/lib/auth";
+import { pendingCount } from "@/lib/review";
 
-export type ConsoleTab = "epcs" | "apps" | "loanleads" | "insurance" | "leads";
-export type SectionKey = ConsoleTab | "analytics" | "board";
+export type ConsoleTab = "epcs" | "apps" | "loanleads" | "insurance" | "otherins" | "leads";
+export type SectionKey = ConsoleTab | "analytics" | "board" | "pendings";
 
 // Per-console accent colors (C). Soft professional tints — accents only.
 export const ACCENTS: Record<SectionKey, { label: string; color: string; tint: string }> = {
   epcs:      { label: "EPCs",              color: "#185fa5", tint: "#e8f1fb" },
   apps:      { label: "Loan applications", color: "#178a5c", tint: "#e7f5ee" },
   loanleads: { label: "Leads",             color: "#4338ca", tint: "#e8e7fb" },
-  insurance: { label: "Insurance",         color: "#0e7490", tint: "#e0f2f4" },
+  insurance: { label: "Solar Insurance",   color: "#0e7490", tint: "#e0f2f4" },
+  otherins:  { label: "Other Insurance",   color: "#be185d", tint: "#fce7f3" },
   leads:     { label: "Leads (Non-EPC)",   color: "#b45309", tint: "#fbf0e0" },
   analytics: { label: "Analytics",         color: "#6d28d9", tint: "#efe9fb" },
   board:     { label: "Task Manager",      color: "#0f766e", tint: "#dcf3ef" },
+  pendings:  { label: "Pendings",          color: "#b91c1c", tint: "#fdecec" },
 };
 
 const ICONS: Record<SectionKey, ReactNode> = {
@@ -48,6 +51,9 @@ const ICONS: Record<SectionKey, ReactNode> = {
   insurance: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V6z" /><path d="M9 12l2 2 4-4" /></svg>
   ),
+  otherins: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 12a10 10 0 0 0-20 0z" /><path d="M12 12v7a2 2 0 0 0 4 0" /><path d="M12 2v1" /></svg>
+  ),
   leads: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" /></svg>
   ),
@@ -57,6 +63,9 @@ const ICONS: Record<SectionKey, ReactNode> = {
   board: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="6" height="18" rx="1"/><rect x="10.5" y="3" width="6" height="12" rx="1"/><rect x="18" y="3" width="3" height="9" rx="1"/></svg>
   ),
+  pendings: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 4H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2" /><rect x="9" y="2" width="6" height="4" rx="1" /><path d="M9 14l2 2 4-4" /></svg>
+  ),
 };
 
 const ORDER: SectionKey[] = ["epcs", "apps", "loanleads", "insurance", "leads", "analytics"];
@@ -64,9 +73,15 @@ const ORDER: SectionKey[] = ["epcs", "apps", "loanleads", "insurance", "leads", 
 export default function AdminSidebar({
   active,
   onSelectTab,
+  pendings,
+  onPendingsClick,
 }: {
   active: SectionKey;
   onSelectTab?: (t: ConsoleTab) => void;
+  /** Live Pendings count from the Pendings page itself (overrides the cached badge). */
+  pendings?: number;
+  /** On the Pendings page: clicking Pendings again re-checks the list + badge. */
+  onPendingsClick?: () => void;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false); // mobile drawer
@@ -83,11 +98,31 @@ export default function AdminSidebar({
     // (MAIN_ADMIN sees all cases + RM tabs; an OPERATIONS_USER sees only their
     // own, enforced by RLS). Pinned to the top.
     if (biz?.business_type === "admin") keys.unshift("board");
+    // Pendings — the main admin's checker queue (maker-checker, lib/review) —
+    // and Other Insurance (general, non-solar) are the main admin's only.
+    if (isMainAdmin(biz)) {
+      keys.splice(1, 0, "pendings");
+      const at = keys.indexOf("insurance");
+      keys.splice(at >= 0 ? at + 1 : keys.length, 0, "otherins");
+    }
     return keys;
   });
+  const [cachedPending, setPending] = useState(0);
+  useEffect(() => {
+    // The Pendings page passes its own live count — no separate count query there.
+    if (pendings == null && active !== "pendings" && navKeys.includes("pendings")) void pendingCount().then(setPending);
+  }, [navKeys, pendings, active]);
+  const pending = pendings ?? cachedPending;
 
   function go(key: SectionKey) {
     setOpen(false);
+    // Pendings: every click re-checks (the page always loads the list fresh and
+    // updates the red number from it).
+    if (key === "pendings") {
+      if (active === "pendings") onPendingsClick?.();
+      else router.push("/admin/pendings");
+      return;
+    }
     if (key === active) return;
     if (key === "analytics") {
       router.push("/admin/analytics");
@@ -151,7 +186,14 @@ export default function AdminSidebar({
                 ].join(" ")}
                 style={on ? { backgroundColor: a.tint, color: a.color } : undefined}
               >
-                <span className="shrink-0">{ICONS[key]}</span>
+                <span className="shrink-0 relative">
+                  {ICONS[key]}
+                  {key === "pendings" && pending > 0 && (
+                    <span className="absolute -top-2 -right-2.5 min-w-[17px] h-[17px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold leading-[17px] text-center">
+                      {pending > 99 ? "99+" : pending}
+                    </span>
+                  )}
+                </span>
                 <span className={"truncate " + labelCls}>{a.label}</span>
               </button>
             );

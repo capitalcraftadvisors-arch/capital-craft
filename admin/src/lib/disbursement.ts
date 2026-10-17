@@ -121,7 +121,7 @@ export function displayAmount(loan: {
 }
 
 // fmtRupees now lives in lib/money; re-exported here so existing imports keep working.
-export { fmtRupees } from "./money";
+export { fmtRupees, fmtRupeesExact } from "./money";
 
 /** Portal-wide compact date for tables/headers — DD/MM/YYYY (see lib/dates). */
 export function fmtDateShort(v: string | null | undefined): string {

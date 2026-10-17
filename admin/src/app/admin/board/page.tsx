@@ -19,7 +19,7 @@ import DateField from "@/components/ui/DateField";
 import LoanActivityLogModal from "@/components/LoanActivityLogModal";
 import ActivityLogModal from "@/components/ActivityLogModal";
 import { supabase } from "@/lib/supabase";
-import { getBusiness, getToken, greetingName } from "@/lib/auth";
+import { getBusiness, getToken, greetingName, isMainAdmin as isMainAdminUser } from "@/lib/auth";
 import { loadOpsCases, columnsFor, SOURCE_META, type OpsCase, type TeamUser, type CaseSource } from "@/lib/ops-board";
 import { PERIOD_OPTIONS, inPeriod, type Period } from "@/lib/period";
 import { DEFAULT_LOAN_LENDERS, LOAN_LENDER_COLS, lendersWithDocs, type LoanLenderRow } from "@/lib/loan-lenders";
@@ -195,7 +195,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 const MYDAY_SRC_TABS: { key: CaseSource; label: string }[] = [
   { key: "loan", label: "Loan" },
   { key: "lead", label: "Leads" },
-  { key: "insurance", label: "Insurance" },
+  { key: "insurance", label: "Solar Insurance" },
   { key: "epc", label: "EPC" },
 ];
 // Normalise a stored number to a 10-digit Indian mobile (or "" if not usable).
@@ -735,7 +735,7 @@ function monthKey(iso: string | null): string | null {
 function Inner() {
   const router = useRouter();
   const me = getBusiness();
-  const isMainAdmin = me?.role === "MAIN_ADMIN" || (me?.business_type === "admin" && !me?.role && (me?.allowed_modules ?? []).includes("analytics"));
+  const isMainAdmin = isMainAdminUser(me);
   const isManager = me?.role === "MANAGER";
   const canOversee = isMainAdmin || isManager; // sees owner tabs + workload strip
 

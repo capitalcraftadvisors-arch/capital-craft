@@ -21,7 +21,7 @@ const NAV: { label: string; hint: string; run: (r: ReturnType<typeof useRouter>)
   { label: "EPC partners", hint: "Console", run: (r) => goConsole(r, "epcs") },
   { label: "Loan applications", hint: "Console", run: (r) => goConsole(r, "apps") },
   { label: "Loan leads", hint: "Console", run: (r) => goConsole(r, "loanleads") },
-  { label: "Insurance", hint: "Console", run: (r) => goConsole(r, "insurance") },
+  { label: "Solar Insurance", hint: "Console", run: (r) => goConsole(r, "insurance") },
   { label: "Leads", hint: "Console", run: (r) => goConsole(r, "leads") },
   { label: "Analytics", hint: "Page", run: (r) => r.push("/admin/analytics" as any) },
   { label: "Task Manager", hint: "Page", run: (r) => r.push("/admin/board" as any) },

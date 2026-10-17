@@ -16,7 +16,9 @@
 //      one of two ways: EXIF GPS (read from the full file before upload), OR
 //      a visible GPS-stamp banner whose coordinates we OCR (GPS Map Camera
 //      and similar apps burn "Lat …° Long …°" onto the image but usually
-//      write no EXIF). No location either way → rejected.
+//      write no EXIF). A photo JUST taken with the phone camera through the
+//      picker (phone browsers strip its EXIF location) gets the live GPS +
+//      the same burned-in stamp as "Take photo". No location → rejected.
 //
 // Uploads go through the same lib/storage primitives FileUpload uses, so row
 // shape, thumbnails, RLS, and admin views are identical. Captured coordinates
@@ -248,6 +250,20 @@ function drawGeoStamp(
   ctx.fillText(dateStr, textX, ty);
 }
 
+// Resolves the address, burns the GPS stamp onto the canvas, and returns it as
+// the JPEG to upload. Shared by the live camera and the phone-camera upload.
+async function stampedFile(canvas: HTMLCanvasElement, coords: Gps, category: string): Promise<File | null> {
+  const meta = await fetchGeoMeta(coords);
+  drawGeoStamp(canvas, { title: meta.title, address: meta.address, lat: coords.lat, lng: coords.lng });
+  const blob: Blob | null = await new Promise((res) => canvas.toBlob((b) => res(b), "image/jpeg", 0.92));
+  return blob ? new File([blob], `office-${category}-${Date.now()}.jpg`, { type: "image/jpeg" }) : null;
+}
+
+// A photo picked through "Upload photo" counts as JUST TAKEN with the phone
+// camera when its file is this fresh. Phone browsers strip the location from
+// such photos, so they get the live GPS instead (see handleUploadFile).
+const FRESH_CAPTURE_MS = 5 * 60 * 1000;
+
 export default function GeoOfficeUpload({
   category, label, businessId, applicationId, uploadedBy, hint,
   uploadFn, initialGps, onUploaded, uploadOnly,
@@ -430,13 +446,8 @@ export default function GeoOfficeUpload({
     }
 
     // Resolve the address, then burn the stamp onto the frozen frame.
-    const meta = await fetchGeoMeta(coords);
-    drawGeoStamp(canvas, { title: meta.title, address: meta.address, lat: coords.lat, lng: coords.lng });
-
-    const blob: Blob | null = await new Promise((res) => canvas.toBlob((b) => res(b), "image/jpeg", 0.92));
-    if (!blob) { setCamBusy(false); setCamError("Couldn't capture the photo. Try again."); return; }
-
-    const file = new File([blob], `office-${category}-${Date.now()}.jpg`, { type: "image/jpeg" });
+    const file = await stampedFile(canvas, coords, category);
+    if (!file) { setCamBusy(false); setCamError("Couldn't capture the photo. Try again."); return; }
     stopStream();
     setCamOpen(false);
     setCamBusy(false);
@@ -462,6 +473,32 @@ export default function GeoOfficeUpload({
     } catch (err) {
       // Real parse error — not "no GPS". Fall through to the OCR-stamp check.
       console.warn("[GeoOfficeUpload] EXIF read failed:", err);
+    }
+    // No EXIF GPS and just taken with the phone camera ("Upload photo" → Camera)? The browser
+    // stripped its location, so read the live GPS now and burn the stamp on —
+    // the same geo-tag the live camera gives.
+    if (!coords && file.type.startsWith("image/") && Date.now() - file.lastModified < FRESH_CAPTURE_MS) {
+      setStatus("Getting your location… please allow location access.");
+      const live = await requestLiveGeo();
+      if (!live) {
+        setStatus(null);
+        setError("Turn on location (GPS) and allow location access, then take the photo again.");
+        if (fileInputRef.current) fileInputRef.current.value = "";
+        return;
+      }
+      const bmp = await createImageBitmap(file).catch(() => null);
+      let tagged: File | null = null;
+      if (bmp) {
+        const canvas = document.createElement("canvas");
+        canvas.width = bmp.width;
+        canvas.height = bmp.height;
+        canvas.getContext("2d")?.drawImage(bmp, 0, 0);
+        bmp.close();
+        tagged = await stampedFile(canvas, live, category);
+      }
+      await persist(tagged ?? file, live);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
     }
     // No EXIF GPS? Try to OCR a burned-in GPS-stamp banner (GPS Map Camera etc.).
     if (!coords) {

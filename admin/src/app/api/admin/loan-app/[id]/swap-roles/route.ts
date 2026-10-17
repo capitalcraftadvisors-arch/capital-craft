@@ -9,6 +9,10 @@
 // coapp_pan_path column — so they are moved across: the newest borrower_pan
 // row's file → coapp_pan_path, the old coapp_pan_path → a new borrower_pan row.
 //
+// The applicant-only customer_photo / bank_statement rows were collected for
+// the old applicant, so they are re-filed as "other" (kept, not deleted) and
+// the profile falls back to the new applicant's Aadhaar face.
+//
 // borrower_dob is a DATE (ISO); coapp_dob is text kept DD/MM/YYYY like the rest
 // of the co-applicant form. A relation survives only when it is symmetric
 // (Spouse). The 0091 earning columns are swapped once that migration has run
@@ -17,6 +21,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { isMainAdmin } from "@/lib/hierarchy";
 import { logLoanActivityServer, type LoanAction } from "@/lib/loan-activity-server";
 import { fmtDate, toIsoDate } from "@/lib/dates";
 import { isUndefinedColumn } from "@/lib/optional-column";
@@ -63,6 +68,7 @@ export async function POST(
     if (!token) return err("unauthorized", 401);
     const claims = await verifyJwt(token);
     if (claims.business_type !== "admin") return err("admin_only", 403);
+    if (!isMainAdmin(claims)) return err("Only the main admin can swap the applicant and co-applicant.", 403);
 
     const appId = params.id;
     if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);
@@ -131,10 +137,20 @@ export async function POST(
       if (delErr) console.warn("[swap-roles] old applicant PAN rows:", delErr.message);
     }
 
+    const { data: refiled, error: refileErr } = await supabase
+      .from("user_application_docs")
+      .update({ category: "other" })
+      .eq("application_id", appId)
+      .in("category", ["customer_photo", "bank_statement"])
+      .select("id");
+    if (refileErr) console.warn("[swap-roles] old applicant photo / bank statement rows:", refileErr.message);
+
     // Append-only activity trail. LoanAction doesn't list this action yet; the
     // column is free text and the log modal shows the detail.
     await logLoanActivityServer(supabase, appId, "roles_swapped" as LoanAction, claims.business_id ?? null, {
-      detail: "Applicant ↔ co-applicant swapped",
+      detail: refiled?.length
+        ? "Applicant ↔ co-applicant swapped; photo / bank statement moved to Other documents"
+        : "Applicant ↔ co-applicant swapped",
     });
 
     return NextResponse.json({ ok: true });

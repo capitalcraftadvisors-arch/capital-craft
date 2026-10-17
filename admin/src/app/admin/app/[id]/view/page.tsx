@@ -14,9 +14,10 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
-import { getToken, getBusiness } from "@/lib/auth";
+import { getToken, getBusiness, isMainAdmin } from "@/lib/auth";
 import { getDocumentUrl, deleteDocument } from "@/lib/storage";
 import DeleteLoanAppModal from "@/components/DeleteLoanAppModal";
+import EditLoanDatesModal from "@/components/EditLoanDatesModal";
 import { invalidate } from "@/lib/list-cache";
 import CommentsSection from "@/components/CommentsSection";
 import OwnershipCard from "@/components/OwnershipCard";
@@ -35,7 +36,7 @@ import { logLoanActivity } from "@/lib/loanAudit";
 import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
 import { deadlineState, DEADLINE_PILL, remainingAmount, fmtDateShort } from "@/lib/disbursement";
 import { fmtDateTime } from "@/lib/dates";
-import { fmtRupees } from "@/lib/money";
+import { fmtRupees, fmtRupeesExact } from "@/lib/money";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import {
   I, SectionCard, KV, StepBlock, DocGrid, BigProgressStep, BigConnector, type ViewDocSlot,
@@ -115,11 +116,11 @@ function maskAcct(a: string | null | undefined): string {
 function cap(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 }
-// Approval-details cell: money → ₹ rounded, tenure → "<n> years". Numbers only.
+// Approval-details cell: money → ₹ exact (never rounded), tenure → "<n> years". Numbers only.
 function fmtApproval(v: number | null | undefined, money: boolean, suffix?: string): string {
   if (v === null || v === undefined || !Number.isFinite(Number(v))) return "—";
   const n = Number(v);
-  const base = money ? fmtRupees(n) : String(n);
+  const base = money ? fmtRupeesExact(n) : String(n);
   return suffix ? `${base} ${suffix}` : base;
 }
 
@@ -303,6 +304,7 @@ function Inner() {
   // Bumped to re-read the file (and its docs) after a server-side change.
   const [reloadKey, setReloadKey] = useState(0);
   const [swapBusy, setSwapBusy] = useState(false);
+  const [datesOpen, setDatesOpen] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -694,8 +696,10 @@ function Inner() {
   };
 
   // Three-dot overflow menu (replaces the bare trash button). "Change review"
-  // only appears once there's a decision/abort to undo.
+  // only appears once there's a decision/abort to undo. Change lender and the
+  // applicant ↔ co-applicant swap are the main admin's only.
   const canChangeReview = approvedPlus || rejected || aborted || anyLenderActivity;
+  const mainAdmin = isMainAdmin(getBusiness());
   const kebabItems = [
     ...(!aborted ? [{
       label: "Abort application",
@@ -707,10 +711,20 @@ function Inner() {
       icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></svg>),
       onClick: changeReview,
     }] : []),
-    ...((canChangeReview || withDocs.length > 0) && !aborted ? [{
+    ...(mainAdmin && (canChangeReview || withDocs.length > 0) && !aborted ? [{
       label: "Change lender",
       icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M16 3h5v5" /><path d="M21 3l-7 7" /><path d="M8 21H3v-5" /><path d="M3 21l7-7" /></svg>),
       onClick: () => setChangeLenderOpen(true),
+    }] : []),
+    ...(mainAdmin && hasCoapp && !aborted ? [{
+      label: swapBusy ? "Swapping…" : "Swap applicant ↔ co-applicant",
+      icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M7 4v16M7 4 3 8M7 4l4 4" /><path d="M17 20V4M17 20l-4-4M17 20l4-4" /></svg>),
+      onClick: () => { if (!swapBusy) void swapRoles(); },
+    }] : []),
+    ...(mainAdmin ? [{
+      label: "Edit dates",
+      icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>),
+      onClick: () => setDatesOpen(true),
     }] : []),
     {
       label: "Delete",
@@ -866,9 +880,12 @@ function Inner() {
   }
 
   // Swap applicant ↔ co-applicant. The route moves every identity field and the
-  // two PAN files, so the whole file (and its docs) is re-read afterwards.
+  // two PAN files and re-files the photo / bank statement as "other", so the
+  // whole file (and its docs) is re-read afterwards.
   async function swapRoles() {
-    if (!loan || swapBusy || !window.confirm("Swap applicant ↔ co-applicant?")) return;
+    if (!loan || swapBusy || !window.confirm(
+      "Swap applicant ↔ co-applicant?\n\nThe photo and bank statement will move to Other documents and should be re-collected for the new applicant.",
+    )) return;
     setSwapBusy(true);
     try {
       const res = await fetch(`/api/admin/loan-app/${loan.id}/swap-roles`, {
@@ -1227,16 +1244,6 @@ function Inner() {
                     <KV k="Address" v={loan.coapp_aadhaar_address} />
                   </>
                 )}
-                {!aborted && (
-                  <button
-                    type="button"
-                    disabled={swapBusy}
-                    onClick={() => void swapRoles()}
-                    className="mt-3 text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center gap-1.5 border border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5] disabled:opacity-50"
-                  >
-                    {swapBusy ? "Swapping…" : "Swap applicant ↔ co-applicant"}
-                  </button>
-                )}
               </SectionCard>
             )}
 
@@ -1444,7 +1451,7 @@ function Inner() {
             {(approvedPlus || firstDone || secondDone) && (
               <SectionCard title="Sanction details" accent="green" icon={I.money} adminOnly>
                 <StepBlock title="1st Disbursement">
-                  <KV k="Amount" v={fmtRupees(loan.first_disbursement_amount)} valueClass="text-[#178a5c]" />
+                  <KV k="Amount" v={fmtRupeesExact(loan.first_disbursement_amount)} valueClass="text-[#178a5c]" />
                   <KV k="Date" v={fmtDateShort(loan.first_disbursement_date)} />
                   <div className="flex justify-between items-center text-[14px] py-[5px] gap-3">
                     <span className="text-[#5a8a76] shrink-0">Countdown to 2nd</span>
@@ -1454,12 +1461,12 @@ function Inner() {
                   </div>
                   {/* Once the 2nd tranche is paid there is nothing pending — hide it. */}
                   {!secondDone && (
-                    <KV k="Remaining (pending)" v={fmtRupees(remainingAmount(loan.sanctioned_amount, loan.first_disbursement_amount))} />
+                    <KV k="Remaining (pending)" v={fmtRupeesExact(remainingAmount(loan.sanctioned_amount, loan.first_disbursement_amount))} />
                   )}
                 </StepBlock>
                 <div className="mt-3">
                   <StepBlock title="2nd Disbursement">
-                    <KV k="Amount" v={fmtRupees(loan.second_disbursement_amount)} valueClass="text-[#178a5c]" />
+                    <KV k="Amount" v={fmtRupeesExact(loan.second_disbursement_amount)} valueClass="text-[#178a5c]" />
                     <KV k="Date" v={fmtDateShort(loan.second_disbursement_date)} />
                     <div className="flex justify-between items-center text-[14px] py-[5px] gap-3">
                       <span className="text-[#5a8a76] shrink-0">Documents review</span>
@@ -1576,6 +1583,12 @@ function Inner() {
         onClose={() => setActivityOpen(false)}
         loan={loan}
         borrowerName={applicantName}
+      />
+      <EditLoanDatesModal
+        open={datesOpen}
+        loan={loan}
+        onClose={() => setDatesOpen(false)}
+        onSaved={() => { setDatesOpen(false); setReloadKey((k) => k + 1); }}
       />
       <DeleteLoanAppModal
         open={delOpen}

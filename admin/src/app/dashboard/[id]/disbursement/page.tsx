@@ -18,7 +18,7 @@ import { supabase } from "@/lib/supabase";
 import CompletionDocsSection from "@/components/CompletionDocsSection";
 import { I, SectionCard, KV, Pill } from "@/components/view/ViewKit";
 import {
-  deadlineState, DEADLINE_PILL, remainingAmount, fmtRupees, fmtDateShort,
+  deadlineState, DEADLINE_PILL, remainingAmount, fmtRupeesExact, fmtDateShort,
   DISBURSEMENT_WINDOW_DAYS,
 } from "@/lib/disbursement";
 
@@ -96,7 +96,7 @@ function Inner() {
             </div>
             <div className="text-right shrink-0">
               <div className="text-[11px] font-semibold text-[#5a8a76] uppercase tracking-wider mb-1">Sanctioned</div>
-              <div className="text-[26px] font-bold text-[#178a5c] leading-none">{fmtRupees(sanctioned)}</div>
+              <div className="text-[26px] font-bold text-[#178a5c] leading-none">{fmtRupeesExact(sanctioned)}</div>
               <div className={["inline-block mt-3 px-3 py-1.5 rounded-[8px] text-[13px] font-semibold", DEADLINE_PILL[dl.tone]].join(" ")}>
                 {dl.label}
               </div>
@@ -136,17 +136,17 @@ function Inner() {
 
         <div className="space-y-4">
           <SectionCard title="Disbursement" accent="green" icon={I.money}>
-            <KV k="Sanctioned amount" v={fmtRupees(sanctioned)} />
+            <KV k="Sanctioned amount" v={fmtRupeesExact(sanctioned)} />
             <KV
               k="First disbursement (received)"
-              v={firstSaved ? `${fmtRupees(loan.first_disbursement_amount)} · ${fmtDateShort(loan.first_disbursement_date)}` : "Not released yet"}
+              v={firstSaved ? `${fmtRupeesExact(loan.first_disbursement_amount)} · ${fmtDateShort(loan.first_disbursement_date)}` : "Not released yet"}
               valueClass={firstSaved ? "text-[#178a5c]" : undefined}
             />
-            <KV k="Remaining (pending)" v={firstSaved ? fmtRupees(remaining) : "—"} />
+            <KV k="Remaining (pending)" v={firstSaved ? fmtRupeesExact(remaining) : "—"} />
             <KV
               k="Second disbursement"
               v={loan.second_disbursement_amount != null
-                ? `${fmtRupees(loan.second_disbursement_amount)} · ${fmtDateShort(loan.second_disbursement_date)}`
+                ? `${fmtRupeesExact(loan.second_disbursement_amount)} · ${fmtDateShort(loan.second_disbursement_date)}`
                 : "After work completion & review"}
               valueClass={loan.second_disbursement_amount != null ? "text-[#178a5c]" : undefined}
             />

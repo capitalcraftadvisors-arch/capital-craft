@@ -20,7 +20,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
-import { getBusiness } from "@/lib/auth";
+import { getBusiness, isMainAdmin } from "@/lib/auth";
+import { reviewPatch, invalidatePendingCount } from "@/lib/review";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import CompletionDocsSection from "@/components/CompletionDocsSection";
@@ -29,7 +30,7 @@ import { LENDER_LABEL } from "@/lib/lender-summary";
 import DateField from "@/components/ui/DateField";
 import { I, SectionCard, KV, Pill, StatusBtn } from "@/components/view/ViewKit";
 import {
-  deadlineState, DEADLINE_PILL, remainingAmount, fmtRupees, fmtDateShort,
+  deadlineState, DEADLINE_PILL, remainingAmount, fmtRupeesExact, fmtDateShort,
   DISBURSEMENT_WINDOW_DAYS,
 } from "@/lib/disbursement";
 
@@ -114,20 +115,21 @@ function Inner() {
     const sanctioned = Number(loan.sanctioned_amount ?? 0);
     if (sanctioned > 0 && amt > sanctioned) {
       const ok = window.confirm(
-        `The first disbursement (${fmtRupees(amt)}) is MORE than the sanctioned amount (${fmtRupees(sanctioned)}).\n\nAre you sure?`,
+        `The first disbursement (${fmtRupeesExact(amt)}) is MORE than the sanctioned amount (${fmtRupeesExact(sanctioned)}).\n\nAre you sure?`,
       );
       if (!ok) return;
     }
     setBusy(true); setError(null); setMsg(null);
     const { error: e } = await supabase()
       .from("epc_applications")
-      .update({ first_disbursement_amount: amt, first_disbursement_date: firstDate })
+      .update({ first_disbursement_amount: amt, first_disbursement_date: firstDate, ...reviewPatch("disb1") })
       .eq("id", loan.id);
     if (e) { setError("Couldn't save — " + e.message); setBusy(false); return; }
     await logLoanActivity(loan.id, "status_change", {
-      detail: `First disbursement ${fmtRupees(amt)} on ${fmtDateShort(firstDate)} — 45-day clock started`,
+      detail: `First disbursement ${fmtRupeesExact(amt)} on ${fmtDateShort(firstDate)} — 45-day clock started`,
     });
     invalidateLoanBoards(); // disbursement moves the case on the Task Manager / list
+    invalidatePendingCount();
     setMsg("First disbursement saved — the 45-day clock has started.");
     await load();
     setBusy(false);
@@ -163,13 +165,14 @@ function Inner() {
     setBusy(true); setError(null); setMsg(null);
     const { error: e } = await supabase()
       .from("epc_applications")
-      .update({ second_disbursement_amount: amt, second_disbursement_date: secondDate })
+      .update({ second_disbursement_amount: amt, second_disbursement_date: secondDate, ...reviewPatch("disb2") })
       .eq("id", loan.id);
     if (e) { setError("Couldn't save — " + e.message); setBusy(false); return; }
     await logLoanActivity(loan.id, "status_change", {
-      detail: `Second disbursement ${fmtRupees(amt)} on ${fmtDateShort(secondDate)}`,
+      detail: `Second disbursement ${fmtRupeesExact(amt)} on ${fmtDateShort(secondDate)}`,
     });
     invalidateLoanBoards(); // 2nd disbursement moves the case on the Task Manager / list
+    invalidatePendingCount();
     setMsg("Second disbursement saved.");
     await load();
     setBusy(false);
@@ -183,6 +186,9 @@ function Inner() {
   }
 
   const dl = deadlineState(loan.first_disbursement_date);
+  // Pendings (maker-checker): a team member can't enter a disbursement while the
+  // approval details await the main admin's check (the DB trigger enforces it too).
+  const approvalLocked = !isMainAdmin(getBusiness()) && loan.approval_review_status === "pending";
   const sanctioned = loan.sanctioned_amount != null ? Number(loan.sanctioned_amount) : null;
   const firstSaved = loan.first_disbursement_amount != null;
   // No disbursement is allowed until a lender has APPROVED the application (which
@@ -232,7 +238,7 @@ function Inner() {
             </div>
             <div className="text-right shrink-0">
               <div className="text-[11px] font-semibold text-[#5a8a76] uppercase tracking-wider mb-1">Sanctioned</div>
-              <div className="text-[26px] font-bold text-[#178a5c] leading-none">{fmtRupees(sanctioned)}</div>
+              <div className="text-[26px] font-bold text-[#178a5c] leading-none">{fmtRupeesExact(sanctioned)}</div>
               <div className={["inline-block mt-3 px-3 py-1.5 rounded-[8px] text-[13px] font-semibold", DEADLINE_PILL[dl.tone]].join(" ")}>
                 {dl.label}
               </div>
@@ -279,9 +285,11 @@ function Inner() {
             </SectionCard>
 
             <SectionCard title="First disbursement" accent="green" icon={I.money}>
-              {!tranche1Complete ? (
+              {!tranche1Complete || approvalLocked ? (
                 <p className="text-[13px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2">
-                  {!isApproved
+                  {approvalLocked
+                    ? "Waiting for the admin to approve the approval details."
+                    : !isApproved
                     ? "The application must be approved by a lender before the 1st disbursement can be entered."
                     : "Upload both Tranche-1 documents above to open the 1st disbursement."}
                 </p>
@@ -290,7 +298,7 @@ function Inner() {
                   {firstSaved ? (
                     <div className="mb-3 text-[12px] text-[#5a8a76]">
                       Deadline (45 days): <span className="font-semibold text-[#0f3d2e]">{fmtDateShort(loan.disbursement_deadline)}</span>
-                      {" · "}Remaining (pending): <span className="font-semibold text-[#0f3d2e]">{fmtRupees(remaining)}</span>
+                      {" · "}Remaining (pending): <span className="font-semibold text-[#0f3d2e]">{fmtRupeesExact(remaining)}</span>
                     </div>
                   ) : (
                     <p className="text-[13px] text-[#5a8a76] mb-3">
@@ -310,7 +318,7 @@ function Inner() {
                   </div>
                   {sanctioned != null && firstAmt && Number(firstAmt) > 0 && (
                     <p className="text-[12px] text-[#5a8a76] mt-2">
-                      Remaining after this: <span className="font-semibold text-[#0f3d2e]">{fmtRupees(remainingAmount(sanctioned, Number(firstAmt)))}</span>
+                      Remaining after this: <span className="font-semibold text-[#0f3d2e]">{fmtRupeesExact(remainingAmount(sanctioned, Number(firstAmt)))}</span>
                     </p>
                   )}
                   <div className="mt-4">
@@ -384,14 +392,16 @@ function Inner() {
             {/* 2nd disbursement — unlocked by an approved review. */}
             {firstSaved && (
               <SectionCard title="Second disbursement" accent="green" icon={I.money}>
-                {(!secondUnlocked && loan.second_disbursement_amount == null) ? (
+                {approvalLocked || (!secondUnlocked && loan.second_disbursement_amount == null) ? (
                   <p className="text-[13px] text-[#5a8a76]">
-                    Available once the completion documents are reviewed and approved above.
+                    {approvalLocked
+                      ? "Waiting for the admin to approve the approval details."
+                      : "Available once the completion documents are reviewed and approved above."}
                   </p>
                 ) : (
                   <>
                     <p className="text-[13px] text-[#5a8a76] mb-3">
-                      Pending after the first disbursement: <span className="font-semibold text-[#0f3d2e]">{fmtRupees(remaining)}</span>
+                      Pending after the first disbursement: <span className="font-semibold text-[#0f3d2e]">{fmtRupeesExact(remaining)}</span>
                     </p>
                     <div className="grid sm:grid-cols-2 gap-3">
                       <div>

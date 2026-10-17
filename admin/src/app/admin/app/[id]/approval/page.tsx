@@ -26,10 +26,8 @@ import type { LenderKey } from "@/components/LenderPickerModal";
 import { rupeesInWords } from "@/lib/numberToWords";
 import { I, SectionCard } from "@/components/view/ViewKit";
 import FileUpload from "@/components/FileUpload";
-
-function fmtRs(n: number): string {
-  return "₹" + Math.round(n).toLocaleString("en-IN");
-}
+import { fmtRupeesExact as fmtRs } from "@/lib/money"; // approval amounts are shown exact, never rounded
+import { reviewPatch, invalidatePendingCount } from "@/lib/review";
 
 export default function LoanApprovalPage() {
   return (
@@ -151,6 +149,8 @@ function Inner() {
       // Credit score — a positive integer, or null when "None" is chosen.
       credit_score: creditNone ? null : (Number(creditScore) > 0 ? Number(creditScore) : null),
       reviewed_by: by, reviewed_at: now,
+      // Pendings: a team member's approval details wait for the main admin.
+      ...reviewPatch("approval"),
     };
 
     // Approval details are fully editable, repeatedly — no edit-once lock. On an
@@ -218,7 +218,8 @@ function Inner() {
     });
 
     invalidateLoanBoards(); // approval reflects on the Task Manager / Loans list / KPIs
-    router.push(`/admin/app/${loan.id}/view` as any);
+    invalidatePendingCount();
+    router.push((search.get("from") === "pendings" ? "/admin/pendings" : `/admin/app/${loan.id}/view`) as any);
   }
 
   if (loading) {

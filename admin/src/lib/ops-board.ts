@@ -64,7 +64,7 @@ export function columnsFor(src: CaseSource | "all"): ColumnDef[] {
 
 export const SOURCE_META: Record<CaseSource, { label: string; color: string; tint: string }> = {
   loan:      { label: "Loan",      color: "#178a5c", tint: "#e7f5ee" },
-  insurance: { label: "Insurance", color: "#0e7490", tint: "#e0f2f4" },
+  insurance: { label: "Solar Insurance", color: "#0e7490", tint: "#e0f2f4" },
   lead:      { label: "Lead",      color: "#4338ca", tint: "#e8e7fb" },
   epc:       { label: "EPC",       color: "#185fa5", tint: "#e8f1fb" },
 };

@@ -26,6 +26,19 @@ export function fmtDate(v: DateInput): string {
   return `${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 
+/** Local calendar date "YYYY-MM-DD" of a date / timestamp ("" when empty) — the DateField value. */
+export function localIsoDate(v: DateInput): string {
+  const d = parseLocal(v);
+  return d ? `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}` : "";
+}
+
+/** Timestamp moved to calendar day `iso` ("YYYY-MM-DD"), keeping its local time of day. */
+export function withLocalDate(ts: DateInput, iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const t = parseLocal(ts) ?? new Date(y, m - 1, d);
+  return new Date(y, m - 1, d, t.getHours(), t.getMinutes(), t.getSeconds(), t.getMilliseconds()).toISOString();
+}
+
 /** "05/07/2026, 5:52 am" — date (DD/MM/YYYY) + local time. */
 export function fmtDateTime(v: DateInput): string {
   const d = parseLocal(v);

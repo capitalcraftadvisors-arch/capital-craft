@@ -10,25 +10,27 @@
 //   • submit   → POST /api/epc/loan-apply { phase:"submit", ...all fields }
 //
 // Flow: greeting → customer mobile (creates the draft) → document TABLE (e-bill,
-// Aadhaar, PAN, rooftop) → earning + income → role decision (lib/loan-roles):
+// Aadhaar, PAN, rooftop) → earning (Yes / No) → role decision (lib/loan-roles):
 // a second person's Aadhaar + PAN only when the first can't be the sole
 // applicant (bill owner over 60 / under 21 / not earning, or the bill in someone
-// else's name) → roles card (confirm / swap) → relation → mobiles → applicant
-// photo + bank statement → quotation → review → the details not on any document
-// (email, pincode, system type, use) → loan amount → tenure → lead owner →
-// consent → success. All uploads/OCR run against the EPC's own token; RLS
-// scopes writes. Roles are decided here and written in the ONE submit.
+// else's name) → the roles, stated in one line → relation + whose mobile (only
+// with a co-applicant) → applicant photo + bank statement → quotation → review →
+// the details not on any document (email, pincode, system type, use) → loan
+// amount → tenure → lead owner → consent → success. Swapping roles is the
+// Capital Craft team's (admin profile), not the EPC's. All uploads/OCR run
+// against the EPC's own token; RLS scopes writes. Roles are decided here and
+// written in the ONE submit.
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
-import { getToken } from "@/lib/auth";
+import { getBusiness, getToken } from "@/lib/auth";
 import { fetchEpcName } from "@/lib/epc-name";
 import { getDocumentUrl } from "@/lib/storage";
 import { hydrateLoanForm } from "@/lib/loan-form";
 import { numberToWordsIndian } from "@/lib/numberToWords";
 import { nameReadable } from "@/lib/name-match";
-import { toIsoDate } from "@/lib/dates";
+import { fmtDate, toIsoDate } from "@/lib/dates";
 import { coappReasonText, decideRoles, eligibility, idNamesMatch, isBillOwner, personName, type IneligibleReason, type PersonFacts, type RoleDecision } from "@/lib/loan-roles";
 import EditTable from "@/components/EditTable";
 import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES, formatRupees } from "@/lib/emi";
@@ -38,7 +40,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PIN_RE = /^[1-9]\d{5}$/;
 
 type Form = Record<string, string>;
-type Msg = { id: string; _id?: string; from: "bot" | "user"; text?: string; time: string; files?: { name: string; thumb: string | null }[]; turnId?: string; pass?: string };
+type Msg = { id: string; _id?: string; from: "bot" | "user"; text?: string; time: string; files?: { name: string; thumb: string | null }[]; turnId?: string; pass?: string; value?: string /* the answer as stored, for ✎ Edit */ };
 type Choice = { value: string; label: string; sub?: string };
 // What an automatic (decision) turn does: an optional one-line bot message, the
 // next form, and the turn to jump to (none → the next turn).
@@ -46,7 +48,7 @@ type Step = { say?: string; form: Form; goto?: string };
 type Turn = {
   id: string;
   bot: string | ((f: Form) => string); // a function renders the person's name from the form when the turn opens
-  kind: "text" | "pincode" | "choice" | "consent" | "doc_table" | "coapp_docs" | "doc_review" | "quotation" | "number" | "tenure" | "confirm_edit" | "edit_picker" | "decision" | "roles";
+  kind: "text" | "pincode" | "choice" | "consent" | "doc_table" | "coapp_docs" | "doc_review" | "quotation" | "number" | "tenure" | "confirm_edit" | "edit_picker" | "decision";
   field?: string;
   rows?: Row[] | ((f: Form) => Row[]); // edit mode: limits a doc_table / coapp_docs to only the selected documents
   placeholder?: string;
@@ -58,27 +60,34 @@ type Turn = {
 };
 
 const mobileErr = (v: string) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile number.");
+
+// The lead owner this EPC last used on this device — pre-fills the lead-owner
+// inputs only (never written into the form on its own). Saved after a submit.
+const leadOwnerKey = () => `cc.leadOwner.${getBusiness()?.id ?? ""}`;
+function lastLeadOwner(field: string): string {
+  try { return (JSON.parse(localStorage.getItem(leadOwnerKey()) || "{}") as Form)[field] || ""; } catch { return ""; }
+}
 const dobErr = (v: string) => (toIsoDate(v) ? null : "Enter the date of birth as DD/MM/YYYY.");
 
 // ── Applicant / co-applicant roles ───────────────────────────────────────────
 // p1 (the first person uploaded) reads into the APPLICANT keys and p2 into the
-// CO-APPLICANT keys. The two lists are index-aligned, so one swap serves both
-// the automatic assignment and the roles card's Swap. "_" keys stay in the
-// browser (never submitted).
+// CO-APPLICANT keys. The two lists are index-aligned, so the automatic
+// assignment can swap the two people. "_" keys stay in the browser (never
+// submitted).
 const APPLICANT_KEYS = [
   "aadhaar_name", "aadhaar_dob", "aadhaar_gender", "aadhaar_number", "aadhaar_care_of", "aadhaar_address",
   "aadhaar_front_path", "aadhaar_back_path", "aadhaar_face_path",
-  "borrower_pan", "borrower_father_name", "_pan_name", "borrower_dob", "borrower_pan_path", "borrower_pan_mime", "borrower_pan_file_name",
-  "applicant_earning", "monthly_income",
+  "borrower_pan", "borrower_father_name", "_pan_name", "borrower_dob", "borrower_pan_path", "borrower_pan_mime", "borrower_pan_file_name", "_pan_url",
+  "applicant_earning",
 ];
 const COAPP_KEYS = [
   "coapp_aadhaar_name", "coapp_aadhaar_dob", "coapp_aadhaar_gender", "coapp_aadhaar_number", "coapp_aadhaar_care_of", "coapp_aadhaar_address",
   "coapp_aadhaar_front_path", "coapp_aadhaar_back_path", "coapp_aadhaar_face_path",
-  "coapp_pan", "coapp_father_name", "_coapp_pan_name", "coapp_dob", "coapp_pan_path", "_coapp_pan_mime", "_coapp_pan_file_name",
-  "coapp_earning", "coapp_monthly_income",
+  "coapp_pan", "coapp_father_name", "_coapp_pan_name", "coapp_dob", "coapp_pan_path", "_coapp_pan_mime", "_coapp_pan_file_name", "_coapp_pan_url",
+  "coapp_earning",
 ];
 // Everything about one person, cleared when they must be re-uploaded.
-const P1_RESET = [...APPLICANT_KEYS, "_p1_ids", "_p1_owner"];
+const P1_RESET = [...APPLICANT_KEYS, "_p1_ids", "_p1_owner", "_p1_pan_required"];
 const P2_RESET = [...COAPP_KEYS, "_p2_ids"];
 
 const without = (f: Form, keys: string[]): Form => { const g = { ...f }; for (const k of keys) delete g[k]; return g; };
@@ -104,10 +113,12 @@ const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const hasCoapp = (f: Form) => (f._has_coapp ? f._has_coapp === "1"
   : f.bill_on_applicant_name ? f.bill_on_applicant_name === "false"
   : !!(f.coapp_pan || f.coapp_aadhaar_number || f.coapp_pan_path || f.coapp_aadhaar_front_path));
-const decide = (f: Form, withP2: boolean) => decideRoles({ ebillName: f.ebill_name, p1: p1Of(f), p2: withP2 ? p2Of(f) : null, p1IsOwner: yesNo(f._p1_owner) });
+// The EPC's "Is the bill in <name>'s name?" answer counts only while the bill
+// name is unreadable — once a readable bill is uploaded, the names decide.
+const p1OwnerAnswer = (f: Form) => (nameReadable(f.ebill_name) ? null : yesNo(f._p1_owner));
+const decide = (f: Form, withP2: boolean) => decideRoles({ ebillName: f.ebill_name, p1: p1Of(f), p2: withP2 ? p2Of(f) : null, p1IsOwner: p1OwnerAnswer(f) });
 
 const WHY: Record<IneligibleReason, string> = { over_60: "is over 60", under_21: "is under 21", not_earning: "is not earning", dob_unknown: "has no readable date of birth" };
-const ROLE_SWAPPED = " (roles swapped by EPC)";
 
 // Final roles from a decision: the applicant ends in the applicant keys, the
 // co-applicant (pair only) in the co-applicant keys; a dropped person is cleared.
@@ -122,18 +133,23 @@ function assignRoles(f: Form, d: Extract<RoleDecision, { kind: "single" | "pair"
     coapp_name: pair ? personName(p2Of(h)) : "",
     coapp_role_reason: pair ? coappReasonText(d.reason) : "",
     _has_coapp: pair ? "1" : "0",
-    _bill_owner: pair ? "coapp" : "applicant",
   };
 }
 
 // After the first person's documents + earning: they apply alone, or who the
 // second person must be (an applicant beside the bill owner, or the bill owner).
 function firstDecision(f: Form): Step {
+  // The bill owner's documents are mandatory: no PAN → back to the table with the PAN row required.
+  if (!f.borrower_pan_path && (p1OwnerAnswer(f) ?? isBillOwner(p1Of(f), f.ebill_name))) {
+    return { say: `${cap(n1(f))}'s PAN is required.`, form: { ...f, _p1_pan_required: "1" }, goto: "doc_table" };
+  }
   const d = decide(f, false);
-  if (d.kind === "single") return { say: `${cap(n1(f))} will be the applicant.`, form: assignRoles(f, d), goto: "roles" };
+  if (d.kind === "single") return { say: `${cap(n1(f))} will be the applicant.`, form: assignRoles(f, d), goto: "coapp_relation" };
   if (d.kind === "need_p2") {
+    // Replacing the applicant while the bill owner is already on file → straight to the final decision.
+    if (d.p2Role === "owner" && f._p2_role === "owner" && f.coapp_aadhaar_front_path) return { form: f, goto: "p2_decision" };
     return d.p2Role === "owner"
-      ? { say: `The electricity bill is in ${billName(f)}'s name.`, form: { ...f, _p2_role: "owner" } }
+      ? { say: nameReadable(f.ebill_name) ? `The electricity bill is in ${billName(f)}'s name.` : undefined, form: { ...f, _p2_role: "owner" } }
       : { say: `${cap(n1(f))} ${WHY[d.reason.slice(6) as IneligibleReason]} and will be the co-applicant.`, form: { ...f, _p2_role: "applicant" } };
   }
   if (d.kind === "ask_owner") return { form: f, goto: "p1_owner" };
@@ -142,7 +158,7 @@ function firstDecision(f: Form): Step {
 }
 
 // The second person was asked for as the bill owner — their name must match the bill.
-const notOwner = (f: Form): Step => ({ say: `This isn't ${billName(f)}. Please upload ${billName(f)}'s Aadhaar and PAN.`, form: without(f, P2_RESET), goto: "p2_docs" });
+const notOwner = (f: Form): Step => ({ say: `This isn't ${billName(f)}.`, form: without(f, P2_RESET), goto: "p2_docs" });
 function ownerCheck(f: Form): Step {
   return f._p2_role === "owner" && isBillOwner(p2Of(f), f.ebill_name) === false ? notOwner(f) : { form: f };
 }
@@ -152,12 +168,18 @@ function ownerCheck(f: Form): Step {
 function finalDecision(f: Form): Step {
   const d = decide(f, true);
   if (d.kind === "single" || d.kind === "pair") {
-    return { say: d.kind === "single" ? `${cap(d.applicant === "p1" ? n1(f) : n2(f))} will be the sole applicant.` : undefined, form: assignRoles(f, d), goto: "roles" };
+    const g = assignRoles(f, d);
+    return {
+      say: d.kind === "single"
+        ? `${cap(g.borrower_name || "the applicant")} will be the sole applicant.`
+        : `${cap(g.borrower_name || "the applicant")} will be the applicant and ${g.coapp_name || "the bill owner"} the co-applicant.`,
+      form: g,
+    };
   }
   if (d.kind === "need_new_applicant") {
     return d.replace === "p2"
-      ? { say: `${cap(n2(f))} ${WHY[d.reason]} and can't be the applicant. Please upload a different applicant's Aadhaar and PAN.`, form: without(f, P2_RESET), goto: "p2_docs" }
-      : { say: `Neither ${n1(f)} nor ${n2(f)} can be the applicant. Please upload the applicant's Aadhaar and PAN.`, form: without(f, P1_RESET), goto: "doc_table" };
+      ? { say: `${cap(n2(f))} ${WHY[d.reason]} and can't be the applicant.`, form: without(f, P2_RESET), goto: "p2_docs" }
+      : { say: `Neither ${n1(f)} nor ${n2(f)} can be the applicant.`, form: without(f, P1_RESET), goto: "doc_table" };
   }
   if (d.kind === "p2_not_owner") return notOwner(f);
   if (d.kind === "need_dob") return { form: f, goto: d.who === "p1" ? "p1_dob" : "p2_dob" };
@@ -168,6 +190,7 @@ function finalDecision(f: Form): Step {
 const YES_NO: Choice[] = [{ value: "true", label: "Yes" }, { value: "false", label: "No" }];
 const IDS_CHOICES: Choice[] = [{ value: "replace", label: "Replace" }, { value: "same", label: "Same person, continue" }];
 const RELATIONS: Choice[] = ["Father", "Mother", "Spouse", "Son", "Daughter", "Brother", "Sister", "Other"].map((v) => ({ value: v, label: v }));
+const MOBILE_OF: Choice[] = [{ value: "applicant", label: "Applicant" }, { value: "coapp", label: "Co-applicant" }];
 const idsText = (a?: string, b?: string) => `Aadhaar shows ${a}, PAN shows ${b}.`;
 
 // Docs-first flow: the mobile creates the draft, then each person's documents
@@ -182,7 +205,6 @@ const SCRIPT: Turn[] = [
   { id: "p1_owner", bot: (f) => `Is the electricity bill in ${n1(f)}'s name?`, kind: "choice", field: "_p1_owner", choices: YES_NO, when: (f) => !nameReadable(f.ebill_name) },
   { id: "p1_dob", bot: (f) => `Date of birth of ${n1(f)}.`, kind: "text", field: "borrower_dob", placeholder: "DD/MM/YYYY", validate: dobErr, when: (f) => eligibility(p1Of(f)).needDob },
   { id: "p1_earning", bot: (f) => `Is ${n1(f)} earning?`, kind: "choice", field: "applicant_earning", choices: YES_NO },
-  { id: "p1_income", bot: (f) => `Monthly income of ${n1(f)} (₹).`, kind: "number", field: "monthly_income", placeholder: "Amount in ₹", when: (f) => f.applicant_earning === "true" },
   { id: "p1_decision", bot: "", kind: "decision", decide: firstDecision },
   // Second person — only when the first can't be the sole applicant.
   { id: "p2_docs", bot: (f) => `Please upload ${f._p2_role === "owner" ? `${billName(f)}'s` : "the applicant's"} Aadhaar and PAN.`, kind: "doc_table", rows: secondRows },
@@ -190,12 +212,14 @@ const SCRIPT: Turn[] = [
   { id: "p2_check", bot: "", kind: "decision", decide: ownerCheck },
   { id: "p2_dob", bot: (f) => `Date of birth of ${n2(f)}.`, kind: "text", field: "coapp_dob", placeholder: "DD/MM/YYYY", validate: dobErr, when: (f) => { const d = decide(f, true); return d.kind === "need_dob" && d.who === "p2"; } },
   { id: "p2_earning", bot: (f) => `Is ${n2(f)} earning?`, kind: "choice", field: "coapp_earning", choices: YES_NO },
-  { id: "p2_income", bot: (f) => `Monthly income of ${n2(f)} (₹).`, kind: "number", field: "coapp_monthly_income", placeholder: "Amount in ₹", when: (f) => f.coapp_earning === "true" },
   { id: "p2_decision", bot: "", kind: "decision", decide: finalDecision },
-  { id: "roles", bot: "Please confirm the roles.", kind: "roles" },
+  // With a co-applicant: relation, then whose the first mobile is — only the
+  // other person's number is asked. A sole applicant keeps the first mobile.
   { id: "coapp_relation", bot: (f) => `Relation of ${f.coapp_name || "the co-applicant"} to ${f.borrower_name || "the applicant"}?`, kind: "choice", field: "coapp_relation", choices: RELATIONS, when: hasCoapp },
-  { id: "applicant_mobile", bot: (f) => `Mobile number of ${f.borrower_name || "the applicant"}.`, kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile", validate: mobileErr },
-  { id: "coapp_mobile", bot: (f) => `Mobile number of ${f.coapp_name || "the co-applicant"}.`, kind: "text", field: "coapp_mobile", placeholder: "10-digit mobile", when: hasCoapp, validate: mobileErr },
+  { id: "mobile_of", bot: (f) => `Whose number is ${f.borrower_mobile}?`, kind: "choice", field: "_mobile_of", choices: MOBILE_OF, when: hasCoapp },
+  { id: "mobile_move", bot: "", kind: "decision", decide: (f) => ({ form: f._mobile_of === "coapp" ? { ...f, coapp_mobile: f.borrower_mobile, borrower_mobile: "" } : f }) },
+  { id: "applicant_mobile", bot: (f) => `Mobile number of ${f.borrower_name || "the applicant"}.`, kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile", validate: mobileErr, when: (f) => hasCoapp(f) && f._mobile_of === "coapp" },
+  { id: "coapp_mobile", bot: (f) => `Mobile number of ${f.coapp_name || "the co-applicant"}.`, kind: "text", field: "coapp_mobile", placeholder: "10-digit mobile", when: (f) => hasCoapp(f) && f._mobile_of !== "coapp", validate: mobileErr },
   { id: "final_docs", bot: (f) => `Please upload ${f.borrower_name ? `${f.borrower_name}'s` : "the applicant's"} photo and bank statement.`, kind: "doc_table", rows: finalRows },
   { id: "quotation", bot: "Please upload the quotation / proforma invoice.", kind: "quotation" },
   // Everything uploaded so far, in one editable table (incl. the quotation) —
@@ -305,8 +329,8 @@ function ChatInner() {
 
   const pushBot = (text: string, id?: string) =>
     setMsgs((m) => (id && m.some((x) => x.from === "bot" && x._id === id) ? m : [...m, { id: uidGen(), _id: id, from: "bot", text, time: nowLabel() }]));
-  const pushUser = (text: string, files?: Msg["files"], turnId?: string) =>
-    setMsgs((m) => [...m, { id: uidGen(), from: "user", text, time: nowLabel(), files, turnId, pass: form._pass }]);
+  const pushUser = (text: string, files?: Msg["files"], turnId?: string, value?: string) =>
+    setMsgs((m) => [...m, { id: uidGen(), from: "user", text, time: nowLabel(), files, turnId, pass: form._pass, value }]);
   const prefillRef = useRef("");
 
   // Warm greeting on mount, then the first question. In edit mode (?id&edit=1)
@@ -374,6 +398,7 @@ function ChatInner() {
     if (!pre && turn.field && form[turn.field] && (turn.kind === "text" || turn.kind === "pincode" || turn.kind === "number")) {
       pre = String(form[turn.field]);
     }
+    if (!pre && turn.field && (turn.id === "lead_owner_name" || turn.id === "lead_owner_phone")) pre = lastLeadOwner(turn.field);
     setInput(pre);
     if ((turn.kind === "text" || turn.kind === "pincode" || turn.kind === "number")) setTimeout(() => inputRef.current?.focus(), 350);
     return () => clearTimeout(t);
@@ -510,7 +535,10 @@ function ChatInner() {
     } else if (turn.validate) {
       const e = turn.validate(v); if (e) { setError(e); return; }
     }
+    // A typed DOB is kept as DD/MM/YYYY (coapp_dob is a text column).
+    if (turn.validate === dobErr) v = fmtDate(toIsoDate(v));
     if (turn.id === "coapp_mobile" && v === form.borrower_mobile) { setError("Co-applicant mobile can't be the same as the applicant's."); return; }
+    if (turn.id === "applicant_mobile" && v === form.coapp_mobile) { setError("Applicant mobile can't be the same as the co-applicant's."); return; }
     const next = turn.field ? { ...form, [turn.field]: v } : form;
     // The mobile creates the draft (once) before the document step.
     if (turn.id === "borrower_mobile" && !appId) {
@@ -518,7 +546,7 @@ function ChatInner() {
       if (!ok) return; // stay on the mobile turn; error shown, input kept
     }
     pushUndo();
-    pushUser(v, undefined, turn.id);
+    pushUser(v, undefined, turn.id, v);
     if (turn.field) setForm(next);
     advance();
   }
@@ -530,7 +558,7 @@ function ChatInner() {
     const cost = Number(form.total_project_cost) || 0;
     if (cost > 0 && n > cost) { setError(`Loan amount can't exceed the project cost (₹${cost.toLocaleString("en-IN")}).`); return; }
     pushUndo();
-    pushUser(`₹${n.toLocaleString("en-IN")}`, undefined, turn.id);
+    pushUser(`₹${n.toLocaleString("en-IN")}`, undefined, turn.id, String(n));
     if (turn.field) merge({ [turn.field]: String(n) });
     advance();
   }
@@ -548,7 +576,7 @@ function ChatInner() {
         return;
       }
       pushUndo();
-      pushUser(pin, undefined, turn.id);
+      pushUser(pin, undefined, turn.id, pin);
       merge({ install_pincode: pin, install_state: String(j.state), install_district: String(j.district ?? ""), install_city: String(j.city ?? "") });
       pushBot(`Got it — ${[j.city, j.state].filter(Boolean).join(", ")}.`);
       advance();
@@ -568,17 +596,17 @@ function ChatInner() {
   // Edit an earlier answer: jump back to that step (prefilled) via the undo
   // stack. Steps after it are re-asked (their answers may depend on this one).
   // The pass picks the right snapshot when the step was asked more than once.
-  function editAnswer(turnId: string, pass?: string) {
+  function editAnswer(turnId: string, pass?: string, value?: string) {
     const ti = script.findIndex((t) => t.id === turnId);
     if (ti < 0) return;
     setUndoStack((s) => {
       const i = s.findIndex((snap) => snap.idx === ti && snap.form._pass === pass);
       if (i < 0) return s;
       const snap = s[i];
-      const f = script[ti].field;
-      // Prefill the box with the current value.
-      if (f && (script[ti].kind === "text" || script[ti].kind === "pincode" || script[ti].kind === "number")) {
-        prefillRef.current = form[f] || "";
+      // Prefill the box with the answer given (the live form may hold the other
+      // person's value once the roles are assigned or swapped).
+      if (script[ti].kind === "text" || script[ti].kind === "pincode" || script[ti].kind === "number") {
+        prefillRef.current = value || "";
       }
       setMsgs(snap.msgs); setForm(snap.form); setIdx(snap.idx);
       setError(null);
@@ -633,8 +661,9 @@ function ChatInner() {
           // Names are set when the roles are assigned; the ID name is the fallback.
           borrower_name: form.borrower_name || personName(p1Of(form)) || null,
           // Keys added for the role decision are sent ONLY when present (the
-          // route writes them only then) — undefined drops out of the JSON.
-          borrower_mobile: form.borrower_mobile || undefined,
+          // route writes them only then) — undefined drops out of the JSON. The
+          // applicant's mobile is asked only when applying (edit keeps the one on file).
+          borrower_mobile: editMode ? undefined : form.borrower_mobile || undefined,
           borrower_email: form.borrower_email || null,
           install_pincode: form.install_pincode || null,
           install_state: form.install_state || null,
@@ -660,7 +689,6 @@ function ChatInner() {
           borrower_pan_mime: form.borrower_pan_mime || undefined,
           borrower_pan_file_name: form.borrower_pan_file_name || undefined,
           applicant_earning: yesNo(form.applicant_earning) ?? undefined,
-          monthly_income: form.monthly_income ? Number(form.monthly_income) : undefined,
           // E-bill
           ebill_path: form.ebill_path || null,
           monthly_bill_amount: form.monthly_bill_amount || null,
@@ -680,7 +708,6 @@ function ChatInner() {
           coapp_aadhaar_face_path: form.coapp_aadhaar_face_path || undefined,
           coapp_relation: form.coapp_relation || undefined,
           coapp_earning: yesNo(form.coapp_earning) ?? undefined,
-          coapp_monthly_income: form.coapp_monthly_income ? Number(form.coapp_monthly_income) : undefined,
           coapp_role_reason: form.coapp_role_reason || undefined,
           coapp_dob: form.coapp_dob || null,
           coapp_pan_path: form.coapp_pan_path || null,
@@ -707,6 +734,9 @@ function ChatInner() {
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't submit the application."); return; }
+      if (form.lead_owner_name) {
+        try { localStorage.setItem(leadOwnerKey(), JSON.stringify({ lead_owner_name: form.lead_owner_name, lead_owner_phone: form.lead_owner_phone || "" })); } catch { /* storage unavailable */ }
+      }
       setDone({ loanId: form.loan_display_id || null, borrowerName: form.borrower_name || form.aadhaar_name || "your customer", edit: editMode });
     } catch (e) {
       // A network-level failure (server unreachable / dropped connection) throws
@@ -808,7 +838,7 @@ function ChatInner() {
               </div>
               {m.from === "user" && m.turnId && !done && (
                 <div className="text-right mt-0.5 pr-1">
-                  <button onClick={() => editAnswer(m.turnId!, m.pass)} disabled={busy} className="text-[11px] text-text-muted hover:text-[#1e3a8a] disabled:opacity-40" title="Edit this answer">✎ Edit</button>
+                  <button onClick={() => editAnswer(m.turnId!, m.pass, m.value)} disabled={busy} className="text-[11px] text-text-muted hover:text-[#1e3a8a] disabled:opacity-40" title="Edit this answer">✎ Edit</button>
                 </div>
               )}
             </div>
@@ -906,24 +936,6 @@ function ChatInner() {
               <DocTable key={"coapp-docs-" + idx} appId={appId} form={form} docRows={docRows} rows={rowsOf(turn, form) ?? COAPP_ROWS} onPatch={merge} onDone={() => { pushUndo(); advance(); }} />
             )}
 
-            {turn.kind === "roles" && (
-              <RolesCard
-                form={form}
-                onConfirm={() => { pushUndo(); pushUser("Confirmed", undefined, turn.id); advance(); }}
-                onSwap={() => setForm((f) => {
-                  // The EPC's override: swap the two people, keep the reason with a note.
-                  const g = swapPersons(f);
-                  const r = f.coapp_role_reason || "";
-                  return {
-                    ...g,
-                    borrower_name: personName(p1Of(g)), coapp_name: personName(p2Of(g)),
-                    coapp_role_reason: r.endsWith(ROLE_SWAPPED) ? r.slice(0, -ROLE_SWAPPED.length) : r + ROLE_SWAPPED,
-                    _bill_owner: f._bill_owner === "coapp" ? "applicant" : "coapp",
-                  };
-                })}
-              />
-            )}
-
             {turn.kind === "doc_review" && appId && (
               <DocTable
                 key={"doc-review-" + idx} appId={appId} form={form} docRows={docRows}
@@ -987,14 +999,15 @@ const QUOTATION_ROW: Row = { slot: "quotation", label: "Quotation / proforma inv
 
 // Apply-mode tables. The first person's documents carry neutral labels (roles
 // aren't known yet); the second person's are labelled for the role they're
-// asked for; the photo + bank statement are the final applicant's.
-function firstRows(): Row[] {
+// asked for; the photo + bank statement are the final applicant's. The PAN is
+// required once the first person turned out to be the bill owner.
+function firstRows(f: Form): Row[] {
   const pick = (u: Unit) => APPLICANT_ROWS.filter((r) => r.unit === u);
   return [...pick("ebill"), ...pick("aadhaar"), ...pick("pan"), ...pick("rooftop")]
-    .map((r) => ({ ...r, label: r.label.replace("Applicant ", ""), required: r.unit === "aadhaar" }));
+    .map((r) => ({ ...r, label: r.label.replace("Applicant ", ""), required: r.unit === "aadhaar" || (r.unit === "pan" && f._p1_pan_required === "1") }));
 }
 function secondRows(f: Form): Row[] {
-  const who = f._p2_role === "owner" ? `${billName(f)} (bill owner)` : "Applicant";
+  const who = f._p2_role !== "owner" ? "Applicant" : nameReadable(f.ebill_name) ? `${billName(f)} (bill owner)` : "Bill owner";
   return COAPP_ROWS.map((r) => ({ ...r, label: r.label.replace("Co-applicant", who), required: true }));
 }
 function finalRows(f: Form): Row[] {
@@ -1011,9 +1024,10 @@ const UNIT_DONE_KEY: Record<Unit, string[]> = {
   coapp_aadhaar: ["coapp_aadhaar_front_path"], coapp_pan: ["coapp_pan_path"],
   quotation: ["proforma_invoice_path"],
 };
-// The PAN's read-out name: the name read off the card until the roles are
-// assigned (it feeds the Aadhaar ≠ PAN check), then the person's name on file.
-const panNameField = (f: Form, read: string, onFile: string) => (!f._has_coapp && read in f ? read : onFile);
+// The PAN's read-out name: the name read off the card (it feeds the Aadhaar ≠
+// PAN check) until the person's name is on file — set when the roles are
+// assigned, or hydrated when editing (roles fixed), so a fix there is submitted.
+const panNameField = (f: Form, read: string, onFile: string) => (!(onFile in f) && read in f ? read : onFile);
 // Editable read-out fields shown under a unit once read.
 const UNIT_FIELDS: Partial<Record<Unit, (f: Form) => { label: string; field: string }[]>> = {
   aadhaar: () => [{ label: "Name", field: "aadhaar_name" }, { label: "DOB", field: "aadhaar_dob" }, { label: "Aadhaar", field: "aadhaar_number" }, { label: "Address", field: "aadhaar_address" }],
@@ -1040,9 +1054,11 @@ function DocTable({ appId, form, rows, docRows = [], review = false, onPatch, on
 
   const auth = () => ({ Authorization: `Bearer ${getToken() ?? ""}` });
   // Open the document already on file for a unit (so editors can see what they
-  // uploaded before). Path-based docs go via sign-doc; the PAN image is a row.
-  async function view(path?: string | null, rowId?: string) {
+  // uploaded before). Path-based docs go via sign-doc; the PAN image is a row,
+  // and a PAN read here opens by the signed URL its read returned.
+  async function view(path?: string | null, rowId?: string, url?: string) {
     try {
+      if (url) { window.open(url, "_blank", "noopener"); return; }
       if (path) {
         const res = await fetch(`/api/admin/loan-app/${appId}/sign-doc`, { method: "POST", headers: { ...auth(), "Content-Type": "application/json" }, body: JSON.stringify({ path }) });
         const j = await res.json().catch(() => ({}));
@@ -1052,16 +1068,16 @@ function DocTable({ appId, form, rows, docRows = [], review = false, onPatch, on
       alert("Couldn't open the document.");
     } catch { alert("Couldn't open the document."); }
   }
-  const unitTarget = (u: Unit): { path?: string; rowId?: string } => {
+  const unitTarget = (u: Unit): { path?: string; rowId?: string; url?: string } => {
     switch (u) {
       case "aadhaar":       return { path: form.aadhaar_front_path };
-      case "pan":           return { path: form.borrower_pan_path, rowId: docRows.find((d) => d.category === "borrower_pan")?.id };
+      case "pan":           return { url: form._pan_url, path: form.borrower_pan_path, rowId: docRows.find((d) => d.category === "borrower_pan")?.id };
       case "ebill":         return { path: form.ebill_path };
       case "rooftop":       return { path: form.rooftop_photo_path };
       case "selfie":        return { path: form.customer_photo_path };
       case "bank":          return { path: form.bank_statement_path };
       case "coapp_aadhaar": return { path: form.coapp_aadhaar_front_path };
-      case "coapp_pan":     return { path: form.coapp_pan_path };
+      case "coapp_pan":     return { url: form._coapp_pan_url, path: form.coapp_pan_path };
       case "quotation":     return { path: form.proforma_invoice_path };
       default:              return {};
     }
@@ -1069,10 +1085,13 @@ function DocTable({ appId, form, rows, docRows = [], review = false, onPatch, on
   const unitPrefilled = (u: Unit) => UNIT_DONE_KEY[u].some((k) => !!(form[k] && String(form[k]).trim()));
   const unitDone = (u: Unit) => reads[u]?.status === "done" || unitPrefilled(u);
   const rowOpen = (slot: Slot, u: Unit) => !files[slot] && !skipped[slot] && (!!reopened[slot] || !unitPrefilled(u));
-  const rowSettled = (r: Row) => !!skipped[r.slot] || (!!files[r.slot] && reads[r.unit]?.status !== "error") || unitPrefilled(r.unit);
+  // A row is settled once its read is done (or it was on file, or skipped), and
+  // nothing continues while any read is running — the next turns act on it.
+  const rowSettled = (r: Row) => !!skipped[r.slot] || (!!files[r.slot] && reads[r.unit]?.status === "done") || unitPrefilled(r.unit);
+  const reading = Object.values(reads).some((x) => x?.status === "reading");
   // In review mode every row is already uploaded (or optional), so Continue is
   // always available — the table is for checking/fixing, not forced completion.
-  const allSettled = review || rows.every(rowSettled);
+  const allSettled = review || (!reading && rows.every(rowSettled));
 
   async function callRoute(unit: Unit, f: Partial<Record<Slot, SlotFile>>): Promise<Form> {
     const fileOf = (s: Slot) => { const x = f[s]?.file; if (!x) throw new Error("File missing — re-attach it."); return x; };
@@ -1104,8 +1123,9 @@ function DocTable({ appId, form, rows, docRows = [], review = false, onPatch, on
       if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the PAN.");
       const x = j.fields ?? {};
       const mime = file.type.startsWith("image/") ? "image/jpeg" : file.type; // the route stores images as JPEG
-      if (applicant) return { borrower_pan: x.pan ?? "", borrower_father_name: x.father_name ?? "", _pan_name: x.name ?? "", borrower_dob: x.dob ?? "", borrower_pan_path: j.storage_path ?? "", borrower_pan_mime: mime, borrower_pan_file_name: file.name };
-      return { coapp_pan: x.pan ?? "", coapp_father_name: x.father_name ?? "", _coapp_pan_name: x.name ?? "", coapp_dob: x.dob ?? "", coapp_pan_path: j.storage_path ?? "", _coapp_pan_mime: mime, _coapp_pan_file_name: file.name };
+      // A PAN with no readable date keeps the date of birth already on file.
+      if (applicant) return { borrower_pan: x.pan ?? "", borrower_father_name: x.father_name ?? "", _pan_name: x.name ?? "", ...(x.dob ? { borrower_dob: x.dob } : {}), borrower_pan_path: j.storage_path ?? "", borrower_pan_mime: mime, borrower_pan_file_name: file.name, _pan_url: j.signed_url ?? "" };
+      return { coapp_pan: x.pan ?? "", coapp_father_name: x.father_name ?? "", _coapp_pan_name: x.name ?? "", ...(x.dob ? { coapp_dob: x.dob } : {}), coapp_pan_path: j.storage_path ?? "", _coapp_pan_mime: mime, _coapp_pan_file_name: file.name, _coapp_pan_url: j.signed_url ?? "" };
     }
     // E-bill — extract-loan-docs (ebill side).
     if (unit === "ebill") {
@@ -1115,7 +1135,9 @@ function DocTable({ appId, form, rows, docRows = [], review = false, onPatch, on
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the bill.");
       const e = j.ebill?.fields ?? {}; const path = j.ebill?.storage_path ?? "";
-      return { ebill_path: path, monthly_bill_amount: e.monthly_bill_amount != null ? String(e.monthly_bill_amount) : "", discom_name: e.discom_name ?? "", ca_number: e.ca_number ?? "", ebill_address_line: e.ebill_address_line ?? "", ebill_name: e.ebill_name ?? "" };
+      // The bill's pincode pre-fills the installation pincode question.
+      const pin = String(e.pincode ?? "").trim();
+      return { ebill_path: path, monthly_bill_amount: e.monthly_bill_amount != null ? String(e.monthly_bill_amount) : "", discom_name: e.discom_name ?? "", ca_number: e.ca_number ?? "", ebill_address_line: e.ebill_address_line ?? "", ebill_name: e.ebill_name ?? "", ...(PIN_RE.test(pin) ? { install_pincode: pin } : {}) };
     }
     // Quotation / proforma — extract-loan-docs (proforma side); reads project
     // size + total cost. Used in the review table's Replace.
@@ -1218,8 +1240,8 @@ function DocTable({ appId, form, rows, docRows = [], review = false, onPatch, on
     if (unitDone(unit)) {
       const build = UNIT_FIELDS[unit];
       const tgt = unitTarget(unit);
-      const viewLink = (tgt.path || tgt.rowId)
-        ? <button onClick={() => void view(tgt.path, tgt.rowId)} className="text-[#1e3a8a] text-[11px] font-semibold hover:underline">View current file</button>
+      const viewLink = (tgt.url || tgt.path || tgt.rowId)
+        ? <button onClick={() => void view(tgt.path, tgt.rowId, tgt.url)} className="text-[#1e3a8a] text-[11px] font-semibold hover:underline">View current file</button>
         : null;
       return build
         ? <div className="flex flex-col gap-1.5">{viewLink}<FieldRows fields={build(form).map((x) => ({ ...x, value: form[x.field] || "" }))} onEdit={(field, value) => onPatch({ [field]: value })} /></div>
@@ -1283,44 +1305,6 @@ function EditPicker({ appId, form, docRows, preselect = [], onPick }: {
           Edit selected{sel.length ? ` (${sel.length})` : ""} →
         </button>
         {sel.length === 0 && <span className="text-[11px] text-text-muted">Tick the fields or documents you want to change.</span>}
-      </div>
-    </div>
-  );
-}
-
-// ── Roles card ───────────────────────────────────────────────────────────────
-// The decided applicant (and co-applicant): name · age · bill owner · earning.
-// Swap (pair only) is the EPC's override.
-function RolesCard({ form, onConfirm, onSwap }: { form: Form; onConfirm: () => void; onSwap: () => void }) {
-  const pair = form._has_coapp === "1";
-  const people = [
-    { role: "Applicant", name: form.borrower_name, p: p1Of(form), income: Number(form.monthly_income) || 0, owner: form._bill_owner === "applicant" },
-    ...(pair ? [{ role: "Co-applicant", name: form.coapp_name, p: p2Of(form), income: Number(form.coapp_monthly_income) || 0, owner: form._bill_owner === "coapp" }] : []),
-  ];
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="rounded-xl border border-line bg-white overflow-hidden">
-        {people.map((x, i) => {
-          const age = eligibility(x.p).age;
-          const facts = [
-            age ? `Age ${age.min === age.max ? age.min : `${age.min}–${age.max}`}` : null,
-            x.p.earning ? `Earning${x.income > 0 ? ` · ${formatRupees(x.income)}/month` : ""}` : "Not earning",
-          ].filter(Boolean).join(" · ");
-          return (
-            <div key={x.role} className={["px-3 py-2.5", i > 0 ? "border-t border-line/70" : ""].join(" ")}>
-              <div className="text-[11px] font-semibold text-[#14235c]">{x.role}</div>
-              <div className="flex items-center gap-2 text-[14px] font-semibold text-text">
-                {x.name || "—"}
-                {x.owner && <span className="text-[10px] font-semibold text-[#1e3a8a] bg-[#e8effc] rounded-full px-2 py-0.5">Bill owner</span>}
-              </div>
-              <div className="text-[12px] text-text-muted">{facts}</div>
-            </div>
-          );
-        })}
-      </div>
-      <div className="flex items-center gap-2 flex-wrap">
-        <button onClick={onConfirm} className="px-4 py-2 rounded-lg bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a]">Confirm →</button>
-        {pair && <button onClick={onSwap} className="px-4 py-2 rounded-lg border border-line text-[13px] font-semibold text-text-mid hover:bg-bg-soft">Swap</button>}
       </div>
     </div>
   );

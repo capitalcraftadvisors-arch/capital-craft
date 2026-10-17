@@ -209,6 +209,24 @@ export async function geminiExtractPolicy(images: GeminiImage[]): Promise<{ from
   return from || to ? { from, to } : null;
 }
 
+// ── GPS-camera stamp (geo-tagged site / office photos) ───────────────────────
+// The coordinates a GPS-camera app printed onto the photo. Only what's printed
+// on the image — never a guess from the scene.
+export async function geminiExtractGeoStamp(images: GeminiImage[]): Promise<{ lat: number; lng: number } | null> {
+  const g = await geminiExtract<{ lat?: unknown; lng?: unknown }>({
+    images, label: "geo",
+    schema: obj({ lat: NUM, lng: NUM }),
+    prompt:
+      "This photo may carry a GPS-camera stamp (a banner or text printed on the image) with its location coordinates. " +
+      "Return the PRINTED latitude and longitude as decimal degrees: convert degrees/minutes/seconds to decimal, and make S / W negative. " +
+      "If no coordinates are printed on the image, return null for both — never guess a location from the scene, address or landmarks.",
+  });
+  if (!g) return null;
+  const lat = n(g.lat), lng = n(g.lng);
+  if (lat == null || lng == null || Math.abs(lat) > 90 || Math.abs(lng) > 180 || (lat === 0 && lng === 0)) return null;
+  return { lat, lng };
+}
+
 // ── Solar quotation details (one-photo auto-fill for the Quotation Builder) ───
 export type QuotationExtract = {
   customer_name: string | null; pincode: string | null; address: string | null;

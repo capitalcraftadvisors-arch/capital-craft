@@ -13,7 +13,7 @@ import AddNewInsuranceModal from "@/components/AddNewInsuranceModal";
 import DeleteLeadModal from "@/components/DeleteLeadModal";
 import AdminSidebar, { ACCENTS } from "@/components/AdminSidebar";
 import { supabase } from "@/lib/supabase";
-import { getToken, getBusiness, allowedModules, greetingName } from "@/lib/auth";
+import { getToken, getBusiness, allowedModules, greetingName, isMainAdmin as isMainAdminUser } from "@/lib/auth";
 import NotificationBell from "@/components/NotificationBell";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
 import { getCached, setCached, invalidate } from "@/lib/list-cache";
@@ -32,8 +32,9 @@ import LenderCell from "@/components/LenderCell";
 import LoanLeadsTab from "@/components/LoanLeadsTab";
 import { latestLenderStatus, latestStatusLabel, type LoanLenderRow } from "@/lib/loan-lenders";
 import { LENDER_LABEL } from "@/components/ApprovalDetailsTable";
+import { otherInsDoc, OTHER_INS_LIST_CACHE } from "@/lib/other-insurance";
 
-type Tab = "epcs" | "apps" | "loanleads" | "insurance" | "leads";
+type Tab = "epcs" | "apps" | "loanleads" | "insurance" | "otherins" | "leads";
 
 export default function AdminHomePage() {
   return (
@@ -53,7 +54,10 @@ function Inner() {
   const [allowedTabs] = useState<Tab[]>(() => {
     const mods = allowedModules(getBusiness()) as string[];
     const t = CONSOLE_TABS.filter((k) => mods.includes(k));
-    return t.length ? t : CONSOLE_TABS;
+    const tabs = t.length ? t : [...CONSOLE_TABS];
+    // Other Insurance (general, non-solar) — the main admin's only.
+    if (isMainAdminUser(getBusiness())) tabs.push("otherins");
+    return tabs;
   });
   // Initialise to the LAST tab the user was on (persisted below), so returning
   // to the console from anywhere lands where they left — not the default tab.
@@ -67,6 +71,7 @@ function Inner() {
   // Summary period is owned here so the picker can sit in the section header
   // (top-right). Default is per-tab: EPCs = This Year, all others = This Month.
   const [period, setPeriod] = useState<Period>("year");
+  const [epcKpis, setEpcKpis] = useState<EpcKpis | null>(null); // EPC tab's counts → the KPI strip
   const [pFrom, setPFrom] = useState("");
   const [pTo, setPTo] = useState("");
 
@@ -76,7 +81,7 @@ function Inner() {
   // doesn't set this key, so it correctly stays on the EPCs tab.)
   useEffect(() => {
     const t = sessionStorage.getItem("adminList.tab");
-    if ((t === "apps" || t === "loanleads" || t === "insurance" || t === "leads") && allowedTabs.includes(t)) setTab(t);
+    if ((t === "apps" || t === "loanleads" || t === "insurance" || t === "otherins" || t === "leads") && allowedTabs.includes(t)) setTab(t);
     sessionStorage.removeItem("adminList.tab");
   }, [allowedTabs]);
 
@@ -114,10 +119,10 @@ function Inner() {
   // The KPI strip is a business-wide money snapshot — shown to the MAIN_ADMIN
   // only (managers/RMs get the per-tab stage bar, not the top-line figures).
   const kpiBiz = getBusiness();
-  const isMainAdmin = kpiBiz?.role === "MAIN_ADMIN" || (kpiBiz?.business_type === "admin" && !kpiBiz?.role && (kpiBiz?.allowed_modules ?? []).includes("analytics"));
+  const isMainAdmin = isMainAdminUser(kpiBiz);
   const section = ACCENTS[tab];
   // Tabs that carry summary cards + a period picker (loanleads/analytics don't).
-  const showPeriod = tab === "epcs" || tab === "apps" || tab === "insurance" || tab === "leads";
+  const showPeriod = tab === "epcs" || tab === "apps" || tab === "insurance" || tab === "otherins" || tab === "leads";
   const periodProps: TabPeriodProps = { period, pFrom, pTo };
 
   return (
@@ -135,7 +140,7 @@ function Inner() {
           </div>
           {/* At-a-glance loan KPIs — MAIN_ADMIN only, compact. Driven by the
               current tab's period picker (below), and a loan-money set on apps. */}
-          {isMainAdmin && <DashboardKpis tab={tab} period={period} pFrom={pFrom} pTo={pTo} />}
+          {isMainAdmin && <DashboardKpis tab={tab} period={period} pFrom={pFrom} pTo={pTo} epc={epcKpis} />}
           {/* Section header with the console's accent bar; period picker on the
               right, aligned with the heading. */}
           <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
@@ -148,10 +153,11 @@ function Inner() {
             )}
           </div>
 
-          {tab === "epcs" ? <EpcsTab {...periodProps} />
+          {tab === "epcs" ? <EpcsTab {...periodProps} onKpis={setEpcKpis} />
             : tab === "apps" ? <AppsTab {...periodProps} />
             : tab === "loanleads" ? <LoanLeadsTab />
             : tab === "insurance" ? <InsuranceTab {...periodProps} />
+            : tab === "otherins" ? <OtherInsuranceTab {...periodProps} />
             : <LeadsTab {...periodProps} />}
         </section>
       </div>
@@ -515,7 +521,10 @@ function SummaryCards({ accent, cards, active, onPick, caption }: {
 // egress); the figures are recomputed locally when the period/tab changes, so
 // changing the period costs no extra query. The Loan-applications tab swaps in
 // a loan-money set (no Approval rate; + approved amount, 1st tranche, 2nd
-// tranche pending).
+// tranche pending). Pipeline value (open files' loan amount) shows only on
+// Current Month. The EPC tab shows EPC stage counts, fed by EpcsTab's own
+// period-scoped cards (no extra query).
+type EpcKpis = { total: number; unseen: number; docsSent: number; approved: number; rejected: number };
 type KpiRow = {
   status: string | null;
   loan_amount_required: number | null; loan_amount: number | null; sanctioned_amount: number | null;
@@ -529,7 +538,7 @@ type KpiData = {
 };
 const KPI_APPROVED = new Set(["approved", "rfd", "sent_to_nbfc", "disbursed"]);
 
-function DashboardKpis({ tab, period, pFrom, pTo }: { tab: string; period: Period; pFrom: string; pTo: string }) {
+function DashboardKpis({ tab, period, pFrom, pTo, epc }: { tab: string; period: Period; pFrom: string; pTo: string; epc: EpcKpis | null }) {
   const [rows, setRows] = useState<KpiRow[] | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -572,7 +581,20 @@ function DashboardKpis({ tab, period, pFrom, pTo }: { tab: string; period: Perio
     return { pipeline, disbursed, active: active.length, approvalRate, overdue, target, approvedAmount, firstTranche, secondTranchePending };
   }, [rows, period, pFrom, pTo]);
 
+  if (tab === "epcs") {
+    if (!epc) return null;
+    return (
+      <div className="mb-4 grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+        <KpiTile label="Total EPCs" value={String(epc.total)} accent="#178a5c" />
+        <KpiTile label="Application unseen" value={String(epc.unseen)} accent="#94a3b8" />
+        <KpiTile label="Docs sent to lender" value={String(epc.docsSent)} accent="#185fa5" />
+        <KpiTile label="Approved by CC" value={String(epc.approved)} accent="#0f7a52" />
+        <KpiTile label="Rejected by CC" value={String(epc.rejected)} accent="#dc2626" />
+      </div>
+    );
+  }
   if (!d) return null;
+  const showPipeline = period === "month";
   const money = (v: number) => (v >= 1e7 ? `₹${(v / 1e7).toFixed(2)} Cr` : `₹${(v / 1e5).toFixed(1)} L`);
   const periodLabel = (PERIOD_OPTIONS.find((o) => o.value === period)?.label ?? "Period").toLowerCase();
   // Scale the monthly disbursement target to the picked period so the ring works
@@ -581,10 +603,10 @@ function DashboardKpis({ tab, period, pFrom, pTo }: { tab: string; period: Perio
   const periodTarget = targetMonths != null ? d.target * 1e5 * targetMonths : null;
   const ringPct = periodTarget && periodTarget > 0 ? Math.min(100, Math.round((d.disbursed / periodTarget) * 100)) : 0;
   return (
-    <div className="mb-4 grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5">
+    <div className={"mb-4 grid gap-2 grid-cols-2 sm:grid-cols-3 " + (showPipeline ? "lg:grid-cols-5" : "lg:grid-cols-4")}>
       {tab === "apps" ? (
         <>
-          <KpiTile label="Pipeline value" value={money(d.pipeline)} sub={`${d.active} active`} accent="#178a5c" />
+          {showPipeline && <KpiTile label="Pipeline value" value={money(d.pipeline)} sub={`${d.active} active`} accent="#178a5c" />}
           <KpiTile label="Approved loan amount" value={money(d.approvedAmount)} accent="#0f7a52" />
           <KpiTile label="1st tranche disbursed" value={money(d.firstTranche)} accent="#185fa5" />
           <KpiTile label="2nd tranche pending" value={String(d.secondTranchePending)} sub="awaiting 2nd" accent={d.secondTranchePending > 0 ? "#854f0b" : "#94a3b8"} />
@@ -592,7 +614,7 @@ function DashboardKpis({ tab, period, pFrom, pTo }: { tab: string; period: Perio
         </>
       ) : (
         <>
-          <KpiTile label="Pipeline value" value={money(d.pipeline)} sub={`${d.active} active`} accent="#178a5c" />
+          {showPipeline && <KpiTile label="Pipeline value" value={money(d.pipeline)} sub={`${d.active} active`} accent="#178a5c" />}
           {periodTarget != null
             ? <KpiRingTile label={`Disbursed · ${periodLabel}`} value={money(d.disbursed)} sub={`Target ${money(periodTarget)}`} pct={ringPct} />
             : <KpiTile label="Disbursed" value={money(d.disbursed)} sub={periodLabel} accent="#0f766e" />}
@@ -761,7 +783,7 @@ const IconArrowDown = (
   </svg>
 );
 
-function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
+function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k: EpcKpis) => void }) {
   const router = useRouter();
   type Row = {
     id: string;
@@ -1088,6 +1110,13 @@ function EpcsTab({ period, pFrom, pTo }: TabPeriodProps) {
     { key: "lender_approved", label: "Approved by Lender",  value: fyRows.filter((r) => catMatch(r, "lender_approved")).length },
     { key: "rejected_by_lender", label: "Rejected by Lender", value: fyRows.filter((r) => catMatch(r, "rejected_by_lender")).length },
   ];
+  // Feed the top KPI strip from these same period-scoped counts (no extra query).
+  const countOf = (key: string) => cards.find((c) => c.key === key)?.value ?? 0;
+  const kpiSig = cards.map((c) => c.value).join(",");
+  useEffect(() => {
+    onKpis?.({ total: countOf(""), unseen: countOf("unseen"), docsSent: countOf("docs_sent"), approved: countOf("approved"), rejected: countOf("rejected") });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kpiSig]);
   const panelActive = [sourceFilter, lenderFilter, lenderStateFilter, dateFrom, dateTo].filter(Boolean).length;
   const activeCount = panelActive + (categoryFilter ? 1 : 0);
   const pickCategory = (key: string) => setCategoryFilter(key === categoryFilter ? "" : key);
@@ -2477,26 +2506,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
                 {/* Policy Validity — end date, with the colour-coded days-left
                     badge on the line below. */}
                 <td className="px-3 py-3 text-center">
-                  {(() => {
-                    const v = policyValidityParts(r.policy_from_date, r.policy_to_date);
-                    if (!v) return <span className="text-[13px] text-[#5a8a76]">—</span>;
-                    const badge =
-                      v.tone === "red"   ? "bg-red-50 text-red-700 border-red-200" :
-                      v.tone === "amber" ? "bg-[#fef0d6] text-[#854f0b] border-[#f3d9a4]" :
-                                           "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd]";
-                    const daysText =
-                      v.daysLeft == null ? null :
-                      v.daysLeft < 0 ? `Expired ${Math.abs(v.daysLeft)}d ago` :
-                      `${v.daysLeft} ${v.daysLeft === 1 ? "day" : "days"} left`;
-                    return (
-                      <div className="flex flex-col items-center gap-1">
-                        <span className="text-[13px] font-semibold text-[#0f3d2e]">{v.toLabel ?? "—"}</span>
-                        {daysText && (
-                          <span className={`inline-flex px-2 py-0.5 rounded-full border text-[11px] font-semibold ${badge}`}>{daysText}</span>
-                        )}
-                      </div>
-                    );
-                  })()}
+                  <PolicyValidityCell from={r.policy_from_date} to={r.policy_to_date} />
                 </td>
                 {/* Created on — date bold dark, time smaller grey beneath. */}
                 <td className="px-3 py-3 text-center">
@@ -2543,6 +2553,275 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
       </Card>
 
       <AddNewInsuranceModal open={addOpen} onClose={() => setAddOpen(false)} />
+    </>
+  );
+}
+
+// Policy Validity cell — end date, with the colour-coded days-left badge below.
+// Shared by the Solar Insurance and Other Insurance tables.
+function PolicyValidityCell({ from, to }: { from: string | null; to: string | null }) {
+  const v = policyValidityParts(from, to);
+  if (!v) return <span className="text-[13px] text-[#5a8a76]">—</span>;
+  const badge =
+    v.tone === "red"   ? "bg-red-50 text-red-700 border-red-200" :
+    v.tone === "amber" ? "bg-[#fef0d6] text-[#854f0b] border-[#f3d9a4]" :
+                         "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd]";
+  const daysText =
+    v.daysLeft == null ? null :
+    v.daysLeft < 0 ? `Expired ${Math.abs(v.daysLeft)}d ago` :
+    `${v.daysLeft} ${v.daysLeft === 1 ? "day" : "days"} left`;
+  return (
+    <div className="flex flex-col items-center gap-1">
+      <span className="text-[13px] font-semibold text-[#0f3d2e]">{v.toLabel ?? "—"}</span>
+      {daysText && (
+        <span className={`inline-flex px-2 py-0.5 rounded-full border text-[11px] font-semibold ${badge}`}>{daysText}</span>
+      )}
+    </div>
+  );
+}
+
+// ── Other Insurance — general (non-solar) insurance files, main admin only ──
+// (migration 0093). Same table as Solar Insurance minus the EPC column; the
+// file opens /admin/other-insurance/[id] (KYC docs → policy → validity → name).
+function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
+  const router = useRouter();
+  const adminNames = useAdminNames();
+  type Row = {
+    id: string;
+    display_id: string | null;
+    customer_name: string | null;
+    sum_insured: number | null;
+    insurance_company: string | null;
+    policy_path: string | null;
+    policy_from_date: string | null;
+    policy_to_date: string | null;
+    kyc_docs: unknown[] | null;
+    created_at: string;
+    created_by_user_id: string | null;
+  };
+  const [rows, setRows] = useState<Row[]>([]);
+  const [q, setQ] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [expiryFilter, setExpiryFilter] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const CK = OTHER_INS_LIST_CACHE;
+      const cached = getCached<Row[]>(CK, 45000);
+      if (cached) { setRows(cached); return; }
+      const { data } = await supabase()
+        .from("other_insurance")
+        .select("id, display_id, customer_name, sum_insured, insurance_company, policy_path, policy_from_date, policy_to_date, kyc_docs, created_at, created_by_user_id")
+        .order("created_at", { ascending: false });
+      const list = (data ?? []) as unknown as Row[];
+      setRows(list);
+      setCached(CK, list);
+    })();
+  }, []);
+
+  // Row → the file's view profile; Edit / Add → the form ("new" adds one).
+  const open = (id: string, edit = false) => {
+    sessionStorage.setItem("adminList.tab", "otherins");
+    router.push((edit ? `/admin/other-insurance/${id}` : `/admin/other-insurance/${id}/view`) as any);
+  };
+  const customer = (r: Row) => r.customer_name || "—";
+  const issued = (r: Row) => r.policy_path != null;
+
+  async function downloadPolicy(r: Row) {
+    if (busyId || !r.policy_path) return;
+    setBusyId(r.id);
+    const res = await otherInsDoc(r.id, r.policy_path, "sign");
+    setBusyId(null);
+    if (res.ok && res.url) window.open(res.url, "_blank", "noopener");
+    else alert("Couldn't open the policy: " + res.error);
+  }
+
+  function catMatch(r: Row, key: string): boolean {
+    switch (key) {
+      case "docs_pending":    return !(r.kyc_docs?.length);
+      case "awaiting_policy": return !issued(r);
+      case "policy_issued":   return issued(r);
+      default:                return true;
+    }
+  }
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const fromT = dateFrom ? Date.parse(dateFrom + "T00:00:00") : null;
+    const toT   = dateTo ? Date.parse(dateTo + "T23:59:59.999") : null;
+    const daysOf = (r: Row) => policyValidityParts(r.policy_from_date, r.policy_to_date)?.daysLeft ?? null;
+    const out = rows.filter((r) => {
+      if (!inPeriod(r.created_at, period, pFrom, pTo)) return false;
+      if (categoryFilter && !catMatch(r, categoryFilter)) return false;
+      if (needle && !(customer(r).toLowerCase().includes(needle) || (r.display_id ?? "").toLowerCase().includes(needle))) return false;
+      if (statusFilter === "issued" && !issued(r)) return false;
+      if (statusFilter === "awaiting" && issued(r)) return false;
+      if (expiryFilter) {
+        const d = daysOf(r);
+        if (expiryFilter === "none")    { if (d !== null) return false; }
+        else if (d === null)            { return false; }
+        else if (expiryFilter === "expired") { if (d >= 0) return false; }
+        else if (expiryFilter === "30")      { if (d < 0 || d > 30) return false; }
+        else if (expiryFilter === "90")      { if (d < 0 || d > 90) return false; }
+      }
+      const t = Date.parse(r.created_at);
+      if (fromT != null && !(t >= fromT)) return false;
+      if (toT != null && !(t <= toT)) return false;
+      return true;
+    });
+    // Rows with policy dates first, fewest days left on top; the rest newest first.
+    return out.sort((a, b) => {
+      const da = daysOf(a), db = daysOf(b);
+      const ha = da !== null, hb = db !== null;
+      if (ha !== hb) return ha ? -1 : 1;
+      if (ha && hb) return (da as number) - (db as number);
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, q, categoryFilter, statusFilter, expiryFilter, dateFrom, dateTo, period, pFrom, pTo]);
+
+  const periodRows = useMemo(() => rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo)), [rows, period, pFrom, pTo]);
+  const cards: SummaryCard[] = [
+    { key: "",                label: "Total Applications", value: periodRows.length },
+    { key: "docs_pending",    label: "Docs Pending",       value: periodRows.filter((r) => catMatch(r, "docs_pending")).length },
+    { key: "awaiting_policy", label: "Awaiting Policy",    value: periodRows.filter((r) => catMatch(r, "awaiting_policy")).length },
+    { key: "policy_issued",   label: "Policy Issued",      value: periodRows.filter((r) => catMatch(r, "policy_issued")).length },
+  ];
+  const panelActive = [statusFilter, expiryFilter, dateFrom, dateTo].filter(Boolean).length;
+  const activeCount = panelActive + (categoryFilter ? 1 : 0);
+  function clearAll() {
+    setStatusFilter(""); setExpiryFilter(""); setCategoryFilter(""); setDateFrom(""); setDateTo("");
+  }
+
+  function exportReport() {
+    const header = ["OI ID", "Customer", "Sum insured", "Insurance company", "Status", "Policy from", "Policy to", "Created on", "Created by"];
+    downloadCsv("other-insurance", header, filtered.map((r) => [
+      r.display_id || r.id,
+      customer(r),
+      r.sum_insured ?? "",
+      r.insurance_company ?? "",
+      issued(r) ? "Issued" : "Awaiting policy",
+      r.policy_from_date ?? "",
+      r.policy_to_date ?? "",
+      r.created_at,
+      r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : "—",
+    ]));
+  }
+
+  const th = "px-3 py-3 font-medium text-[12px] uppercase tracking-wide";
+  return (
+    <>
+      <SummaryCards accent={ACCENTS.otherins.color} cards={cards} active={categoryFilter} onPick={(k) => setCategoryFilter(k === categoryFilter ? "" : k)} />
+
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-[220px]">
+          <Input placeholder="Search by customer or OI id…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
+        </div>
+        <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.otherins.color} onClick={() => setFiltersOpen((o) => !o)} />
+        <Button type="button" variant="primary" onClick={exportReport} style={{ backgroundColor: "#178a5c" }} className="whitespace-nowrap inline-flex items-center gap-1.5">
+          {IconDownload} Report
+        </Button>
+        <Button type="button" variant="primary" onClick={() => open("new", true)} className="whitespace-nowrap" style={{ backgroundColor: ACCENTS.otherins.color }}>
+          + Add New Insurance Application
+        </Button>
+      </div>
+
+      <FiltersPanel open={filtersOpen} hasActive={activeCount > 0} onClear={clearAll}>
+        <Select placeholder="Status filter" options={[{ value: "issued", label: "Issued" }, { value: "awaiting", label: "Awaiting policy" }]}
+          value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} />
+        <Select
+          placeholder="Policy expiry"
+          options={[
+            { value: "30",      label: "Expiring in 30 days" },
+            { value: "90",      label: "Expiring in 90 days" },
+            { value: "expired", label: "Expired" },
+            { value: "none",    label: "No policy" },
+          ]}
+          value={expiryFilter}
+          onChange={(e) => setExpiryFilter(e.target.value)}
+        />
+        <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
+      </FiltersPanel>
+      <Card className="overflow-hidden">
+        <table className="w-full text-[14px] table-fixed">
+          <colgroup>
+            <col style={{ width: "22%" }} />
+            <col style={{ width: "11%" }} />
+            <col style={{ width: "14%" }} />
+            <col style={{ width: "11%" }} />
+            <col style={{ width: "13%" }} />
+            <col style={{ width: "11%" }} />
+            <col style={{ width: "9%" }} />
+            <col style={{ width: "9%" }} />
+          </colgroup>
+          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-[#5a8a76]">
+            <tr>
+              <th className={th + " text-left"}>Insured name</th>
+              <th className={th + " text-center"}>Sum insured</th>
+              <th className={th + " text-center"}>Insurance company</th>
+              <th className={th + " text-center"}>Status</th>
+              <th className={th + " text-center"}>Policy Validity</th>
+              <th className={th + " text-center"}>Created on</th>
+              <th className={th + " text-center"}>Created by</th>
+              <th className={th + " text-center"}>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.length === 0 ? (
+              <tr><td colSpan={8} className="px-5 py-10 text-center text-[#5a8a76]">No insurance applications yet.</td></tr>
+            ) : filtered.map((r) => (
+              <tr key={r.id} onClick={() => open(r.id)} className="border-b border-[#eaf3ee] cursor-pointer hover:bg-[#f7fcfa] align-top">
+                <td className="px-3 py-3">
+                  <div className="flex items-start gap-3">
+                    <span className="w-9 h-9 rounded-md grid place-items-center shrink-0" style={{ backgroundColor: ACCENTS.otherins.tint, color: ACCENTS.otherins.color }}>
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h6" /></svg>
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-[15px] font-semibold text-[#0f3d2e] truncate">{customer(r)}</p>
+                      {r.display_id && <p className="text-[12px] font-mono text-[#185fa5] mt-0.5">{r.display_id}</p>}
+                    </div>
+                  </div>
+                </td>
+                <td className="px-3 py-3 text-center text-[13px] font-semibold text-[#0f3d2e]">{fmtRupees(r.sum_insured)}</td>
+                <td className="px-3 py-3 text-center text-[13px] text-[#0f3d2e] truncate">{r.insurance_company || "—"}</td>
+                <td className="px-3 py-3 text-center">
+                  <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${issued(r) ? "bg-[#e6f6ee] text-[#178a5c]" : "bg-[#fef0d6] text-[#854f0b]"}`}>
+                    {issued(r) ? "Issued" : "Awaiting policy"}
+                  </span>
+                </td>
+                <td className="px-3 py-3 text-center"><PolicyValidityCell from={r.policy_from_date} to={r.policy_to_date} /></td>
+                <td className="px-3 py-3 text-center">
+                  <p className="text-[13px] font-semibold text-[#0f3d2e]">{fmtAddedDate(r.created_at)}</p>
+                  <p className="text-[11px] text-[#5a8a76] mt-0.5">{fmtAddedTime(r.created_at)}</p>
+                </td>
+                <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">
+                  {r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : "—"}
+                </td>
+                <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex flex-col gap-1.5">
+                    <button type="button" onClick={() => open(r.id, true)}
+                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5]">
+                      Edit
+                    </button>
+                    {r.policy_path && (
+                      <button type="button" disabled={busyId === r.id} onClick={() => void downloadPolicy(r)}
+                        className={["text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 transition-colors",
+                          busyId === r.id ? "bg-bg-soft text-text-muted cursor-not-allowed" : "bg-[#178a5c] text-white hover:bg-[#12734c]"].join(" ")}>
+                        {IconDownload} {busyId === r.id ? "Opening…" : "Download Policy"}
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
     </>
   );
 }

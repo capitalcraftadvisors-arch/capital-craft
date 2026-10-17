@@ -56,6 +56,14 @@ export function canAccessModule(b: Business | null | undefined, key: ModuleKey):
   return allowedModules(b).includes(key);
 }
 
+// MAIN_ADMIN — mirrors the server's lib/hierarchy isMainAdmin(claims): a legacy
+// admin with no role that still has analytics access counts as MAIN_ADMIN.
+export function isMainAdmin(b: Business | null | undefined): boolean {
+  if (!b || b.business_type !== "admin") return false;
+  if (b.role === "MAIN_ADMIN") return true;
+  return !b.role && canAccessModule(b, "analytics");
+}
+
 // Friendly greeting label for portal headings + the Namaste splash. The
 // MAIN_ADMIN console is a shared "Admin" portal, so it's greeted generically as
 // "Admin" (never the underlying account's personal contact_name); managers and

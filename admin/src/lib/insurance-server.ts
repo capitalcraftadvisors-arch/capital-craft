@@ -7,6 +7,9 @@
 
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import sharp from "sharp";
+import { verifyJwt } from "./jwt";
+import { isMainAdmin } from "./hierarchy";
+import type { KycDoc } from "./other-insurance";
 
 export const SUPABASE_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL || "https://hpebydmrpimyuxgsgtmu.supabase.co";
@@ -23,6 +26,20 @@ export function insuranceClient(token: string): SupabaseClient {
     global: { headers: { Authorization: `Bearer ${token}` } },
     auth: { persistSession: false, autoRefreshToken: false },
   });
+}
+
+// Other Insurance (0093) routes: main admin only, row read through RLS.
+export async function otherInsuranceRow(token: string, id: string):
+  Promise<{ supabase: SupabaseClient; row: { kyc_docs: KycDoc[]; policy_path: string | null } } | { error: string; status: number }> {
+  const claims = await verifyJwt(token);
+  if (!isMainAdmin(claims)) return { error: "main_admin_only", status: 403 };
+  if (!UUID_RE.test(id)) return { error: "Invalid id.", status: 400 };
+  const supabase = insuranceClient(token);
+  const { data, error } = await supabase.from("other_insurance").select("kyc_docs, policy_path").eq("id", id).maybeSingle();
+  if (error) return { error: error.message, status: 500 };
+  if (!data) return { error: "Not found.", status: 404 };
+  const d = data as { kyc_docs: KycDoc[] | null; policy_path: string | null };
+  return { supabase, row: { kyc_docs: Array.isArray(d.kyc_docs) ? d.kyc_docs : [], policy_path: d.policy_path } };
 }
 
 export function safeName(fileName: string, fallback: string): string {
