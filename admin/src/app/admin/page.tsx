@@ -23,7 +23,7 @@ import { useEpcUpdates } from "@/lib/use-epc-updates";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import LoginWelcome from "@/components/LoginWelcome";
 import {
-  deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort,
+  deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort, remainingAmount,
   displayAmount as amountFor,
 } from "@/lib/disbursement";
 import { fmtDate, fmtDateTime } from "@/lib/dates";
@@ -315,29 +315,6 @@ function inPeriod(dateStr: string | null | undefined, period: Period, from?: str
   const { start, end } = periodBounds(period, from, to);
   return t >= start && t < end;
 }
-// How many "months" of the monthly disbursement target a period represents, so
-// the Disbursed ring can scale its target to ANY timeline (today → a day's
-// share, quarter → 3×, year → 12×, a custom month range → its month count).
-// Returns null when there is no finite window (All time / open-ended custom) —
-// the caller then shows a plain amount instead of a ring.
-function periodTargetMonths(period: Period, from?: string, to?: string): number | null {
-  switch (period) {
-    case "month": case "prev_month": return 1;
-    case "quarter": return 3;
-    case "year": return 12;
-    case "today": return 1 / 30;
-    case "week": return 7 / 30;
-    case "custom": {
-      const f = from ? from.slice(0, 7) : ""; const t = to ? to.slice(0, 7) : "";
-      if (!f || !t) return null;
-      const [fy, fm] = f.split("-").map(Number);
-      const [ty, tm] = t.split("-").map(Number);
-      const n = (ty - fy) * 12 + (tm - fm) + 1;
-      return n > 0 ? n : 1;
-    }
-    default: return null; // "all"
-  }
-}
 function PeriodPicker({ period, onPeriod, from, onFrom, to, onTo }: {
   period: Period; onPeriod: (p: Period) => void;
   from: string; onFrom: (v: string) => void; to: string; onTo: (v: string) => void;
@@ -515,70 +492,69 @@ function SummaryCards({ accent, cards, active, onPick, caption }: {
 }
 
 // ── Dashboard KPI strip ──────────────────────────────────────────────────
-// A lightweight loan-wide snapshot shown above every tab, driven by the SAME
-// period the tab's PeriodPicker uses — so the strip always agrees with the
-// cards + list below it. One small aggregate query (cached 30s to protect
-// egress); the figures are recomputed locally when the period/tab changes, so
-// changing the period costs no extra query. The Loan-applications tab swaps in
-// a loan-money set (no Approval rate; + approved amount, 1st tranche, 2nd
-// tranche pending). Pipeline value (open files' loan amount) shows only on
-// Current Month. The EPC tab shows EPC stage counts, fed by EpcsTab's own
-// period-scoped cards (no extra query).
+// Loan KPIs show on the Loan-applications tab ONLY, driven by the SAME period
+// as the tab's PeriodPicker — so the strip always agrees with the cards + list
+// below it. One small aggregate query (cached 30s to protect egress); the
+// figures are recomputed locally when the period changes. Every tile shows the
+// amount + the number of files: Pipeline value (in-progress files only — not
+// yet approved / disbursed; Current Month only), Approved loan amount, 1st
+// tranche disbursed, 2nd tranche pending (sanctioned − 1st). The EPC tab shows
+// EPC stage counts, fed by EpcsTab's own period-scoped cards (no extra query).
 type EpcKpis = { total: number; unseen: number; docsSent: number; lenderApproved: number; approved: number; rejected: number };
 type KpiRow = {
   status: string | null;
   loan_amount_required: number | null; loan_amount: number | null; sanctioned_amount: number | null;
   first_disbursement_amount: number | null; second_disbursement_amount: number | null;
-  first_disbursement_date: string | null; second_disbursement_date: string | null;
-  created_at: string | null; updated_at: string | null; aborted_at: string | null;
+  first_disbursement_date: string | null;
+  created_at: string | null; aborted_at: string | null;
 };
-type KpiData = {
-  pipeline: number; disbursed: number; active: number; approvalRate: number; overdue: number; target: number;
-  approvedAmount: number; firstTranche: number; secondTranchePending: number;
-};
+// Each KPI = total amount + number of files.
+type KpiFig = { amount: number; files: number };
+type KpiData = { pipeline: KpiFig; approved: KpiFig; firstTranche: KpiFig; secondPending: KpiFig };
 const KPI_APPROVED = new Set(["approved", "rfd", "sent_to_nbfc", "disbursed"]);
 
 function DashboardKpis({ tab, period, pFrom, pTo, epc }: { tab: string; period: Period; pFrom: string; pTo: string; epc: EpcKpis | null }) {
   const [rows, setRows] = useState<KpiRow[] | null>(null);
+  const loanTab = tab === "apps";
   useEffect(() => {
+    if (!loanTab || rows) return; // only the Loan-applications tab needs the query
     let cancelled = false;
     const cached = getCached<KpiRow[]>("dashkpis", 30000);
     if (cached) { setRows(cached); return; }
     void (async () => {
       const { data } = await supabase()
         .from("epc_applications")
-        .select("status, loan_amount_required, loan_amount, sanctioned_amount, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, second_disbursement_date, created_at, updated_at, aborted_at");
+        .select("status, loan_amount_required, loan_amount, sanctioned_amount, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, created_at, aborted_at");
       if (cancelled) return;
       const r = (data ?? []) as unknown as KpiRow[];
       setCached("dashkpis", r);
       setRows(r);
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [loanTab, rows]);
 
   const d = useMemo<KpiData | null>(() => {
     if (!rows) return null;
     const num = (v: unknown) => Number(v) || 0;
     const inP = (s: string | null) => inPeriod(s, period, pFrom, pTo);
+    const fig = (list: KpiRow[], amt: (r: KpiRow) => number): KpiFig =>
+      ({ amount: list.reduce((s, r) => s + amt(r), 0), files: list.length });
+    const applied = (r: KpiRow) => num(r.loan_amount_required) || num(r.loan_amount);
     // Application-level metrics are scoped by created_at (same as every card +
-    // table on these tabs); disbursement money is scoped by the disbursement
-    // date, so "disbursed in this period" means money that actually went out.
-    const created = rows.filter((r) => inP(r.created_at));
-    const active = created.filter((r) => r.status !== "draft" && r.status !== "rejected" && !r.aborted_at && r.second_disbursement_amount == null);
-    const pipeline = active.reduce((s, r) => s + (num(r.loan_amount_required) || num(r.loan_amount)), 0);
-    const submitted = created.filter((r) => r.status !== "draft").length;
+    // table on this tab); the 1st tranche is scoped by its disbursement date, so
+    // "disbursed in this period" means money that actually went out.
+    const created = rows.filter((r) => inP(r.created_at) && !r.aborted_at);
     const approvedRows = created.filter((r) => r.first_disbursement_amount != null || KPI_APPROVED.has(r.status ?? ""));
-    const approvalRate = submitted ? Math.round((approvedRows.length / submitted) * 100) : 0;
-    const approvedAmount = approvedRows.reduce((s, r) => s + (num(r.sanctioned_amount) || num(r.loan_amount_required) || num(r.loan_amount)), 0);
-    const overdue = active.filter((r) => r.updated_at && (Date.now() - new Date(r.updated_at).getTime()) > 7 * 86400000).length;
+    // In progress = submitted and still moving: not approved, not disbursed, not rejected.
+    const inProgress = created.filter((r) => r.status !== "draft" && r.status !== "rejected" && !approvedRows.includes(r));
     // 1st tranche released, 2nd still pending — mirrors the EPC portal tile.
-    const secondTranchePending = created.filter((r) => r.first_disbursement_amount != null && r.second_disbursement_amount == null && !r.aborted_at).length;
-    const disbursed = rows.reduce((s, r) =>
-      s + (inP(r.first_disbursement_date) ? num(r.first_disbursement_amount) : 0)
-        + (inP(r.second_disbursement_date) ? num(r.second_disbursement_amount) : 0), 0);
-    const firstTranche = rows.reduce((s, r) => s + (inP(r.first_disbursement_date) ? num(r.first_disbursement_amount) : 0), 0);
-    let target = 65; try { target = Number(localStorage.getItem("opsboard.target")) || 65; } catch { /* default */ }
-    return { pipeline, disbursed, active: active.length, approvalRate, overdue, target, approvedAmount, firstTranche, secondTranchePending };
+    const secondPending = created.filter((r) => r.first_disbursement_amount != null && r.second_disbursement_amount == null);
+    return {
+      pipeline: fig(inProgress, applied),
+      approved: fig(approvedRows, (r) => num(r.sanctioned_amount) || applied(r)),
+      firstTranche: fig(rows.filter((r) => r.first_disbursement_amount != null && inP(r.first_disbursement_date)), (r) => num(r.first_disbursement_amount)),
+      secondPending: fig(secondPending, (r) => remainingAmount(r.sanctioned_amount, r.first_disbursement_amount) ?? 0),
+    };
   }, [rows, period, pFrom, pTo]);
 
   if (tab === "epcs") {
@@ -594,36 +570,17 @@ function DashboardKpis({ tab, period, pFrom, pTo, epc }: { tab: string; period: 
       </div>
     );
   }
-  if (!d) return null;
+  // Loan KPIs belong to the Loan-applications tab only.
+  if (tab !== "apps" || !d) return null;
   const showPipeline = period === "month";
   const money = (v: number) => (v >= 1e7 ? `₹${(v / 1e7).toFixed(2)} Cr` : `₹${(v / 1e5).toFixed(1)} L`);
-  const periodLabel = (PERIOD_OPTIONS.find((o) => o.value === period)?.label ?? "Period").toLowerCase();
-  // Scale the monthly disbursement target to the picked period so the ring works
-  // across the whole timeline; null target (All time / open custom) → plain tile.
-  const targetMonths = periodTargetMonths(period, pFrom, pTo);
-  const periodTarget = targetMonths != null ? d.target * 1e5 * targetMonths : null;
-  const ringPct = periodTarget && periodTarget > 0 ? Math.min(100, Math.round((d.disbursed / periodTarget) * 100)) : 0;
+  const files = (n: number) => `${n} ${n === 1 ? "file" : "files"}`;
   return (
-    <div className={"mb-4 grid gap-2 grid-cols-2 sm:grid-cols-3 " + (showPipeline ? "lg:grid-cols-5" : "lg:grid-cols-4")}>
-      {tab === "apps" ? (
-        <>
-          {showPipeline && <KpiTile label="Pipeline value" value={money(d.pipeline)} sub={`${d.active} active`} accent="#178a5c" />}
-          <KpiTile label="Approved loan amount" value={money(d.approvedAmount)} accent="#0f7a52" />
-          <KpiTile label="1st tranche disbursed" value={money(d.firstTranche)} accent="#185fa5" />
-          <KpiTile label="2nd tranche pending" value={String(d.secondTranchePending)} sub="awaiting 2nd" accent={d.secondTranchePending > 0 ? "#854f0b" : "#94a3b8"} />
-          <KpiTile label="Overdue" value={String(d.overdue)} sub="idle > 7 days" accent={d.overdue > 0 ? "#dc2626" : "#94a3b8"} />
-        </>
-      ) : (
-        <>
-          {showPipeline && <KpiTile label="Pipeline value" value={money(d.pipeline)} sub={`${d.active} active`} accent="#178a5c" />}
-          {periodTarget != null
-            ? <KpiRingTile label={`Disbursed · ${periodLabel}`} value={money(d.disbursed)} sub={`Target ${money(periodTarget)}`} pct={ringPct} />
-            : <KpiTile label="Disbursed" value={money(d.disbursed)} sub={periodLabel} accent="#0f766e" />}
-          <KpiTile label="Active applications" value={String(d.active)} accent="#185fa5" />
-          <KpiTile label="Approval rate" value={`${d.approvalRate}%`} accent="#0f7a52" />
-          <KpiTile label="Overdue" value={String(d.overdue)} sub="idle > 7 days" accent={d.overdue > 0 ? "#dc2626" : "#94a3b8"} />
-        </>
-      )}
+    <div className={"mb-4 grid gap-2 grid-cols-2 " + (showPipeline ? "lg:grid-cols-4" : "lg:grid-cols-3")}>
+      {showPipeline && <KpiTile label="Pipeline value" value={money(d.pipeline.amount)} sub={files(d.pipeline.files)} accent="#178a5c" />}
+      <KpiTile label="Approved loan amount" value={money(d.approved.amount)} sub={files(d.approved.files)} accent="#0f7a52" />
+      <KpiTile label="1st tranche disbursed" value={money(d.firstTranche.amount)} sub={files(d.firstTranche.files)} accent="#185fa5" />
+      <KpiTile label="2nd tranche pending" value={money(d.secondPending.amount)} sub={files(d.secondPending.files)} accent={d.secondPending.files > 0 ? "#854f0b" : "#94a3b8"} />
     </div>
   );
 }
@@ -637,25 +594,6 @@ function KpiTile({ label, value, sub, accent }: { label: string; value: string; 
       </div>
       <div className="text-[17px] font-display font-bold text-text mt-1 leading-none">{value}</div>
       {sub && <div className="text-[10px] text-text-muted mt-0.5 truncate">{sub}</div>}
-    </div>
-  );
-}
-
-function KpiRingTile({ label, value, sub, pct }: { label: string; value: string; sub?: string; pct: number }) {
-  const r = 13, circ = 2 * Math.PI * r, off = circ * (1 - pct / 100);
-  const color = pct >= 100 ? "#178a5c" : pct >= 60 ? "#0f7a52" : pct >= 30 ? "#d97706" : "#dc2626";
-  return (
-    <div className="rounded-lg border border-line bg-white px-3 py-2 shadow-sm flex items-center gap-2.5">
-      <svg width="34" height="34" viewBox="0 0 34 34" className="shrink-0 -rotate-90">
-        <circle cx="17" cy="17" r={r} fill="none" stroke="#eef1f4" strokeWidth="4" />
-        <circle cx="17" cy="17" r={r} fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" strokeDasharray={circ} strokeDashoffset={off} />
-        <text x="17" y="17" transform="rotate(90 17 17)" textAnchor="middle" dominantBaseline="central" style={{ fontSize: 9, fontWeight: 700, fill: "#334155" }}>{pct}%</text>
-      </svg>
-      <div className="min-w-0">
-        <div className="text-[10px] font-medium text-text-muted uppercase tracking-wide truncate">{label}</div>
-        <div className="text-[15px] font-display font-bold text-text leading-none mt-0.5">{value}</div>
-        {sub && <div className="text-[10px] text-text-muted mt-0.5 truncate">{sub}</div>}
-      </div>
     </div>
   );
 }

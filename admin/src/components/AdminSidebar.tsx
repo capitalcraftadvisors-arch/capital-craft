@@ -23,7 +23,7 @@ import { logout, getBusiness, allowedModules, canAccessModule, isMainAdmin, type
 import { pendingCount } from "@/lib/review";
 
 export type ConsoleTab = "epcs" | "apps" | "loanleads" | "insurance" | "otherins" | "leads";
-export type SectionKey = ConsoleTab | "analytics" | "board" | "pendings";
+export type SectionKey = ConsoleTab | "analytics" | "board" | "pendings" | "team";
 
 // Per-console accent colors (C). Soft professional tints — accents only.
 export const ACCENTS: Record<SectionKey, { label: string; color: string; tint: string }> = {
@@ -36,6 +36,7 @@ export const ACCENTS: Record<SectionKey, { label: string; color: string; tint: s
   analytics: { label: "Analytics",         color: "#6d28d9", tint: "#efe9fb" },
   board:     { label: "Task Manager",      color: "#0f766e", tint: "#dcf3ef" },
   pendings:  { label: "Pendings",          color: "#b91c1c", tint: "#fdecec" },
+  team:      { label: "Team",              color: "#334155", tint: "#eef1f5" },
 };
 
 const ICONS: Record<SectionKey, ReactNode> = {
@@ -62,6 +63,9 @@ const ICONS: Record<SectionKey, ReactNode> = {
   ),
   board: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="6" height="18" rx="1"/><rect x="10.5" y="3" width="6" height="12" rx="1"/><rect x="18" y="3" width="3" height="9" rx="1"/></svg>
+  ),
+  team: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="7.5" cy="15.5" r="4.5" /><path d="M10.7 12.3 21 2M16 7l3 3M19 4l2 2" /></svg>
   ),
   pendings: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 4H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2" /><rect x="9" y="2" width="6" height="4" rx="1" /><path d="M9 14l2 2 4-4" /></svg>
@@ -104,6 +108,7 @@ export default function AdminSidebar({
       keys.splice(1, 0, "pendings");
       const at = keys.indexOf("insurance");
       keys.splice(at >= 0 ? at + 1 : keys.length, 0, "otherins");
+      keys.push("team"); // team logins (passwords)
     }
     return keys;
   });
@@ -130,6 +135,10 @@ export default function AdminSidebar({
     }
     if (key === "board") {
       router.push("/admin/board");
+      return;
+    }
+    if (key === "team") {
+      router.push("/admin/team");
       return;
     }
     if (onSelectTab) {

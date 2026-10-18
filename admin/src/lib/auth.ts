@@ -92,14 +92,16 @@ const TOKEN_KEY = "cc_token";
 const BUSINESS_KEY = "cc_business";
 const IMPERSONATE_KEY = "cc_admin_impersonating";
 
-export async function login(mobile: string, otp: string): Promise<{ ok: true; business: Business } | { ok: false; error: string }> {
+// password: required once CC has set one for the account (migration 0094) —
+// the server then answers passwordRequired until it's given and correct.
+export async function login(mobile: string, otp: string, password?: string): Promise<{ ok: true; business: Business } | { ok: false; error: string; passwordRequired?: boolean }> {
   const res = await fetch(`${FUNCTIONS_URL}/auth`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mobile, otp }),
+    body: JSON.stringify({ mobile, otp, ...(password ? { password } : {}) }),
   });
   const data = await res.json();
-  if (!data.ok) return { ok: false, error: data.error || "login_failed" };
+  if (!data.ok) return { ok: false, error: data.error || "login_failed", passwordRequired: !!data.password_required };
   localStorage.setItem(TOKEN_KEY, data.token);
   localStorage.setItem(BUSINESS_KEY, JSON.stringify(data.business));
   localStorage.removeItem(IMPERSONATE_KEY);

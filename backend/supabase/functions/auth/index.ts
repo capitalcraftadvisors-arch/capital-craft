@@ -1,6 +1,11 @@
 // =========================================================
 // Capital Craft — `auth` Edge Function
-// POST { mobile, otp } -> { ok, token, business }
+// POST { mobile, otp, password? } -> { ok, token, business }
+//
+// Passwords (migration 0094): an account CC has set a password for must send
+// it — otherwise { ok:false, password_required:true }. An account with no
+// password yet (new sign-ups, not-yet-set) logs in with the mobile only.
+// 5 wrong passwords lock the account for 15 minutes.
 //
 // Signing key selection (no code change needed to roll back):
 //   - If APP_SIGNING_JWK is set, sign with ES256 using that private JWK.
@@ -13,7 +18,6 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { SignJWT, importJWK, type KeyLike } from "https://esm.sh/jose@5.2.0";
 
-const FIXED_OTP = Deno.env.get("FIXED_OTP")!;
 const supabase = createClient(
   Deno.env.get("SUPABASE_URL")!,
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
@@ -60,8 +64,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
 
   try {
-    const { mobile, otp } = await req.json();
-    
+    const { mobile, password } = await req.json();
 
     // Find or create
     let { data: biz } = await supabase
@@ -69,6 +72,17 @@ serve(async (req) => {
       .select("id, status, business_type, current_step, contact_name, loan_app_unlocked, service_type, role, allowed_modules, parent_user_id")
       .eq("contact_mobile", mobile)
       .maybeSingle();
+
+    if (biz) {
+      // Password check. PGRST202 = function not deployed yet → no passwords exist.
+      const { data: pw, error: pwErr } = await supabase.rpc("verify_login_password", {
+        p_business_id: biz.id, p_password: typeof password === "string" ? password : "",
+      });
+      if (pwErr && pwErr.code !== "PGRST202") return json({ ok: false, error: pwErr.message }, 500);
+      if (pw === "required") return json({ ok: false, password_required: true, error: "Enter your password." }, 401);
+      if (pw === "bad") return json({ ok: false, password_required: true, error: "Wrong password." }, 401);
+      if (pw === "locked") return json({ ok: false, password_required: true, error: "Too many wrong attempts. Try again in 15 minutes." }, 429);
+    }
 
     if (!biz) {
       const { data: created, error } = await supabase

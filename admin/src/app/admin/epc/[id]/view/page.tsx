@@ -20,7 +20,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { getToken, getBusiness, isMainAdmin } from "@/lib/auth";
 import { getDocumentUrl, deleteDocument } from "@/lib/storage";
 import { logAudit } from "@/lib/auditLog";
 import { Period, inPeriod } from "@/lib/period";
@@ -30,6 +30,7 @@ import CommentsSection from "@/components/CommentsSection";
 import OwnershipCard from "@/components/OwnershipCard";
 import ActivityLogModal from "@/components/ActivityLogModal";
 import DeleteEpcModal from "@/components/DeleteEpcModal";
+import EpcPasswordEmailModal from "@/components/EpcPasswordEmailModal";
 import { invalidate } from "@/lib/list-cache";
 import { TabButton, DownloadMenu, KebabMenu, ProfileRail } from "@/components/ProfileTabBar";
 import { computeEpcHealth, scoreTone, type TatBands, type HealthBucket } from "@/lib/epc-score";
@@ -163,6 +164,7 @@ function Inner() {
   const [zipPickerOpen, setZipPickerOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [pwOpen, setPwOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState<string>("");
   const [rejectOther, setRejectOther] = useState<string>("");
@@ -433,9 +435,19 @@ function Inner() {
           <TabButton label="Profile" icon={I.building} active rail />
           <TabButton label="Edit" icon={I.edit} rail onClick={() => router.push(`/admin/epc/${biz.id}` as any)} />
           <TabButton label="Continue in chat" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>} rail onClick={() => router.push(`/admin/epc/intake?epc=${biz.id}&edit=1` as any)} />
+          {/* Login password — once CC has approved the EPC, a drafted email the
+              main admin checks, then sends. */}
+          {isMainAdmin(getBusiness()) && biz.business_type !== "admin" && biz.status === "approved" && (
+            <TabButton label="Email password" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-10 6L2 7" /></svg>} rail onClick={() => setPwOpen(true)} />
+          )}
           <TabButton label="Activity Log" icon={I.eye} rail onClick={() => setActivityOpen(true)} />
           <TabButton label="Download ZIP" icon={I.download} rail disabled={downloading} onClick={() => setZipPickerOpen(true)} />
         </ProfileRail>
+        <EpcPasswordEmailModal
+          open={pwOpen}
+          epc={{ id: biz.id, tradeName: biz.trade_name || biz.legal_name || biz.contact_name || "EPC", contactName: biz.contact_name, mobile: biz.contact_mobile, email: biz.contact_email }}
+          onClose={() => setPwOpen(false)}
+        />
 
         {/* ── CONTENT COLUMN ─────────────────────────────────────────── */}
         <div className="flex-1 min-w-0">

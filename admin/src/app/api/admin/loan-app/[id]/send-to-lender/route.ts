@@ -15,7 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import ExcelJS from "exceljs";
 import archiver from "archiver";
-import nodemailer from "nodemailer";
+import { sendMail, mailConfigured } from "@/lib/mailer";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { uploadBuffer, downloadBuffer, getSignedReadUrl } from "@/lib/gcs";
 import { creditFairEmailRows, LENDER_LABEL, type LenderKey } from "@/lib/lender-summary";
@@ -31,8 +31,6 @@ const SUPABASE_ANON =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
 
-const SENDER = process.env.GMAIL_SENDER || "capitalcraftadvisors@gmail.com";
-const GMAIL_PASS = process.env.GMAIL_APP_PASSWORD || "";
 const LOAN_CC_DEFAULT = ["malvikasaxena323@gmail.com"];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -197,7 +195,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
 
     // ── SEND ──
-    if (!GMAIL_PASS) return err("Email isn't configured yet (app password missing).", 500);
+    if (!mailConfigured()) return err("Email isn't configured yet (app password missing).", 500);
     const to = String(body.to ?? "").trim().toLowerCase();
     if (!EMAIL_RE.test(to)) return err("Enter a valid recipient (TO) email.", 400);
     const cc = cleanEmails(body.cc);
@@ -260,9 +258,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         <p style="margin-top:18px">Regards,<br/>Capital Craft Advisors</p>
       </div>`;
 
-    const transporter = nodemailer.createTransport({ service: "gmail", auth: { user: SENDER, pass: GMAIL_PASS } });
-    await transporter.sendMail({
-      from: `"Capital Craft" <${SENDER}>`,
+    await sendMail({
       to,
       ...(cc.length ? { cc } : {}),
       ...(bcc.length ? { bcc } : {}),
