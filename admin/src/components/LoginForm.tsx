@@ -14,6 +14,7 @@ export default function LoginForm() {
   const [mobile, setMobile] = useState("");
   const [password, setPassword] = useState("");
   const [needPassword, setNeedPassword] = useState(false);
+  const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pwError, setPwError] = useState<string | null>(null);
@@ -25,9 +26,11 @@ export default function LoginForm() {
       setError("Enter a valid 10-digit mobile number starting with 6-9.");
       return;
     }
-    if (needPassword && !password) { setPwError("Enter your password."); return; }
+    // Generated passwords never contain spaces — drop any copied from the email.
+    const pw = password.replace(/\s+/g, "");
+    if (needPassword && !pw) { setPwError("Enter your password."); return; }
     setLoading(true);
-    const r = await login(mobile, "000000", needPassword ? password : undefined);
+    const r = await login(mobile, "000000", needPassword ? pw : undefined);
     setLoading(false);
     if (!r.ok) {
       if (r.passwordRequired) {
@@ -59,12 +62,23 @@ export default function LoginForm() {
       {needPassword && (
         <Input
           label="Password"
-          type="password"
+          type={showPw ? "text" : "password"}
           autoComplete="current-password"
           autoFocus
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           error={pwError ?? undefined}
+          rightSlot={
+            <button type="button" onClick={() => setShowPw((s) => !s)}
+              aria-label={showPw ? "Hide password" : "Show password"} title={showPw ? "Hide password" : "Show password"}
+              className="p-1.5 rounded text-text-muted hover:text-text">
+              {showPw ? (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c7 0 10 8 10 8a13.2 13.2 0 0 1-1.67 2.68M6.6 6.6A13.5 13.5 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.4-1.6" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /><path d="M2 2l20 20" /></svg>
+              ) : (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 12s3.5-7 10.5-7 10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z" /><circle cx="12" cy="12" r="3" /></svg>
+              )}
+            </button>
+          }
         />
       )}
       <Button type="submit" variant="primary" fullWidth loading={loading}

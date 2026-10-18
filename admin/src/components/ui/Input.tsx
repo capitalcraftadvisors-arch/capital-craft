@@ -7,10 +7,12 @@ type Props = InputHTMLAttributes<HTMLInputElement> & {
   hint?: string;
   error?: string;
   leftIcon?: ReactNode;
+  /** Clickable control inside the right edge (e.g. a show-password eye). */
+  rightSlot?: ReactNode;
 };
 
 const Input = forwardRef<HTMLInputElement, Props>(function Input(
-  { label, hint, error, className = "", id, leftIcon, ...rest },
+  { label, hint, error, className = "", id, leftIcon, rightSlot, ...rest },
   ref,
 ) {
   const inputId = id || (label ? label.toLowerCase().replace(/\s+/g, "-") : undefined);
@@ -32,7 +34,8 @@ const Input = forwardRef<HTMLInputElement, Props>(function Input(
           ref={ref}
           className={[
             "w-full rounded-input border bg-white py-3 text-[15px] text-text",
-            leftIcon ? "pl-10 pr-3.5" : "px-3.5",
+            leftIcon ? "pl-10" : "pl-3.5",
+            rightSlot ? "pr-11" : "pr-3.5",
             "placeholder:text-text-muted",
             "outline-none transition-colors duration-250",
             error
@@ -42,6 +45,9 @@ const Input = forwardRef<HTMLInputElement, Props>(function Input(
           ].join(" ")}
           {...rest}
         />
+        {rightSlot && (
+          <span className="absolute inset-y-0 right-0 flex items-center pr-2">{rightSlot}</span>
+        )}
       </div>
       {error ? (
         <p className="mt-1.5 text-[12px] text-red-500">{error}</p>
