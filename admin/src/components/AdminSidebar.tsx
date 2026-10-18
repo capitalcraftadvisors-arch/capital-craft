@@ -23,7 +23,7 @@ import { logout, getBusiness, allowedModules, canAccessModule, isMainAdmin, type
 import { pendingCount } from "@/lib/review";
 
 export type ConsoleTab = "epcs" | "apps" | "loanleads" | "insurance" | "otherins" | "leads";
-export type SectionKey = ConsoleTab | "analytics" | "board" | "pendings" | "team";
+export type SectionKey = ConsoleTab | "analytics" | "board" | "pendings" | "team" | "pri";
 
 // Per-console accent colors (C). Soft professional tints — accents only.
 export const ACCENTS: Record<SectionKey, { label: string; color: string; tint: string }> = {
@@ -37,6 +37,7 @@ export const ACCENTS: Record<SectionKey, { label: string; color: string; tint: s
   board:     { label: "Task Manager",      color: "#0f766e", tint: "#dcf3ef" },
   pendings:  { label: "Pendings",          color: "#b91c1c", tint: "#fdecec" },
   team:      { label: "Team",              color: "#334155", tint: "#eef1f5" },
+  pri:       { label: "Pri portal",        color: "#7c2d12", tint: "#fbece4" },
 };
 
 const ICONS: Record<SectionKey, ReactNode> = {
@@ -63,6 +64,9 @@ const ICONS: Record<SectionKey, ReactNode> = {
   ),
   board: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="6" height="18" rx="1"/><rect x="10.5" y="3" width="6" height="12" rx="1"/><rect x="18" y="3" width="3" height="9" rx="1"/></svg>
+  ),
+  pri: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.6-7 9-4-1.4-7-4.5-7-9V6z" /><rect x="9.5" y="10.5" width="5" height="4" rx="0.8" /><path d="M10.5 10.5V9a1.5 1.5 0 0 1 3 0v1.5" /></svg>
   ),
   team: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="7.5" cy="15.5" r="4.5" /><path d="M10.7 12.3 21 2M16 7l3 3M19 4l2 2" /></svg>
@@ -110,6 +114,8 @@ export default function AdminSidebar({
       keys.splice(at >= 0 ? at + 1 : keys.length, 0, "otherins");
       keys.push("team"); // team logins (passwords)
     }
+    // Pri portal — the owner's private console (0096); no one else sees it.
+    if (biz?.is_owner) keys.push("pri");
     return keys;
   });
   const [cachedPending, setPending] = useState(0);
@@ -139,6 +145,10 @@ export default function AdminSidebar({
     }
     if (key === "team") {
       router.push("/admin/team");
+      return;
+    }
+    if (key === "pri") {
+      router.push("/admin/pri");
       return;
     }
     if (onSelectTab) {

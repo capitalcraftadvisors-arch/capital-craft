@@ -34,6 +34,9 @@ export type Business = {
   role?: "MAIN_ADMIN" | "MANAGER" | "OPERATIONS_USER" | null;
   allowed_modules?: string[] | null;
   parent_user_id?: string | null;
+  // Owner account (0096) — sees the private Pri portal. Set by the auth
+  // function at login; the server re-checks it for everything it unlocks.
+  is_owner?: boolean;
 };
 
 // The six admin console module keys (match AdminSidebar tab keys).

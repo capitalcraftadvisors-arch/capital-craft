@@ -62,7 +62,7 @@ export default function OverviewSection({ win, segment }: { win: { start: number
         db.from("epc_applications").select("status, plant_use_type, loan_amount_required, loan_amount, sanctioned_amount, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, second_disbursement_date, created_at, updated_at, submitted_at, docs_sent_at, approved_at, approved_lender, rejected_lender, rejection_reason, epc_business_id, assigned_to_user_id, install_state, install_district, central_subsidy, state_subsidy, borrower_pan, borrower_mobile, aborted_at"),
         db.from("loan_leads").select("status, dead_at, created_at"),
         db.from("epc_business").select("id, trade_name, legal_name, contact_name").neq("business_type", "admin"),
-        db.from("epc_business").select("id, contact_name").eq("business_type", "admin"),
+        db.rpc("team_accounts"), // CC team, owner accounts left out (0096)
       ]);
       if (cancelled) return;
       setLoans((l.data ?? []) as LoanRow[]);

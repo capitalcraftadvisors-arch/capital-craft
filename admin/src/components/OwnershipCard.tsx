@@ -40,11 +40,8 @@ export default function OwnershipCard({
 
   useEffect(() => {
     void (async () => {
-      const { data } = await supabase()
-        .from("epc_business")
-        .select("id, contact_name, role")
-        .eq("business_type", "admin")
-        .order("contact_name", { ascending: true });
+      // CC team, owner accounts left out (0096).
+      const { data } = await supabase().rpc("team_accounts");
       const rows = (data ?? []) as { id: string; contact_name: string | null; role: string | null }[];
       setNames(new Map(rows.map((r) => [r.id, r.contact_name || "(unnamed)"])));
       setTeam(rows.map((r) => ({

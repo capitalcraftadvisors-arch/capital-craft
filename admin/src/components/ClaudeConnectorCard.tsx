@@ -1,6 +1,6 @@
 "use client";
 
-// Claude connector (MCP, migration 0095) — the main admin's connector links.
+// Claude connector (MCP, migration 0095) — the owner's connector links (Pri portal, 0096).
 // Create a link (shown ONCE: it carries a secret key), copy it into Claude, and
 // revoke it any time. Links expire after 90 days. Read-only portal data.
 

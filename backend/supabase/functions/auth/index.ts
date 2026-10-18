@@ -13,8 +13,8 @@
 //
 // To roll back from ES256 to HS256: unset APP_SIGNING_JWK, redeploy.
 //
-// Claude connector (MCP, migration 0095):
-//   { action: "mcp_create" }  + the main admin's Bearer token
+// Claude connector (MCP, migration 0095) — owner accounts only (0096):
+//   { action: "mcp_create" }  + the owner's Bearer token
 //       -> { ok, key, expires_at }   a new opaque connector key (shown once)
 //   { action: "mcp_exchange", key }
 //       -> { ok, token }   a 5-minute JWT with role mcp_reader (SELECT-only)
@@ -95,14 +95,23 @@ async function sha256Hex(s: string): Promise<string> {
 const MCP_KEY_DAYS = 90;
 const MCP_JWT_SECONDS = 300;
 
-// Main admin → a new opaque connector key (only its hash is stored).
+// Owner accounts (0096, the Pri portal) — service-role read only.
+async function isOwner(id: string): Promise<boolean> {
+  const { data } = await supabase.from("owner_accounts").select("business_id").eq("business_id", id).maybeSingle();
+  return !!data;
+}
+// A main-admin-level owner account (Claude connector links are owner-only).
+const ownerAdmin = async (b: { id: string; business_type: string | null; role: string | null } | null) =>
+  !!b && b.business_type === "admin" && (!b.role || b.role === "MAIN_ADMIN") && await isOwner(b.id);
+
+// Owner → a new opaque connector key (only its hash is stored).
 async function mcpCreate(req: Request): Promise<Response> {
   const c = await callerClaims(req);
   if (!c || c.role !== "authenticated") return json({ ok: false, error: "unauthorized" }, 401);
   const { data: me } = await supabase.from("epc_business")
     .select("id, business_type, role").eq("id", String(c.business_id ?? "")).maybeSingle();
-  if (!me || me.business_type !== "admin" || (me.role && me.role !== "MAIN_ADMIN")) {
-    return json({ ok: false, error: "Only the main admin can create a Claude connector." }, 403);
+  if (!(await ownerAdmin(me))) {
+    return json({ ok: false, error: "Only the owner can create a Claude connector." }, 403);
   }
   const raw = new Uint8Array(32);
   crypto.getRandomValues(raw);
@@ -121,8 +130,8 @@ async function mcpExchange(key: unknown): Promise<Response> {
   if (!t || t.revoked_at || new Date(t.expires_at).getTime() < Date.now()) return json({ ok: false, error: "invalid key" }, 401);
   const { data: owner } = await supabase.from("epc_business")
     .select("id, business_type, role, allowed_modules").eq("id", t.business_id).maybeSingle();
-  // Main admin only — re-checked on every use, so a role change ends access.
-  if (!owner || owner.business_type !== "admin" || (owner.role && owner.role !== "MAIN_ADMIN")) return json({ ok: false, error: "invalid key" }, 401);
+  // Owner (main-admin level) only — re-checked on every use, so a change ends access.
+  if (!owner || !(await ownerAdmin(owner))) return json({ ok: false, error: "invalid key" }, 401);
   const token = await sign({
     sub: owner.id,
     role: "mcp_reader",                // SELECT-only database role (0095)
@@ -195,7 +204,8 @@ serve(async (req) => {
 
     const token = await sign(claims);
 
-    return json({ ok: true, token, business: biz });
+    // is_owner drives the Pri portal's visibility (0096); the server re-checks it.
+    return json({ ok: true, token, business: { ...biz, is_owner: biz.business_type === "admin" && await isOwner(biz.id) } });
   } catch (e) {
     return json({ ok: false, error: String(e) }, 500);
   }

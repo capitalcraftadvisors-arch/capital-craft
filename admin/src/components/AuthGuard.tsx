@@ -57,7 +57,8 @@ export default function AuthGuard({ children, allow, requireModule }: Props) {
       .eq("id", biz.id)
       .maybeSingle()
       .then(({ data }: { data: Business | null }) => {
-        const latest = (data as Business | null) ?? biz;
+        // Merge so login-only fields (is_owner) survive the refresh.
+        const latest = data ? ({ ...biz, ...(data as Business) }) : biz;
         if (data) setBusiness(latest);
         if (!matches(latest, allow)) {
           router.replace(routeForBusiness(latest) as any);

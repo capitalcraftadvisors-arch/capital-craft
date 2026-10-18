@@ -254,7 +254,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
     db.from("loan_leads").select("id, name, mobile, loan_amount, status, created_at, reviewed_at, epc_name_custom, epc_business_id, assigned_to_user_id, lead_owner_name, dead_at, aborted_at"),
     db.from("epc_business").select("id, trade_name, legal_name, contact_name, contact_mobile, status, current_step, created_at, updated_at, business_type, assigned_to_user_id").neq("business_type", "admin").in("status", ["draft", "under_review", "on_hold", "approved", "rejected"]),
     db.from("epc_lender_status").select("business_id, docs_given, approved, rejected"),
-    db.from("epc_business").select("id, contact_name, role, parent_user_id").eq("business_type", "admin").order("contact_name", { ascending: true }),
+    db.rpc("team_accounts"), // CC team, owner accounts left out (0096)
     // Comment counts (My Day badge) — one tiny key-column select per table.
     db.from("loan_comments").select("application_id"),
     db.from("epc_comments").select("business_id"),

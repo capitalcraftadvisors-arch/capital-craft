@@ -17,7 +17,7 @@ export function useAdminNames(): Map<string, string> {
     void (async () => {
       const cached = getCached<[string, string][]>(CACHE_KEY, 300000);
       if (cached) { setNames(new Map(cached)); return; }
-      const { data } = await supabase().from("epc_business").select("id, contact_name").eq("business_type", "admin");
+      const { data } = await supabase().rpc("team_accounts"); // owner accounts left out (0096)
       const pairs = ((data ?? []) as { id: string; contact_name: string | null }[])
         .map((r) => [r.id, r.contact_name || "(unnamed)"] as [string, string]);
       setCached(CACHE_KEY, pairs);

@@ -9,7 +9,6 @@ import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import AdminSidebar from "@/components/AdminSidebar";
 import SetPasswordModal from "@/components/SetPasswordModal";
-import ClaudeConnectorCard from "@/components/ClaudeConnectorCard";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { loginPasswordStatus } from "@/lib/passwords";
@@ -36,8 +35,8 @@ function Inner() {
   useEffect(() => {
     if (!allowed) { router.replace("/admin"); return; }
     void (async () => {
-      const { data } = await supabase().from("epc_business")
-        .select("id, contact_name, contact_mobile, contact_email, role").eq("business_type", "admin").order("contact_name");
+      // team_accounts() (0096) lists the CC team without owner accounts.
+      const { data } = await supabase().rpc("team_accounts");
       const list = (data ?? []) as Member[];
       setMembers(list);
       setPwSet(await loginPasswordStatus(list.map((m) => m.id)));
@@ -98,7 +97,6 @@ function Inner() {
               </table>
             )}
           </section>
-          <ClaudeConnectorCard />
         </main>
       </div>
       {editing && (
