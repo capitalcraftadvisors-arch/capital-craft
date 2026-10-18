@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import AdminSidebar from "@/components/AdminSidebar";
 import SetPasswordModal from "@/components/SetPasswordModal";
+import ClaudeConnectorCard from "@/components/ClaudeConnectorCard";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { loginPasswordStatus } from "@/lib/passwords";
@@ -97,6 +98,7 @@ function Inner() {
               </table>
             )}
           </section>
+          <ClaudeConnectorCard />
         </main>
       </div>
       {editing && (

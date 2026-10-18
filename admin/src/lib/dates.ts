@@ -26,6 +26,15 @@ export function fmtDate(v: DateInput): string {
   return `${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 
+/** DD/MM/YYYY in India time — for SERVER output (the server's own clock is UTC,
+ *  so fmtDate there could show a late-evening IST timestamp as the previous day). */
+export function fmtDateIST(v: DateInput): string {
+  if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) return fmtDate(v); // date-only: no zone
+  const d = parseLocal(v);
+  if (!d) return "—";
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
+}
+
 /** Local calendar date "YYYY-MM-DD" of a date / timestamp ("" when empty) — the DateField value. */
 export function localIsoDate(v: DateInput): string {
   const d = parseLocal(v);

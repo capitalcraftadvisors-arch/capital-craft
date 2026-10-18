@@ -59,11 +59,10 @@ export async function emailLoginPassword(
       html: `<div style="font-family:Arial,sans-serif;font-size:14px;color:#0f3d2e;line-height:1.55">
         <p>Namaste ${esc(greet)},</p>
         <p>${intro}</p>
-        <table style="border-collapse:collapse;margin:12px 0">
-          <tr><td style="padding:4px 14px 4px 0;color:#5a8a76">Login</td><td><a href="${loginUrl}">${loginUrl}</a></td></tr>
-          <tr><td style="padding:4px 14px 4px 0;color:#5a8a76">Mobile number</td><td style="font-weight:bold">${esc(acc.contact_mobile)}</td></tr>
-          <tr><td style="padding:4px 14px 4px 0;color:#5a8a76">Password</td><td style="font-weight:bold;font-family:monospace;font-size:15px">${esc(password)}</td></tr>
-        </table>
+        <p style="margin:12px 0 4px"><span style="color:#5a8a76">Login:</span> <a href="${loginUrl}">${loginUrl}</a></p>
+        <p style="margin:4px 0"><span style="color:#5a8a76">Mobile number:</span> <b>${esc(acc.contact_mobile)}</b></p>
+        <p style="margin:12px 0 4px;color:#5a8a76">Password:</p>
+        <div style="display:inline-block;font-family:monospace;font-size:16px;font-weight:bold;background:#f0faf5;border:1px solid #cdeadd;border-radius:6px;padding:6px 12px">${esc(password)}</div>
         <p>Please keep this password private.</p>
         <p style="margin-top:18px">Regards,<br/>Capital Craft Advisors</p>
       </div>`,
@@ -81,7 +80,8 @@ async function savePassword(db: ReturnType<typeof callerClient>, accountId: stri
   return { ok: true, sentTo: to };
 }
 
-const STRONG = (p: string) => p.length >= 12 && /[A-Z]/.test(p) && /[a-z]/.test(p) && /[0-9]/.test(p) && /[^A-Za-z0-9]/.test(p);
+// Strong and space-free (generated passwords never contain whitespace).
+const STRONG = (p: string) => p.length >= 12 && !/\s/.test(p) && /[A-Z]/.test(p) && /[a-z]/.test(p) && /[0-9]/.test(p) && /[^A-Za-z0-9]/.test(p);
 
 /** Sends the main admin's reviewed draft (it must still contain the password), then saves the password. */
 export async function sendPasswordDraft(
