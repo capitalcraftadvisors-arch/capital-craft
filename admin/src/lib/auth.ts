@@ -72,6 +72,7 @@ export function isMainAdmin(b: Business | null | undefined): boolean {
 // "Admin" (never the underlying account's personal contact_name); managers and
 // RMs are greeted by their own first name.
 export function greetingName(b: Business | null | undefined): string {
+  if (b?.is_owner) return "Pri"; // the owner's own console (0096)
   if (b?.role === "MAIN_ADMIN") return "Admin";
   const full = (b?.contact_name || "").trim();
   return full ? full.split(" ")[0] : "there";
@@ -177,7 +178,7 @@ export function getImpersonatedBusiness(): Business | null {
 // admin status stays under_review but who's been ticked "approved" by
 // any lender gets the /dashboard immediately.
 export function routeForBusiness(b: Business): string {
-  if (b.business_type === "admin") return "/admin";
+  if (b.business_type === "admin") return b.is_owner ? "/admin/pri" : "/admin"; // owner lands on Pri
   if (b.status === "draft") return `/onboarding/step-${Math.max(1, Math.min(b.current_step || 1, 7))}`;
   // The dashboard is reachable when EITHER loans or insurance is unlocked;
   // the dashboard itself shows whichever apply buttons the EPC is entitled to.

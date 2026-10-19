@@ -42,6 +42,16 @@ export const BATTERY_OPTIONS = ["Exide", "Luminous", "MNRE Equivalent Standard"]
 
 export const SYSTEM_TYPES = ["Hybrid", "On-grid", "Off-grid"] as const;
 
+// Bijlee Solar (template bundled:bijlee) — their quotation's own defaults and
+// serial number format.
+export const BIJLEE = {
+  key: "bundled:bijlee",
+  module: "Novasys/ Navitas Green Solutions",
+  inverter: "Growatt/ Sungrow",
+  cable: "Polycab",
+  serial: (n: number) => `BIJ-${n}/P/1.2`,
+};
+
 // Field keys used for persisting custom options (quotation_brand_options.field).
 export const BRAND_FIELDS = {
   module: "module_brand",

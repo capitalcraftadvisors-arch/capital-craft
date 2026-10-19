@@ -1498,28 +1498,10 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     setCached("dash.apps", { rows, lenderLatest: map, lenderSentAt: sentMap });
   }, []);
 
+  // Loads on open only (cached). No reload on tab focus — it re-downloaded the
+  // whole list on every switch back to the portal and blew the Free-plan
+  // egress; other admins' changes show on the next open after the cache ages.
   useEffect(() => { void loadApps(); }, [loadApps]);
-
-  // Cross-admin freshness: when this tab regains focus, re-pull the list
-  // (bypassing the cache) so a send/decision another admin just made shows up.
-  // Throttled to once per 20s to keep Supabase egress low.
-  const lastFocusLoad = useRef(0);
-  useEffect(() => {
-    const onFocus = () => {
-      if (document.visibilityState !== "visible") return;
-      const now = Date.now();
-      if (now - lastFocusLoad.current < 20000) return;
-      lastFocusLoad.current = now;
-      invalidate("dash.apps");
-      void loadApps(true);
-    };
-    document.addEventListener("visibilitychange", onFocus);
-    window.addEventListener("focus", onFocus);
-    return () => {
-      document.removeEventListener("visibilitychange", onFocus);
-      window.removeEventListener("focus", onFocus);
-    };
-  }, [loadApps]);
 
   // After an email goes out from the LIST, record the shared docs-sent marker
   // (loan_application_lenders.docs_sent_at) — the same state the View page writes

@@ -9,6 +9,9 @@
 // business → "bundled:…" reads the app-shipped template, else a GCS object.
 // When no row exists yet it falls back to the bundled GHANPRIYA template.
 //
+// Bijlee Solar (bundled:bijlee) is their own PDF filled directly — always a PDF —
+// and its serial number auto-advances (X-Next-Serial tells the form the next one).
+//
 // Auth: caller's token (RLS scopes the template lookup to the EPC's own row).
 
 import { NextRequest, NextResponse } from "next/server";
@@ -17,6 +20,9 @@ import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { downloadBuffer } from "@/lib/gcs";
 import { buildQuotationData, fillTemplate, readBundledTemplate, type QuotationInput } from "@/lib/quotation";
 import { docxToPdf } from "@/lib/docx-to-pdf";
+import { buildBijleeQuotation, type BijleeInput } from "@/lib/quotation-bijlee";
+import { BIJLEE } from "@/lib/quotation-brands";
+import { fmtDateIST } from "@/lib/dates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -55,18 +61,49 @@ export async function POST(req: NextRequest) {
     const bizId = claims.business_type === "admin" && body["epc_business_id" as keyof QuotationInput]
       ? String(body["epc_business_id" as keyof QuotationInput])
       : claims.business_id;
-    let storagePath = "";
+    let storagePath = "", templateId = "";
     try {
       const { data: tpl } = await supabase
         .from("epc_quotation_templates")
-        .select("storage_path")
+        .select("id, storage_path")
         .eq("epc_business_id", bizId)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
-      if (tpl?.storage_path) storagePath = tpl.storage_path;
+      if (tpl?.storage_path) { storagePath = tpl.storage_path; templateId = tpl.id; }
     } catch { /* table missing → treated as no template */ }
     if (!storagePath) return err("No quotation template is set up for your account yet.", 403);
+
+    if (storagePath === BIJLEE.key) {
+      const b = body as unknown as Partial<Record<keyof BijleeInput, string | number>>;
+      const s = (k: keyof BijleeInput) => String(b[k] ?? "").trim();
+      const input: BijleeInput = {
+        customer_name: s("customer_name"), location: s("location"), kw: Number(b.kw),
+        serial: s("serial"), date: fmtDateIST(new Date()),
+        project_location: s("project_location"), client_name: s("client_name"),
+        msedcl_division: s("msedcl_division"), contracted_demand: s("contracted_demand"),
+        module_brand: s("module_brand") || BIJLEE.module, inverter_brand: s("inverter_brand") || BIJLEE.inverter,
+        cable_brand: s("cable_brand") || BIJLEE.cable,
+        rate_per_kw: Number(b.rate_per_kw) || 0, structure_rate_per_kw: Number(b.structure_rate_per_kw) || 0,
+      };
+      if (input.rate_per_kw <= 0) return err("Price per kW is required.", 400);
+      const pdf = await buildBijleeQuotation(input, readBundledTemplate(storagePath));
+      // Auto-number: the next suggested serial moves past the one just used.
+      const used = Number(/\d+/.exec(input.serial)?.[0]);
+      let next = "";
+      if (used > 0) {
+        const { data } = await supabase.rpc("quotation_serial_used", { p_template: templateId, p_used: used });
+        if (typeof data === "number") next = BIJLEE.serial(data);
+      }
+      return new NextResponse(new Uint8Array(pdf), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `attachment; filename="Quotation_${safeName(input.customer_name)}_${safeName(input.serial)}.pdf"`,
+          "X-Next-Serial": next,
+        },
+      });
+    }
 
     const templateBuf = storagePath.startsWith("bundled:")
       ? readBundledTemplate(storagePath)

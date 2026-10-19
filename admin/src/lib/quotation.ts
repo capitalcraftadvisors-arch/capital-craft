@@ -52,9 +52,12 @@ export function stateSubsidyFor(kw: number): number {
 }
 
 // Resolve the template file for a storage_path. "bundled:ges" → the GHANPRIYA
-// template shipped with the app; otherwise a GCS object (handled by the caller).
+// template shipped with the app, "bundled:bijlee" → Bijlee Solar's PDF (kept in
+// templates/, not public/: it holds a real customer's quote, so it's never served);
+// otherwise a GCS object (handled by the caller).
 export function bundledTemplatePath(key: string): string | null {
   if (key === "bundled:ges") return path.join(process.cwd(), "public", "quotation", "ges-template.docx");
+  if (key === "bundled:bijlee") return path.join(process.cwd(), "templates", "bijlee-template.pdf");
   return null;
 }
 

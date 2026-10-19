@@ -37,7 +37,7 @@ export const ACCENTS: Record<SectionKey, { label: string; color: string; tint: s
   board:     { label: "Task Manager",      color: "#0f766e", tint: "#dcf3ef" },
   pendings:  { label: "Pendings",          color: "#b91c1c", tint: "#fdecec" },
   team:      { label: "Team",              color: "#334155", tint: "#eef1f5" },
-  pri:       { label: "Pri portal",        color: "#7c2d12", tint: "#fbece4" },
+  pri:       { label: "Pri",               color: "#7c2d12", tint: "#fbece4" },
 };
 
 const ICONS: Record<SectionKey, ReactNode> = {
@@ -114,8 +114,9 @@ export default function AdminSidebar({
       keys.splice(at >= 0 ? at + 1 : keys.length, 0, "otherins");
       keys.push("team"); // team logins (passwords)
     }
-    // Pri portal — the owner's private console (0096); no one else sees it.
-    if (biz?.is_owner) keys.push("pri");
+    // Pri — the owner's own dashboard (0096), first in the owner's sidebar; no
+    // one else sees it. The admin tabs below it stay separate.
+    if (biz?.is_owner) keys.unshift("pri");
     return keys;
   });
   const [cachedPending, setPending] = useState(0);

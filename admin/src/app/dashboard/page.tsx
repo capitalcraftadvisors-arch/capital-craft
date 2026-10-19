@@ -15,6 +15,7 @@ import LoginWelcome from "@/components/LoginWelcome";
 import { logout, getBusiness, getToken, greetingName, loanAccess, insuranceAccess } from "@/lib/auth";
 import { fetchEpcName, shortEpcName } from "@/lib/epc-name";
 import { supabase } from "@/lib/supabase";
+import { fetchQuoteTemplate } from "@/lib/quotation-template";
 import { fmtRupees, fmtDateShort, deadlineState, DEADLINE_PILL } from "@/lib/disbursement";
 import { numberToWordsIndian } from "@/lib/numberToWords";
 import { fmtDateTime as fmtDateTimeLib } from "@/lib/dates";
@@ -164,10 +165,7 @@ function DashboardInner() {
         .order("created_at", { ascending: false });
       setInsRows((ins ?? []) as unknown as InsRow[]);
       setLoading(false);
-      try {
-        const { data: tpls } = await supabase().from("epc_quotation_templates").select("id").limit(1);
-        setCanQuote((tpls?.length ?? 0) > 0);
-      } catch { setCanQuote(false); }
+      try { setCanQuote(!!(await fetchQuoteTemplate(true))); } catch { setCanQuote(false); }
     })();
   }, []);
 

@@ -1,14 +1,15 @@
 "use client";
 
-// Pri portal — /admin/pri. The owner's private console (migration 0096): only
-// an owner login sees it (sidebar + this page); the main admin, managers and
-// RMs never do. Holds the Claude connector links and the owner's own login
+// Pri — /admin/pri. The owner's own dashboard (migration 0096), separate from
+// the admin dashboard; only an owner login sees it (it's where that login lands;
+// the main admin, managers and RMs never see it). Holds the Claude connector links and the owner's own login
 // password (typed by the owner — nobody else can set it).
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import AdminSidebar from "@/components/AdminSidebar";
+import LoginWelcome from "@/components/LoginWelcome";
 import ClaudeConnectorCard from "@/components/ClaudeConnectorCard";
 import Input from "@/components/ui/Input";
 import { supabase } from "@/lib/supabase";
@@ -33,12 +34,13 @@ function Inner() {
 
   return (
     <div className="min-h-screen bg-bg-soft md:flex">
+      <LoginWelcome />
       <AdminSidebar active="pri" />
       <div className="flex-1 min-w-0">
         <header className="px-4 sm:px-6 py-5 border-b border-line bg-white">
           <div className="flex items-center gap-2.5">
             <span className="inline-block w-1.5 h-7 rounded-full" style={{ backgroundColor: "#7c2d12" }} />
-            <h1 className="font-display text-[22px] sm:text-[26px] font-bold text-text">Pri portal</h1>
+            <h1 className="font-display text-[22px] sm:text-[26px] font-bold text-text">Pri</h1>
           </div>
         </header>
         <main className="px-4 sm:px-6 py-5">
@@ -73,7 +75,9 @@ function MyPasswordCard({ id }: { id: string }) {
     setBusy(true);
     const { data, error: e } = await supabase().rpc("set_login_password", { p_business_id: id, p_password: pw });
     setBusy(false);
-    if (e) { setError("Couldn't save — " + e.message); return; }
+    // owner_only = this browser's session is another account now (one login per
+    // browser — a later login replaces this one).
+    if (e) { setError(/owner_only/.test(e.message) ? "This browser is now signed in as another account. Log out, log in again with your own number, then save." : "Couldn't save — " + e.message); return; }
     setSetAt(String(data)); setPw(""); setPw2(""); setMsg("Password saved.");
   }
 

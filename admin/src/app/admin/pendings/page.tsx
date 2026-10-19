@@ -83,6 +83,9 @@ function Inner() {
       {busy === id + item ? "Approving…" : "Approve"}
     </button>
   );
+  const viewLink = (id: string) => (
+    <Link href={`/admin/app/${id}/view` as any} className="px-3 py-1.5 border border-line rounded text-[12px] font-semibold text-text hover:bg-bg-tint">View</Link>
+  );
   const editLink = (href: string) => (
     <Link href={href as any} className="px-3 py-1.5 border border-line rounded text-[12px] font-semibold text-text hover:bg-bg-tint">Edit</Link>
   );
@@ -117,6 +120,7 @@ function Inner() {
                   <Td>{r.reviewed_by || "—"}</Td>
                   <Td>
                     <div className="flex items-center gap-2 justify-end">
+                      {viewLink(r.id)}
                       {editLink(`/admin/app/${r.id}/approval?edit=approval&from=pendings`)}
                       {approveBtn(r.id, "approval")}
                     </div>
@@ -141,6 +145,7 @@ function Inner() {
                     <Td>{fmtRupeesExact(r.sanctioned_amount)}</Td>
                     <Td>
                       <div className="flex items-center gap-2 justify-end">
+                        {viewLink(r.id)}
                         {editLink(`/admin/app/${r.id}/disbursement`)}
                         {approveBtn(r.id, k)}
                       </div>

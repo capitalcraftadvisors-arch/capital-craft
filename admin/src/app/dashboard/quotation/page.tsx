@@ -3,18 +3,21 @@
 // EPC Quotation Builder — fill a short form, download a quotation in the EPC's
 // own format (PDF on prod, .docx fallback). The heavy content/format lives in
 // the stored template; this page only collects the ~dozen variable values.
+// Bijlee Solar's template (their own PDF) has its own shorter form.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { getToken } from "@/lib/auth";
+import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template";
 import SearchableSelect from "@/components/quotation/SearchableSelect";
 import {
   MODULE_BRANDS, INVERTER_BRANDS, ROOF_TYPES, MOUNTS_BY_ROOF,
-  ACDB_DCDB_OPTIONS, CABLE_OPTIONS, BATTERY_OPTIONS, SYSTEM_TYPES, BRAND_FIELDS,
+  ACDB_DCDB_OPTIONS, CABLE_OPTIONS, BATTERY_OPTIONS, SYSTEM_TYPES, BRAND_FIELDS, BIJLEE,
 } from "@/lib/quotation-brands";
 
 const NAVY = "#1e3a8a";
+const input = "w-full border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none focus:border-[#1e3a8a]";
 const inr = (n: number) => (Number.isFinite(n) ? Math.round(n).toLocaleString("en-IN") : "0");
 function stateSubsidyFor(kw: number): number { if (!kw || kw <= 0) return 0; return kw >= 3 ? 78000 : Math.round(kw * 30000); }
 function todayDDMMYYYY() { const d = new Date(); const p = (x: number) => String(x).padStart(2, "0"); return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`; }
@@ -38,32 +41,32 @@ const EMPTY: Form = {
 export default function QuotationBuilderPage() {
   return (
     <AuthGuard allow={["approved"]}>
-      <Inner />
+      <Builder />
     </AuthGuard>
   );
 }
 
-function Inner() {
-  const router = useRouter();
-  const [f, setF] = useState<Form>(EMPTY);
-  const [custom, setCustom] = useState<Record<string, string[]>>({});
-  const [busy, setBusy] = useState(false);
-  const [pinBusy, setPinBusy] = useState(false);
-  const [ocrBusy, setOcrBusy] = useState(false);
-  const [dlOpen, setDlOpen] = useState(false);
-  const dlRef = useRef<HTMLDivElement>(null);
-  const [error, setError] = useState<string | null>(null);
-  const set = (k: keyof Form, v: string | boolean) => setF((p) => ({ ...p, [k]: v }));
+// The EPC's template decides the form (read by the dashboard already — cached).
+function Builder() {
+  const [tpl, setTpl] = useState<QuoteTemplate | null | undefined>(undefined);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => { fetchQuoteTemplate().then(setTpl, () => setFailed(true)); }, []);
+  if (failed) {
+    return (
+      <div className="min-h-screen bg-bg-soft">
+        <BackHeader />
+        <p className="max-w-[900px] mx-auto px-5 sm:px-7 py-8 text-[13px] text-red-600">Couldn&apos;t load the quotation builder. Please refresh.</p>
+      </div>
+    );
+  }
+  if (tpl === undefined) return null;
+  return tpl?.storage_path === BIJLEE.key ? <BijleeForm serialNext={tpl.serial_next} /> : <Inner />;
+}
 
-  useEffect(() => {
-    const onDoc = (e: MouseEvent) => { if (dlRef.current && !dlRef.current.contains(e.target as Node)) setDlOpen(false); };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
-
-  // Keyboard navigation: Enter / ↓ / → (at caret end) → next field; ↑ / ← (at
-  // caret start) → previous. Works alongside mouse. Native <select> keeps ↑/↓ for
-  // its options; custom dropdowns (buttons) handle their own keys.
+// Keyboard navigation: Enter / ↓ / → (at caret end) → next field; ↑ / ← (at
+// caret start) → previous. Works alongside mouse. Native <select> keeps ↑/↓ for
+// its options; custom dropdowns (buttons) handle their own keys.
+function useKeyNav() {
   const formRef = useRef<HTMLDivElement>(null);
   function fieldList(): HTMLElement[] {
     const root = formRef.current;
@@ -106,6 +109,63 @@ function Inner() {
       case "ArrowLeft": if (tag === "SELECT" || (isText && !atStart)) break; e.preventDefault(); moveFocus(t, -1); break;
     }
   }
+  return { formRef, onFormKey };
+}
+
+// Default option lists + the custom values saved from the dropdowns.
+function useBrandOptions() {
+  const [custom, setCustom] = useState<Record<string, string[]>>({});
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/epc/quotation/brands", { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+        const j = await res.json().catch(() => ({}));
+        if (j?.ok) setCustom(j.options || {});
+      } catch { /* defaults only */ }
+    })();
+  }, []);
+  return useCallback((base: string[], field: string) => Array.from(new Set([...base, ...(custom[field] || [])])), [custom]);
+}
+
+// Save the generated quotation the server sent back.
+async function saveDownload(res: Response) {
+  const blob = await res.blob();
+  const cd = res.headers.get("Content-Disposition") || "";
+  const name = (cd.match(/filename="([^"]+)"/) || [])[1] || "quotation.pdf";
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function BackHeader() {
+  const router = useRouter();
+  return (
+    <header className="border-b border-line bg-white">
+      <div className="max-w-[900px] mx-auto px-5 sm:px-7 h-14 flex items-center">
+        <button onClick={() => router.push("/dashboard" as any)} className="text-[13px] text-text-muted hover:text-text inline-flex items-center gap-1">← Back to dashboard</button>
+      </div>
+    </header>
+  );
+}
+
+function Inner() {
+  const [f, setF] = useState<Form>(EMPTY);
+  const merge = useBrandOptions();
+  const [busy, setBusy] = useState(false);
+  const [pinBusy, setPinBusy] = useState(false);
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [dlOpen, setDlOpen] = useState(false);
+  const dlRef = useRef<HTMLDivElement>(null);
+  const [error, setError] = useState<string | null>(null);
+  const set = (k: keyof Form, v: string | boolean) => setF((p) => ({ ...p, [k]: v }));
+
+  useEffect(() => {
+    const onDoc = (e: MouseEvent) => { if (dlRef.current && !dlRef.current.contains(e.target as Node)) setDlOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  const { formRef, onFormKey } = useKeyNav();
 
   // Pincode → city + a base address (editable), via the app's pincode lookup.
   async function resolvePincode(pin: string) {
@@ -154,17 +214,6 @@ function Inner() {
     finally { setOcrBusy(false); }
   }
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/epc/quotation/brands", { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
-        const j = await res.json().catch(() => ({}));
-        if (j?.ok) setCustom(j.options || {});
-      } catch { /* defaults only */ }
-    })();
-  }, []);
-
-  const merge = (base: string[], field: string) => Array.from(new Set([...base, ...(custom[field] || [])]));
   const hasBattery = f.system_type !== "On-grid";
 
   const kwNum = Number(f.kw) || 0;
@@ -175,7 +224,7 @@ function Inner() {
 
   const mountOptions = useMemo(
     () => merge(f.roof_type ? MOUNTS_BY_ROOF[f.roof_type] || [] : [], BRAND_FIELDS.mount),
-    [f.roof_type, custom],
+    [f.roof_type, merge],
   );
 
   async function download() {
@@ -197,26 +246,16 @@ function Inner() {
         }),
       });
       if (!res.ok) { const j = await res.json().catch(() => ({})); setError(j?.error || "Couldn't generate the quotation."); return; }
-      const blob = await res.blob();
-      const cd = res.headers.get("Content-Disposition") || "";
-      const name = (cd.match(/filename="([^"]+)"/) || [])[1] || "quotation.pdf";
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
+      await saveDownload(res);
     } catch (e) { setError((e as Error)?.message || "Network error."); }
     finally { setBusy(false); }
   }
 
-  const input = "w-full border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none focus:border-[#1e3a8a]";
   const lbl = "text-[12.5px] font-medium text-text-mid";
 
   return (
     <div className="min-h-screen bg-bg-soft">
-      <header className="border-b border-line bg-white">
-        <div className="max-w-[900px] mx-auto px-5 sm:px-7 h-14 flex items-center">
-          <button onClick={() => router.push("/dashboard" as any)} className="text-[13px] text-text-muted hover:text-text inline-flex items-center gap-1">← Back to dashboard</button>
-        </div>
-      </header>
+      <BackHeader />
 
       <div className="max-w-[900px] mx-auto px-5 sm:px-7 py-8" ref={formRef} onKeyDown={onFormKey}>
         <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -319,6 +358,93 @@ function Inner() {
           <SearchableSelect label="DCDB" value={f.make_dcdb} onChange={(v) => set("make_dcdb", v)} options={merge(ACDB_DCDB_OPTIONS, BRAND_FIELDS.dcdb)} field={BRAND_FIELDS.dcdb} />
           <SearchableSelect label="Cables (AC & DC)" value={f.make_cable} onChange={(v) => set("make_cable", v)} options={merge(CABLE_OPTIONS, BRAND_FIELDS.cable)} field={BRAND_FIELDS.cable} />
           {hasBattery && <SearchableSelect label="Battery make" value={f.make_battery} onChange={(v) => set("make_battery", v)} options={merge(BATTERY_OPTIONS, BRAND_FIELDS.battery)} field={BRAND_FIELDS.battery} />}
+        </Section>
+
+        {error && <p className="text-[13px] text-red-600 mt-4">{error}</p>}
+        <div className="mt-6">
+          <button onClick={() => void download()} disabled={busy}
+            className="px-5 py-2.5 rounded-xl text-white text-[14px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
+            {busy ? "Generating…" : "Download quotation"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Bijlee Solar — their own PDF; only these values change (date is automatic,
+// serial no. auto-numbered, every other detail is their standard).
+type BijleeFields = {
+  customer_name: string; location: string; kw: string; serial: string;
+  project_location: string; client_name: string; msedcl_division: string; contracted_demand: string;
+  module_brand: string; inverter_brand: string; cable_brand: string;
+  rate_per_kw: string; structure_rate_per_kw: string;
+};
+
+function BijleeForm({ serialNext }: { serialNext: number | null }) {
+  const [f, setF] = useState<BijleeFields>({
+    customer_name: "", location: "", kw: "", serial: serialNext ? BIJLEE.serial(serialNext) : "",
+    project_location: "", client_name: "", msedcl_division: "", contracted_demand: "",
+    module_brand: BIJLEE.module, inverter_brand: BIJLEE.inverter, cable_brand: BIJLEE.cable,
+    rate_per_kw: "", structure_rate_per_kw: "",
+  });
+  const merge = useBrandOptions();
+  const { formRef, onFormKey } = useKeyNav();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const set = (k: keyof BijleeFields, v: string) => setF((p) => ({ ...p, [k]: v }));
+  const decimal = (v: string) => v.replace(/[^\d.]/g, "");
+  const digits = (v: string) => v.replace(/\D/g, "");
+
+  async function download() {
+    setError(null);
+    if (!f.customer_name.trim()) { setError("Customer name is required."); return; }
+    if (!(Number(f.kw) > 0)) { setError("Enter the system size (kW)."); return; }
+    if (!(Number(f.rate_per_kw) > 0)) { setError("Enter the price per kW."); return; }
+    setBusy(true);
+    try {
+      const res = await fetch("/api/epc/quotation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify({ ...f, kw: Number(f.kw), contracted_demand: f.contracted_demand || f.kw }),
+      });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); setError(j?.error || "Couldn't generate the quotation."); return; }
+      const next = res.headers.get("X-Next-Serial");
+      await saveDownload(res);
+      if (next) set("serial", next);
+    } catch (e) { setError((e as Error)?.message || "Network error."); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="min-h-screen bg-bg-soft">
+      <BackHeader />
+      <div className="max-w-[900px] mx-auto px-5 sm:px-7 py-8" ref={formRef} onKeyDown={onFormKey}>
+        <h1 className="font-display text-[24px] sm:text-[28px] font-bold text-text">Quotation builder</h1>
+
+        <Section title="Customer">
+          <Field l="Customer name" req><input className={input} value={f.customer_name} onChange={(e) => set("customer_name", e.target.value)} placeholder="Full name" /></Field>
+          <Field l="Location"><input className={input} value={f.location} onChange={(e) => set("location", e.target.value)} placeholder="e.g. Koradi Nagpur" /></Field>
+          <Field l="System size (kW)" req><input className={input} inputMode="decimal" value={f.kw} onChange={(e) => set("kw", decimal(e.target.value))} placeholder="e.g. 15" /></Field>
+          <Field l="Serial no."><input className={input} value={f.serial} onChange={(e) => set("serial", e.target.value)} placeholder={BIJLEE.serial(1)} /></Field>
+        </Section>
+
+        <Section title="Site survey">
+          <Field l="Project location"><input className={input} value={f.project_location} onChange={(e) => set("project_location", e.target.value)} placeholder="e.g. KORADI" /></Field>
+          <Field l="Client name"><input className={input} value={f.client_name} onChange={(e) => set("client_name", e.target.value)} /></Field>
+          <Field l="MSEDCL division"><input className={input} value={f.msedcl_division} onChange={(e) => set("msedcl_division", e.target.value)} /></Field>
+          <Field l="Contracted demand (kW)"><input className={input} inputMode="decimal" value={f.contracted_demand} onChange={(e) => set("contracted_demand", decimal(e.target.value))} placeholder={f.kw || "e.g. 15"} /></Field>
+        </Section>
+
+        <Section title="Products">
+          <SearchableSelect label="Solar module brand" value={f.module_brand} onChange={(v) => set("module_brand", v)} options={merge([BIJLEE.module, ...MODULE_BRANDS], BRAND_FIELDS.module)} field={BRAND_FIELDS.module} />
+          <SearchableSelect label="Inverter brand" value={f.inverter_brand} onChange={(v) => set("inverter_brand", v)} options={merge([BIJLEE.inverter, ...INVERTER_BRANDS], BRAND_FIELDS.inverter)} field={BRAND_FIELDS.inverter} />
+          <SearchableSelect label="Cable brand" value={f.cable_brand} onChange={(v) => set("cable_brand", v)} options={merge(CABLE_OPTIONS, BRAND_FIELDS.cable)} field={BRAND_FIELDS.cable} />
+        </Section>
+
+        <Section title="Cost">
+          <Field l="Price per kW ₹" req><input className={input} inputMode="numeric" value={f.rate_per_kw} onChange={(e) => set("rate_per_kw", digits(e.target.value))} placeholder="e.g. 38000" /></Field>
+          <Field l="Structure price per kW ₹"><input className={input} inputMode="numeric" value={f.structure_rate_per_kw} onChange={(e) => set("structure_rate_per_kw", digits(e.target.value))} placeholder="0" /></Field>
         </Section>
 
         {error && <p className="text-[13px] text-red-600 mt-4">{error}</p>}
