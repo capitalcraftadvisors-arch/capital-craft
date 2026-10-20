@@ -3,9 +3,9 @@
 // Pendings — /admin/pendings (main admin only).
 //
 // The checker side of the maker-checker flow (lib/review): approval details and
-// 1st / 2nd disbursements a team member entered wait here for the main admin to
-// check, edit if needed, and approve. One query on open; approving updates the
-// list locally (no refetch).
+// 1st / 2nd disbursements a team member entered, and EPC profiles the team
+// approved, wait here for the main admin to check, edit if needed, and approve.
+// One query per list on open; approving updates the list locally (no refetch).
 
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
@@ -18,7 +18,8 @@ import { fmtRupeesExact } from "@/lib/money";
 import { fmtDate } from "@/lib/dates";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import { LENDER_LABEL } from "@/components/ApprovalDetailsTable";
-import { approveReview, rememberPendingCount, PENDING_FILTER, REVIEW_LABEL, type ReviewItem } from "@/lib/review";
+import { approveReview, approveEpcReview, rememberPendingCount, PENDING_FILTER, REVIEW_LABEL, type ReviewItem } from "@/lib/review";
+import { invalidate } from "@/lib/list-cache";
 
 type Row = Record<string, any>;
 
@@ -37,6 +38,7 @@ function Inner() {
   const router = useRouter();
   const allowed = isMainAdmin(getBusiness());
   const [rows, setRows] = useState<Row[] | null>(null);
+  const [epcRows, setEpcRows] = useState<Row[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0); // bumped by clicking Pendings in the sidebar
@@ -44,18 +46,37 @@ function Inner() {
   useEffect(() => {
     if (!allowed) { router.replace("/admin"); return; }
     void (async () => {
-      const { data, error: e } = await supabase()
-        .from("epc_applications")
-        .select("id, loan_display_id, aadhaar_name, borrower_name, approved_lender, sanctioned_amount, approval_details, reviewed_by, approval_review_status, first_disbursement_amount, first_disbursement_date, disb1_review_status, second_disbursement_amount, second_disbursement_date, disb2_review_status, updated_at, epc_business:epc_business_id(trade_name, legal_name, contact_name)")
-        .or(PENDING_FILTER)
-        .order("updated_at", { ascending: false });
-      setError(e ? e.message : null);
+      const [{ data, error: e }, { data: epcs, error: e2 }] = await Promise.all([
+        supabase()
+          .from("epc_applications")
+          .select("id, loan_display_id, aadhaar_name, borrower_name, approved_lender, sanctioned_amount, approval_details, reviewed_by, approval_review_status, first_disbursement_amount, first_disbursement_date, disb1_review_status, second_disbursement_amount, second_disbursement_date, disb2_review_status, updated_at, epc_business:epc_business_id(trade_name, legal_name, contact_name)")
+          .or(PENDING_FILTER)
+          .order("updated_at", { ascending: false }),
+        supabase()
+          .from("epc_business")
+          .select("id, epc_display_id, trade_name, legal_name, contact_name, contact_mobile, reviewed_at")
+          .eq("admin_review_status", "pending")
+          .order("reviewed_at", { ascending: false }),
+      ]);
+      setError(e ? e.message : e2 ? e2.message : null);
       setRows((data ?? []) as Row[]);
+      setEpcRows((epcs ?? []) as Row[]);
     })();
   }, [allowed, router, reload]);
 
-  const count = rows?.length ?? 0;
-  useEffect(() => { if (rows) rememberPendingCount(rows.length); }, [rows]);
+  const loaded = rows != null && epcRows != null;
+  const count = (rows?.length ?? 0) + (epcRows?.length ?? 0);
+  useEffect(() => { if (loaded) rememberPendingCount(count); }, [loaded, count]);
+
+  async function approveEpc(id: string) {
+    if (busy) return;
+    setBusy(id + "epc"); setError(null);
+    const msg = await approveEpcReview(id);
+    setBusy(null);
+    if (msg) { setError("Couldn't approve — " + msg); return; }
+    invalidate("dash.epcs"); // the console's EPC list shows the lender actions again
+    setEpcRows((rs) => (rs ?? []).filter((r) => r.id !== id));
+  }
 
   async function approve(id: string, item: ReviewItem) {
     const key = id + item;
@@ -92,7 +113,7 @@ function Inner() {
 
   return (
     <div className="min-h-screen bg-bg-soft md:flex">
-      <AdminSidebar active="pendings" pendings={rows ? count : undefined} onPendingsClick={() => setReload((n) => n + 1)} />
+      <AdminSidebar active="pendings" pendings={loaded ? count : undefined} onPendingsClick={() => setReload((n) => n + 1)} />
       <div className="flex-1 min-w-0">
         <header className="px-4 sm:px-6 py-5 border-b border-line bg-white">
           <div className="flex items-center gap-2.5">
@@ -105,6 +126,28 @@ function Inner() {
 
         <main className="px-4 sm:px-6 py-5 space-y-6">
           {error && <p className="text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-[8px] px-3 py-2">{error}</p>}
+
+          <Section title="EPC pendings" n={epcRows?.length ?? 0} loading={!epcRows}>
+            <Table head={["EPC", "EPC ID", "Contact", "Mobile", ""]}>
+              {(epcRows ?? []).map((r) => (
+                <tr key={r.id} className="border-t border-line">
+                  <Td><Link href={`/admin/epc/${r.id}/view` as any} className="font-semibold text-text hover:underline">{r.trade_name || r.legal_name || r.contact_name || "—"}</Link></Td>
+                  <Td>{r.epc_display_id || "—"}</Td>
+                  <Td>{r.contact_name || "—"}</Td>
+                  <Td>{r.contact_mobile ? `+91 ${r.contact_mobile}` : "—"}</Td>
+                  <Td>
+                    <div className="flex items-center gap-2 justify-end">
+                      <Link href={`/admin/epc/${r.id}/view` as any} className="px-3 py-1.5 border border-line rounded text-[12px] font-semibold text-text hover:bg-bg-tint">View</Link>
+                      <button type="button" onClick={() => void approveEpc(r.id)} disabled={busy != null}
+                        className="px-3 py-1.5 bg-[#178a5c] text-white rounded text-[12px] font-semibold hover:bg-[#12734c] disabled:opacity-60">
+                        {busy === r.id + "epc" ? "Approving…" : "Approve"}
+                      </button>
+                    </div>
+                  </Td>
+                </tr>
+              ))}
+            </Table>
+          </Section>
 
           <Section title="Approval pendings" n={approvals.length} loading={!rows}>
             <Table head={["Applicant", "Loan ID", "EPC", "Lender", "Approved amount", "Tenure", "EMI", "Filled by", ""]}>

@@ -168,7 +168,7 @@ function Inner() {
           </div>
           {(() => {
             const s = biz.status;
-            const label = s === "approved" ? "Approved by CC" : s === "under_review" ? "Under review" : s === "on_hold" ? "On hold" : s === "rejected" ? "Rejected" : "Draft";
+            const label = s === "approved" ? "Approved by Manish" : s === "under_review" ? "Under review" : s === "on_hold" ? "On hold" : s === "rejected" ? "Rejected" : "Draft";
             const cls = s === "approved" ? "bg-green-50 text-green-dark" : s === "rejected" ? "bg-red-50 text-red-700" : s === "under_review" ? "bg-[#fef0d6] text-[#854f0b]" : s === "on_hold" ? "bg-[#e5edf5] text-[#3b5a76]" : "bg-[#eef1f0] text-[#5a8a76]";
             return <span className={`inline-block px-3 py-1 rounded-full text-[12px] font-semibold ${cls}`}>{label}</span>;
           })()}

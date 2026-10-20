@@ -29,6 +29,8 @@ import {
 import { fmtDate, fmtDateTime } from "@/lib/dates";
 import { policyValidityParts, VALIDITY_TEXT } from "@/lib/insurance-validity";
 import LenderCell from "@/components/LenderCell";
+import AdminPendingPill from "@/components/AdminPendingPill";
+import { epcLocked, saveEpcLenderState } from "@/lib/review";
 import LoanLeadsTab from "@/components/LoanLeadsTab";
 import { latestLenderStatus, latestStatusLabel, type LoanLenderRow } from "@/lib/loan-lenders";
 import { LENDER_LABEL } from "@/components/ApprovalDetailsTable";
@@ -372,7 +374,7 @@ const EPC_STAGE_META: Record<string, { label: string; cls: string }> = {
   unseen:          { label: "Application Unseen",  cls: "bg-[#eef1f0] text-[#5a8a76]" },
   under_review:    { label: "Under Review",        cls: "bg-[#fef0d6] text-[#854f0b]" },
   updated:         { label: "Updated",             cls: "bg-[#fff2cc] text-[#8a6500]" },
-  approved:        { label: "Approved by CC",      cls: "bg-[#e6f6ee] text-[#178a5c]" },
+  approved:        { label: "Approved by Manish",  cls: "bg-[#e6f6ee] text-[#178a5c]" },
   hold:            { label: "Hold",                cls: "bg-[#e5edf5] text-[#3b5a76]" },
   rejected:        { label: "Rejected by CC",      cls: "bg-red-50 text-red-700" },
   docs_sent:       { label: "Docs Sent to Lender", cls: "bg-[#dceffb] text-[#185fa5]" },
@@ -565,7 +567,7 @@ function DashboardKpis({ tab, period, pFrom, pTo, epc }: { tab: string; period: 
         <KpiTile label="Application unseen" value={String(epc.unseen)} accent="#94a3b8" />
         <KpiTile label="Docs sent to lender" value={String(epc.docsSent)} accent="#185fa5" />
         <KpiTile label="Approved by lender" value={String(epc.lenderApproved)} accent="#178a5c" />
-        <KpiTile label="Approved by CC" value={String(epc.approved)} accent="#0f7a52" />
+        <KpiTile label="Approved by Manish" value={String(epc.approved)} accent="#0f7a52" />
         <KpiTile label="Rejected by CC" value={String(epc.rejected)} accent="#dc2626" />
       </div>
     );
@@ -740,6 +742,7 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
     epc_self_edited: boolean | null;
     reviewed_at: string | null;
     created_by_user_id: string | null;
+    admin_review_status: string | null;
   };
   const adminNames = useAdminNames();
   const [rows, setRows] = useState<Row[]>([]);
@@ -828,7 +831,7 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
       if (cached) { setRows(cached.rows); setLenderState(cached.lenderState); return; }
     }
     let query = supabase().from("epc_business")
-      .select("id, epc_display_id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, source, created_at, submitted_at, epc_self_edited, reviewed_at, created_by_user_id")
+      .select("id, epc_display_id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, source, created_at, submitted_at, epc_self_edited, reviewed_at, created_by_user_id, admin_review_status")
       .neq("business_type", "admin");
     const { data } = await query;
     const rs = (data ?? []) as Row[];
@@ -1017,17 +1020,7 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
       return next;
     });
     try {
-      const { data: existing } = await supabase()
-        .from("epc_lender_status")
-        .select("id")
-        .eq("business_id", epcId)
-        .eq("lender", lender)
-        .maybeSingle();
-      if (existing) {
-        await supabase().from("epc_lender_status").update(dbPatch).eq("id", (existing as { id: string }).id);
-      } else {
-        await supabase().from("epc_lender_status").insert({ business_id: epcId, lender, ...dbPatch });
-      }
+      await saveEpcLenderState(epcId, lender, dbPatch);
       invalidate("dash.epcs"); // local state already updated; refresh cache on next mount
     } catch (e) {
       setLenderState(prevState);
@@ -1042,7 +1035,7 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
     { key: "unseen",          label: "Application Unseen",  value: fyRows.filter((r) => catMatch(r, "unseen")).length },
     { key: "under_review",    label: "Under Review",        value: fyRows.filter((r) => catMatch(r, "under_review")).length },
     { key: "updated",         label: "Updated",             value: fyRows.filter((r) => catMatch(r, "updated")).length },
-    { key: "approved",        label: "Approved by CC",      value: fyRows.filter((r) => catMatch(r, "approved")).length },
+    { key: "approved",        label: "Approved by Manish",  value: fyRows.filter((r) => catMatch(r, "approved")).length },
     { key: "hold",            label: "Hold",                value: fyRows.filter((r) => catMatch(r, "hold")).length },
     { key: "rejected",        label: "Rejected by CC",      value: fyRows.filter((r) => catMatch(r, "rejected")).length },
     { key: "docs_sent",       label: "Docs Sent to Lender", value: fyRows.filter((r) => catMatch(r, "docs_sent")).length },
@@ -1248,12 +1241,14 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
                   })()}
                 </td>
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
-                  <LenderCell
-                    state={lenderState[r.id] ?? {}}
-                    lenders={lenderList}
-                    onSet={(lender, target) => setLenderExclusive(r.id, lender, target)}
-                    onAddLender={addLender}
-                  />
+                  {epcLocked(r) ? <AdminPendingPill /> : (
+                    <LenderCell
+                      state={lenderState[r.id] ?? {}}
+                      lenders={lenderList}
+                      onSet={(lender, target) => setLenderExclusive(r.id, lender, target)}
+                      onAddLender={addLender}
+                    />
+                  )}
                 </td>
                 <td className="px-3 py-3 text-center">
                   <p className="text-[13px] font-semibold text-[#0f3d2e]">
@@ -1270,8 +1265,8 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
                 </td>
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <div className="flex flex-col items-center gap-1">
-                    <button type="button" onClick={(e) => { e.stopPropagation(); setEmailRow(r); }}
-                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 bg-[#178a5c] text-white hover:bg-[#12734c] transition-colors">
+                    <button type="button" disabled={epcLocked(r)} onClick={(e) => { e.stopPropagation(); setEmailRow(r); }}
+                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 bg-[#178a5c] text-white hover:bg-[#12734c] transition-colors disabled:opacity-40 disabled:pointer-events-none">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
                       Email
                     </button>

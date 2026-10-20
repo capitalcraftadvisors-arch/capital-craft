@@ -4,6 +4,7 @@
 // same editable-detail + document-pack + summary format. Sent FROM
 // capitalcraftadvisors@gmail.com with Manishfrthanvi@gmail.com in CC by default
 // (the EPC desk is managed by Manish). Admin-only. Keeps Download-ZIP untouched.
+// The team can't send while the profile waits for the main admin's check (0100).
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
@@ -74,6 +75,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     ]);
     if (loadErr) return err(loadErr.message, 500);
     if (!epc) return err("EPC not found.", 404);
+    // A profile the team approved waits for the main admin's check (Pendings).
+    const team = !!claims.hierarchy_role && claims.hierarchy_role !== "MAIN_ADMIN";
+    if (team && epc.admin_review_status === "pending") return err("This profile is waiting for admin approval.", 403);
 
     const epcName: string = epc.trade_name || epc.legal_name || epc.contact_name || "EPC";
     const seen = new Set<string>();

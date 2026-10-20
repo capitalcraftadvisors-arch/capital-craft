@@ -21,6 +21,8 @@ import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness, isMainAdmin } from "@/lib/auth";
+import { epcReviewPatch, approveEpcReview, epcLocked, invalidatePendingCount, saveEpcLenderState } from "@/lib/review";
+import AdminPendingPill from "@/components/AdminPendingPill";
 import { getDocumentUrl, deleteDocument } from "@/lib/storage";
 import { logAudit } from "@/lib/auditLog";
 import { Period, inPeriod } from "@/lib/period";
@@ -290,7 +292,8 @@ function Inner() {
       // it was submitted. First-write wins — subsequent status flips
       // keep the original timestamp so the analytics "time to review"
       // metric measures initial admin response, not the latest change.
-      const patch: Record<string, unknown> = { status: next };
+      // Approving: the team's approval waits for the main admin's check (Pendings).
+      const patch: Record<string, unknown> = { status: next, ...(next === "approved" ? epcReviewPatch() : {}) };
       const firstReview = !biz.reviewed_at ? new Date().toISOString() : null;
       if (firstReview) patch.reviewed_at = firstReview;
       // Rejection reason: set it when rejecting, clear it on any other status.
@@ -306,7 +309,23 @@ function Inner() {
         return;
       }
       await logAudit(biz.id, "field_edit", "status", biz.status, next);
-      setBiz({ ...biz, status: next, rejection_reason: nextReason, ...(firstReview ? { reviewed_at: firstReview } : {}) });
+      setBiz({ ...biz, ...patch, ...(next === "approved" ? {} : { admin_review_status: null }) });
+      invalidatePendingCount();
+    } finally {
+      setStatusBusy(false);
+    }
+  }
+
+  // Main admin's check of a profile the team approved (same as on Pendings).
+  async function approveAdminCheck() {
+    if (!biz || statusBusy) return;
+    setStatusBusy(true);
+    try {
+      const msg = await approveEpcReview(biz.id);
+      if (msg) { alert("Couldn't approve: " + msg); return; }
+      await logAudit(biz.id, "field_edit", "admin_review", "pending", "approved");
+      setBiz({ ...biz, admin_review_status: "approved" });
+      invalidatePendingCount();
     } finally {
       setStatusBusy(false);
     }
@@ -335,11 +354,16 @@ function Inner() {
   // Approved / Rejected are gated behind Docs Sent in the UI below.
   async function setLenderExclusive(lenderKey: string, target: "none" | "docs" | "approved" | "rejected") {
     if (!biz) return;
-    // Gate: docs can't go to a lender until Capital Craft has approved the EPC
-    // profile. If it hasn't, offer to approve it now and continue in one step —
-    // clicking "OK" flips the profile to Approved by CC, then sends the docs.
+    if (epcLocked(biz)) { alert("This profile is waiting for admin approval."); return; }
+    // Gate: docs can't go to a lender until the EPC profile is approved. The main
+    // admin can approve it now and continue in one step; a team member's approval
+    // goes to the admin's check first, so the lender step waits.
     if ((target === "docs" || target === "approved") && biz.status !== "approved") {
-      if (!window.confirm("This EPC profile hasn't been approved by Capital Craft yet.\n\nApprove it now and continue?")) return;
+      if (!isMainAdmin(getBusiness())) {
+        if (window.confirm("This EPC profile hasn't been approved yet.\n\nApprove it now and send it for admin approval?")) await changeStatus("approved");
+        return;
+      }
+      if (!window.confirm("This EPC profile hasn't been approved yet.\n\nApprove it now and continue?")) return;
       await changeStatus("approved");
     }
     if (target === "approved" && !window.confirm("Mark this lender as Approved?")) return;
@@ -349,17 +373,7 @@ function Inner() {
     const prev = lender;
     setLender((arr) => [...arr.filter((x) => x.lender !== lenderKey), { lender: lenderKey, ...flags }]);
     try {
-      const { data: existing } = await supabase()
-        .from("epc_lender_status")
-        .select("id")
-        .eq("business_id", biz.id)
-        .eq("lender", lenderKey)
-        .maybeSingle();
-      if (existing) {
-        await supabase().from("epc_lender_status").update(dbPatch).eq("id", (existing as { id: string }).id);
-      } else {
-        await supabase().from("epc_lender_status").insert({ business_id: biz.id, lender: lenderKey, ...dbPatch });
-      }
+      await saveEpcLenderState(biz.id, lenderKey, dbPatch);
       await logAudit(biz.id, "field_edit", `lender_${lenderKey}`, null, target);
     } catch (e) {
       setLender(prev);
@@ -511,14 +525,24 @@ function Inner() {
                   : "bg-red-50 text-red-700 border-red-200")
               }
             >
-              {biz.status === "approved" ? "Approved by CC" : "Rejected by CC"}
+              {biz.status === "approved" ? "Approved by Manish" : "Rejected by CC"}
             </span>
+          )}
+          {/* Waiting for the main admin's check: he approves here (or on
+              Pendings); the team sees it's pending and can't touch lenders. */}
+          {biz.status === "approved" && biz.admin_review_status === "pending" && (
+            isMainAdmin(getBusiness()) ? (
+              <button type="button" onClick={() => void approveAdminCheck()} disabled={statusBusy}
+                className="inline-flex items-center px-3 py-1.5 rounded-[8px] text-[13px] font-semibold bg-[#178a5c] text-white hover:bg-[#12734c] disabled:opacity-60 whitespace-nowrap">
+                Admin approve
+              </button>
+            ) : <AdminPendingPill />
           )}
           {/* Lender-status dropdown — available once the EPC has submitted
               (not draft), even before CC review. Sending docs (or approving)
               before CC approval prompts to approve the profile in the same
               step (see setLenderExclusive). */}
-          {biz.status !== "draft" && (
+          {biz.status !== "draft" && !epcLocked(biz) && (
             <LenderCell
               state={lenderMap}
               lenders={lenderList}
@@ -976,7 +1000,7 @@ function ServiceBand({
 const INTERNAL_STATUS_LABEL: Record<string, string> = {
   draft:        "Draft",
   under_review: "Under review",
-  approved:     "Approved by Capital Craft",
+  approved:     "Approved by Manish",
   on_hold:      "On hold",
   rejected:     "Rejected",
 };
