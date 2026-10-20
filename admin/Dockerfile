@@ -29,7 +29,5 @@ COPY --from=builder /app/.next/static ./.next/static
 # Standalone output does NOT bundle public/ — copy it so static brand assets
 # (e.g. /brand/capital-craft.png) are served.
 COPY --from=builder /app/public ./public
-# Server-only files (not served), e.g. Bijlee's quotation template PDF.
-COPY --from=builder /app/templates ./templates
 EXPOSE 8080
 CMD ["node", "server.js"]

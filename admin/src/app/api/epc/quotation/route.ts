@@ -9,8 +9,9 @@
 // business → "bundled:…" reads the app-shipped template, else a GCS object.
 // When no row exists yet it falls back to the bundled GHANPRIYA template.
 //
-// Bijlee Solar (bundled:bijlee) is their own PDF filled directly — always a PDF —
-// and its serial number auto-advances (X-Next-Serial tells the form the next one).
+// Bijlee Solar (bundled:bijlee) and Sarvatra Energy (bundled:sarvatra) are their
+// own PDFs filled directly — always a PDF — and the serial / quote no. auto-advances
+// (X-Next-Serial tells the form the next one).
 //
 // Auth: caller's token (RLS scopes the template lookup to the EPC's own row).
 
@@ -20,8 +21,9 @@ import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { downloadBuffer } from "@/lib/gcs";
 import { buildQuotationData, fillTemplate, readBundledTemplate, type QuotationInput } from "@/lib/quotation";
 import { docxToPdf } from "@/lib/docx-to-pdf";
-import { buildBijleeQuotation, type BijleeInput } from "@/lib/quotation-bijlee";
-import { BIJLEE } from "@/lib/quotation-brands";
+import { buildBijleeQuotation } from "@/lib/quotation-bijlee";
+import { buildSarvatraQuotation, buildSarvatraPcr, buildSarvatraAgreement, type SarvatraInput } from "@/lib/quotation-sarvatra";
+import { BIJLEE, SARVATRA } from "@/lib/quotation-brands";
 import { fmtDateIST } from "@/lib/dates";
 
 export const runtime = "nodejs";
@@ -74,39 +76,87 @@ export async function POST(req: NextRequest) {
     } catch { /* table missing → treated as no template */ }
     if (!storagePath) return err("No quotation template is set up for your account yet.", 403);
 
-    if (storagePath === BIJLEE.key) {
-      const b = body as unknown as Partial<Record<keyof BijleeInput, string | number>>;
-      const s = (k: keyof BijleeInput) => String(b[k] ?? "").trim();
-      const input: BijleeInput = {
-        customer_name: s("customer_name"), location: s("location"), kw: Number(b.kw),
-        serial: s("serial"), date: fmtDateIST(new Date()),
-        project_location: s("project_location"), client_name: s("client_name"),
-        msedcl_division: s("msedcl_division"), contracted_demand: s("contracted_demand"),
-        module_brand: s("module_brand") || BIJLEE.module, inverter_brand: s("inverter_brand") || BIJLEE.inverter,
-        cable_brand: s("cable_brand") || BIJLEE.cable,
-        rate_per_kw: Number(b.rate_per_kw) || 0, structure_rate_per_kw: Number(b.structure_rate_per_kw) || 0,
-      };
-      if (input.rate_per_kw <= 0) return err("Price per kW is required.", 400);
-      const pdf = await buildBijleeQuotation(input, readBundledTemplate(storagePath));
+    if (storagePath === BIJLEE.key || storagePath === SARVATRA.key) {
+      const b = body as unknown as Record<string, unknown>;
+      const s = (k: string) => String(b[k] ?? "").trim();
+      const n = (k: string) => Number(b[k]) || 0;
+      const today = fmtDateIST(new Date()); // DD/MM/YYYY, India time
+      const template = await readBundledTemplate(storagePath);
+      const name = safeName(s("customer_name"));
+      let files: { name: string; pdf: Uint8Array }[];
+      let serial: string, serialNo: (s: string) => number, serialOf: (n: number) => string;
+      if (storagePath === BIJLEE.key) {
+        if (n("rate_per_kw") <= 0) return err("Price per kW is required.", 400);
+        serial = s("serial"); serialNo = BIJLEE.serialNo; serialOf = BIJLEE.serial;
+        const pdf = await buildBijleeQuotation({
+          customer_name: s("customer_name"), location: s("location"), kw: n("kw"), serial, date: today,
+          project_location: s("project_location"), client_name: s("client_name"),
+          msedcl_division: s("msedcl_division"), contracted_demand: s("contracted_demand"),
+          module_brand: s("module_brand") || BIJLEE.module, inverter_brand: s("inverter_brand") || BIJLEE.inverter,
+          cable_brand: s("cable_brand") || BIJLEE.cable,
+          rate_per_kw: n("rate_per_kw"), structure_rate_per_kw: n("structure_rate_per_kw"),
+        }, template);
+        files = [{ name: `Quotation_${name}_${safeName(serial)}.pdf`, pdf }];
+      } else {
+        if (n("price") <= 0) return err("System price is required.", 400);
+        const month = Number(today.slice(3, 5));
+        serial = s("quote_no"); serialNo = SARVATRA.serialNo; serialOf = (x) => SARVATRA.serial(x, month);
+        const input: SarvatraInput = {
+          quote_no: serial, date: today.replace(/\//g, "-"), title: s("title"), customer_name: s("customer_name"),
+          contact: s("contact"), city: s("city"), state: s("state"), kw: n("kw"),
+          panel_brand: s("panel_brand") || SARVATRA.panel, panel_type: s("panel_type") || SARVATRA.panelType,
+          inverter_brand: s("inverter_brand") || SARVATRA.inverter, inverter_kw: n("inverter_kw") || n("kw"),
+          phase: s("phase") || SARVATRA.phases[0], inverter_location: s("inverter_location"),
+          connection_type: s("connection_type"), floors: s("floors"), solar_care: b.solar_care === true,
+          roof_type: s("roof_type"), structure_type: s("structure_type"),
+          price: n("price"), state_subsidy: n("state_subsidy"), design_payment: n("design_payment"),
+          email: s("email"), ebill_name: s("ebill_name"), k_number: s("k_number"), address: s("address"),
+          pincode: s("pincode"), sanctioned_load: s("sanctioned_load"), spc_name: s("spc_name"),
+          cell_type: s("cell_type") || SARVATRA.cellType, dcr_type: s("dcr_type") || SARVATRA.dcrTypes[0],
+          wp: s("wp") || SARVATRA.wp, inverter_type: s("inverter_type") || SARVATRA.inverterTypes[0],
+          maintenance_plan: s("maintenance_plan"), maintenance_others: s("maintenance_others"),
+          site_readiness: s("site_readiness") || SARVATRA.siteReadiness[0],
+          bill_correction: Array.isArray(b.bill_correction) ? b.bill_correction.map(String) : [],
+          finance_by: s("finance_by"), payment_method: s("payment_method"),
+          payment_mode: s("payment_mode") || SARVATRA.paymentModes[0], aen: s("aen"),
+        };
+        const [quotation, pcr, agreement] = await Promise.all([
+          buildSarvatraQuotation(input, template),
+          buildSarvatraPcr(input, await readBundledTemplate("bundled:sarvatra-pcr")),
+          buildSarvatraAgreement(input, await readBundledTemplate("bundled:sarvatra-agreement")),
+        ]);
+        files = [
+          { name: `Quotation_${name}_${safeName(serial)}.pdf`, pdf: quotation },
+          { name: `PCR_${name}_${safeName(serial)}.pdf`, pdf: pcr },
+          { name: `Agreement_${name}_${safeName(serial)}.pdf`, pdf: agreement },
+        ];
+      }
       // Auto-number: the next suggested serial moves past the one just used.
-      const used = Number(/\d+/.exec(input.serial)?.[0]);
+      const used = serialNo(serial);
       let next = "";
       if (used > 0) {
         const { data } = await supabase.rpc("quotation_serial_used", { p_template: templateId, p_used: used });
-        if (typeof data === "number") next = BIJLEE.serial(data);
+        if (typeof data === "number") next = serialOf(data);
       }
-      return new NextResponse(new Uint8Array(pdf), {
+      // One document → the PDF itself; several → JSON, the page saves each as its own PDF.
+      if (files.length > 1) {
+        return NextResponse.json(
+          { ok: true, files: files.map((f) => ({ name: f.name, data: Buffer.from(f.pdf).toString("base64") })) },
+          { headers: { "X-Next-Serial": next } },
+        );
+      }
+      return new NextResponse(new Uint8Array(files[0].pdf), {
         status: 200,
         headers: {
           "Content-Type": "application/pdf",
-          "Content-Disposition": `attachment; filename="Quotation_${safeName(input.customer_name)}_${safeName(input.serial)}.pdf"`,
+          "Content-Disposition": `attachment; filename="${files[0].name}"`,
           "X-Next-Serial": next,
         },
       });
     }
 
     const templateBuf = storagePath.startsWith("bundled:")
-      ? readBundledTemplate(storagePath)
+      ? await readBundledTemplate(storagePath)
       : await downloadBuffer(storagePath);
 
     const data = buildQuotationData(body as QuotationInput);

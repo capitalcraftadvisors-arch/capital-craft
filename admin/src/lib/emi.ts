@@ -28,6 +28,11 @@ export function computeCentralSubsidy(kw: number | null): number {
   return CENTRAL_SUBSIDY_CAP;
 }
 
+// PM Surya Ghar is for homes only — no central subsidy on commercial plants.
+export function centralSubsidyFor(kw: number | null, commercial: boolean): number {
+  return commercial ? 0 : computeCentralSubsidy(kw);
+}
+
 // Reducing-balance EMI, rounded to the nearest rupee.
 // principal in rupees, roi in percent per annum, years whole years.
 export function computeEmi(principal: number, roiPct: number, years: number): number {
@@ -36,6 +41,13 @@ export function computeEmi(principal: number, roiPct: number, years: number): nu
   const n = years * 12;
   const pow = Math.pow(1 + r, n);
   return Math.round(principal * r * pow / (pow - 1));
+}
+
+// Flat-rate EMI (interest on the full principal for the whole tenure), rounded
+// to the nearest rupee — how some EPCs quote financing.
+export function computeFlatEmi(principal: number, flatPct: number, years: number): number {
+  if (principal <= 0 || years <= 0) return 0;
+  return Math.round((principal * (1 + (flatPct / 100) * years)) / (12 * years));
 }
 
 export function formatRupees(n: number | null | undefined): string {

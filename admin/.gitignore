@@ -28,3 +28,6 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+
+# EPC quotation templates hold real customer samples — private bucket only (templates/)
+/templates/

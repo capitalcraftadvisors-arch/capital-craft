@@ -3,22 +3,29 @@
 // EPC Quotation Builder — fill a short form, download a quotation in the EPC's
 // own format (PDF on prod, .docx fallback). The heavy content/format lives in
 // the stored template; this page only collects the ~dozen variable values.
-// Bijlee Solar's template (their own PDF) has its own shorter form.
+// Bijlee Solar's and Sarvatra Energy's templates (their own PDFs) have their own
+// forms; Sarvatra's one form makes their quotation and PCR together.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { getToken } from "@/lib/auth";
 import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template";
+import { centralSubsidyFor } from "@/lib/emi";
+import { INDIA_STATES } from "@/lib/india-states";
+import { supabase } from "@/lib/supabase";
+import { LENDER_LABEL, type LenderKey } from "@/lib/lender-summary";
 import SearchableSelect from "@/components/quotation/SearchableSelect";
 import {
   MODULE_BRANDS, INVERTER_BRANDS, ROOF_TYPES, MOUNTS_BY_ROOF,
-  ACDB_DCDB_OPTIONS, CABLE_OPTIONS, BATTERY_OPTIONS, SYSTEM_TYPES, BRAND_FIELDS, BIJLEE,
+  ACDB_DCDB_OPTIONS, CABLE_OPTIONS, BATTERY_OPTIONS, SYSTEM_TYPES, BRAND_FIELDS, BIJLEE, SARVATRA,
 } from "@/lib/quotation-brands";
 
 const NAVY = "#1e3a8a";
 const input = "w-full border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none focus:border-[#1e3a8a]";
 const inr = (n: number) => (Number.isFinite(n) ? Math.round(n).toLocaleString("en-IN") : "0");
+const decimal = (v: string) => v.replace(/[^\d.]/g, "");
+const digits = (v: string) => v.replace(/\D/g, "");
 function stateSubsidyFor(kw: number): number { if (!kw || kw <= 0) return 0; return kw >= 3 ? 78000 : Math.round(kw * 30000); }
 function todayDDMMYYYY() { const d = new Date(); const p = (x: number) => String(x).padStart(2, "0"); return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`; }
 
@@ -60,7 +67,9 @@ function Builder() {
     );
   }
   if (tpl === undefined) return null;
-  return tpl?.storage_path === BIJLEE.key ? <BijleeForm serialNext={tpl.serial_next} /> : <Inner />;
+  if (tpl?.storage_path === BIJLEE.key) return <BijleeForm serialNext={tpl.serial_next} />;
+  if (tpl?.storage_path === SARVATRA.key) return <SarvatraForm serialNext={tpl.serial_next} />;
+  return <Inner />;
 }
 
 // Keyboard navigation: Enter / ↓ / → (at caret end) → next field; ↑ / ← (at
@@ -127,14 +136,104 @@ function useBrandOptions() {
   return useCallback((base: string[], field: string) => Array.from(new Set([...base, ...(custom[field] || [])])), [custom]);
 }
 
-// Save the generated quotation the server sent back.
-async function saveDownload(res: Response) {
-  const blob = await res.blob();
-  const cd = res.headers.get("Content-Disposition") || "";
-  const name = (cd.match(/filename="([^"]+)"/) || [])[1] || "quotation.pdf";
-  const url = URL.createObjectURL(blob);
+type SavedFile = { name: string; url: string };
+
+function saveUrl(url: string, name: string) {
   const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+}
+
+// Save what the server sent back: one file, or several (JSON, each its own PDF).
+// Several → also returned as links, in case the browser blocks the extra downloads.
+async function saveDownload(res: Response): Promise<SavedFile[]> {
+  if ((res.headers.get("Content-Type") || "").includes("application/json")) {
+    const j = (await res.json()) as { files: { name: string; data: string }[] };
+    const files = j.files.map((f) => ({
+      name: f.name,
+      url: URL.createObjectURL(new Blob([Uint8Array.from(atob(f.data), (c) => c.charCodeAt(0))], { type: "application/pdf" })),
+    }));
+    for (const [n, f] of files.entries()) {
+      if (n) await new Promise((r) => setTimeout(r, 400)); // let the browser start each download
+      saveUrl(f.url, f.name);
+    }
+    return files;
+  }
+  const cd = res.headers.get("Content-Disposition") || "";
+  const url = URL.createObjectURL(await res.blob());
+  saveUrl(url, (cd.match(/filename="([^"]+)"/) || [])[1] || "quotation.pdf");
   URL.revokeObjectURL(url);
+  return [];
+}
+
+// Generate the quotation and save it; resolves to the next suggested serial no.
+// (PDF-template EPCs) or null.
+function useQuotationDownload() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [files, setFiles] = useState<SavedFile[]>([]);
+  async function run(body: object): Promise<string | null> {
+    setError(null);
+    setFiles((old) => { old.forEach((f) => URL.revokeObjectURL(f.url)); return []; });
+    setBusy(true);
+    try {
+      const res = await fetch("/api/epc/quotation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); setError(j?.error || "Couldn't generate the quotation."); return null; }
+      const next = res.headers.get("X-Next-Serial");
+      setFiles(await saveDownload(res));
+      return next;
+    } catch (e) { setError((e as Error)?.message || "Network error."); return null; }
+    finally { setBusy(false); }
+  }
+  return { busy, error, setError, files, run };
+}
+
+function DownloadBar({ busy, error, files = [], onClick }: { busy: boolean; error: string | null; files?: SavedFile[]; onClick: () => void }) {
+  return (
+    <>
+      {error && <p className="text-[13px] text-red-600 mt-4">{error}</p>}
+      <div className="mt-6 flex items-center gap-4 flex-wrap">
+        <button onClick={onClick} disabled={busy}
+          className="px-5 py-2.5 rounded-xl text-white text-[14px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
+          {busy ? "Generating…" : "Download quotation"}
+        </button>
+        {files.map((f) => (
+          <a key={f.url} href={f.url} download={f.name} className="text-[12.5px] text-[#1e3a8a] underline">{f.name}</a>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function Toggle({ on, onClick, label, grow }: { on: boolean; onClick: () => void; label: string; grow?: boolean }) {
+  return (
+    <button type="button" onClick={onClick}
+      className={[grow ? "flex-1" : "", "px-3 py-2 rounded-xl text-[13px] font-semibold border", on ? "text-white border-transparent" : "bg-white border-line text-text-mid"].join(" ")}
+      style={on ? { background: NAVY } : undefined}>{label}</button>
+  );
+}
+
+function YesNo({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex gap-2">
+      {([["Yes", true], ["No", false]] as const).map(([lab, val]) => (
+        <Toggle key={lab} label={lab} on={value === val} onClick={() => onChange(val)} grow />
+      ))}
+    </div>
+  );
+}
+
+// Pick any number of options (none = not applicable).
+function Chips({ options, value, onChange }: { options: readonly string[]; value: string[]; onChange: (v: string[]) => void }) {
+  return (
+    <div className="flex gap-2 flex-wrap">
+      {options.map((o) => (
+        <Toggle key={o} label={o} on={value.includes(o)} onClick={() => onChange(value.includes(o) ? value.filter((x) => x !== o) : [...value, o])} />
+      ))}
+    </div>
+  );
 }
 
 function BackHeader() {
@@ -151,12 +250,11 @@ function BackHeader() {
 function Inner() {
   const [f, setF] = useState<Form>(EMPTY);
   const merge = useBrandOptions();
-  const [busy, setBusy] = useState(false);
+  const { busy, error, setError, run } = useQuotationDownload();
   const [pinBusy, setPinBusy] = useState(false);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [dlOpen, setDlOpen] = useState(false);
   const dlRef = useRef<HTMLDivElement>(null);
-  const [error, setError] = useState<string | null>(null);
   const set = (k: keyof Form, v: string | boolean) => setF((p) => ({ ...p, [k]: v }));
 
   useEffect(() => {
@@ -228,27 +326,16 @@ function Inner() {
   );
 
   async function download() {
-    setError(null);
     if (!f.customer_name.trim()) { setError("Customer name is required."); return; }
     if (kwNum <= 0) { setError("Enter the system size (kW)."); return; }
-    setBusy(true);
-    try {
-      const res = await fetch("/api/epc/quotation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
-        body: JSON.stringify({
-          customer_name: f.customer_name, city: f.city, state: f.address, date: f.date, quote_no: f.quote_no,
-          kw: kwNum, system_type: f.system_type, battery: hasBattery && f.battery ? `${f.battery} ${f.battery_unit}` : "",
-          total: totalNum, subsidised: f.subsidised, central_subsidy: centralNum,
-          make_panel: f.make_panel, make_inverter: f.make_inverter, make_structure: f.make_structure,
-          make_acdb: f.make_acdb, make_dcdb: f.make_dcdb, make_cable: f.make_cable,
-          make_battery: hasBattery ? f.make_battery : "",
-        }),
-      });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); setError(j?.error || "Couldn't generate the quotation."); return; }
-      await saveDownload(res);
-    } catch (e) { setError((e as Error)?.message || "Network error."); }
-    finally { setBusy(false); }
+    await run({
+      customer_name: f.customer_name, city: f.city, state: f.address, date: f.date, quote_no: f.quote_no,
+      kw: kwNum, system_type: f.system_type, battery: hasBattery && f.battery ? `${f.battery} ${f.battery_unit}` : "",
+      total: totalNum, subsidised: f.subsidised, central_subsidy: centralNum,
+      make_panel: f.make_panel, make_inverter: f.make_inverter, make_structure: f.make_structure,
+      make_acdb: f.make_acdb, make_dcdb: f.make_dcdb, make_cable: f.make_cable,
+      make_battery: hasBattery ? f.make_battery : "",
+    });
   }
 
   const lbl = "text-[12.5px] font-medium text-text-mid";
@@ -324,15 +411,7 @@ function Inner() {
         {/* Pricing + subsidy */}
         <Section title="Pricing & subsidy">
           <Field l="Total price (GST incl.) ₹" req><input className={input} inputMode="numeric" value={f.total} onChange={(e) => set("total", e.target.value.replace(/[^\d]/g, ""))} placeholder="e.g. 237000" /></Field>
-          <Field l="Subsidised plan?">
-            <div className="flex gap-2">
-              {[["Yes", true], ["No", false]].map(([lab, val]) => (
-                <button key={String(val)} type="button" onClick={() => set("subsidised", val as boolean)}
-                  className={["flex-1 px-3 py-2 rounded-xl text-[13px] font-semibold border", f.subsidised === val ? "text-white border-transparent" : "bg-white border-line text-text-mid"].join(" ")}
-                  style={f.subsidised === val ? { background: NAVY } : undefined}>{lab as string}</button>
-              ))}
-            </div>
-          </Field>
+          <Field l="Subsidised plan?"><YesNo value={f.subsidised} onChange={(v) => set("subsidised", v)} /></Field>
           {f.subsidised && (
             <>
               <Field l="Central subsidy ₹ (you enter)"><input className={input} inputMode="numeric" value={f.central_subsidy} onChange={(e) => set("central_subsidy", e.target.value.replace(/[^\d]/g, ""))} placeholder="e.g. 60000" /></Field>
@@ -360,13 +439,7 @@ function Inner() {
           {hasBattery && <SearchableSelect label="Battery make" value={f.make_battery} onChange={(v) => set("make_battery", v)} options={merge(BATTERY_OPTIONS, BRAND_FIELDS.battery)} field={BRAND_FIELDS.battery} />}
         </Section>
 
-        {error && <p className="text-[13px] text-red-600 mt-4">{error}</p>}
-        <div className="mt-6">
-          <button onClick={() => void download()} disabled={busy}
-            className="px-5 py-2.5 rounded-xl text-white text-[14px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
-            {busy ? "Generating…" : "Download quotation"}
-          </button>
-        </div>
+        <DownloadBar busy={busy} error={error} onClick={() => void download()} />
       </div>
     </div>
   );
@@ -390,30 +463,15 @@ function BijleeForm({ serialNext }: { serialNext: number | null }) {
   });
   const merge = useBrandOptions();
   const { formRef, onFormKey } = useKeyNav();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { busy, error, setError, run } = useQuotationDownload();
   const set = (k: keyof BijleeFields, v: string) => setF((p) => ({ ...p, [k]: v }));
-  const decimal = (v: string) => v.replace(/[^\d.]/g, "");
-  const digits = (v: string) => v.replace(/\D/g, "");
 
   async function download() {
-    setError(null);
     if (!f.customer_name.trim()) { setError("Customer name is required."); return; }
     if (!(Number(f.kw) > 0)) { setError("Enter the system size (kW)."); return; }
     if (!(Number(f.rate_per_kw) > 0)) { setError("Enter the price per kW."); return; }
-    setBusy(true);
-    try {
-      const res = await fetch("/api/epc/quotation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
-        body: JSON.stringify({ ...f, kw: Number(f.kw), contracted_demand: f.contracted_demand || f.kw }),
-      });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); setError(j?.error || "Couldn't generate the quotation."); return; }
-      const next = res.headers.get("X-Next-Serial");
-      await saveDownload(res);
-      if (next) set("serial", next);
-    } catch (e) { setError((e as Error)?.message || "Network error."); }
-    finally { setBusy(false); }
+    const next = await run({ ...f, kw: Number(f.kw), contracted_demand: f.contracted_demand || f.kw });
+    if (next) set("serial", next);
   }
 
   return (
@@ -447,13 +505,197 @@ function BijleeForm({ serialNext }: { serialNext: number | null }) {
           <Field l="Structure price per kW ₹"><input className={input} inputMode="numeric" value={f.structure_rate_per_kw} onChange={(e) => set("structure_rate_per_kw", digits(e.target.value))} placeholder="0" /></Field>
         </Section>
 
-        {error && <p className="text-[13px] text-red-600 mt-4">{error}</p>}
-        <div className="mt-6">
-          <button onClick={() => void download()} disabled={busy}
-            className="px-5 py-2.5 rounded-xl text-white text-[14px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
-            {busy ? "Generating…" : "Download quotation"}
-          </button>
-        </div>
+        <DownloadBar busy={busy} error={error} onClick={() => void download()} />
+      </div>
+    </div>
+  );
+}
+
+// Sarvatra Energy (gozerobils) — one form → their quotation + Project Confirmation
+// Receipt (PCR), each saved as its own PDF. Quote no. auto-numbered, date automatic;
+// generation, savings and financing are worked out from kW and price. A loan
+// application ID fills everything that application already has.
+type SarvatraFields = {
+  loan_id: string;
+  title: string; customer_name: string; contact: string; email: string; city: string; state: string;
+  address: string; pincode: string; ebill_name: string; k_number: string; aen: string; sanctioned_load: string;
+  spc_name: string; quote_no: string;
+  kw: string; panel_brand: string; panel_type: string; cell_type: string; dcr_type: string; wp: string;
+  inverter_brand: string; inverter_kw: string; phase: string; inverter_type: string; inverter_location: string;
+  connection_type: string; floors: string; solar_care: boolean; roof_type: string; structure_type: string;
+  price: string; state_subsidy: string; design_payment: string;
+  finance_by: string; payment_method: string; payment_mode: string;
+  maintenance_plan: string; maintenance_others: string; site_readiness: string; bill_correction: string[];
+};
+
+// The loan application's columns that fill the form (RLS: the EPC's own applications only).
+const LOAN_COLS = "aadhaar_name, borrower_name, aadhaar_gender, borrower_mobile, borrower_email, ebill_name, ca_number, " +
+  "ebill_address_line, aadhaar_address, install_pincode, install_city, install_state, project_size, project_size_unit, " +
+  "total_project_cost, system_type, plant_use_type, approved_lender, lead_owner_name";
+const SYSTEM_TYPE: Record<string, string> = { on_grid: "On-grid", off_grid: "Off-grid", hybrid: "Hybrid" };
+const PLANT_USE: Record<string, string> = { residential: "Domestic", commercial: "Commercial", industrial: "Industrial" };
+
+// Every form field a loan application can fill — reset when a different application is looked up.
+const LOAN_FIELDS = [
+  "customer_name", "title", "contact", "email", "ebill_name", "k_number", "address", "pincode", "city", "state",
+  "kw", "price", "inverter_type", "connection_type", "finance_by", "spc_name", "payment_mode",
+] as const satisfies readonly (keyof SarvatraFields)[];
+
+function loanToFields(a: Record<string, unknown>): Partial<SarvatraFields> {
+  const t = (k: string) => (a[k] == null ? "" : String(a[k]).trim());
+  const gender = t("aadhaar_gender").toLowerCase();
+  const size = Number(a.project_size) > 0 ? Number(a.project_size) * (t("project_size_unit").toLowerCase() === "mw" ? 1000 : 1) : 0;
+  const out: Partial<SarvatraFields> = {
+    customer_name: t("aadhaar_name") || t("borrower_name"),
+    title: gender.startsWith("f") ? "Mrs." : gender.startsWith("m") ? "Mr." : "",
+    contact: t("borrower_mobile").replace(/\D/g, "").slice(-10),
+    email: t("borrower_email"), ebill_name: t("ebill_name"), k_number: t("ca_number"),
+    address: t("ebill_address_line") || t("aadhaar_address"), pincode: t("install_pincode"),
+    city: t("install_city"), state: INDIA_STATES.includes(t("install_state")) ? t("install_state") : "",
+    kw: size ? String(+size.toFixed(2)) : "", price: Number(a.total_project_cost) > 0 ? String(Math.round(Number(a.total_project_cost))) : "",
+    inverter_type: SYSTEM_TYPE[t("system_type")] ?? "", connection_type: PLANT_USE[t("plant_use_type")] ?? "",
+    finance_by: LENDER_LABEL[t("approved_lender") as LenderKey] ?? t("approved_lender"),
+    spc_name: t("lead_owner_name"), payment_mode: "Financing",
+  };
+  return Object.fromEntries(Object.entries(out).filter(([, v]) => v)) as Partial<SarvatraFields>; // keep what's filled
+}
+
+function SarvatraForm({ serialNext }: { serialNext: number | null }) {
+  const [f, setF] = useState<SarvatraFields>({
+    loan_id: "",
+    title: SARVATRA.titles[0], customer_name: "", contact: "", email: "", city: "", state: "Rajasthan",
+    address: "", pincode: "", ebill_name: "", k_number: "", aen: "", sanctioned_load: "", spc_name: "",
+    quote_no: serialNext ? SARVATRA.serial(serialNext) : "",
+    kw: "", panel_brand: SARVATRA.panel, panel_type: SARVATRA.panelType, cell_type: SARVATRA.cellType,
+    dcr_type: SARVATRA.dcrTypes[0], wp: SARVATRA.wp, inverter_brand: SARVATRA.inverter, inverter_kw: "",
+    phase: SARVATRA.phases[0], inverter_type: SARVATRA.inverterTypes[0], inverter_location: SARVATRA.inverterLocations[0],
+    connection_type: SARVATRA.connectionTypes[0], floors: "", solar_care: false,
+    roof_type: SARVATRA.roofTypes[0], structure_type: SARVATRA.structureTypes[0],
+    price: "", state_subsidy: "", design_payment: "",
+    finance_by: "", payment_method: SARVATRA.paymentMethods[0], payment_mode: SARVATRA.paymentModes[0],
+    maintenance_plan: "", maintenance_others: "NA", site_readiness: SARVATRA.siteReadiness[0], bill_correction: [],
+  });
+  const merge = useBrandOptions();
+  const { formRef, onFormKey } = useKeyNav();
+  const { busy, error, setError, files, run } = useQuotationDownload();
+  const set = <K extends keyof SarvatraFields>(k: K, v: SarvatraFields[K]) => setF((p) => ({ ...p, [k]: v }));
+
+  // Loan application ID → fill the form from that application (once per ID entered).
+  // A different ID first resets what the previous one filled; a slower earlier
+  // lookup can't overwrite a newer one.
+  const [loanBusy, setLoanBusy] = useState(false);
+  const initial = useRef(f).current;
+  const loanFilled = useRef("");
+  const loanReq = useRef(0);
+  async function fillFromLoan() {
+    const id = f.loan_id.trim().toUpperCase();
+    if (!id || id === loanFilled.current) return;
+    const req = ++loanReq.current;
+    setLoanBusy(true); setError(null);
+    try {
+      const { data } = await supabase().from("epc_applications").select(LOAN_COLS).eq("loan_display_id", id).maybeSingle();
+      if (req !== loanReq.current) return;
+      if (!data) { setError("No loan application found with this ID."); return; }
+      const reset = loanFilled.current ? Object.fromEntries(LOAN_FIELDS.map((k) => [k, initial[k]])) : {};
+      loanFilled.current = id;
+      setF((p) => ({ ...p, ...reset, ...loanToFields(data as unknown as Record<string, unknown>) }));
+    } catch (e) { if (req === loanReq.current) setError((e as Error)?.message || "Network error."); }
+    finally { if (req === loanReq.current) setLoanBusy(false); }
+  }
+
+  const kwNum = Number(f.kw) || 0;
+  const priceNum = Number(f.price) || 0;
+  const central = centralSubsidyFor(kwNum, SARVATRA.commercial(f.connection_type));
+  const net = Math.max(0, priceNum - central - (Number(f.state_subsidy) || 0));
+  const designAuto = Math.round(priceNum * SARVATRA.designShare);
+
+  async function download() {
+    if (!f.customer_name.trim()) { setError("Customer name is required."); return; }
+    if (kwNum <= 0) { setError("Enter the system size (kW)."); return; }
+    if (priceNum <= 0) { setError("Enter the system price."); return; }
+    const next = await run({
+      ...f, kw: kwNum, inverter_kw: Number(f.inverter_kw) || kwNum, price: priceNum,
+      state_subsidy: Number(f.state_subsidy) || 0,
+      design_payment: f.design_payment ? Number(f.design_payment) : designAuto,
+    });
+    if (next) set("quote_no", next);
+  }
+
+  const pick = (options: readonly string[]) => options.map((o) => <option key={o} value={o}>{o}</option>);
+
+  return (
+    <div className="min-h-screen bg-bg-soft">
+      <BackHeader />
+      <div className="max-w-[900px] mx-auto px-5 sm:px-7 py-8" ref={formRef} onKeyDown={onFormKey}>
+        <h1 className="font-display text-[24px] sm:text-[28px] font-bold text-text">Quotation builder</h1>
+
+        <Section title="Loan application">
+          <Field l={`Loan application ID${loanBusy ? " · looking up…" : ""}`}>
+            <input className={input} value={f.loan_id} onChange={(e) => set("loan_id", e.target.value)} onBlur={() => void fillFromLoan()} placeholder="e.g. CC-RES-00223" />
+          </Field>
+        </Section>
+
+        <Section title="Customer">
+          <Field l="Title"><select className={input} value={f.title} onChange={(e) => set("title", e.target.value)}>{pick(SARVATRA.titles)}</select></Field>
+          <Field l="Customer name" req><input className={input} value={f.customer_name} onChange={(e) => set("customer_name", e.target.value)} placeholder="Full name" /></Field>
+          <Field l="Contact no."><input className={input} inputMode="numeric" value={f.contact} onChange={(e) => set("contact", digits(e.target.value).slice(0, 10))} placeholder="10-digit mobile" /></Field>
+          <Field l="Email"><input className={input} inputMode="email" value={f.email} onChange={(e) => set("email", e.target.value)} /></Field>
+          <Field l="Address"><input className={input} value={f.address} onChange={(e) => set("address", e.target.value)} /></Field>
+          <Field l="Pincode"><input className={input} inputMode="numeric" value={f.pincode} onChange={(e) => set("pincode", digits(e.target.value).slice(0, 6))} /></Field>
+          <Field l="City"><input className={input} value={f.city} onChange={(e) => set("city", e.target.value)} placeholder="e.g. Jaipur" /></Field>
+          <Field l="State"><select className={input} value={f.state} onChange={(e) => set("state", e.target.value)}>{pick(INDIA_STATES)}</select></Field>
+          <Field l="Name on electricity bill"><input className={input} value={f.ebill_name} onChange={(e) => set("ebill_name", e.target.value)} /></Field>
+          <Field l="K number"><input className={input} value={f.k_number} onChange={(e) => set("k_number", e.target.value)} /></Field>
+          <Field l="AEN office"><input className={input} value={f.aen} onChange={(e) => set("aen", e.target.value)} placeholder="e.g. B-IV_DURGAPURA" /></Field>
+          <Field l="Sanctioned load (kW)"><input className={input} inputMode="decimal" value={f.sanctioned_load} onChange={(e) => set("sanctioned_load", decimal(e.target.value))} /></Field>
+          <Field l="SPC name"><input className={input} value={f.spc_name} onChange={(e) => set("spc_name", e.target.value)} /></Field>
+          <Field l="Quote no."><input className={input} value={f.quote_no} onChange={(e) => set("quote_no", e.target.value)} placeholder={SARVATRA.serial(1)} /></Field>
+        </Section>
+
+        <Section title="System">
+          <Field l="System size (kW)" req><input className={input} inputMode="decimal" value={f.kw} onChange={(e) => set("kw", decimal(e.target.value))} placeholder="e.g. 6" /></Field>
+          <SearchableSelect label="Solar panel brand" value={f.panel_brand} onChange={(v) => set("panel_brand", v)} options={merge([SARVATRA.panel, ...MODULE_BRANDS], BRAND_FIELDS.module)} field={BRAND_FIELDS.module} />
+          <Field l="Panel type"><input className={input} value={f.panel_type} onChange={(e) => set("panel_type", e.target.value)} /></Field>
+          <Field l="Type of cell"><input className={input} value={f.cell_type} onChange={(e) => set("cell_type", e.target.value)} /></Field>
+          <Field l="DCR / NDCR"><select className={input} value={f.dcr_type} onChange={(e) => set("dcr_type", e.target.value)}>{pick(SARVATRA.dcrTypes)}</select></Field>
+          <Field l="Wp"><input className={input} value={f.wp} onChange={(e) => set("wp", e.target.value)} /></Field>
+          <SearchableSelect label="Inverter brand" value={f.inverter_brand} onChange={(v) => set("inverter_brand", v)} options={merge([SARVATRA.inverter, ...INVERTER_BRANDS], BRAND_FIELDS.inverter)} field={BRAND_FIELDS.inverter} />
+          <Field l="Inverter size (kW)"><input className={input} inputMode="decimal" value={f.inverter_kw} onChange={(e) => set("inverter_kw", decimal(e.target.value))} placeholder={f.kw || "e.g. 6"} /></Field>
+          <Field l="Phase"><select className={input} value={f.phase} onChange={(e) => set("phase", e.target.value)}>{pick(SARVATRA.phases)}</select></Field>
+          <Field l="Inverter type"><select className={input} value={f.inverter_type} onChange={(e) => set("inverter_type", e.target.value)}>{pick(SARVATRA.inverterTypes)}</select></Field>
+          <SearchableSelect label="Inverter location" value={f.inverter_location} onChange={(v) => set("inverter_location", v)} options={merge(SARVATRA.inverterLocations, BRAND_FIELDS.inverterLocation)} field={BRAND_FIELDS.inverterLocation} />
+          <SearchableSelect label="Connection type" value={f.connection_type} onChange={(v) => set("connection_type", v)} options={merge(SARVATRA.connectionTypes, BRAND_FIELDS.connectionType)} field={BRAND_FIELDS.connectionType} />
+          <Field l="No. of floors"><input className={input} value={f.floors} onChange={(e) => set("floors", e.target.value)} placeholder="e.g. G+2" /></Field>
+          <Field l="GoZeroBils SolarCare™"><YesNo value={f.solar_care} onChange={(v) => set("solar_care", v)} /></Field>
+          <SearchableSelect label="Roof type" value={f.roof_type} onChange={(v) => set("roof_type", v)} options={merge(SARVATRA.roofTypes, BRAND_FIELDS.roofType)} field={BRAND_FIELDS.roofType} />
+          <SearchableSelect label="Structure type" value={f.structure_type} onChange={(v) => set("structure_type", v)} options={merge(SARVATRA.structureTypes, BRAND_FIELDS.structureType)} field={BRAND_FIELDS.structureType} />
+        </Section>
+
+        <Section title="Price">
+          <Field l="System price (GST incl.) ₹" req><input className={input} inputMode="numeric" value={f.price} onChange={(e) => set("price", digits(e.target.value))} placeholder="e.g. 300000" /></Field>
+          <Field l="State subsidy ₹"><input className={input} inputMode="numeric" value={f.state_subsidy} onChange={(e) => set("state_subsidy", digits(e.target.value))} placeholder="e.g. 17000" /></Field>
+          <Field l="Central subsidy ₹ (auto by kW)"><input className={input + " bg-bg-soft"} readOnly value={inr(central)} /></Field>
+          <Field l="On design approval ₹"><input className={input} inputMode="numeric" value={f.design_payment} onChange={(e) => set("design_payment", digits(e.target.value))} placeholder={inr(designAuto)} /></Field>
+          <Field l="Net effective price ₹"><input className={input + " bg-bg-soft font-semibold"} readOnly value={inr(net)} /></Field>
+          <Field l="Finance by (bank / NBFC)"><input className={input} value={f.finance_by} onChange={(e) => set("finance_by", e.target.value)} /></Field>
+          <Field l="Mode of payment"><select className={input} value={f.payment_method} onChange={(e) => set("payment_method", e.target.value)}>{pick(SARVATRA.paymentMethods)}</select></Field>
+          <Field l="Payment mode"><select className={input} value={f.payment_mode} onChange={(e) => set("payment_mode", e.target.value)}>{pick(SARVATRA.paymentModes)}</select></Field>
+        </Section>
+
+        <Section title="Booking">
+          <Field l="Maintenance plan">
+            <select className={input} value={f.maintenance_plan} onChange={(e) => set("maintenance_plan", e.target.value)}>
+              <option value="">None</option>{pick(SARVATRA.maintenancePlans)}
+            </select>
+          </Field>
+          <Field l="Maintenance — others"><input className={input} value={f.maintenance_others} onChange={(e) => set("maintenance_others", e.target.value)} /></Field>
+          <Field l="Site readiness"><select className={input} value={f.site_readiness} onChange={(e) => set("site_readiness", e.target.value)}>{pick(SARVATRA.siteReadiness)}</select></Field>
+          <Field l="Bill correction">
+            <Chips options={SARVATRA.billCorrections} value={f.bill_correction} onChange={(v) => set("bill_correction", v)} />
+          </Field>
+        </Section>
+
+        <DownloadBar busy={busy} error={error} files={files} onClick={() => void download()} />
       </div>
     </div>
   );

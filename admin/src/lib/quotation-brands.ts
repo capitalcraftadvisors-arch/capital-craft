@@ -42,14 +42,46 @@ export const BATTERY_OPTIONS = ["Exide", "Luminous", "MNRE Equivalent Standard"]
 
 export const SYSTEM_TYPES = ["Hybrid", "On-grid", "Off-grid"] as const;
 
-// Bijlee Solar (template bundled:bijlee) — their quotation's own defaults and
-// serial number format.
+// PDF-template EPCs: each quotation's own defaults, its serial number format
+// (`serial`) and how to read the running number back out of one (`serialNo`).
+
+// Bijlee Solar (template bundled:bijlee).
 export const BIJLEE = {
   key: "bundled:bijlee",
   module: "Novasys/ Navitas Green Solutions",
   inverter: "Growatt/ Sungrow",
   cable: "Polycab",
   serial: (n: number) => `BIJ-${n}/P/1.2`,
+  serialNo: (s: string) => Number(/\d+/.exec(s)?.[0]),
+};
+
+// Sarvatra Energy — gozerobils (template bundled:sarvatra). Quote no. carries the month.
+export const SARVATRA = {
+  key: "bundled:sarvatra",
+  panel: "Adani",
+  panelType: "Bifacial Topcon 600+ Wp",
+  inverter: "Polycab",
+  titles: ["Mr.", "Mrs.", "Ms.", "Dr."],
+  phases: ["Single Phase", "Three Phase"],
+  inverterLocations: ["Ground", "Rooftop", "Parking", "Staircase"],
+  connectionTypes: ["Domestic", "Commercial", "Industrial"],
+  commercial: (connection: string) => /commercial|industrial/i.test(connection),
+  roofTypes: ["RCC", "Tin shed", "Asbestos", "Tiled"],
+  structureTypes: ["Galvanised Iron", "Hot-dip Galvanised", "Aluminium"],
+  designShare: 0.3, // "On design approval" default share of the price (₹90,000 of ₹3,00,000)
+  booking: 10000,   // booking / advance amount
+  // Project Confirmation Receipt (PCR)
+  cellType: "Topcon Bifacial",
+  wp: "600+Wp",
+  dcrTypes: ["Both", "DCR", "NDCR"],
+  inverterTypes: ["On-grid", "Off-grid", "Hybrid"],
+  maintenancePlans: ["Monthly 1 yr", "Quarterly 1 yr", "Monthly 5 yr", "Quarterly 5 yr", "Included"],
+  siteReadiness: ["Ready for installation", "Under development (60 days)", "Under development (90 days)"],
+  billCorrections: ["Name change", "Phase change", "Load change"],
+  paymentMethods: ["UPI", "Cash", "Cheque", "NEFT / RTGS", "Card"],
+  paymentModes: ["Direct", "Financing"],
+  serial: (n: number, month = new Date().getMonth() + 1) => `Quote_GZB_${String(month).padStart(2, "0")}-${String(n).padStart(3, "0")}`,
+  serialNo: (s: string) => Number(/(\d+)\D*$/.exec(s)?.[1]),
 };
 
 // Field keys used for persisting custom options (quotation_brand_options.field).
@@ -61,4 +93,8 @@ export const BRAND_FIELDS = {
   dcdb: "dcdb",
   cable: "cable",
   battery: "battery",
+  inverterLocation: "inverter_location",
+  connectionType: "connection_type",
+  roofType: "roof_type",
+  structureType: "structure_type",
 } as const;

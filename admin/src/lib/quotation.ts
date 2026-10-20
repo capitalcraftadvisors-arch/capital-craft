@@ -10,6 +10,7 @@ import fs from "fs";
 import path from "path";
 import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
+import { downloadBuffer } from "./gcs";
 
 export type QuotationInput = {
   customer_name: string;
@@ -51,15 +52,17 @@ export function stateSubsidyFor(kw: number): number {
   return Math.round(kw * 30000);
 }
 
-// Resolve the template file for a storage_path. "bundled:ges" → the GHANPRIYA
-// template shipped with the app, "bundled:bijlee" → Bijlee Solar's PDF (kept in
-// templates/, not public/: it holds a real customer's quote, so it's never served);
-// otherwise a GCS object (handled by the caller).
-export function bundledTemplatePath(key: string): string | null {
-  if (key === "bundled:ges") return path.join(process.cwd(), "public", "quotation", "ges-template.docx");
-  if (key === "bundled:bijlee") return path.join(process.cwd(), "templates", "bijlee-template.pdf");
-  return null;
-}
+// EPCs' own PDF templates (bundled:<key>) hold a real customer's sample values, so
+// they live only in the private bucket (templates/<file>) — never in the public repo,
+// the image or public/. A local copy in admin/templates (gitignored) is used when
+// present (localhost). Loaded once per server instance.
+const PRIVATE_TEMPLATES: Record<string, string> = {
+  "bundled:bijlee": "bijlee-template.pdf",
+  "bundled:sarvatra": "sarvatra-template.pdf",
+  "bundled:sarvatra-pcr": "sarvatra-pcr.pdf",
+  "bundled:sarvatra-agreement": "sarvatra-agreement.pdf",
+};
+const loaded = new Map<string, Buffer>();
 
 // Build the docxtemplater data object (computes subsidy + final price + display).
 export function buildQuotationData(input: QuotationInput) {
@@ -106,8 +109,16 @@ export function fillTemplate(templateBuf: Buffer, data: Record<string, unknown>)
   return dt.getZip().generate({ type: "nodebuffer" });
 }
 
-export function readBundledTemplate(key: string): Buffer {
-  const p = bundledTemplatePath(key);
-  if (!p) throw new Error("Unknown bundled template: " + key);
-  return fs.readFileSync(p);
+// "bundled:ges" → the GHANPRIYA .docx shipped in public/quotation; the PDF templates
+// above → private bucket (or the local copy).
+export async function readBundledTemplate(key: string): Promise<Buffer> {
+  if (key === "bundled:ges") return fs.readFileSync(path.join(process.cwd(), "public", "quotation", "ges-template.docx"));
+  const file = PRIVATE_TEMPLATES[key];
+  if (!file) throw new Error("Unknown bundled template: " + key);
+  const hit = loaded.get(file);
+  if (hit) return hit;
+  const local = path.join(process.cwd(), "templates", file);
+  const buf = fs.existsSync(local) ? fs.readFileSync(local) : await downloadBuffer(`templates/${file}`);
+  loaded.set(file, buf);
+  return buf;
 }
