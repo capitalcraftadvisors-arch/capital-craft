@@ -7,9 +7,9 @@
 // per-console accent (soft tint background + accent text/icon).
 //
 // Responsive:
-//   - lg+  : full sidebar (icon + label).
-//   - md   : icons-only rail.
-//   - < md : hidden; a top bar with a hamburger opens a slide-in drawer.
+//   - lg+  : icons-only rail; expands with labels on hover or keyboard focus.
+//   - < lg : hidden; a top bar with a hamburger opens a slide-in drawer (so
+//            touch tablets get labels too).
 //
 // Routing is unchanged. On the console page the four list sections switch the
 // in-page `tab` state (via onSelectTab) so scroll-restore + row-highlight keep
@@ -78,6 +78,34 @@ const ICONS: Record<SectionKey, ReactNode> = {
 
 const ORDER: SectionKey[] = ["epcs", "apps", "loanleads", "insurance", "leads", "analytics"];
 
+// The sections this user sees, in order — scoped to their allowed modules
+// (hierarchy). Shared with the ⌘K palette so both list the same destinations.
+export function sidebarNavKeys(biz = getBusiness()): SectionKey[] {
+  const mods = allowedModules(biz);                      // e.g. ['epcs','apps',...]
+  const keys: SectionKey[] = ORDER.filter((k): k is ModuleKey => (mods as string[]).includes(k));
+  // Ops Board is the primary work view — available to EVERY admin-type user
+  // (MAIN_ADMIN sees all cases + RM tabs; an OPERATIONS_USER sees only their
+  // own, enforced by RLS). Pinned to the top.
+  if (biz?.business_type === "admin") keys.unshift("board");
+  // Pendings — the main admin's checker queue (maker-checker, lib/review) —
+  // and Other Insurance (general, non-solar) are the main admin's only.
+  if (isMainAdmin(biz)) {
+    keys.splice(1, 0, "pendings");
+    const at = keys.indexOf("insurance");
+    keys.splice(at >= 0 ? at + 1 : keys.length, 0, "otherins");
+    keys.push("team"); // team logins (passwords)
+  }
+  // Pri — the owner's own dashboard (0096), first in the owner's sidebar; no
+  // one else sees it. The admin tabs below it stay separate.
+  if (biz?.is_owner) keys.unshift("pri");
+  return keys;
+}
+
+// Where a section lives: console tabs are in-page state on /admin; the rest are routes.
+export const SECTION_ROUTE: Partial<Record<SectionKey, string>> = {
+  analytics: "/admin/analytics", board: "/admin/board", pendings: "/admin/pendings", team: "/admin/team", pri: "/admin/pri",
+};
+
 export default function AdminSidebar({
   active,
   onSelectTab,
@@ -94,31 +122,10 @@ export default function AdminSidebar({
   const router = useRouter();
   const [open, setOpen] = useState(false); // mobile drawer
 
-  // The nav list is scoped to the current user's allowed modules (hierarchy).
   // AuthGuard shows "Loading…" until it has re-fetched the row and called
   // setBusiness, so by the time this sidebar mounts getBusiness() is populated
   // and authoritative — a lazy init is safe (no SSR/hydration mismatch).
-  const [navKeys] = useState<SectionKey[]>(() => {
-    const biz = getBusiness();
-    const mods = allowedModules(biz);                      // e.g. ['epcs','apps',...]
-    const keys: SectionKey[] = ORDER.filter((k): k is ModuleKey => (mods as string[]).includes(k));
-    // Ops Board is the primary work view — available to EVERY admin-type user
-    // (MAIN_ADMIN sees all cases + RM tabs; an OPERATIONS_USER sees only their
-    // own, enforced by RLS). Pinned to the top.
-    if (biz?.business_type === "admin") keys.unshift("board");
-    // Pendings — the main admin's checker queue (maker-checker, lib/review) —
-    // and Other Insurance (general, non-solar) are the main admin's only.
-    if (isMainAdmin(biz)) {
-      keys.splice(1, 0, "pendings");
-      const at = keys.indexOf("insurance");
-      keys.splice(at >= 0 ? at + 1 : keys.length, 0, "otherins");
-      keys.push("team"); // team logins (passwords)
-    }
-    // Pri — the owner's own dashboard (0096), first in the owner's sidebar; no
-    // one else sees it. The admin tabs below it stay separate.
-    if (biz?.is_owner) keys.unshift("pri");
-    return keys;
-  });
+  const [navKeys] = useState<SectionKey[]>(() => sidebarNavKeys());
   const [cachedPending, setPending] = useState(0);
   useEffect(() => {
     // The Pendings page passes its own live count — no separate count query there.
@@ -136,24 +143,13 @@ export default function AdminSidebar({
       return;
     }
     if (key === active) return;
-    if (key === "analytics") {
-      router.push("/admin/analytics");
-      return;
-    }
-    if (key === "board") {
-      router.push("/admin/board");
-      return;
-    }
-    if (key === "team") {
-      router.push("/admin/team");
-      return;
-    }
-    if (key === "pri") {
-      router.push("/admin/pri");
+    const route = SECTION_ROUTE[key];
+    if (route) {
+      router.push(route as never);
       return;
     }
     if (onSelectTab) {
-      onSelectTab(key);
+      onSelectTab(key as ConsoleTab); // every routed section returned above
     } else {
       // Coming from a routed page (Analytics) → return to the console with the
       // chosen tab pre-selected (the console restores from this key on mount).
@@ -163,11 +159,11 @@ export default function AdminSidebar({
   }
 
   function content(inDrawer: boolean) {
-    // In the static rail, labels are hidden until the rail is hovered; the
-    // drawer always shows them. Icons center when collapsed, left-align on
-    // hover (or in the drawer).
-    const labelCls = inDrawer ? "" : "hidden group-hover:inline";
-    const rowJustify = inDrawer ? "" : "justify-center group-hover:justify-start";
+    // In the static rail, labels are hidden until the rail is hovered or a
+    // keyboard user tabs into it; the drawer always shows them. Icons center
+    // when collapsed, left-align when open (or in the drawer).
+    const labelCls = inDrawer ? "" : "hidden group-hover:inline group-has-[:focus-visible]:inline";
+    const rowJustify = inDrawer ? "" : "justify-center group-hover:justify-start group-has-[:focus-visible]:justify-start";
     return (
       <>
         {/* Brand — real logo. Collapsed rail shows just the swirl mark; the
@@ -177,13 +173,13 @@ export default function AdminSidebar({
           <img
             src="/brand/capital-craft-mark.png"
             alt="Capital Craft"
-            className={"h-8 w-8 object-contain shrink-0 " + (inDrawer ? "hidden" : "group-hover:hidden")}
+            className={"h-8 w-8 object-contain shrink-0 " + (inDrawer ? "hidden" : "group-hover:hidden group-has-[:focus-visible]:hidden")}
           />
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/brand/capital-craft.png"
             alt="Capital Craft"
-            className={"h-7 w-auto object-contain " + (inDrawer ? "block" : "hidden group-hover:block")}
+            className={"h-7 w-auto object-contain " + (inDrawer ? "block" : "hidden group-hover:block group-has-[:focus-visible]:block")}
           />
         </div>
 
@@ -196,7 +192,9 @@ export default function AdminSidebar({
               <button
                 key={key}
                 type="button"
-                onClick={() => go(key)}
+                // A mouse click drops focus (else the rail stays open on the next
+                // key press); keyboard activation keeps it.
+                onClick={(e) => { if (e.detail > 0) e.currentTarget.blur(); go(key); }}
                 aria-current={on ? "page" : undefined}
                 aria-label={a.label}
                 className={[
@@ -239,7 +237,7 @@ export default function AdminSidebar({
   return (
     <>
       {/* Mobile top bar */}
-      <div className="md:hidden sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-line bg-white px-4 h-14">
+      <div className="lg:hidden sticky top-0 z-30 flex items-center justify-between gap-3 border-b border-line bg-white px-4 h-14">
         <button type="button" onClick={() => setOpen(true)} aria-label="Open menu" className="p-2 -ml-2 text-text">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
         </button>
@@ -250,7 +248,7 @@ export default function AdminSidebar({
 
       {/* Mobile drawer */}
       {open && (
-        <div className="md:hidden fixed inset-0 z-50" onClick={() => setOpen(false)}>
+        <div className="lg:hidden fixed inset-0 z-50" onClick={() => setOpen(false)}>
           <div className="absolute inset-0 bg-black/40" />
           <aside
             onClick={(e) => e.stopPropagation()}
@@ -261,11 +259,11 @@ export default function AdminSidebar({
         </div>
       )}
 
-      {/* Static rail (md+): a slim icons-only rail that reserves 68px of layout
-          width. On hover, the fixed panel expands to 248px as an OVERLAY, so
-          the content area never reflows. Collapses when the cursor leaves. */}
-      <div className="hidden md:block shrink-0 w-[68px]">
-        <div className="group fixed top-0 left-0 z-40 h-screen w-[68px] hover:w-[248px] transition-[width] duration-200 ease-out overflow-hidden flex flex-col border-r border-line bg-white p-3">
+      {/* Static rail (lg+): a slim icons-only rail that reserves 68px of layout
+          width. On hover (or keyboard focus inside it), the fixed panel expands
+          to 248px as an OVERLAY, so the content area never reflows. */}
+      <div className="hidden lg:block shrink-0 w-[68px]">
+        <div className="group fixed top-0 left-0 z-40 h-screen w-[68px] hover:w-[248px] has-[:focus-visible]:w-[248px] transition-[width] duration-200 ease-out overflow-hidden flex flex-col border-r border-line bg-white p-3">
           {content(false)}
         </div>
       </div>

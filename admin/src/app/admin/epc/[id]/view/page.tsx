@@ -366,8 +366,6 @@ function Inner() {
       if (!window.confirm("This EPC profile hasn't been approved yet.\n\nApprove it now and continue?")) return;
       await changeStatus("approved");
     }
-    if (target === "approved" && !window.confirm("Mark this lender as Approved?")) return;
-    if (target === "rejected" && !window.confirm("Mark this lender as Rejected?")) return;
     const flags = { docs_given: target === "docs", approved: target === "approved", rejected: target === "rejected" };
     const dbPatch: Record<string, unknown> = { ...flags, rejected_at: target === "rejected" ? new Date().toISOString() : null };
     const prev = lender;
@@ -504,9 +502,10 @@ function Inner() {
 
         {/* ── ACTION STRIP — Review-by-CC → status + lender dropdown → ⋯ menu. ── */}
         <div className="flex items-center gap-2 flex-wrap justify-end mb-4">
-          {/* Before a CC decision (docs uploaded, not yet decided): the
-              Review-by-CC dropdown to set Approved / Rejected. */}
-          {biz.status !== "draft" && biz.status !== "approved" && biz.status !== "rejected" && (
+          {/* Before a CC decision: the Review-by-CC dropdown to set Approved /
+              Rejected — drafts too (a profile can have its docs uploaded and
+              still be a draft, e.g. never submitted, or added by the team). */}
+          {biz.status !== "approved" && biz.status !== "rejected" && (
             <DownloadMenu
               label="Review by CC"
               items={[

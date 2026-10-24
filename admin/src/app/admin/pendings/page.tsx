@@ -112,7 +112,7 @@ function Inner() {
   );
 
   return (
-    <div className="min-h-screen bg-bg-soft md:flex">
+    <div className="min-h-screen bg-bg-soft lg:flex">
       <AdminSidebar active="pendings" pendings={loaded ? count : undefined} onPendingsClick={() => setReload((n) => n + 1)} />
       <div className="flex-1 min-w-0">
         <header className="px-4 sm:px-6 py-5 border-b border-line bg-white">

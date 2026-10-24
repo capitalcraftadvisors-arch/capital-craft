@@ -625,11 +625,11 @@ function Inner() {
   const epc = useMemo(() => computeEpcSection(biz, lenders, w), [biz, lenders, w]);
 
   return (
-    <div className="min-h-screen bg-bg-soft md:flex">
+    <div className="min-h-screen bg-bg-soft lg:flex">
       <AdminSidebar active="analytics" />
       <div className="flex-1 min-w-0">
         {/* Sticky top bar: title + section switcher + period filter */}
-        <div className="sticky top-0 z-20 bg-bg-soft/90 backdrop-blur border-b border-line">
+        <div className="sticky top-14 lg:top-0 z-20 bg-bg-soft/90 backdrop-blur border-b border-line">
           <div className="w-full px-4 sm:px-6 py-4">
             <div className="flex items-center gap-2.5 mb-3">
               <span className="inline-block w-1.5 h-7 rounded-full" style={{ backgroundColor: ACCENT }} />

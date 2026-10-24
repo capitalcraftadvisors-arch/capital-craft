@@ -22,6 +22,9 @@ import { useAdminNames } from "@/lib/use-admin-names";
 import { useEpcUpdates } from "@/lib/use-epc-updates";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import LoginWelcome from "@/components/LoginWelcome";
+import RowLink from "@/components/RowLink";
+import { toast } from "sonner";
+import { nameCase } from "@/lib/names";
 import {
   deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort, remainingAmount,
   displayAmount as amountFor,
@@ -81,10 +84,16 @@ function Inner() {
   // list then restores scroll + highlights the row you came from). Consumed
   // once, so a fresh visit still defaults to EPCs. (Return from an EPC View
   // doesn't set this key, so it correctly stays on the EPCs tab.)
+  // The ⌘K palette also signals it ("adminList.tab" event) when already on /admin.
   useEffect(() => {
-    const t = sessionStorage.getItem("adminList.tab");
-    if ((t === "apps" || t === "loanleads" || t === "insurance" || t === "otherins" || t === "leads") && allowedTabs.includes(t)) setTab(t);
-    sessionStorage.removeItem("adminList.tab");
+    const consume = () => {
+      const t = sessionStorage.getItem("adminList.tab") as Tab | null;
+      if (t && allowedTabs.includes(t)) setTab(t);
+      sessionStorage.removeItem("adminList.tab");
+    };
+    consume();
+    window.addEventListener("adminList.tab", consume);
+    return () => window.removeEventListener("adminList.tab", consume);
   }, [allowedTabs]);
 
   // Remember the active tab across navigation so every "back to console" button
@@ -128,32 +137,29 @@ function Inner() {
   const periodProps: TabPeriodProps = { period, pFrom, pTo };
 
   return (
-    <div className="min-h-screen bg-bg-soft md:flex">
+    <div className="min-h-screen bg-bg-soft lg:flex">
       <LoginWelcome />
       <AdminSidebar active={tab} onSelectTab={setTab} />
       <div className="flex-1 min-w-0">
         <section className="w-full px-4 sm:px-6 py-8">
-          {/* Portal identity + notifications. */}
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <h1 className="font-display text-[22px] sm:text-[26px] font-bold text-text">
-              Hi <span className="text-[#178a5c]">{greetingName(getBusiness())}</span>
-            </h1>
-            <NotificationBell />
-          </div>
-          {/* At-a-glance loan KPIs — MAIN_ADMIN only, compact. Driven by the
-              current tab's period picker (below), and a loan-money set on apps. */}
-          {isMainAdmin && <DashboardKpis tab={tab} period={period} pFrom={pFrom} pTo={pTo} epc={epcKpis} />}
-          {/* Section header with the console's accent bar; period picker on the
-              right, aligned with the heading. */}
-          <div className="mb-6 flex items-center justify-between gap-3 flex-wrap">
+          {/* One header row: the section (accent bar + title) on the left; the
+              period picker, who is signed in and notifications on the right. */}
+          <div className="mb-5 flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-2.5">
               <span className="inline-block w-1.5 h-7 rounded-full" style={{ backgroundColor: section.color }} />
               <h1 className="font-display text-[24px] sm:text-[28px] font-bold">{section.label}</h1>
             </div>
-            {showPeriod && (
-              <PeriodPicker period={period} onPeriod={changePeriod} from={pFrom} onFrom={changeFrom} to={pTo} onTo={changeTo} />
-            )}
+            <div className="ml-auto flex items-center justify-end gap-3 flex-wrap">
+              {showPeriod && (
+                <PeriodPicker period={period} onPeriod={changePeriod} from={pFrom} onFrom={changeFrom} to={pTo} onTo={changeTo} />
+              )}
+              <span className="text-[13px] text-text-muted">Hi <span className="font-semibold text-[#178a5c]">{greetingName(getBusiness())}</span></span>
+              <NotificationBell />
+            </div>
           </div>
+          {/* At-a-glance loan KPIs — MAIN_ADMIN only, compact. Driven by the
+              period picker above, and a loan-money set on apps. */}
+          {isMainAdmin && <DashboardKpis tab={tab} period={period} pFrom={pFrom} pTo={pTo} epc={epcKpis} />}
 
           {tab === "epcs" ? <EpcsTab {...periodProps} onKpis={setEpcKpis} />
             : tab === "apps" ? <AppsTab {...periodProps} />
@@ -219,7 +225,7 @@ function downloadCsv(filenameStem: string, header: string[], rows: (unknown[])[]
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${filenameStem}-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `${filenameStem}-${fmtDate(new Date()).replace(/\//g, "-")}.csv`;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -380,6 +386,20 @@ const EPC_STAGE_META: Record<string, { label: string; cls: string }> = {
   docs_sent:       { label: "Docs Sent to Lender", cls: "bg-[#dceffb] text-[#185fa5]" },
   lender_approved: { label: "Approved by Lender",  cls: "bg-[#d6efe3] text-[#0f7a52]" },
   rejected_by_lender: { label: "Rejected by Lender", cls: "bg-[#ffe4e6] text-[#9f1239]" },
+};
+
+// Every status pill in the console: one shape, labels as written (no forced capitals).
+const PILL = "inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold";
+
+// Loan Status-column pills with a fixed label. Aborted is the inactive grey, so
+// it can't be mistaken for a rejection.
+const LOAN_PILL: Record<string, { label: string; cls: string }> = {
+  aborted:         { label: "Aborted",               cls: "bg-[#eef1f4] text-[#64748b]" },
+  draft:           { label: "Draft",                 cls: "bg-[#eef1f0] text-[#5a8a76]" },
+  docs_sent:       { label: "Docs Sent",             cls: "bg-[#dceffb] text-[#185fa5]" },
+  hold:            { label: "Hold",                  cls: "bg-[#e5edf5] text-[#3b5a76]" },
+  fully_disbursed: { label: "Fully Disbursed",       cls: "bg-[#e6f6ee] text-[#0f7a52]" },
+  tranche1:        { label: "1st Disbursement Done", cls: "bg-[#dceffb] text-[#185fa5]" },
 };
 
 // One consistent colour per pipeline stage — shared across EVERY dashboard tab,
@@ -757,6 +777,7 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
   const [sortKey, setSortKey] = useState<SortKey>("created_at");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [lenderState, setLenderState] = useState<Record<string, LenderMap>>({});
+  const [loaded, setLoaded] = useState(false); // first read done (cache or query)
   // Live lender registry (falls back to the static list until it loads).
   const [lenderList, setLenderList] = useState<LenderInfo[]>(LENDERS);
   const [addOpen, setAddOpen] = useState(false);
@@ -828,7 +849,7 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
     const CK = "dash.epcs";
     if (!force) {
       const cached = getCached<{ rows: Row[]; lenderState: Record<string, LenderMap> }>(CK, 45000);
-      if (cached) { setRows(cached.rows); setLenderState(cached.lenderState); return; }
+      if (cached) { setRows(cached.rows); setLenderState(cached.lenderState); setLoaded(true); return; }
     }
     let query = supabase().from("epc_business")
       .select("id, epc_display_id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, source, created_at, submitted_at, epc_self_edited, reviewed_at, created_by_user_id, admin_review_status")
@@ -836,6 +857,7 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
     const { data } = await query;
     const rs = (data ?? []) as Row[];
     setRows(rs);
+    setLoaded(true);
 
     let map: Record<string, LenderMap> = {};
     if (rs.length > 0) {
@@ -878,8 +900,8 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
     const label = name.trim();
     if (!label) return;
     const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-    if (!key) { alert("Please enter a valid lender name."); return; }
-    if (lenderList.some((l) => l.key === key)) { alert("That lender already exists."); return; }
+    if (!key) { toast.error("Please enter a valid lender name."); return; }
+    if (lenderList.some((l) => l.key === key)) { toast.error("That lender already exists."); return; }
     const sort_order = Math.max(100, ...lenderList.map((l) => l.sort_order ?? 100)) + 10;
     const { error } = await supabase().from("lenders").insert({ key, label, sort_order });
     if (error) { alert("Couldn't add lender: " + error.message); return; }
@@ -1003,8 +1025,6 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
   // combine (B1). Approved/Rejected are gated behind Docs Sent in the UI, and
   // this reuses the same epc_lender_status upsert as before.
   async function setLenderExclusive(epcId: string, lender: Lender, target: "none" | "docs" | "approved" | "rejected") {
-    if (target === "approved" && !window.confirm("Mark this lender as Approved?")) return;
-    if (target === "rejected" && !window.confirm("Mark this lender as Rejected?")) return;
     const flags: LenderState = {
       docs_given: target === "docs",
       approved:   target === "approved",
@@ -1066,34 +1086,25 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
     setDateFrom(""); setDateTo(""); setCategoryFilter("");
   }
 
+  // Created by — the admin user who added it (from created_by_user_id);
+  // self-onboarded EPCs have none → "EPC"; legacy admin-added → "Admin".
+  const createdBy = (r: Row) =>
+    r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : ((r.source || "website").toLowerCase() === "manual" ? "Admin" : "EPC");
+
   // "Report" — client-side CSV of the CURRENTLY-FILTERED EPC list.
   function exportEpcReport() {
-    const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const header = ["EPC ID", "Trade name", "Legal name", "Contact", "Mobile", "Email", "Status", "Created by", "Created on"];
-    const lines = [header.map(esc).join(",")];
-    for (const r of filtered) {
-      lines.push([
-        r.epc_display_id || r.id,
-        r.trade_name || "",
-        r.legal_name || "",
-        r.contact_name || "",
-        r.contact_mobile || "",
-        r.contact_email || "",
-        EPC_STAGE_META[epcBadge(r)]?.label ?? "",
-        r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : ((r.source || "website").toLowerCase() === "manual" ? "Admin" : "EPC"),
-        r.created_at,
-      ].map(esc).join(","));
-    }
-    const csv = "﻿" + lines.join("\r\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `epcs-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    downloadCsv("epcs", header, filtered.map((r) => [
+      r.epc_display_id || r.id,
+      nameCase(r.trade_name),
+      nameCase(r.legal_name),
+      nameCase(r.contact_name),
+      r.contact_mobile || "",
+      r.contact_email || "",
+      EPC_STAGE_META[epcBadge(r)]?.label ?? "",
+      createdBy(r),
+      fmtDateTime(r.created_at),
+    ]));
   }
 
   return (
@@ -1109,10 +1120,10 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
           />
         </div>
         <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.epcs.color} onClick={() => setFiltersOpen((o) => !o)} />
-        <Button type="button" variant="primary" onClick={exportEpcReport} style={{ backgroundColor: "#178a5c" }} className="whitespace-nowrap inline-flex items-center gap-1.5">
+        <Button type="button" variant="outline" onClick={exportEpcReport} className="whitespace-nowrap inline-flex items-center gap-1.5">
           {IconDownload} Report
         </Button>
-        <Button type="button" variant="primary" onClick={() => setAddOpen(true)} className="whitespace-nowrap">
+        <Button type="button" variant="primary" onClick={() => setAddOpen(true)} className="whitespace-nowrap" style={{ backgroundColor: ACCENTS.epcs.color }}>
           + Add New EPC
         </Button>
       </div>
@@ -1120,17 +1131,7 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
       <FiltersPanel open={filtersOpen} hasActive={activeCount > 0} onClear={clearAll}>
         <Select
           placeholder="Stage"
-          options={[
-            { value: "unseen",          label: "Application Unseen" },
-            { value: "under_review",    label: "Under Review" },
-            { value: "updated",         label: "Updated" },
-            { value: "approved",        label: "Approved" },
-            { value: "hold",            label: "Hold" },
-            { value: "rejected",        label: "Rejected" },
-            { value: "docs_sent",       label: "Docs Sent to Lender" },
-            { value: "lender_approved", label: "Lender Approved" },
-            { value: "rejected_by_lender", label: "Rejected by Lender" },
-          ]}
+          options={Object.entries(EPC_STAGE_META).map(([value, m]) => ({ value, label: m.label }))}
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
         />
@@ -1163,9 +1164,10 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
       </FiltersPanel>
 
       <Card className="overflow-hidden">
-        <table className="w-full text-[14px] table-fixed">
-          {/* Percentage widths — the table fills the page evenly and never
-              needs a horizontal scrollbar (matches the loan table). Internal
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[820px] text-[14px] table-fixed">
+          {/* Percentage widths — the table fills the page evenly and scrolls sideways
+              only on small screens (matches the loan table). Internal
               status keeps room for the status + UPDATED pills side by side. */}
           <colgroup>
             <col style={{ width: "26%" }} />
@@ -1198,7 +1200,7 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={6} className="px-5 py-10 text-center text-[#5a8a76]">No EPCs match.</td></tr>
+              <tr><td colSpan={6} className="px-5 py-10 text-center text-[#5a8a76]">{!loaded ? "Loading…" : rows.length ? "No EPCs match." : "No EPCs yet."}</td></tr>
             ) : filtered.map((r) => {
               const isHighlighted = highlightId === r.id;
               return (
@@ -1219,8 +1221,9 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-[13px] font-semibold text-[#0f3d2e] truncate">
-                        {r.trade_name || r.legal_name ||
-                          <span className="text-[#5a8a76] font-normal">—</span>}
+                        {r.trade_name || r.legal_name ? (
+                          <RowLink href={`/admin/epc/${r.id}/view`} onOpen={() => navigateToView(r)}>{nameCase(r.trade_name || r.legal_name)}</RowLink>
+                        ) : <span className="text-[#5a8a76] font-normal">—</span>}
                       </p>
                       {r.epc_display_id && (
                         <p className="text-[11px] font-mono text-[#185fa5]">{r.epc_display_id}</p>
@@ -1237,7 +1240,7 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
                 <td className="px-3 py-3 text-center">
                   {(() => {
                     const m = EPC_STAGE_META[epcBadge(r)];
-                    return <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${m.cls}`}>{m.label}</span>;
+                    return <span className={`${PILL} ${m.cls}`}>{m.label}</span>;
                   })()}
                 </td>
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
@@ -1255,14 +1258,10 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
                     {fmtDate(r.created_at)}
                   </p>
                   <p className="text-[11px] text-[#5a8a76] mt-0.5">
-                    {new Date(r.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                    {fmtAddedTime(r.created_at)}
                   </p>
                 </td>
-                {/* Created by — the admin user who added it (from created_by_user_id);
-                    self-onboarded EPCs have none → "EPC"; legacy admin-added → "Admin". */}
-                <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">
-                  {r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : ((r.source || "website").toLowerCase() === "manual" ? "Admin" : "EPC")}
-                </td>
+                <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">{createdBy(r)}</td>
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <div className="flex flex-col items-center gap-1">
                     <button type="button" disabled={epcLocked(r)} onClick={(e) => { e.stopPropagation(); setEmailRow(r); }}
@@ -1277,6 +1276,7 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
             })}
           </tbody>
         </table>
+        </div>
       </Card>
 
       <AddNewEpcModal open={addOpen} onClose={() => setAddOpen(false)} />
@@ -1354,6 +1354,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
   const adminNames = useAdminNames();
   const { loanCounts } = useEpcUpdates();   // per-admin unseen EPC-reply counts
   const [rows, setRows] = useState<Row[]>([]);
+  const [loaded, setLoaded] = useState(false); // first read done (cache or query)
   // 6h — per-application latest lender status label (most-recent event).
   const [lenderLatest, setLenderLatest] = useState<Record<string, string>>({});
   // Latest docs-sent (email-to-lender) timestamp per application — drives the
@@ -1447,7 +1448,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     const CK = "dash.apps";
     if (!force) {
       const cached = getCached<{ rows: Row[]; lenderLatest: Record<string, string>; lenderSentAt?: Record<string, string> }>(CK, 45000);
-      if (cached) { setRows(cached.rows); setLenderLatest(cached.lenderLatest); setLenderSentAt(cached.lenderSentAt ?? {}); return; }
+      if (cached) { setRows(cached.rows); setLenderLatest(cached.lenderLatest); setLenderSentAt(cached.lenderSentAt ?? {}); setLoaded(true); return; }
     }
     const { data } = await supabase()
       .from("epc_applications")
@@ -1469,6 +1470,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
       .order("created_at", { ascending: false });
     const rows = (data ?? []) as unknown as Row[];
     setRows(rows);
+    setLoaded(true);
 
     // Per-lender latest status (6h) — group loan_application_lenders by app,
     // then the most-recent event across each app's lenders becomes its label.
@@ -1538,7 +1540,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
   // the profile header. borrower_name can be a stale lead name (from a converted
   // lead), which made the list disagree with the opened profile.
   function displayBorrower(r: Row): string {
-    return r.aadhaar_name || r.borrower_name || "—";
+    return nameCase(r.aadhaar_name || r.borrower_name) || "—";
   }
   // Applications that look like the SAME person as another loan — flagged ⚠ so
   // duplicates get caught before double-work. A shared PAN or mobile is a
@@ -1576,10 +1578,30 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     return { have: all.filter(Boolean).length, need: all.length };
   }
   function displayEpc(r: Row): string {
-    return r.epc_business?.trade_name
+    return nameCase(r.epc_business?.trade_name
         || r.epc_business?.legal_name
-        || r.epc_business?.contact_name
-        || "—";
+        || r.epc_business?.contact_name) || "—";
+  }
+  // Status-column pill. Once the 1st disbursement is entered it shows that
+  // instead — display-only, the underlying status field is unchanged.
+  function loanPill(r: Row): { label: string; cls: string } {
+    if (r.aborted_at != null) return LOAN_PILL.aborted;
+    if (r.status === "draft") return LOAN_PILL.draft;
+    if (r.status === "docs_sent" && !lenderLatest[r.id]) return LOAN_PILL.docs_sent;
+    if (r.status === "on_hold") return LOAN_PILL.hold;
+    if (r.status === "approved" && r.first_disbursement_amount != null) {
+      return r.second_disbursement_amount != null ? LOAN_PILL.fully_disbursed : LOAN_PILL.tranche1;
+    }
+    // Finalized for disbursement — the approval by that lender (not the latest
+    // event, which may be a different lender's later rejection).
+    if (r.approved_lender) {
+      return { label: `Approved by ${LENDER_LABEL[String(r.approved_lender)] ?? String(r.approved_lender)}`, cls: "bg-[#e6f6ee] text-[#0f7a52]" };
+    }
+    // Latest status across all lenders: a rejection is red, other events indigo.
+    const latest = lenderLatest[r.id];
+    if (latest) return { label: latest, cls: latest.startsWith("Rejected") ? "bg-red-50 text-red-700" : "bg-[#eef0fb] text-[#4338ca]" };
+    const o = lenderOutcome(r.status);
+    return { label: OUTCOME_LABEL[o], cls: OUTCOME_PILL[o] };
   }
   // Approved → show what the lender SANCTIONED; otherwise what was applied for.
   function displayAmount(r: Row): string {
@@ -1744,7 +1766,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         amountFor(r),
         STAGE[loanStage(r)] ?? loanStage(r),
         `${d.have}/${d.need}`,
-        r.created_at,
+        fmtDateTime(r.created_at),
         r.created_by === "epc" ? "EPC" : r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : "Admin",
         r.first_disbursement_amount ?? "",
         r.second_disbursement_amount ?? "",
@@ -1763,10 +1785,10 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
           <Input placeholder="Search by borrower or mobile…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
         </div>
         <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.apps.color} onClick={() => setFiltersOpen((o) => !o)} />
-        <Button variant="primary" onClick={exportReport} style={{ backgroundColor: "#178a5c" }} className="whitespace-nowrap inline-flex items-center gap-1.5">
+        <Button variant="outline" onClick={exportReport} className="whitespace-nowrap inline-flex items-center gap-1.5">
           {IconDownload} Report
         </Button>
-        <Button variant="primary" onClick={() => setAddOpen(true)} style={{ backgroundColor: "#185fa5" }} className="whitespace-nowrap">
+        <Button variant="primary" onClick={() => setAddOpen(true)} style={{ backgroundColor: ACCENTS.apps.color }} className="whitespace-nowrap">
           + New Applicant
         </Button>
       </div>
@@ -1792,7 +1814,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         />
         <Select
           label="EPC Name"
-          placeholder="Search & Select EPC"
+          placeholder="EPC"
           options={epcOptions}
           value={epcFilter}
           onChange={(e) => setEpcFilter(e.target.value)}
@@ -1800,11 +1822,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         <Select
           label="Lender"
           placeholder="Lender"
-          options={[
-            { value: "creditfair", label: "Credit Fair" },
-            { value: "aerem",      label: "Aerem" },
-            { value: "solfin",     label: "Solfin" },
-          ]}
+          options={Object.entries(LENDER_LABEL).map(([value, label]) => ({ value, label }))}
           value={lenderFilter}
           onChange={(e) => setLenderFilter(e.target.value)}
         />
@@ -1812,9 +1830,10 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
       </FiltersPanel>
 
       <Card className="overflow-hidden">
-        <table className="w-full text-[14px] table-fixed">
-          {/* Percentage widths — the table fills the page evenly and never
-              needs a horizontal scrollbar. */}
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[960px] text-[14px] table-fixed">
+          {/* Percentage widths — the table fills the page evenly and scrolls sideways
+              only on small screens. */}
           <colgroup>
             <col style={{ width: "15%" }} />
             <col style={{ width: "13%" }} />
@@ -1847,7 +1866,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={9} className="px-5 py-10 text-center text-[#5a8a76]">No applications match.</td></tr>
+              <tr><td colSpan={9} className="px-5 py-10 text-center text-[#5a8a76]">{!loaded ? "Loading…" : rows.length ? "No applications match." : "No applications yet."}</td></tr>
             ) : filtered.map((r) => {
               const isHighlighted = highlightId === r.id;
               return (
@@ -1869,7 +1888,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                     </span>
                     <div className="min-w-0">
                       <p className="text-[13px] font-semibold text-[#0f3d2e] truncate flex items-center gap-1">
-                        <span className="truncate">{displayBorrower(r)}</span>
+                        <RowLink href={`/admin/app/${r.id}/view`} onOpen={() => navigateToView(r)} className="truncate">{displayBorrower(r)}</RowLink>
                         {isDup(r) && <span title="Same person as another application — matches on PAN / mobile, or name + father's name — possible duplicate" className="text-[#d97706] shrink-0">⚠</span>}
                       </p>
                       {r.loan_display_id && (
@@ -1901,50 +1920,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                     disbursement is entered, surface that instead — display-only,
                     the underlying status field is unchanged. */}
                 <td className="px-3 py-3 text-center">
-                  {r.aborted_at != null ? (
-                    <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-red-50 text-red-700">
-                      Aborted
-                    </span>
-                  ) : r.status === "draft" ? (
-                    <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#eef1f0] text-[#5a8a76]">
-                      Draft
-                    </span>
-                  ) : r.status === "docs_sent" && !lenderLatest[r.id] ? (
-                    <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#dceffb] text-[#185fa5]">
-                      Docs Sent
-                    </span>
-                  ) : r.status === "on_hold" ? (
-                    <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#e5edf5] text-[#3b5a76]">
-                      Hold
-                    </span>
-                  ) : r.status === "approved" && r.first_disbursement_amount != null ? (
-                    r.second_disbursement_amount != null ? (
-                      <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#e6f6ee] text-[#0f7a52]">
-                        Fully Disbursed
-                      </span>
-                    ) : (
-                      <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#dceffb] text-[#185fa5]">
-                        1st Disbursement Done
-                      </span>
-                    )
-                  ) : r.approved_lender ? (
-                    // Finalized for disbursement — show the approval by that
-                    // lender (not the latest event, which may be a different
-                    // lender's later rejection).
-                    <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide bg-[#e6f6ee] text-[#0f7a52]">
-                      Approved by {LENDER_LABEL[String(r.approved_lender)] ?? String(r.approved_lender)}
-                    </span>
-                  ) : lenderLatest[r.id] ? (
-                    // 6h — latest status across all lenders. A rejection shows RED;
-                    // other events (e.g. "Doc sent to …") keep the neutral indigo.
-                    <span className={["inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide", lenderLatest[r.id].startsWith("Rejected") ? "bg-red-50 text-red-700" : "bg-[#eef0fb] text-[#4338ca]"].join(" ")}>
-                      {lenderLatest[r.id]}
-                    </span>
-                  ) : (
-                    <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${OUTCOME_PILL[lenderOutcome(r.status)]}`}>
-                      {OUTCOME_LABEL[lenderOutcome(r.status)]}
-                    </span>
-                  )}
+                  {(() => { const p = loanPill(r); return <span className={`${PILL} ${p.cls}`}>{p.label}</span>; })()}
                 </td>
                 {/* Disbursement + countdown — only meaningful once approved. */}
                 <td className="px-3 py-3 text-center">
@@ -2021,6 +1997,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
             })}
           </tbody>
         </table>
+        </div>
       </Card>
 
       <AddNewLoanAppModal open={addOpen} onClose={() => setAddOpen(false)} />
@@ -2081,6 +2058,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
     epc_business: { contact_name: string | null; trade_name: string | null; legal_name: string | null; epc_display_id: string | null } | null;
   };
   const [rows, setRows] = useState<Row[]>([]);
+  const [loaded, setLoaded] = useState(false); // first read done (cache or query)
   const [q, setQ] = useState("");
   const [zipBusy, setZipBusy] = useState<string | null>(null);
   const [highlightId, setHighlightId] = useState<string | null>(null);
@@ -2098,7 +2076,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
     (async () => {
       const CK = "dash.insurance";
       const cached = getCached<Row[]>(CK, 45000);
-      if (cached) { setRows(cached); return; }
+      if (cached) { setRows(cached); setLoaded(true); return; }
       const { data } = await supabase()
         .from("insurance_applications")
         .select(
@@ -2111,6 +2089,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
         .order("created_at", { ascending: false });
       const rows = (data ?? []) as unknown as Row[];
       setRows(rows);
+      setLoaded(true);
       setCached("dash.insurance", rows);
     })();
   }, []);
@@ -2281,7 +2260,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
     under_review: "bg-[#fef0d6] text-[#854f0b]",
     issued: "bg-[#e6f6ee] text-[#178a5c]",
     rejected: "bg-red-50 text-red-700",
-    hold: "bg-[#dceffb] text-[#185fa5]",
+    hold: "bg-[#e5edf5] text-[#3b5a76]",
   };
 
   const fyRows = useMemo(() => rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo)), [rows, period, pFrom, pTo]);
@@ -2309,9 +2288,9 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
       r.sum_insured ?? r.invoice_confirmed_amount ?? r.invoice_amount ?? "",
       insurerLabelShort(r.insurance_partner),
       STATUS_LABEL[r.status] ?? r.status,
-      r.policy_from_date ?? "",
-      r.policy_to_date ?? "",
-      r.created_at,
+      r.policy_from_date ? fmtDate(r.policy_from_date) : "",
+      r.policy_to_date ? fmtDate(r.policy_to_date) : "",
+      fmtDateTime(r.created_at),
       r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : "—",
     ]);
     downloadCsv("insurance-applications", header, rowsOut);
@@ -2326,7 +2305,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
           <Input placeholder="Search by applicant, INS id, or EPC…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
         </div>
         <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.insurance.color} onClick={() => setFiltersOpen((o) => !o)} />
-        <Button type="button" variant="primary" onClick={exportReport} style={{ backgroundColor: "#178a5c" }} className="whitespace-nowrap inline-flex items-center gap-1.5">
+        <Button type="button" variant="outline" onClick={exportReport} className="whitespace-nowrap inline-flex items-center gap-1.5">
           {IconDownload} Report
         </Button>
         <Button type="button" variant="primary" onClick={() => setAddOpen(true)} className="whitespace-nowrap" style={{ backgroundColor: ACCENTS.insurance.color }}>
@@ -2367,17 +2346,19 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
         <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
       </FiltersPanel>
       <Card className="overflow-hidden">
-        <table className="w-full text-[14px] table-fixed">
-          {/* Percentage widths — fills the page evenly, never scrolls sideways. */}
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[960px] text-[14px] table-fixed">
+          {/* Percentage widths — fills the page evenly, scrolls sideways only on small screens. */}
           <colgroup>
-            <col style={{ width: "17%" }} />
             <col style={{ width: "15%" }} />
-            <col style={{ width: "10%" }} />
-            <col style={{ width: "11%" }} />
-            <col style={{ width: "10%" }} />
             <col style={{ width: "13%" }} />
+            <col style={{ width: "9%"  }} />
+            <col style={{ width: "9%"  }} />
+            <col style={{ width: "9%"  }} />
             <col style={{ width: "12%" }} />
-            <col style={{ width: "12%" }} />
+            <col style={{ width: "9%"  }} />
+            <col style={{ width: "9%"  }} />
+            <col style={{ width: "15%" }} />
           </colgroup>
           {/* Everything centred except Insured name, which stays left. */}
           <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-[#5a8a76]">
@@ -2395,7 +2376,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={9} className="px-5 py-10 text-center text-[#5a8a76]">No insurance applications yet.</td></tr>
+              <tr><td colSpan={9} className="px-5 py-10 text-center text-[#5a8a76]">{!loaded ? "Loading…" : rows.length ? "No insurance applications match." : "No insurance applications yet."}</td></tr>
             ) : filtered.map((r) => {
               const hl = highlightId === r.id;
               return (
@@ -2411,7 +2392,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h6" /></svg>
                     </span>
                     <div className="min-w-0">
-                      <p className="text-[15px] font-semibold text-[#0f3d2e] truncate">{applicant(r)}</p>
+                      <p className="text-[15px] font-semibold text-[#0f3d2e] truncate"><RowLink href={`/admin/insurance/${r.id}/view`} onOpen={() => navigateToView(r)}>{applicant(r)}</RowLink></p>
                       {r.insurance_display_id && <p className="text-[12px] font-mono text-[#185fa5] mt-0.5">{r.insurance_display_id}</p>}
                     </div>
                   </div>
@@ -2424,7 +2405,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
                 <td className="px-3 py-3 text-center text-[13px] font-semibold text-[#0f3d2e]">{amount(r)}</td>
                 <td className="px-3 py-3 text-center text-[13px] text-[#0f3d2e]">{insurerLabelShort(r.insurance_partner)}</td>
                 <td className="px-3 py-3 text-center">
-                  <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${STATUS_PILL[r.status] ?? STATUS_PILL.draft}`}>
+                  <span className={`${PILL} ${STATUS_PILL[r.status] ?? STATUS_PILL.draft}`}>
                     {STATUS_LABEL[r.status] ?? r.status.replace(/_/g, " ")}
                   </span>
                 </td>
@@ -2475,6 +2456,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
             })}
           </tbody>
         </table>
+        </div>
       </Card>
 
       <AddNewInsuranceModal open={addOpen} onClose={() => setAddOpen(false)} />
@@ -2525,6 +2507,7 @@ function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
     created_by_user_id: string | null;
   };
   const [rows, setRows] = useState<Row[]>([]);
+  const [loaded, setLoaded] = useState(false); // first read done (cache or query)
   const [q, setQ] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
@@ -2538,13 +2521,14 @@ function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
     (async () => {
       const CK = OTHER_INS_LIST_CACHE;
       const cached = getCached<Row[]>(CK, 45000);
-      if (cached) { setRows(cached); return; }
+      if (cached) { setRows(cached); setLoaded(true); return; }
       const { data } = await supabase()
         .from("other_insurance")
         .select("id, display_id, customer_name, sum_insured, insurance_company, policy_path, policy_from_date, policy_to_date, kyc_docs, created_at, created_by_user_id")
         .order("created_at", { ascending: false });
       const list = (data ?? []) as unknown as Row[];
       setRows(list);
+      setLoaded(true);
       setCached(CK, list);
     })();
   }, []);
@@ -2631,9 +2615,9 @@ function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
       r.sum_insured ?? "",
       r.insurance_company ?? "",
       issued(r) ? "Issued" : "Awaiting policy",
-      r.policy_from_date ?? "",
-      r.policy_to_date ?? "",
-      r.created_at,
+      r.policy_from_date ? fmtDate(r.policy_from_date) : "",
+      r.policy_to_date ? fmtDate(r.policy_to_date) : "",
+      fmtDateTime(r.created_at),
       r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : "—",
     ]));
   }
@@ -2648,7 +2632,7 @@ function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
           <Input placeholder="Search by customer or OI id…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
         </div>
         <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.otherins.color} onClick={() => setFiltersOpen((o) => !o)} />
-        <Button type="button" variant="primary" onClick={exportReport} style={{ backgroundColor: "#178a5c" }} className="whitespace-nowrap inline-flex items-center gap-1.5">
+        <Button type="button" variant="outline" onClick={exportReport} className="whitespace-nowrap inline-flex items-center gap-1.5">
           {IconDownload} Report
         </Button>
         <Button type="button" variant="primary" onClick={() => open("new", true)} className="whitespace-nowrap" style={{ backgroundColor: ACCENTS.otherins.color }}>
@@ -2673,7 +2657,8 @@ function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
         <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
       </FiltersPanel>
       <Card className="overflow-hidden">
-        <table className="w-full text-[14px] table-fixed">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[900px] text-[14px] table-fixed">
           <colgroup>
             <col style={{ width: "22%" }} />
             <col style={{ width: "11%" }} />
@@ -2698,7 +2683,7 @@ function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={8} className="px-5 py-10 text-center text-[#5a8a76]">No insurance applications yet.</td></tr>
+              <tr><td colSpan={8} className="px-5 py-10 text-center text-[#5a8a76]">{!loaded ? "Loading…" : rows.length ? "No insurance applications match." : "No insurance applications yet."}</td></tr>
             ) : filtered.map((r) => (
               <tr key={r.id} onClick={() => open(r.id)} className="border-b border-[#eaf3ee] cursor-pointer hover:bg-[#f7fcfa] align-top">
                 <td className="px-3 py-3">
@@ -2707,7 +2692,7 @@ function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h6" /></svg>
                     </span>
                     <div className="min-w-0">
-                      <p className="text-[15px] font-semibold text-[#0f3d2e] truncate">{customer(r)}</p>
+                      <p className="text-[15px] font-semibold text-[#0f3d2e] truncate"><RowLink href={`/admin/other-insurance/${r.id}/view`} onOpen={() => open(r.id)}>{customer(r)}</RowLink></p>
                       {r.display_id && <p className="text-[12px] font-mono text-[#185fa5] mt-0.5">{r.display_id}</p>}
                     </div>
                   </div>
@@ -2715,7 +2700,7 @@ function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
                 <td className="px-3 py-3 text-center text-[13px] font-semibold text-[#0f3d2e]">{fmtRupees(r.sum_insured)}</td>
                 <td className="px-3 py-3 text-center text-[13px] text-[#0f3d2e] truncate">{r.insurance_company || "—"}</td>
                 <td className="px-3 py-3 text-center">
-                  <span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${issued(r) ? "bg-[#e6f6ee] text-[#178a5c]" : "bg-[#fef0d6] text-[#854f0b]"}`}>
+                  <span className={`${PILL} ${issued(r) ? "bg-[#e6f6ee] text-[#178a5c]" : "bg-[#fef0d6] text-[#854f0b]"}`}>
                     {issued(r) ? "Issued" : "Awaiting policy"}
                   </span>
                 </td>
@@ -2746,6 +2731,7 @@ function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
             ))}
           </tbody>
         </table>
+        </div>
       </Card>
     </>
   );
@@ -2767,6 +2753,7 @@ const LEAD_STATUS_PILL: Record<string, string> = {
 };
 function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
   const [rows, setRows] = useState<Lead[]>([]);
+  const [loaded, setLoaded] = useState(false); // first read done (cache or query)
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -2782,13 +2769,14 @@ function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
     (async () => {
       const CK = "dash.leads";
       const cached = getCached<Lead[]>(CK, 45000);
-      if (cached) { setRows(cached); return; }
+      if (cached) { setRows(cached); setLoaded(true); return; }
       const { data } = await supabase()
         .from("customer_leads")
         .select("id, created_at, lead_type, name, mobile, city, pincode, pan, aadhaar, project_cost, loan_amount, plant_value, gstin, status")
         .order("created_at", { ascending: false });
       const rows = (data ?? []) as unknown as Lead[];
       setRows(rows);
+      setLoaded(true);
       setCached(CK, rows);
     })();
   }, []);
@@ -2850,7 +2838,7 @@ function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
       r.gstin ?? "",
       r.pan ?? "",
       r.status,
-      r.created_at,
+      fmtDateTime(r.created_at),
     ]);
     downloadCsv("customer-leads", header, rowsOut);
   }
@@ -2859,12 +2847,12 @@ function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
     <>
       <SummaryCards accent={ACCENTS.leads.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
 
-      <div className="flex items-center gap-3 mb-3">
-        <div className="flex-1">
+      <div className="flex flex-wrap items-center gap-3 mb-3">
+        <div className="flex-1 min-w-[220px]">
           <Input placeholder="Search by name, mobile, or city…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
         </div>
         <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.leads.color} onClick={() => setFiltersOpen((o) => !o)} />
-        <Button variant="primary" onClick={exportReport} style={{ backgroundColor: "#178a5c" }} className="whitespace-nowrap inline-flex items-center gap-1.5">
+        <Button variant="outline" onClick={exportReport} className="whitespace-nowrap inline-flex items-center gap-1.5">
           {IconDownload} Report
         </Button>
       </div>
@@ -2888,16 +2876,18 @@ function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={6} className="px-5 py-10 text-center text-[#5a8a76]">No leads yet.</td></tr>
+              <tr><td colSpan={6} className="px-5 py-10 text-center text-[#5a8a76]">{!loaded ? "Loading…" : rows.length ? "No leads match." : "No leads yet."}</td></tr>
             ) : filtered.map((r) => (
               <tr key={r.id} onClick={() => setViewLead(r)} className="border-b border-[#eaf3ee] hover:bg-[#f7fcfa] align-top cursor-pointer">
                 <td className="px-3 py-3">
-                  <p className="text-[15px] font-semibold text-[#0f3d2e]">{r.name || "—"}</p>
+                  <p className="text-[15px] font-semibold text-[#0f3d2e]">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setViewLead(r); }} className="text-left hover:underline">{r.name || "—"}</button>
+                  </p>
                   <p className="text-[12px] text-[#5a8a76] mt-0.5">+91 {r.mobile}</p>
                   {(r.city || r.pincode) && <p className="text-[12px] text-[#5a8a76]">{[r.city, r.pincode].filter(Boolean).join(" · ")}</p>}
                 </td>
                 <td className="px-3 py-3 text-center">
-                  <span className="inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide bg-[#dceffb] text-[#185fa5]">{r.lead_type}</span>
+                  <span className={`${PILL} bg-[#dceffb] text-[#185fa5]`}>{nameCase(r.lead_type)}</span>
                 </td>
                 <td className="px-3 py-3 text-[13px] text-[#0f3d2e]">
                   {r.lead_type === "loan" ? (
@@ -2919,7 +2909,7 @@ function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
                     disabled={busy === r.id}
                     value={r.status}
                     onChange={(e) => void setStatus(r, e.target.value)}
-                    className={`px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide border-none cursor-pointer outline-none ${LEAD_STATUS_PILL[r.status] ?? LEAD_STATUS_PILL.new}`}
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border-none cursor-pointer outline-none ${LEAD_STATUS_PILL[r.status] ?? LEAD_STATUS_PILL.new}`}
                   >
                     <option value="new">New</option>
                     <option value="contacted">Contacted</option>

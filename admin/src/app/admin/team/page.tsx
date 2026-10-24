@@ -51,7 +51,7 @@ function Inner() {
   if (!allowed) return null;
   const th = "px-4 py-2.5 font-semibold text-left whitespace-nowrap";
   return (
-    <div className="min-h-screen bg-bg-soft md:flex">
+    <div className="min-h-screen bg-bg-soft lg:flex">
       <AdminSidebar active="team" />
       <div className="flex-1 min-w-0">
         <header className="px-4 sm:px-6 py-5 border-b border-line bg-white">

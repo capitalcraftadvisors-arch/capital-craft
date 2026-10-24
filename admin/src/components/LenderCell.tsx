@@ -4,28 +4,45 @@ import { useEffect, useRef, useState } from "react";
 
 // Lender registry + per-EPC state. Shared by the admin table and the EPC
 // profile action bar so both render the identical "Lender status" dropdown.
+// The trigger shows each lender that has a state as a coloured chip; approve,
+// reject and undoing either are confirmed inside the panel (✓ / ✕) before saving.
 export type Lender = string;
 export type LenderInfo = { key: string; label: string; sort_order?: number };
 export type LenderState = { docs_given: boolean; approved: boolean; rejected: boolean };
 export type LenderMap = Partial<Record<Lender, LenderState>>;
+type Target = "none" | "docs" | "approved" | "rejected";
+
+const CHIP: Record<"docs" | "approved" | "rejected", string> = {
+  approved: "bg-[#e6f6ee] text-[#0f7a52]",
+  docs:     "bg-[#dceffb] text-[#185fa5]",
+  rejected: "bg-[#ffe4e6] text-[#9f1239]",
+};
+// The confirm question for an armed change (approve / reject / undo either).
+const ASK: Record<"approved" | "rejected" | "docs", string> = {
+  approved: "Mark approved?",
+  rejected: "Mark rejected?",
+  docs: "Undo?",
+};
 
 export default function LenderCell({
   state, lenders, onSet, onAddLender,
 }: {
   state: LenderMap;
   lenders: LenderInfo[];
-  onSet: (lender: Lender, target: "none" | "docs" | "approved" | "rejected") => void;
+  onSet: (lender: Lender, target: Target) => void;
   onAddLender: (name: string) => Promise<void> | void;
 }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number } | null>(null);
   const [newName, setNewName] = useState("");
   const [adding, setAdding] = useState(false);
+  // A change waiting for ✓ — approve / reject, or undoing one (→ Docs sent).
+  const [armed, setArmed] = useState<{ key: string; target: "approved" | "rejected" | "docs" } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
   // One exclusive state per lender.
-  const stateOf = (key: string): "none" | "docs" | "approved" | "rejected" => {
+  const stateOf = (key: string): Target => {
     const s = state[key];
     if (!s) return "none";
     if (s.approved) return "approved";
@@ -37,7 +54,7 @@ export default function LenderCell({
   const approvedL = sorted.filter((l) => stateOf(l.key) === "approved"); // TOP
   const rejectedL = sorted.filter((l) => stateOf(l.key) === "rejected"); // BOTTOM
   const middleL   = sorted.filter((l) => stateOf(l.key) === "none" || stateOf(l.key) === "docs");
-  const anySet = approvedL.length > 0 || rejectedL.length > 0 || middleL.some((l) => stateOf(l.key) === "docs");
+  const setL = sorted.filter((l) => stateOf(l.key) !== "none");
 
   function place() {
     const r = btnRef.current?.getBoundingClientRect();
@@ -59,7 +76,7 @@ export default function LenderCell({
   function toggle() { if (!open) place(); setOpen((o) => !o); }
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) { setArmed(null); return; }
     const onDoc = (e: MouseEvent) => {
       if (panelRef.current?.contains(e.target as Node)) return;
       if (btnRef.current?.contains(e.target as Node)) return;
@@ -79,6 +96,32 @@ export default function LenderCell({
     };
   }, [open]);
 
+  function confirmArmed() {
+    if (!armed) return;
+    onSet(armed.key, armed.target);
+    setArmed(null);
+  }
+  // ✓ / ✕ for the armed change, shown in place of that lender's controls.
+  function confirmBar(label: string, tone: string) {
+    return (
+      <div className={"flex items-center justify-between gap-2 px-3 py-2 " + tone}>
+        <span className="font-medium truncate">{label}</span>
+        <span className="inline-flex items-center gap-1.5 shrink-0">
+          <span className="text-[11px] font-semibold">{armed ? ASK[armed.target] : ""}</span>
+          <button type="button" onClick={confirmArmed} aria-label="Confirm"
+            className="w-7 h-7 grid place-items-center rounded-input bg-[#178a5c] text-white hover:bg-[#12734c]">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+          </button>
+          <button type="button" onClick={() => setArmed(null)} aria-label="Cancel"
+            className="w-7 h-7 grid place-items-center rounded-input border border-line bg-white text-text-mid hover:text-text">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18M6 6l12 12" /></svg>
+          </button>
+        </span>
+      </div>
+    );
+  }
+  const isArmed = (key: string) => armed?.key === key;
+
   async function submitAdd() {
     const name = newName.trim();
     if (!name) return;
@@ -93,9 +136,12 @@ export default function LenderCell({
         ref={btnRef}
         type="button"
         onClick={toggle}
-        className="inline-flex items-center gap-1.5 text-[12px] font-medium px-2.5 py-1.5 rounded-input border border-line bg-white hover:bg-bg-soft text-[#0f3d2e] max-w-full"
+        aria-label="Lender status"
+        className="inline-flex flex-wrap items-center justify-center gap-1 text-[12px] font-medium px-2 py-1.5 rounded-input border border-line bg-white hover:bg-bg-soft text-text-muted max-w-full"
       >
-        <span className={anySet ? "text-[#0f3d2e]" : "text-text-muted"}>{anySet ? "Lender status" : "Set lender status"}</span>
+        {setL.map((l) => (
+          <span key={l.key} className={"px-2 py-0.5 rounded-full text-[11px] font-semibold " + CHIP[stateOf(l.key) as keyof typeof CHIP]}>{l.label}</span>
+        ))}
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0"><path d="M6 9l6 6 6-6" /></svg>
       </button>
 
@@ -111,8 +157,10 @@ export default function LenderCell({
           <div style={{ maxHeight: 320, overflowY: "auto" }}>
 
             {/* APPROVED — top, green. Click to un-approve → back to Docs Sent. */}
-            {approvedL.map((l) => (
-              <button key={l.key} type="button" onClick={() => onSet(l.key, "docs")} title="Click to un-approve"
+            {approvedL.map((l) => isArmed(l.key) ? (
+              <div key={l.key} className="border-b border-[#d6efe3]">{confirmBar(l.label, "bg-[#e6f6ee] text-[#0f7a52]")}</div>
+            ) : (
+              <button key={l.key} type="button" onClick={() => setArmed({ key: l.key, target: "docs" })} title="Click to un-approve"
                 className="w-full flex items-center justify-between gap-2 px-3 py-2.5 border-b border-[#d6efe3] bg-[#e6f6ee] hover:bg-[#d6efe3] text-left">
                 <span className="font-medium text-[#0f7a52] truncate">{l.label}</span>
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#0f7a52] shrink-0">
@@ -136,6 +184,13 @@ export default function LenderCell({
                 <tbody>
                   {middleL.map((l) => {
                     const docs = stateOf(l.key) === "docs";
+                    if (isArmed(l.key)) {
+                      return (
+                        <tr key={l.key} className="border-b border-[#f0f4f2]">
+                          <td colSpan={4} className="p-0 text-[#0f3d2e]">{confirmBar(l.label, "bg-[#f7fcfa]")}</td>
+                        </tr>
+                      );
+                    }
                     return (
                       <tr key={l.key} className={`border-b border-[#f0f4f2] ${docs ? "bg-[#f7fcfa]" : ""}`}>
                         <td className="text-left px-3 py-2 font-medium text-[#0f3d2e] whitespace-nowrap">{l.label}</td>
@@ -143,12 +198,12 @@ export default function LenderCell({
                           <input type="checkbox" checked={docs} onChange={(e) => onSet(l.key, e.target.checked ? "docs" : "none")} className="h-4 w-4 accent-[#185fa5] cursor-pointer" />
                         </td>
                         <td className="text-center px-1 py-2">
-                          <input type="checkbox" checked={false} disabled={!docs} onChange={() => onSet(l.key, "approved")}
+                          <input type="checkbox" checked={false} disabled={!docs} onChange={() => setArmed({ key: l.key, target: "approved" })}
                             title={docs ? "Mark approved" : "Send docs first"}
                             className="h-4 w-4 accent-[#178a5c] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed" />
                         </td>
                         <td className="text-center px-1 py-2">
-                          <input type="checkbox" checked={false} disabled={!docs} onChange={() => onSet(l.key, "rejected")}
+                          <input type="checkbox" checked={false} disabled={!docs} onChange={() => setArmed({ key: l.key, target: "rejected" })}
                             title={docs ? "Mark rejected" : "Send docs first"}
                             className="h-4 w-4 accent-[#dc2626] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed" />
                         </td>
@@ -179,8 +234,10 @@ export default function LenderCell({
             </div>
 
             {/* REJECTED — bottom, red. Click to un-reject → back to Docs Sent. */}
-            {rejectedL.map((l) => (
-              <button key={l.key} type="button" onClick={() => onSet(l.key, "docs")} title="Click to un-reject"
+            {rejectedL.map((l) => isArmed(l.key) ? (
+              <div key={l.key} className="border-b border-[#ffd0d4]">{confirmBar(l.label, "bg-[#ffe4e6] text-[#9f1239]")}</div>
+            ) : (
+              <button key={l.key} type="button" onClick={() => setArmed({ key: l.key, target: "docs" })} title="Click to un-reject"
                 className="w-full flex items-center justify-between gap-2 px-3 py-2.5 border-b border-[#ffd0d4] bg-[#ffe4e6] hover:bg-[#ffd0d4] text-left">
                 <span className="font-medium text-[#9f1239] truncate">{l.label}</span>
                 <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#9f1239] shrink-0">

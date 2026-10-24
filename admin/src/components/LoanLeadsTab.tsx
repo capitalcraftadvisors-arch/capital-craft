@@ -10,7 +10,12 @@ import { fmtDate } from "@/lib/dates";
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+import Input from "@/components/ui/Input";
+import Button from "@/components/ui/Button";
+import RowLink from "@/components/RowLink";
+import { ACCENTS } from "@/components/AdminSidebar";
 import { getToken, getBusiness } from "@/lib/auth";
 import { useAdminNames } from "@/lib/use-admin-names";
 
@@ -34,6 +39,9 @@ type LeadRow = {
   created_at: string;
   epc_business: { trade_name: string | null; legal_name: string | null; contact_name: string | null; epc_display_id: string | null } | null;
 };
+
+// Table header cell — same as the other console tables.
+const TH = "px-4 py-3 font-medium text-[12px] uppercase tracking-wide";
 
 function rupees(v: number | null): string {
   if (v == null) return "—";
@@ -107,7 +115,7 @@ export default function LoanLeadsTab() {
   async function readyForLoan(r: LeadRow) {
     if (converting) return;
     if (!r.epc_business_id) {
-      alert("This lead has a typed EPC name. Open the lead and assign an onboarded EPC before moving it to Loan Applications.");
+      toast.error("This lead has a typed EPC name. Open the lead and assign an onboarded EPC before moving it to Loan Applications.");
       router.push(`/admin/lead/${r.id}/view`);
       return;
     }
@@ -119,7 +127,7 @@ export default function LoanLeadsTab() {
         headers: { Authorization: `Bearer ${getToken() ?? ""}` },
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) { alert(data?.error || `Conversion failed (HTTP ${res.status}).`); setConverting(null); return; }
+      if (!res.ok || !data?.ok) { toast.error(data?.error || `Conversion failed (HTTP ${res.status}).`); setConverting(null); return; }
       router.push(`/admin/app/${data.application_id}/view`);
     } catch (e) {
       alert("Conversion failed: " + (e as Error).message);
@@ -129,22 +137,6 @@ export default function LoanLeadsTab() {
 
   return (
     <div className="w-full">
-      {/* Toolbar */}
-      <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
-        {/* Heading comes from the page shell's section header ("Leads"). */}
-        <p className="text-[13px] text-[#5a8a76]">Admin-created loan leads. Mark a lead “Ready for loan application” to move it into Loan Applications.</p>
-        <button
-          type="button"
-          onClick={() => void addLead()}
-          disabled={adding}
-          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-[8px] text-[14px] font-semibold text-white disabled:opacity-60"
-          style={{ backgroundColor: "#4338ca" }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
-          {adding ? "Creating…" : "Add lead"}
-        </button>
-      </div>
-
       <div className="inline-flex rounded-[8px] border border-[#dcd9f5] bg-white p-0.5 mb-3">
         {([["active", "Active", rows.length - deadCount], ["dead", "Dead", deadCount]] as const).map(([key, label, n]) => (
           <button key={key} type="button" onClick={() => setView(key)}
@@ -155,34 +147,35 @@ export default function LoanLeadsTab() {
         ))}
       </div>
 
-      <div className="mb-3 max-w-sm">
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search by name, mobile, ID or EPC…"
-          className="w-full rounded-[8px] border border-[#dbe7e1] bg-white px-3.5 py-2.5 text-[14px] text-[#0f3d2e] outline-none focus:border-[#4338ca]"
-        />
+      {/* Toolbar — same pattern as the other console tabs. */}
+      <div className="flex flex-wrap items-center gap-3 mb-3">
+        <div className="flex-1 min-w-[220px]">
+          <Input placeholder="Search by name, mobile, ID or EPC…" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <Button type="button" variant="primary" onClick={() => void addLead()} disabled={adding} className="whitespace-nowrap" style={{ backgroundColor: ACCENTS.loanleads.color }}>
+          {adding ? "Creating…" : "+ Add lead"}
+        </Button>
       </div>
 
       <div className="rounded-[12px] border border-[#e0f0e8] bg-white overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[860px] text-[14px]">
-            <thead className="bg-[#eef0fb] border-b border-[#dcd9f5] text-[#4338ca]">
+            <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-[#5a8a76]">
               <tr>
-                <th className="text-left font-semibold px-4 py-3">Borrower name</th>
-                <th className="text-left font-semibold px-4 py-3">EPC · Lead owner</th>
-                <th className="text-center font-semibold px-4 py-3">Project size</th>
-                <th className="text-center font-semibold px-4 py-3">Loan amount</th>
-                <th className="text-center font-semibold px-4 py-3">Created on</th>
-                <th className="text-center font-semibold px-4 py-3">Created by</th>
-                <th className="text-center font-semibold px-4 py-3">Status / Action</th>
+                <th className={TH + " text-left"}>Borrower name</th>
+                <th className={TH + " text-left"}>EPC · Lead owner</th>
+                <th className={TH + " text-center"}>Project size</th>
+                <th className={TH + " text-center"}>Loan amount</th>
+                <th className={TH + " text-center"}>Created on</th>
+                <th className={TH + " text-center"}>Created by</th>
+                <th className={TH + " text-center"}>Status / Action</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr><td colSpan={7} className="px-4 py-10 text-center text-[#5a8a76]">Loading…</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-[#5a8a76]">{view === "dead" ? "No dead leads." : "No leads yet. Click “Add lead” to create one."}</td></tr>
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-[#5a8a76]">{(view === "dead" ? deadCount : rows.length - deadCount) > 0 ? "No leads match." : view === "dead" ? "No dead leads." : "No leads yet."}</td></tr>
               ) : (
                 filtered.map((r) => (
                   <tr
@@ -191,7 +184,7 @@ export default function LoanLeadsTab() {
                     className={"border-b border-[#f0f4f2] last:border-0 cursor-pointer " + (r.dead_at ? "bg-[#fdf0f0] hover:bg-[#fbe6e6]" : "hover:bg-[#f7f7fd]")}
                   >
                     <td className="px-4 py-3">
-                      <div className="font-semibold text-[#0f3d2e]">{r.name || "—"}</div>
+                      <div className="font-semibold text-[#0f3d2e]">{r.name ? <RowLink href={`/admin/lead/${r.id}/view`} onOpen={() => router.push(`/admin/lead/${r.id}/view`)}>{r.name}</RowLink> : "—"}</div>
                       <div className="text-[12px] text-[#5a8a76] flex items-center gap-2">
                         <span className="font-mono text-[#4338ca]">{r.lead_display_id || "—"}</span>
                         {r.mobile && <span>· +91 {r.mobile}</span>}

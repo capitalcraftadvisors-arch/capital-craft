@@ -1181,11 +1181,11 @@ function Inner() {
   }), [workloadPeople, cases, thisMonthKey, srcFilter]);
 
   return (
-    <div className="min-h-screen bg-bg-soft md:flex">
+    <div className="min-h-screen bg-bg-soft lg:flex">
       <AdminSidebar active="board" />
       {/* Fixed-height app shell: the page itself doesn't scroll — the board and
           the side panel each scroll in their own container (no scroll bleed). */}
-      <div className="flex-1 min-w-0 flex flex-col md:h-screen md:overflow-hidden">
+      <div className="flex-1 min-w-0 flex flex-col md:h-[calc(100vh-3.5rem)] lg:h-screen md:overflow-hidden">
         {/* Header */}
         <header className="px-4 sm:px-6 py-5 border-b border-line bg-white shrink-0">
           <p className="text-[15px] font-semibold text-text mb-2">

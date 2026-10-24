@@ -8,24 +8,17 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Command } from "cmdk";
 import { supabase } from "@/lib/supabase";
+import { ACCENTS, SECTION_ROUTE, sidebarNavKeys } from "@/components/AdminSidebar";
 
 type Hit = { id: string; label: string; sub: string; href: string };
 
 // Console tabs are internal state restored from sessionStorage on /admin mount.
 function goConsole(router: ReturnType<typeof useRouter>, tab: string) {
   try { sessionStorage.setItem("adminList.tab", tab); } catch { /* ignore */ }
+  window.dispatchEvent(new Event("adminList.tab")); // already on /admin → switch now
   router.push("/admin");
 }
 
-const NAV: { label: string; hint: string; run: (r: ReturnType<typeof useRouter>) => void }[] = [
-  { label: "EPC partners", hint: "Console", run: (r) => goConsole(r, "epcs") },
-  { label: "Loan applications", hint: "Console", run: (r) => goConsole(r, "apps") },
-  { label: "Loan leads", hint: "Console", run: (r) => goConsole(r, "loanleads") },
-  { label: "Solar Insurance", hint: "Console", run: (r) => goConsole(r, "insurance") },
-  { label: "Leads", hint: "Console", run: (r) => goConsole(r, "leads") },
-  { label: "Analytics", hint: "Page", run: (r) => r.push("/admin/analytics" as any) },
-  { label: "Task Manager", hint: "Page", run: (r) => r.push("/admin/board" as any) },
-];
 
 export default function CommandPalette() {
   const router = useRouter();
@@ -66,7 +59,13 @@ export default function CommandPalette() {
   }, [q]);
 
   const run = (fn: () => void) => { setOpen(false); setQ(""); fn(); };
-  const navFiltered = useMemo(() => NAV, []);
+  // Destinations = the user's own sidebar sections, under the sidebar's names.
+  const nav = useMemo(() => sidebarNavKeys().map((key) => {
+    const route = SECTION_ROUTE[key];
+    return { key, label: ACCENTS[key].label, run: () => (route ? router.push(route as never) : goConsole(router, key)) };
+  }), [router, open]); // read on open — the signed-in business is known by then
+  const term = q.trim().toLowerCase();
+  const navFiltered = nav.filter((n) => !term || n.label.toLowerCase().includes(term));
 
   if (!open) return null;
   return (
@@ -85,7 +84,7 @@ export default function CommandPalette() {
         </div>
         <Command.List className="max-h-[52vh] overflow-y-auto p-2">
           <Command.Empty className="py-8 text-center text-[13px] text-text-muted">
-            {searching ? "Searching…" : q.trim().length >= 2 ? "No matches." : "Type to search, or pick a destination below."}
+            {searching ? "Searching…" : "No matches."}
           </Command.Empty>
 
           {hits.length > 0 && (
@@ -100,17 +99,16 @@ export default function CommandPalette() {
             </Command.Group>
           )}
 
-          <Command.Group heading="Go to" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:text-text-muted">
+          {navFiltered.length > 0 && <Command.Group heading="Go to" className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:text-text-muted">
             {navFiltered.map((n) => (
-              <Command.Item key={n.label} value={`nav ${n.label}`} onSelect={() => run(() => n.run(router))}
+              <Command.Item key={n.key} value={`nav ${n.key}`} onSelect={() => run(n.run)}
                 className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-[14px] data-[selected=true]:bg-[#f0faf5]">
                 <span className="inline-flex items-center gap-2.5 text-text">
                   <span className="w-1.5 h-1.5 rounded-full bg-[#178a5c]" />{n.label}
                 </span>
-                <span className="text-[11px] text-text-muted shrink-0">{n.hint}</span>
               </Command.Item>
             ))}
-          </Command.Group>
+          </Command.Group>}
         </Command.List>
       </Command>
     </div>

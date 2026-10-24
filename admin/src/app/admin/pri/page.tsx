@@ -33,7 +33,7 @@ function Inner() {
   if (!allowed || !me) return null;
 
   return (
-    <div className="min-h-screen bg-bg-soft md:flex">
+    <div className="min-h-screen bg-bg-soft lg:flex">
       <LoginWelcome />
       <AdminSidebar active="pri" />
       <div className="flex-1 min-w-0">
