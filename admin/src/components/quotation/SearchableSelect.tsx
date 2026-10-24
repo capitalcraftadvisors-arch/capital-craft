@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { getToken } from "@/lib/auth";
+import { rememberBrandOption } from "./form-kit";
 
 export default function SearchableSelect({
   label, value, options, onChange, field, placeholder = "Search or type…", required,
@@ -51,6 +52,7 @@ export default function SearchableSelect({
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
           body: JSON.stringify({ field, value: v }),
         }).catch(() => {});
+        rememberBrandOption(field, v);
       }
       setOpts((o) => (o.includes(v) ? o : [...o, v]));
       pick(v);

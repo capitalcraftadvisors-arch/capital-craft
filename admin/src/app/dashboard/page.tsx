@@ -15,7 +15,9 @@ import LoginWelcome from "@/components/LoginWelcome";
 import { logout, getBusiness, getToken, greetingName, loanAccess, insuranceAccess } from "@/lib/auth";
 import { fetchEpcName, shortEpcName } from "@/lib/epc-name";
 import { supabase } from "@/lib/supabase";
-import { fetchQuoteTemplate } from "@/lib/quotation-template";
+import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template";
+import { SARVATRA } from "@/lib/quotation-brands";
+import CustomerApplications from "@/components/quotation/CustomerApplications";
 import { fmtRupees, fmtDateShort, deadlineState, DEADLINE_PILL } from "@/lib/disbursement";
 import { numberToWordsIndian } from "@/lib/numberToWords";
 import { fmtDateTime as fmtDateTimeLib } from "@/lib/dates";
@@ -69,7 +71,7 @@ const STAGE4_PILL: Record<Stage4, string> = {
   approved: "bg-[#e6f6ee] text-[#178a5c]", rejected: "bg-red-50 text-red-700",
 };
 
-type Section = "home" | "loans" | "insurance" | "emi" | "documents" | "quotation";
+type Section = "home" | "loans" | "insurance" | "emi" | "documents" | "quotation" | "customers";
 const ICON: Record<Section, ReactNode> = {
   home: <path d="M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5" />,
   loans: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></>,
@@ -77,6 +79,7 @@ const ICON: Record<Section, ReactNode> = {
   emi: <><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M8 7h8M8 11h3M8 15h3" /></>,
   documents: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
   quotation: <><path d="M3 11V4a1 1 0 0 1 1-1h7l9 9-8 8-9-9Z" /><circle cx="7.5" cy="7.5" r="1.5" /></>,
+  customers: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6" /></>,
 };
 
 // Integer → Indian words (Lakh / Crore) for the EMI calculator amount bars.
@@ -137,8 +140,11 @@ function DashboardInner() {
   const [insBusy, setInsBusy] = useState(false);
   const [openCase, setOpenCase] = useState<AppRow | null>(null);
   // Quotation builder is rolled out per-EPC: only show it when THIS EPC has a
-  // template configured (RLS scopes the lookup to their own row).
-  const [canQuote, setCanQuote] = useState(false);
+  // template configured (RLS scopes the lookup to their own row). gozerobils
+  // (Sustera Ventures) builds quotations in Customer applications instead.
+  const [quoteTpl, setQuoteTpl] = useState<QuoteTemplate | null>(null);
+  const customers = quoteTpl?.storage_path === SARVATRA.key;
+  const canQuote = !!quoteTpl && !customers;
 
   const me = getBusiness();
   const canLoan = loanAccess(me);
@@ -165,7 +171,7 @@ function DashboardInner() {
         .order("created_at", { ascending: false });
       setInsRows((ins ?? []) as unknown as InsRow[]);
       setLoading(false);
-      try { setCanQuote(!!(await fetchQuoteTemplate(true))); } catch { setCanQuote(false); }
+      try { setQuoteTpl(await fetchQuoteTemplate(true)); } catch { setQuoteTpl(null); }
     })();
   }, []);
 
@@ -196,6 +202,7 @@ function DashboardInner() {
     { key: "insurance", label: "Insurance", show: canInsurance },
     { key: "documents", label: "Document pending", show: true },
     { key: "emi", label: "EMI calculator", show: true },
+    { key: "customers", label: "Customer applications", show: customers },
     { key: "quotation", label: "Quotation builder", show: canQuote, href: "/dashboard/quotation" },
   ];
   const navItems = NAV.filter((n) => n.show);
@@ -281,7 +288,7 @@ function DashboardInner() {
               onApplyLoan={() => router.push("/dashboard/apply/chat" as any)}
               onApplyInsurance={() => void startInsurance()} applyingInsurance={insBusy}
               onOpenCase={(r) => setOpenCase(r)} onEmi={() => setSection("emi")}
-              canQuote={canQuote} onQuotation={() => router.push("/dashboard/quotation" as any)} onAttention={() => setSection("documents")} />
+              canQuote={canQuote || customers} onQuotation={() => (customers ? setSection("customers") : router.push("/dashboard/quotation" as any))} onAttention={() => setSection("documents")} />
           )}
           {section === "loans" && (
             <LoansSection loans={sortedLoans} loading={loading} canLoan={canLoan}
@@ -294,6 +301,8 @@ function DashboardInner() {
               onOpen={(id) => router.push(`/dashboard/insurance/${id}/step-1` as any)} />
           )}
           {section === "emi" && <EmiSection />}
+          {section === "customers" && customers && <CustomerApplications serialNext={quoteTpl.serial_next}
+            onSerial={(n) => setQuoteTpl((t) => t && { ...t, serial_next: Math.max(t.serial_next ?? 1, n) })} />}
           {section === "documents" && <DocumentsSection loans={rows} insRows={insRows} onOpenMessage={(kind, id) => router.push(`/dashboard/messages/${kind}/${id}` as any)} />}
         </main>
       </div>

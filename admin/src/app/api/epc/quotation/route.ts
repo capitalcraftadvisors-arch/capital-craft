@@ -9,9 +9,12 @@
 // business → "bundled:…" reads the app-shipped template, else a GCS object.
 // When no row exists yet it falls back to the bundled GHANPRIYA template.
 //
-// Bijlee Solar (bundled:bijlee) and Sarvatra Energy (bundled:sarvatra) are their
-// own PDFs filled directly — always a PDF — and the serial / quote no. auto-advances
-// (X-Next-Serial tells the form the next one).
+// Bijlee Solar (bundled:bijlee) and gozerobils (bundled:sarvatra) are their own
+// PDFs filled directly — always a PDF. Bijlee's serial no. auto-advances here
+// (X-Next-Serial tells the form the next one). gozerobils is the Customer
+// applications flow: `doc` picks the quotation, PCR or agreement, `date` is when
+// that document was made (the saved customer_quotations row; its insert trigger
+// advances the quote no.).
 //
 // Auth: caller's token (RLS scopes the template lookup to the EPC's own row).
 
@@ -39,6 +42,13 @@ const SUPABASE_ANON =
 function err(message: string, status: number) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
+// gozerobils documents: `doc` → file name prefix, template, builder.
+const SARVATRA_DOCS = new Map<string, { prefix: string; template: string; build: (i: SarvatraInput, t: Buffer) => Promise<Uint8Array> }>([
+  ["quotation", { prefix: "Quotation", template: SARVATRA.key, build: buildSarvatraQuotation }],
+  ["pcr", { prefix: "PCR", template: "bundled:sarvatra-pcr", build: buildSarvatraPcr }],
+  ["agreement", { prefix: "Agreement", template: "bundled:sarvatra-agreement", build: buildSarvatraAgreement }],
+]);
+
 function safeName(s: string): string {
   return (s || "quotation").replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "_").slice(0, 60) || "quotation";
 }
@@ -80,14 +90,13 @@ export async function POST(req: NextRequest) {
       const b = body as unknown as Record<string, unknown>;
       const s = (k: string) => String(b[k] ?? "").trim();
       const n = (k: string) => Number(b[k]) || 0;
-      const today = fmtDateIST(new Date()); // DD/MM/YYYY, India time
-      const template = await readBundledTemplate(storagePath);
       const name = safeName(s("customer_name"));
-      let files: { name: string; pdf: Uint8Array }[];
-      let serial: string, serialNo: (s: string) => number, serialOf: (n: number) => string;
+      let file: { name: string; pdf: Uint8Array };
+      let next = "";
       if (storagePath === BIJLEE.key) {
         if (n("rate_per_kw") <= 0) return err("Price per kW is required.", 400);
-        serial = s("serial"); serialNo = BIJLEE.serialNo; serialOf = BIJLEE.serial;
+        const today = fmtDateIST(new Date()); // DD/MM/YYYY, India time
+        const serial = s("serial");
         const pdf = await buildBijleeQuotation({
           customer_name: s("customer_name"), location: s("location"), kw: n("kw"), serial, date: today,
           project_location: s("project_location"), client_name: s("client_name"),
@@ -95,21 +104,30 @@ export async function POST(req: NextRequest) {
           module_brand: s("module_brand") || BIJLEE.module, inverter_brand: s("inverter_brand") || BIJLEE.inverter,
           cable_brand: s("cable_brand") || BIJLEE.cable,
           rate_per_kw: n("rate_per_kw"), structure_rate_per_kw: n("structure_rate_per_kw"),
-        }, template);
-        files = [{ name: `Quotation_${name}_${safeName(serial)}.pdf`, pdf }];
+        }, await readBundledTemplate(storagePath));
+        file = { name: `Quotation_${name}_${safeName(serial)}.pdf`, pdf };
+        // Auto-number: the next suggested serial moves past the one just used.
+        const used = BIJLEE.serialNo(serial);
+        if (used > 0) {
+          const { data } = await supabase.rpc("quotation_serial_used", { p_template: templateId, p_used: used });
+          if (typeof data === "number") next = BIJLEE.serial(data);
+        }
       } else {
         if (n("price") <= 0) return err("System price is required.", 400);
-        const month = Number(today.slice(3, 5));
-        serial = s("quote_no"); serialNo = SARVATRA.serialNo; serialOf = (x) => SARVATRA.serial(x, month);
+        const doc = SARVATRA_DOCS.get(s("doc"));
+        if (!doc) return err("Unknown document.", 400);
+        const serial = s("quote_no");
         const input: SarvatraInput = {
-          quote_no: serial, date: today.replace(/\//g, "-"), title: s("title"), customer_name: s("customer_name"),
+          quote_no: serial, date: fmtDateIST(s("date") || new Date()).replace(/\//g, "-"),
+          title: s("title"), customer_name: s("customer_name"),
           contact: s("contact"), city: s("city"), state: s("state"), kw: n("kw"),
           panel_brand: s("panel_brand") || SARVATRA.panel, panel_type: s("panel_type") || SARVATRA.panelType,
           inverter_brand: s("inverter_brand") || SARVATRA.inverter, inverter_kw: n("inverter_kw") || n("kw"),
           phase: s("phase") || SARVATRA.phases[0], inverter_location: s("inverter_location"),
           connection_type: s("connection_type"), floors: s("floors"), solar_care: b.solar_care === true,
           roof_type: s("roof_type"), structure_type: s("structure_type"),
-          price: n("price"), state_subsidy: n("state_subsidy"), design_payment: n("design_payment"),
+          price: n("price"), state_subsidy: n("state_subsidy"),
+          design_payment: s("design_payment") ? n("design_payment") : Math.round(n("price") * SARVATRA.designShare),
           email: s("email"), ebill_name: s("ebill_name"), k_number: s("k_number"), address: s("address"),
           pincode: s("pincode"), sanctioned_load: s("sanctioned_load"), spc_name: s("spc_name"),
           cell_type: s("cell_type") || SARVATRA.cellType, dcr_type: s("dcr_type") || SARVATRA.dcrTypes[0],
@@ -120,36 +138,16 @@ export async function POST(req: NextRequest) {
           finance_by: s("finance_by"), payment_method: s("payment_method"),
           payment_mode: s("payment_mode") || SARVATRA.paymentModes[0], aen: s("aen"),
         };
-        const [quotation, pcr, agreement] = await Promise.all([
-          buildSarvatraQuotation(input, template),
-          buildSarvatraPcr(input, await readBundledTemplate("bundled:sarvatra-pcr")),
-          buildSarvatraAgreement(input, await readBundledTemplate("bundled:sarvatra-agreement")),
-        ]);
-        files = [
-          { name: `Quotation_${name}_${safeName(serial)}.pdf`, pdf: quotation },
-          { name: `PCR_${name}_${safeName(serial)}.pdf`, pdf: pcr },
-          { name: `Agreement_${name}_${safeName(serial)}.pdf`, pdf: agreement },
-        ];
+        file = {
+          name: `${doc.prefix}_${name}_${safeName(serial)}.pdf`,
+          pdf: await doc.build(input, await readBundledTemplate(doc.template)),
+        };
       }
-      // Auto-number: the next suggested serial moves past the one just used.
-      const used = serialNo(serial);
-      let next = "";
-      if (used > 0) {
-        const { data } = await supabase.rpc("quotation_serial_used", { p_template: templateId, p_used: used });
-        if (typeof data === "number") next = serialOf(data);
-      }
-      // One document → the PDF itself; several → JSON, the page saves each as its own PDF.
-      if (files.length > 1) {
-        return NextResponse.json(
-          { ok: true, files: files.map((f) => ({ name: f.name, data: Buffer.from(f.pdf).toString("base64") })) },
-          { headers: { "X-Next-Serial": next } },
-        );
-      }
-      return new NextResponse(new Uint8Array(files[0].pdf), {
+      return new NextResponse(new Uint8Array(file.pdf), {
         status: 200,
         headers: {
           "Content-Type": "application/pdf",
-          "Content-Disposition": `attachment; filename="${files[0].name}"`,
+          "Content-Disposition": `attachment; filename="${file.name}"`,
           "X-Next-Serial": next,
         },
       });

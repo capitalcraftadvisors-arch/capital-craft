@@ -57,6 +57,9 @@ export default function LoanLeadsTab() {
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
   const [converting, setConverting] = useState<string | null>(null);
+  // Active and dead leads apart. Dead leads are deleted 30 days after being
+  // marked dead (migration 0101, daily in the database).
+  const [view, setView] = useState<"active" | "dead">("active");
 
   async function load() {
     setLoading(true);
@@ -71,16 +74,16 @@ export default function LoanLeadsTab() {
   }
   useEffect(() => { void load(); }, []);
 
+  const deadCount = useMemo(() => rows.filter((r) => r.dead_at).length, [rows]);
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    if (!s) return rows;
-    return rows.filter((r) =>
+    return rows.filter((r) => (view === "dead") === !!r.dead_at).filter((r) => !s ||
       (r.name || "").toLowerCase().includes(s) ||
       (r.mobile || "").toLowerCase().includes(s) ||
       (r.lead_display_id || "").toLowerCase().includes(s) ||
       epcName(r).toLowerCase().includes(s),
     );
-  }, [rows, q]);
+  }, [rows, q, view]);
 
   // "+ Add lead" — create a blank draft, then open Step 1 of the onboarding.
   async function addLead() {
@@ -142,6 +145,16 @@ export default function LoanLeadsTab() {
         </button>
       </div>
 
+      <div className="inline-flex rounded-[8px] border border-[#dcd9f5] bg-white p-0.5 mb-3">
+        {([["active", "Active", rows.length - deadCount], ["dead", "Dead", deadCount]] as const).map(([key, label, n]) => (
+          <button key={key} type="button" onClick={() => setView(key)}
+            className={"px-3.5 py-1.5 rounded-[6px] text-[13px] font-semibold " + (view === key ? "text-white" : "text-[#4338ca] hover:bg-[#eef0fb]")}
+            style={view === key ? { backgroundColor: key === "dead" ? "#b42318" : "#4338ca" } : undefined}>
+            {label} · {n}
+          </button>
+        ))}
+      </div>
+
       <div className="mb-3 max-w-sm">
         <input
           value={q}
@@ -169,7 +182,7 @@ export default function LoanLeadsTab() {
               {loading ? (
                 <tr><td colSpan={7} className="px-4 py-10 text-center text-[#5a8a76]">Loading…</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-[#5a8a76]">No leads yet. Click “Add lead” to create one.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-[#5a8a76]">{view === "dead" ? "No dead leads." : "No leads yet. Click “Add lead” to create one."}</td></tr>
               ) : (
                 filtered.map((r) => (
                   <tr

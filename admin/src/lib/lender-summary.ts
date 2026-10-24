@@ -19,17 +19,6 @@ export const LENDER_LABEL: Record<LenderKey, string> = {
 const SYSTEM_LABEL: Record<string, string> = { on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" };
 
 // rupees imported from @/lib/money
-// Monthly income for the lender email. The modern flows (EPC chat, admin intake,
-// Step 4) collect ANNUAL income only; monthly_income stays null on those rows and
-// the Credit Fair table showed a blank. Prefer the stored monthly figure when a
-// legacy screen captured one, otherwise derive it from annual income / 12.
-function monthlyIncomeOf(loan: Record<string, any>): number | null {
-  const m = Number(loan.monthly_income);
-  if (Number.isFinite(m) && m > 0) return Math.round(m);
-  const a = Number(loan.annual_income);
-  if (Number.isFinite(a) && a > 0) return Math.round(a / 12);
-  return null;
-}
 function ddmmyyyy(s: unknown): string {
   if (!s) return "—";
   const str = String(s);
@@ -156,7 +145,6 @@ export function creditFairEmailRows(loan: Record<string, any>, epcName?: string 
     ["Co-applicant mobile", loan.coapp_mobile ? `+91 ${loan.coapp_mobile}` : "—"],
     ["Co-applicant email", loan.coapp_email ?? "—"],
     ["EPC name", epcName || "—"],
-    ["Monthly income", rupees(monthlyIncomeOf(loan))],
     ["Project cost", rupees(loan.total_project_cost)],
     ["Loan amount required", rupees(loan.loan_amount_required)],
     ["Product", loan.system_type ? (SYSTEM_LABEL[loan.system_type] ?? loan.system_type) : "—"],

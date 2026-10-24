@@ -33,7 +33,8 @@ export async function GET(req: NextRequest) {
     const token = getBearerToken(req);
     if (!token) return err("unauthorized", 401);
     await verifyJwt(token);
-    const { data } = await client(token).from("quotation_brand_options").select("field, value");
+    const { data, error } = await client(token).from("quotation_brand_options").select("field, value");
+    if (error) return err(error.message, 500);
     const options: Record<string, string[]> = {};
     for (const r of (data ?? []) as { field: string; value: string }[]) {
       (options[r.field] ??= []).push(r.value);
