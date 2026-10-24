@@ -23,6 +23,7 @@ import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness, isMainAdmin } from "@/lib/auth";
 import { epcReviewPatch, approveEpcReview, epcLocked, invalidatePendingCount, saveEpcLenderState } from "@/lib/review";
 import AdminPendingPill from "@/components/AdminPendingPill";
+import { toast } from "sonner";
 import { getDocumentUrl, deleteDocument } from "@/lib/storage";
 import { logAudit } from "@/lib/auditLog";
 import { Period, inPeriod } from "@/lib/period";
@@ -230,7 +231,14 @@ function Inner() {
     [r3bDocs],
   );
   const nonR3bDocs = useMemo(() => docs.filter((d) => d.category !== "gst_r3b"), [docs]);
-  const stakeholders = ((biz?.stakeholders ?? []) as Array<{ id: string; name?: string; designation?: string; mobile?: string; email?: string }>);
+  const stakeholders = ((biz?.stakeholders ?? []) as Stakeholder[]);
+  // Approving needs every document the Documents card expects.
+  const missingDocs = missingEpcDocs(nonR3bDocs, stakeholders, (biz?.business_type as string | null) ?? null);
+  function approveBlocked(): boolean {
+    if (!missingDocs.length) return false;
+    toast.error(`Upload all documents before approving. Missing: ${missingDocs.join(", ")}.`);
+    return true;
+  }
   const refs = ((biz?.business_references ?? []) as Array<{ type: "customer" | "supplier"; name: string; mobile: string }>);
   const customers = refs.filter((r) => r.type === "customer");
   const suppliers = refs.filter((r) => r.type === "supplier");
@@ -286,6 +294,7 @@ function Inner() {
   // loan application — only a lender "Approved" tick does that.
   async function changeStatus(next: "approved" | "on_hold" | "rejected" | "under_review", reason?: string | null) {
     if (!biz || statusBusy) return;
+    if (next === "approved" && approveBlocked()) return;
     setStatusBusy(true);
     try {
       // reviewed_at = the first time an admin acted on this EPC after
@@ -359,6 +368,7 @@ function Inner() {
     // admin can approve it now and continue in one step; a team member's approval
     // goes to the admin's check first, so the lender step waits.
     if ((target === "docs" || target === "approved") && biz.status !== "approved") {
+      if (approveBlocked()) return;
       if (!isMainAdmin(getBusiness())) {
         if (window.confirm("This EPC profile hasn't been approved yet.\n\nApprove it now and send it for admin approval?")) await changeStatus("approved");
         return;
@@ -509,7 +519,11 @@ function Inner() {
             <DownloadMenu
               label="Review by CC"
               items={[
-                { label: "Approved", onClick: () => void changeStatus("approved") },
+                {
+                  label: missingDocs.length ? `Approved — ${missingDocs.length} document${missingDocs.length === 1 ? "" : "s"} missing` : "Approved",
+                  disabled: missingDocs.length > 0,
+                  onClick: () => void changeStatus("approved"),
+                },
                 { label: "Rejected", onClick: () => { setRejectReason(""); setRejectOther(""); setRejectOpen(true); } },
               ]}
             />
@@ -576,18 +590,18 @@ function Inner() {
           <div className="flex items-center gap-3 sm:gap-6">
             <BigProgressStep
               icon={I.check}
-              done={biz.status !== "draft"}
+              done={!missingDocs.length}
               label="Docs uploaded"
-              sub={biz.status !== "draft" ? "Complete" : "Pending"}
+              sub={!missingDocs.length ? "Complete" : `${missingDocs.length} missing`}
             />
-            <BigConnector active={biz.status !== "draft"} />
+            <BigConnector active={!missingDocs.length} />
             <BigProgressStep
               icon={I.circleCheck}
               done={biz.status === "approved" || biz.status === "rejected"}
               failed={biz.status === "rejected"}
-              inProgress={biz.status !== "draft" && biz.status !== "approved" && biz.status !== "rejected"}
+              inProgress={!missingDocs.length && biz.status !== "approved" && biz.status !== "rejected"}
               label="Review by CC"
-              sub={biz.status === "approved" ? "Completed — Approved" : biz.status === "rejected" ? "Completed — Rejected" : biz.status !== "draft" ? "Incomplete" : "Pending"}
+              sub={biz.status === "approved" ? "Completed — Approved" : biz.status === "rejected" ? "Completed — Rejected" : !missingDocs.length ? "Incomplete" : "Pending"}
               mutedIfPending
             />
             <BigConnector active={biz.status === "approved" || biz.status === "rejected"} />
@@ -1231,6 +1245,7 @@ const BANK_CATS   = ["cancelled_cheque", "bank_statement"] as const;
 const OFFICE_CATS = ["office_exterior", "office_interior", "office_selfie"] as const;
 
 type DocSlot = { key: string; label: string; doc: Doc | null };
+type Stakeholder = { id: string; name?: string; designation?: string; mobile?: string; email?: string };
 
 // Build the slot list for a doc family: one slot per expected category
 // (present → eye-View, absent → greyed "Not uploaded"), followed by any
@@ -1253,17 +1268,9 @@ function buildSlots(
   return slots;
 }
 
-function DocumentsBySteps({
-  docs, stakeholders, businessType, openDoc, removeDoc, downloadDoc, eyeIcon,
-}: {
-  docs: Doc[];
-  stakeholders: Array<{ id: string; name?: string; designation?: string; mobile?: string; email?: string }>;
-  businessType: string | null;
-  openDoc: (id: string) => void;
-  removeDoc: (id: string) => void;
-  downloadDoc: (id: string) => void;
-  eyeIcon: React.ReactNode;
-}) {
+// The documents an EPC profile should have, grouped as the Documents card shows
+// them: each expected slot (empty → "Not uploaded") plus any extra uploads.
+function epcDocGroups(docs: Doc[], stakeholders: Stakeholder[], businessType: string | null) {
   // Bucket docs by category family.
   const byCat = (cats: readonly string[]) =>
     docs.filter((d) => cats.includes(d.category));
@@ -1303,23 +1310,53 @@ function DocumentsBySteps({
     (c) => officeDocLabel(c, businessType),
   );
   const STK_EXPECTED = ["stakeholder_pan", "stakeholder_aadhaar_front", "stakeholder_aadhaar_back"];
+  const stakeholderSlots = stakeholderGroups.map((g, i) => ({
+    key: g.stakeholder.id ?? String(i),
+    header: stakeholderRoleTag(businessType, i, stakeholders.length) + (g.stakeholder.name ? ` — ${g.stakeholder.name}` : ""),
+    slots: buildSlots(g.docs, STK_EXPECTED, (c) => stakeholderDocLabel(businessType, i, stakeholders.length, c)),
+  }));
+  return { bizSlots, stakeholderSlots, orphanStakeholderDocs, bankSlots, officeSlots, otherDocs };
+}
 
+// Labels of the expected documents not uploaded yet.
+function missingEpcDocs(docs: Doc[], stakeholders: Stakeholder[], businessType: string | null): string[] {
+  const g = epcDocGroups(docs, stakeholders, businessType);
+  // An older single-file Aadhaar (both sides in one) covers front + back.
+  const stk = g.stakeholderSlots.flatMap((x) => {
+    const combined = x.slots.some((s) => s.doc?.category === "stakeholder_aadhaar");
+    return x.slots.filter((s) => !(combined && /^stakeholder_aadhaar_(front|back)-/.test(s.key)));
+  });
+  return [...g.bizSlots, ...stk, ...g.bankSlots, ...g.officeSlots]
+    .filter((x) => !x.doc).map((x) => x.label);
+}
+
+function DocumentsBySteps({
+  docs, stakeholders, businessType, openDoc, removeDoc, downloadDoc, eyeIcon,
+}: {
+  docs: Doc[];
+  stakeholders: Stakeholder[];
+  businessType: string | null;
+  openDoc: (id: string) => void;
+  removeDoc: (id: string) => void;
+  downloadDoc: (id: string) => void;
+  eyeIcon: React.ReactNode;
+}) {
+  const { bizSlots, stakeholderSlots, orphanStakeholderDocs, bankSlots, officeSlots, otherDocs } =
+    epcDocGroups(docs, stakeholders, businessType);
   return (
     <div className="space-y-4">
       <StepBlock title="Business (Step 2)">
         <DocGrid slots={toViewSlots(bizSlots, openDoc, removeDoc, downloadDoc)} eyeIcon={eyeIcon} />
       </StepBlock>
 
-      {(stakeholderGroups.length > 0 || orphanStakeholderDocs.length > 0) && (
+      {(stakeholderSlots.length > 0 || orphanStakeholderDocs.length > 0) && (
         <StepBlock title="Stakeholders (Step 3)">
           <div className="space-y-2.5">
-            {stakeholderGroups.map((g, i) => (
+            {stakeholderSlots.map((g) => (
               <StakeholderDocs
-                key={g.stakeholder.id ?? i}
-                header={stakeholderRoleTag(businessType, i, stakeholders.length) +
-                        (g.stakeholder.name ? ` — ${g.stakeholder.name}` : "")}
-                slots={buildSlots(g.docs, STK_EXPECTED,
-                  (c) => stakeholderDocLabel(businessType, i, stakeholders.length, c))}
+                key={g.key}
+                header={g.header}
+                slots={g.slots}
                 openDoc={openDoc}
                 removeDoc={removeDoc}
                 downloadDoc={downloadDoc}

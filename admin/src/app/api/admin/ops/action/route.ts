@@ -56,7 +56,8 @@ function nextStage(source: string, status: string): { status: string; stamp?: Re
     return to && to !== status ? { status: to } : null;
   }
   if (source === "epc") {
-    const map: Record<string, string> = { draft: "under_review", on_hold: "under_review", under_review: "approved" };
+    // No → approved here: approving needs every document (checked on the EPC profile).
+    const map: Record<string, string> = { draft: "under_review", on_hold: "under_review" };
     const to = map[status];
     return to && to !== status ? { status: to, stamp: to === "under_review" ? { submitted_at: now } : {} } : null;
   }
@@ -96,7 +97,8 @@ function columnToStatus(source: string, col: string): { status: string; stamp?: 
   }
   if (source === "epc") {
     // unseen | doc_uploaded | docs_pending | review_cc | send_lender | approved | rejected
-    const m: Record<string, string> = { docs_pending: "on_hold", review_cc: "under_review", approved: "approved" };
+    // Not "approved": approving needs every document (checked on the EPC profile).
+    const m: Record<string, string> = { docs_pending: "on_hold", review_cc: "under_review" };
     const s = m[col]; return s ? { status: s } : null;
   }
   return null;

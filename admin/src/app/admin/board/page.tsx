@@ -70,7 +70,8 @@ function stageCheck(c: OpsCase, target: string, label: string): { ok: boolean; m
   }
   if (c.source === "insurance" && target === "rejected") return { ok: false, msg: UNDRAGGABLE.rejected };
   if (c.source === "epc") {
-    if (target === "send_lender" || target === "rejected") return { ok: false, msg: "Lender / rejection steps are done from the EPC profile." };
+    // Approving needs every document — checked on the EPC profile.
+    if (target === "send_lender" || target === "rejected" || target === "approved") return { ok: false, msg: "Approval, lender and rejection steps are done from the EPC profile." };
     if (target === "unseen" || target === "doc_uploaded") return { ok: false, msg: "This stage is set automatically as the EPC fills their profile." };
   }
   if (c.source === "lead" && target === "converted") return { ok: false, msg: UNDRAGGABLE.converted };
