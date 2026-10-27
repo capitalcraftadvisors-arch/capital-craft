@@ -192,8 +192,10 @@ function readPage(doc: PDFDocument, page: PDFPage, em: number): { content: strin
 export type At = [number, number];
 type Align = "left" | "right" | "center";
 // fit: shrink to fit — `true` = the original's width, a number = that width (a form field's box).
-// native: write in the template's own font when it has every character (else Helvetica).
-type TextEdit = { kind: "text"; at: At; to?: number; text: string; bold?: boolean; align?: Align; fit?: boolean | number; native?: boolean };
+// native: write in the template's own font when it has every character (else Helvetica);
+// font: take that font from the run at this point instead (same row) — for a run
+// whose embedded subset lacks a needed glyph, e.g. a digit the sample never used.
+type TextEdit = { kind: "text"; at: At; to?: number; text: string; bold?: boolean; align?: Align; fit?: boolean | number; native?: boolean; font?: At };
 type AmountEdit = { kind: "amount"; rupee: At; at: At; to?: number; text: string; bold?: boolean; align: Align };
 // Line: one original line replaced by parts drawn one after another, each in the
 // colour of the original text at `like` (default: the line's first glyph).
@@ -278,7 +280,7 @@ export function editPage(doc: PDFDocument, page: PDFPage, edits: Edit[], fonts: 
     if (e.kind === "text") {
       const max = e.fit === true ? r.width : typeof e.fit === "number" ? e.fit : Infinity;
       const place = (width: number) => e.align === "center" ? r.x + r.width / 2 - width / 2 : e.align === "right" ? r.x + r.width - width : r.x;
-      const like = r.runs[0], fm = own[like.font];
+      const like = e.font ? { ...findSpan(runs, e.font).runs[0], y: r.runs[0].y } : r.runs[0], fm = own[like.font];
       const codes = e.native && fm ? Array.from(e.text.replace(/\s+/g, " ").trim()).map((ch) => fm.rev.get(ch)) : [];
       if (codes.length && codes.every((c) => c !== undefined)) {
         const nw = codes.reduce((s, c) => s + fm.advance(c!) * fm.fm, 0) * Math.hypot(like.lin[0], like.lin[1]);

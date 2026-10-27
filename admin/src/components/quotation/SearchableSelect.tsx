@@ -9,7 +9,7 @@ import { getToken } from "@/lib/auth";
 import { rememberBrandOption } from "./form-kit";
 
 export default function SearchableSelect({
-  label, value, options, onChange, field, placeholder = "Search or type…", required,
+  label, value, options, onChange, field, placeholder = "Search or type…", required, clearable,
 }: {
   label: string;
   value: string;
@@ -18,6 +18,7 @@ export default function SearchableSelect({
   field?: string;            // persist custom values under this field key
   placeholder?: string;
   required?: boolean;
+  clearable?: boolean;       // × to empty an optional field
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -69,6 +70,10 @@ export default function SearchableSelect({
           <span className={value ? "text-text" : "text-text-muted"}>{value || placeholder}</span>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5a8a76" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
         </button>
+        {clearable && value && (
+          <button type="button" onClick={() => onChange("")} aria-label={`Clear ${label}`}
+            className="absolute right-8 top-1/2 -translate-y-1/2 w-6 h-6 grid place-items-center rounded-md text-text-muted hover:text-text text-[15px] leading-none">×</button>
+        )}
         {open && (
           <div className="absolute z-30 mt-1 w-full bg-white border border-line rounded-xl shadow-lg max-h-[260px] overflow-hidden flex flex-col">
             <div className="p-2 border-b border-line">

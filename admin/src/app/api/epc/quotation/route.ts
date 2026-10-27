@@ -22,10 +22,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { downloadBuffer } from "@/lib/gcs";
-import { buildQuotationData, fillTemplate, readBundledTemplate, type QuotationInput } from "@/lib/quotation";
+import { buildQuotationData, fillTemplate, readBundledTemplate, epcQuoteTemplate, type QuotationInput } from "@/lib/quotation";
 import { docxToPdf } from "@/lib/docx-to-pdf";
 import { buildBijleeQuotation } from "@/lib/quotation-bijlee";
-import { buildSarvatraQuotation, buildSarvatraPcr, buildSarvatraAgreement, type SarvatraInput } from "@/lib/quotation-sarvatra";
+import { buildSarvatraFile, safeFileName as safeName } from "@/lib/quotation-sarvatra";
 import { BIJLEE, SARVATRA } from "@/lib/quotation-brands";
 import { fmtDateIST } from "@/lib/dates";
 
@@ -42,17 +42,6 @@ const SUPABASE_ANON =
 function err(message: string, status: number) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
-// gozerobils documents: `doc` → file name prefix, template, builder.
-const SARVATRA_DOCS = new Map<string, { prefix: string; template: string; build: (i: SarvatraInput, t: Buffer) => Promise<Uint8Array> }>([
-  ["quotation", { prefix: "Quotation", template: SARVATRA.key, build: buildSarvatraQuotation }],
-  ["pcr", { prefix: "PCR", template: "bundled:sarvatra-pcr", build: buildSarvatraPcr }],
-  ["agreement", { prefix: "Agreement", template: "bundled:sarvatra-agreement", build: buildSarvatraAgreement }],
-]);
-
-function safeName(s: string): string {
-  return (s || "quotation").replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "_").slice(0, 60) || "quotation";
-}
-
 export async function POST(req: NextRequest) {
   try {
     const token = getBearerToken(req);
@@ -73,18 +62,9 @@ export async function POST(req: NextRequest) {
     const bizId = claims.business_type === "admin" && body["epc_business_id" as keyof QuotationInput]
       ? String(body["epc_business_id" as keyof QuotationInput])
       : claims.business_id;
-    let storagePath = "", templateId = "";
-    try {
-      const { data: tpl } = await supabase
-        .from("epc_quotation_templates")
-        .select("id, storage_path")
-        .eq("epc_business_id", bizId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (tpl?.storage_path) { storagePath = tpl.storage_path; templateId = tpl.id; }
-    } catch { /* table missing → treated as no template */ }
-    if (!storagePath) return err("No quotation template is set up for your account yet.", 403);
+    const tpl = await epcQuoteTemplate(supabase, bizId);
+    if (!tpl) return err("No quotation template is set up for your account yet.", 403);
+    const { storage_path: storagePath, id: templateId } = tpl;
 
     if (storagePath === BIJLEE.key || storagePath === SARVATRA.key) {
       const b = body as unknown as Record<string, unknown>;
@@ -114,34 +94,9 @@ export async function POST(req: NextRequest) {
         }
       } else {
         if (n("price") <= 0) return err("System price is required.", 400);
-        const doc = SARVATRA_DOCS.get(s("doc"));
-        if (!doc) return err("Unknown document.", 400);
-        const serial = s("quote_no");
-        const input: SarvatraInput = {
-          quote_no: serial, date: fmtDateIST(s("date") || new Date()).replace(/\//g, "-"),
-          title: s("title"), customer_name: s("customer_name"),
-          contact: s("contact"), city: s("city"), state: s("state"), kw: n("kw"),
-          panel_brand: s("panel_brand") || SARVATRA.panel, panel_type: s("panel_type") || SARVATRA.panelType,
-          inverter_brand: s("inverter_brand") || SARVATRA.inverter, inverter_kw: n("inverter_kw") || n("kw"),
-          phase: s("phase") || SARVATRA.phases[0], inverter_location: s("inverter_location"),
-          connection_type: s("connection_type"), floors: s("floors"), solar_care: b.solar_care === true,
-          roof_type: s("roof_type"), structure_type: s("structure_type"),
-          price: n("price"), state_subsidy: n("state_subsidy"),
-          design_payment: s("design_payment") ? n("design_payment") : Math.round(n("price") * SARVATRA.designShare),
-          email: s("email"), ebill_name: s("ebill_name"), k_number: s("k_number"), address: s("address"),
-          pincode: s("pincode"), sanctioned_load: s("sanctioned_load"), spc_name: s("spc_name"),
-          cell_type: s("cell_type") || SARVATRA.cellType, dcr_type: s("dcr_type") || SARVATRA.dcrTypes[0],
-          wp: s("wp") || SARVATRA.wp, inverter_type: s("inverter_type") || SARVATRA.inverterTypes[0],
-          maintenance_plan: s("maintenance_plan"), maintenance_others: s("maintenance_others"),
-          site_readiness: s("site_readiness") || SARVATRA.siteReadiness[0],
-          bill_correction: Array.isArray(b.bill_correction) ? b.bill_correction.map(String) : [],
-          finance_by: s("finance_by"), payment_method: s("payment_method"),
-          payment_mode: s("payment_mode") || SARVATRA.paymentModes[0], aen: s("aen"),
-        };
-        file = {
-          name: `${doc.prefix}_${name}_${safeName(serial)}.pdf`,
-          pdf: await doc.build(input, await readBundledTemplate(doc.template)),
-        };
+        const built = await buildSarvatraFile(s("doc"), b, s("date") || new Date());
+        if (!built) return err("Unknown document.", 400);
+        file = built;
       }
       return new NextResponse(new Uint8Array(file.pdf), {
         status: 200,

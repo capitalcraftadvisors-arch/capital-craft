@@ -21,6 +21,7 @@ import ActivityLogModal from "@/components/ActivityLogModal";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, getToken, greetingName, isMainAdmin as isMainAdminUser } from "@/lib/auth";
 import { loadOpsCases, columnsFor, SOURCE_META, type OpsCase, type TeamUser, type CaseSource } from "@/lib/ops-board";
+import { waTel, waUrl, WA_LANGS, type WaLang } from "@/lib/wa-link";
 import { PERIOD_OPTIONS, inPeriod, type Period } from "@/lib/period";
 import { DEFAULT_LOAN_LENDERS, LOAN_LENDER_COLS, lendersWithDocs, type LoanLenderRow } from "@/lib/loan-lenders";
 import { logLoanActivity } from "@/lib/loanAudit";
@@ -199,12 +200,6 @@ const MYDAY_SRC_TABS: { key: CaseSource; label: string }[] = [
   { key: "insurance", label: "Solar Insurance" },
   { key: "epc", label: "EPC" },
 ];
-// Normalise a stored number to a 10-digit Indian mobile (or "" if not usable).
-function myDayTel(mobile: string | null): string {
-  const d = (mobile ?? "").replace(/\D/g, "");
-  const ten = d.length > 10 ? d.slice(-10) : d;
-  return ten.length === 10 ? ten : "";
-}
 
 // ── WhatsApp composer (Hindi) ────────────────────────────────────────────────
 // The pending items an RM can tick; `hi` is the Devanagari phrase used in the
@@ -249,13 +244,6 @@ const WA_INTENTS_EPC: { key: WaIntent; label: string }[] = [
 ];
 // Pick the right pending-docs list for a case's source.
 const waPendingFor = (source: CaseSource) => (source === "epc" ? WA_PENDING_EPC : WA_PENDING);
-// The message body can be written in English, Hinglish, or easy Hindi.
-type WaLang = "en" | "hinglish" | "hi";
-const WA_LANGS: { key: WaLang; label: string }[] = [
-  { key: "en", label: "English" },
-  { key: "hinglish", label: "Hinglish" },
-  { key: "hi", label: "Hindi" },
-];
 // Build the WhatsApp message from name, RM, chosen doc keys, source, intent, language.
 function buildWaMessage(customer: string, rm: string, itemKeys: string[], source: CaseSource, intent: WaIntent, lang: WaLang, epc?: string | null): string {
   const name = customer && customer !== "—" ? customer : "";
@@ -381,7 +369,7 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
     } finally { setDetecting(false); }
   }, [onDetectDocs]);
   const openWa = (c: OpsCase) => {
-    setWaCase(c); setWaIntent("docs"); setWaLang("hi"); setWaTo(myDayTel(c.mobile));
+    setWaCase(c); setWaIntent("docs"); setWaLang("hi"); setWaTo(waTel(c.mobile));
     setWaSel(new Set()); setWaHave(new Set());
     if (c.source === "loan") void runDetect(c);
   };
@@ -392,9 +380,9 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
     setWaMsg(buildWaMessage(waCase.name, rmName, Array.from(waSel), waCase.source, waIntent, waLang, waCase.epcName));
   }, [waCase, waSel, waIntent, waLang, rmName]);
   const sendWa = () => {
-    const ten = myDayTel(waTo);
+    const ten = waTel(waTo);
     if (!ten || !waCase) return;
-    window.open(`https://wa.me/91${ten}?text=${encodeURIComponent(waMsg)}`, "_blank", "noopener,noreferrer");
+    window.open(waUrl(ten, waMsg), "_blank", "noopener,noreferrer");
     onStampContact(waCase); // sending counts as a contact
     setWaCase(null);
   };
@@ -510,7 +498,7 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
                     const act = nextAction(c)!;
                     const days = Math.max(0, Math.floor(c.stageHours / 24));
                     const w = waitingOn(c);
-                    const tel = myDayTel(c.mobile);
+                    const tel = waTel(c.mobile);
                     const hasNote = !!COMMENT_TBL[c.source];
                     const fuDue = !!c.followUpAt && c.followUpAt <= todayStr;
                     return (
@@ -655,7 +643,7 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
               <span className="text-[11px] text-text-muted">Sent from your WhatsApp</span>
               <div className="flex gap-2">
                 <button type="button" onClick={() => setWaCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">Cancel</button>
-                <button type="button" onClick={sendWa} disabled={!myDayTel(waTo)}
+                <button type="button" onClick={sendWa} disabled={!waTel(waTo)}
                   className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#128C7E] text-white hover:bg-[#0f766e] disabled:opacity-50 inline-flex items-center gap-1.5">
                   Send on WhatsApp →
                 </button>

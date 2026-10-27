@@ -1,3 +1,5 @@
+import { centralSubsidyFor } from "./emi";
+
 // Default option lists for the Quotation Builder dropdowns. Each dropdown is
 // searchable and lets the EPC add a custom value, which is persisted in
 // quotation_brand_options and merged in on next load (so "add custom" sticks).
@@ -60,16 +62,25 @@ export const SARVATRA = {
   key: "bundled:sarvatra",
   panel: "Adani",
   panelType: "Bifacial Topcon 600+ Wp",
+  panelTypes: ["Bifacial 545+ Wp", "Bifacial Topcon 600+ Wp", "Bifacial Topcon 700+ Wp"],
+  // A panel's watt rating from its type or Wp ("Bifacial 545+ Wp" / "545+Wp" → 545; 0 = none written).
+  wattsOf: (s: string) => Number(/(\d{3,4})\s*\+?\s*w/i.exec(s)?.[1]) || 0,
   inverter: "Polycab",
+  kwOptions: ["3", "4", "5", "6", "7", "8", "9", "10", "12", "15"],
+  floors: Array.from({ length: 12 }, (_, n) => `G+${n + 1}`),
   titles: ["Mr.", "Mrs.", "Ms.", "Dr."],
   phases: ["Single Phase", "Three Phase"],
   inverterLocations: ["Ground", "Rooftop", "Parking", "Staircase"],
   connectionTypes: ["Domestic", "Commercial", "Industrial"],
   commercial: (connection: string) => /commercial|industrial/i.test(connection),
   roofTypes: ["RCC", "Tin shed", "Asbestos", "Tiled"],
-  structureTypes: ["Galvanised Iron", "Hot-dip Galvanised", "Aluminium"],
+  structureTypes: ["Galvanised Iron", "Hot-dip Galvanised", "Aluminium", "Magnelis"],
   designShare: 0.3, // "On design approval" default share of the price (₹90,000 of ₹3,00,000)
-  booking: 10000,   // booking / advance amount
+  booking: 10000,   // default booking / advance amount
+  // Sustera Ventures sends its customers' emails from its own Gmail
+  // (app password: SUSTERA_GMAIL_APP_PASSWORD).
+  sender: "acc.sustera@gmail.com",
+  senderName: "Sustera Ventures",
   // Project Confirmation Receipt (PCR)
   cellType: "Topcon Bifacial",
   wp: "600+Wp",
@@ -83,6 +94,25 @@ export const SARVATRA = {
   serial: (n: number, month = new Date().getMonth() + 1) => `Quote_GZB_${String(month).padStart(2, "0")}-${String(n).padStart(3, "0")}`,
   serialNo: (s: string) => Number(/(\d+)\D*$/.exec(s)?.[1]),
 };
+
+// gozerobils quotation figures from the raw form values — the form shows them
+// and the PDFs print them. A blank optional value means "auto": central subsidy
+// by kW, panels from kW and the panel type's watts, booking ₹10,000, design
+// approval 30% of the price; material dispatch is whatever remains.
+export function sarvatraTerms(v: Record<string, unknown>) {
+  const opt = (k: string) => (v[k] === "" || v[k] == null ? null : Number(v[k]) || 0);
+  const kw = Number(v.kw) || 0;
+  const price = Number(v.price) || 0;
+  const central = opt("central_subsidy") ?? centralSubsidyFor(kw, SARVATRA.commercial(String(v.connection_type ?? "")));
+  const booking = opt("booking") ?? SARVATRA.booking;
+  const design = opt("design_payment") ?? Math.round(price * SARVATRA.designShare);
+  return {
+    kw, price, central, booking, design,
+    panels: opt("panels") || Math.ceil((kw * 1000) / (SARVATRA.wattsOf(String(v.wp ?? "")) || SARVATRA.wattsOf(String(v.panel_type ?? "")) || 600)),
+    net: Math.max(0, price - central - (Number(v.state_subsidy) || 0)),
+    dispatch: Math.max(0, price - booking - design),
+  };
+}
 
 // Field keys used for persisting custom options (quotation_brand_options.field).
 export const BRAND_FIELDS = {

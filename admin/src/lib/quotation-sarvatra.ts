@@ -1,26 +1,28 @@
 // Server-only. Sarvatra Energy (gozerobils) documents — their own PDFs are the
 // templates, filled in place by lib/pdf-template from one form:
-//   • Quotation (templates/sarvatra-template.pdf, 5 pages; page 2 untouched)
+//   • Quotation (templates/sarvatra-template.pdf, 5 pages; page 2 only when the panel isn't 600+ TOPCon)
 //   • Project Confirmation Receipt — PCR (templates/sarvatra-pcr.pdf, 1 page)
 //   • Consumer–vendor agreement (templates/sarvatra-agreement.pdf, 7 pages; 1, 5, 6 filled)
 //
 // Fixed, as in their quotation: 1,400 units per kW per year; shortfall paid back
-// at ₹8.5 per unit (example: 10 % less); savings at ₹10 per unit; 600 Wp panels;
-// financing 10 % down, EMI at 9.75 % flat for 1 / 3 / 5 years; ₹10,000 booking.
+// at ₹8.5 per unit (example: 10 % less); savings at ₹10 per unit; financing 10 %
+// down, EMI at 9.75 % flat for 1 / 3 / 5 years. Panels, central subsidy and the
+// payment milestones come from the form (blank = auto, see sarvatraTerms).
 // These reproduce the sample's own numbers exactly for 6 kW at ₹3,00,000.
 
 import { PDFDocument } from "pdf-lib";
 import { editPage, embedHelvetica, inr, num, type At, type Edit } from "./pdf-template";
-import { centralSubsidyFor, computeFlatEmi } from "./emi";
+import { computeFlatEmi } from "./emi";
 import { STATE_CODES } from "./india-states";
-import { SARVATRA } from "./quotation-brands";
+import { SARVATRA, sarvatraTerms } from "./quotation-brands";
 import { numberToWordsIndian } from "./numberToWords";
+import { readBundledTemplate } from "./quotation";
+import { fmtDateIST } from "./dates";
 
 const UNITS_PER_KW = 1400;
 const PAYBACK_PER_UNIT = 8.5;
 const SHORTFALL = 0.1;
 const SAVING_PER_UNIT = 10;
-const PANEL_WP = 600;
 const DOWN_PAYMENT = 0.1;
 const FLAT_RATE = 9.75;
 const TENURES = [1, 3, 5];
@@ -34,9 +36,10 @@ export type SarvatraInput = {
   city: string;
   state: string;              // full name, e.g. Rajasthan
   kw: number;
-  panel_brand: string;
+  panel_brand: string;        // one or more, "Adani / Waaree"
   panel_type: string;
-  inverter_brand: string;
+  panels: number;
+  inverter_brand: string;     // one or more, "Polycab / Havells"
   inverter_kw: number;
   phase: string;
   inverter_location: string;
@@ -47,7 +50,9 @@ export type SarvatraInput = {
   structure_type: string;
   price: number;              // system price, GST inclusive
   state_subsidy: number;
-  design_payment: number;     // "On design approval"
+  central_subsidy: number;
+  booking: number;            // payment milestones: booking …
+  design_payment: number;     // … on design approval (the rest is due before dispatch)
   // PCR
   email: string;
   ebill_name: string;
@@ -76,15 +81,66 @@ export function sarvatraFigures(i: SarvatraInput) {
   const lowUnits = Math.round(units * (1 - SHORTFALL));
   const lost = units - lowUnits;
   const yearly = units * SAVING_PER_UNIT;
-  const central = centralSubsidyFor(i.kw, SARVATRA.commercial(i.connection_type));
   const down = Math.round(i.price * DOWN_PAYMENT);
   const loan = i.price - down;
   return {
     units, lowUnits, lost, payback: lost * PAYBACK_PER_UNIT, yearly, monthly: yearly / 12,
-    panels: Math.ceil((i.kw * 1000) / PANEL_WP),
-    central, net: Math.max(0, i.price - central - i.state_subsidy),
+    panels: i.panels, central: i.central_subsidy, net: Math.max(0, i.price - i.central_subsidy - i.state_subsidy),
     down, loan, emis: TENURES.map((y) => computeFlatEmi(loan, FLAT_RATE, y)),
-    dispatch: Math.max(0, i.price - SARVATRA.booking - i.design_payment),
+    dispatch: Math.max(0, i.price - i.booking - i.design_payment),
+  };
+}
+
+// "DCR & NDCR" for "Both", as in their agreement.
+const dcrLabel = (dcr: string) => (dcr === "Both" ? "DCR & NDCR" : dcr);
+
+/** The saved form values (strings, blanks = auto) + the document's date → the builders' input. */
+export function sarvatraInput(b: Record<string, unknown>, date: string | Date): SarvatraInput {
+  const s = (k: string) => String(b[k] ?? "").trim();
+  const n = (k: string) => Number(b[k]) || 0;
+  const t = sarvatraTerms(b);
+  return {
+    quote_no: s("quote_no"), date: fmtDateIST(date).replace(/\//g, "-"),
+    title: s("title"), customer_name: s("customer_name"),
+    contact: s("contact"), city: s("city"), state: s("state"), kw: t.kw,
+    panel_brand: s("panel_brand") || SARVATRA.panel, panel_type: s("panel_type") || SARVATRA.panelType, panels: t.panels,
+    inverter_brand: s("inverter_brand") || SARVATRA.inverter, inverter_kw: n("inverter_kw") || t.kw,
+    phase: s("phase") || SARVATRA.phases[0], inverter_location: s("inverter_location"),
+    connection_type: s("connection_type"), floors: s("floors"), solar_care: b.solar_care === true,
+    roof_type: s("roof_type"), structure_type: s("structure_type"),
+    price: t.price, state_subsidy: n("state_subsidy"), central_subsidy: t.central,
+    booking: t.booking, design_payment: t.design,
+    email: s("email"), ebill_name: s("ebill_name"), k_number: s("k_number"), address: s("address"),
+    pincode: s("pincode"), sanctioned_load: s("sanctioned_load"), spc_name: s("spc_name"),
+    cell_type: s("cell_type") || SARVATRA.cellType, dcr_type: s("dcr_type") || SARVATRA.dcrTypes[0],
+    wp: s("wp") || SARVATRA.wp, inverter_type: s("inverter_type") || SARVATRA.inverterTypes[0],
+    maintenance_plan: s("maintenance_plan"), maintenance_others: s("maintenance_others"),
+    site_readiness: s("site_readiness") || SARVATRA.siteReadiness[0],
+    bill_correction: Array.isArray(b.bill_correction) ? b.bill_correction.map(String) : [],
+    finance_by: s("finance_by"), payment_method: s("payment_method"),
+    payment_mode: s("payment_mode") || SARVATRA.paymentModes[0], aen: s("aen"),
+  };
+}
+
+// The three documents: file name prefix, template, builder.
+const SARVATRA_DOCS = new Map<string, { prefix: string; template: string; build: (i: SarvatraInput, t: Buffer) => Promise<Uint8Array> }>([
+  ["quotation", { prefix: "Quotation", template: SARVATRA.key, build: buildSarvatraQuotation }],
+  ["pcr", { prefix: "PCR", template: "bundled:sarvatra-pcr", build: buildSarvatraPcr }],
+  ["agreement", { prefix: "Agreement", template: "bundled:sarvatra-agreement", build: buildSarvatraAgreement }],
+]);
+
+export function safeFileName(s: string): string {
+  return (s || "quotation").replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "_").slice(0, 60) || "quotation";
+}
+
+/** One document (quotation | pcr | agreement) from the saved form values; null = unknown document. */
+export async function buildSarvatraFile(doc: string, b: Record<string, unknown>, date: string | Date): Promise<{ name: string; pdf: Uint8Array } | null> {
+  const d = SARVATRA_DOCS.get(doc);
+  if (!d) return null;
+  const input = sarvatraInput(b, date);
+  return {
+    name: `${d.prefix}_${safeFileName(input.customer_name)}_${safeFileName(input.quote_no)}.pdf`,
+    pdf: await d.build(input, await readBundledTemplate(d.template)),
   };
 }
 
@@ -101,6 +157,15 @@ export async function buildSarvatraQuotation(i: SarvatraInput, template: Buffer)
   editPage(doc, pages[0], [
     { kind: "text", at: [238.5, 199.9], to: 356.8, text: name, bold: true, align: "center", fit: 300 },
   ], fonts);
+  // 2 — the module: its watts, and no "TOPCon" in the heading for a non-TOPCon panel
+  const watts = SARVATRA.wattsOf(i.panel_type) || 600;
+  const topcon = /topcon/i.test(i.panel_type);
+  if (watts !== 600 || !topcon) {
+    editPage(doc, pages[1], [
+      { kind: "text", at: [57, 657.4], to: 95.5, text: `${watts}+ Wp`, bold: true, native: true },
+      ...(topcon ? [] : [{ kind: "text", at: [36, 757.2], to: 203.9, text: "Bi-facial", native: true } as Edit]),
+    ], fonts);
+  }
   // 3 — performance promise
   editPage(doc, pages[2], [
     { kind: "text", at: [504.4, 603.4], to: 548, text: units(k.units), bold: true, align: "right" },
@@ -122,7 +187,7 @@ export async function buildSarvatraQuotation(i: SarvatraInput, template: Buffer)
     { kind: "text", at: [73.5, 651.4], to: 80.6, text: num(i.kw), bold: true, fit: 44 },
     { kind: "line", at: [205.4, 655.2], to: 410.1, fit: 340, parts: [
       { text: i.panel_brand, bold: true },
-      { text: ` - ${i.panel_type}`, like: [234.5, 655.2], bold: true },
+      { text: ` - ${i.panel_type} ${dcrLabel(i.dcr_type)}`, like: [234.5, 655.2], bold: true },
       { text: ` ( ${k.panels} Panels)`, bold: true },
     ] },
     { kind: "line", at: [72, 608.7], to: 226.4, fit: 380, parts: [
@@ -151,6 +216,7 @@ export async function buildSarvatraQuotation(i: SarvatraInput, template: Buffer)
   const wide: At[] = [[291.6, 297.9], [401, 407.3], [510.4, 516.7]];
   editPage(doc, pages[4], [
     ...row(697.9, wide, [i.price, i.price, i.price]),
+    { kind: "amount", rupee: [504.2, 499.2], at: [511.3, 499.2], to: 546.5, text: `${inr(i.booking)}/-`, bold: true, align: "right" },
     ...row(670.2, [[298.3, 304.6], [407.7, 414], [517.1, 523.4]], [k.down, k.down, k.down]),
     ...row(642.4, wide, [k.loan, k.loan, k.loan]),
     ...row(616.2, [[296.2, 302.8], [410.4, 416.9], [519.7, 526.3]], k.emis, true),
@@ -224,7 +290,7 @@ export async function buildSarvatraPcr(i: SarvatraInput, template: Buffer): Prom
     // payment details
     v([137.6, 301.2], 177.8, `${inr(i.price)}/-`, 150),
     v([415.2, 301.2], 428.6, i.finance_by, 155),
-    v([137.6, 280.2], 170.4, `${inr(SARVATRA.booking)}/-`, 150),
+    v([137.6, 280.2], 170.4, `${inr(i.booking)}/-`, 150),
     v([476.2, 280.2], 523.8, i.date, 80),
     v([126.7, 259.2], 141, i.payment_method, 280),
     ...group(PCR_BOXES.paymentMode, SARVATRA.paymentModes, (o) => o === i.payment_mode),
@@ -243,7 +309,7 @@ export async function buildSarvatraAgreement(i: SarvatraInput, template: Buffer)
   const fonts = await embedHelvetica(doc);
   const k = sarvatraFigures(i);
   const pages = doc.getPages();
-  const v = (at: At, to: number, text: string, box: number): Edit => ({ kind: "text", at, to, text, bold: true, fit: box, native: true });
+  const v = (at: At, to: number, text: string, box: number, font?: At): Edit => ({ kind: "text", at, to, text, bold: true, fit: box, native: true, font });
 
   // 1 — parties
   editPage(doc, pages[0], [
@@ -260,15 +326,17 @@ export async function buildSarvatraAgreement(i: SarvatraInput, template: Buffer)
     v([258.5, 743.7], 285, `${num(i.kw)} kWp`, 280),
     v([258.5, 721.2], 283.5, i.panel_brand, 280),
     v([258.5, 697.9], 315.3, `${i.wp.replace(/\s*wp$/i, " Wp")} x ${k.panels}`, 280),
-    v([258.5, 675.4], 315.5, i.dcr_type === "Both" ? "DCR & NDCR" : i.dcr_type, 280),
+    v([258.5, 675.4], 315.5, dcrLabel(i.dcr_type), 280),
     v([258.5, 652.9], 323, `${i.inverter_brand}_ ${num(i.inverter_kw)} KW`, 280),
     v([258.5, 630.4], 285.5, i.phase.replace(/\s*phase$/i, ""), 280),
     v([258.5, 607.9], 268, STRUCTURE_SHORT[i.structure_type.trim().toLowerCase()] ?? i.structure_type, 280),
   ], fonts);
-  // 6 — Annexure B, cost & payment schedule (booking stays ₹10,000)
+  // 6 — Annexure B, cost & payment schedule
   editPage(doc, pages[5], [
     v([147.2, 748.9], 183.7, inr(i.price), 55),
     v([332.9, 748.9], 442.9, `Rupees ${numberToWordsIndian(i.price)} Only`, 212),
+    // the booking cell's bold subset only has the sample's digits → write it like the rows below
+    v([465.9, 700.9], 506.5, `₹ ${inr(i.booking)}/-`, 75, [462.9, 677.7]),
     v([462.9, 677.7], 503.5, `₹ ${inr(i.design_payment)}/-`, 75),
     v([462.9, 655.2], 511, `₹ ${inr(k.dispatch)}/-`, 75),
   ], fonts);

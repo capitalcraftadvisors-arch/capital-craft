@@ -17,7 +17,9 @@ import ExcelJS from "exceljs";
 import archiver from "archiver";
 import { sendMail, mailConfigured } from "@/lib/mailer";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
-import { uploadBuffer, downloadBuffer, getSignedReadUrl } from "@/lib/gcs";
+import { uploadBuffer, downloadBuffer } from "@/lib/gcs";
+import { fileLinkUrl } from "@/lib/file-links";
+import { publicOrigin } from "@/lib/login-password-server";
 import { creditFairEmailRows, LENDER_LABEL, type LenderKey } from "@/lib/lender-summary";
 import { logLoanActivityServer } from "@/lib/loan-activity-server";
 
@@ -36,7 +38,6 @@ const LOAN_CC_DEFAULT = ["malvikasaxena323@gmail.com"];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const LENDER_KEYS: LenderKey[] = ["creditfair", "aerem", "solfin"];
-const LINK_TTL = 7 * 24 * 3600; // 7 days — GCS V4 signed-URL max (604800s)
 
 function err(message: string, status: number) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -235,10 +236,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const zipName = `${safe(`${borrowerName}_${LENDER_LABEL[lender]}`)}.zip`;
     const zipPath = `lender-packs/${appId}/${Date.now()}_${zipName}`;
     await uploadBuffer(zipPath, zipBuffer, "application/zip");
-    const zipUrl = await getSignedReadUrl(zipPath, LINK_TTL);
+    // Links go through the portal so they outlive Google's 7-day cap (lib/file-links).
+    const origin = publicOrigin(req);
+    const zipUrl = fileLinkUrl(origin, zipPath);
 
     const links: Array<{ label: string; url: string }> = [];
-    for (const d of docList) { if (!buffers.has(d.path)) continue; try { links.push({ label: d.label, url: await getSignedReadUrl(d.path, LINK_TTL) }); } catch { /* skip */ } }
+    for (const d of docList) { if (!buffers.has(d.path)) continue; links.push({ label: d.label, url: fileLinkUrl(origin, d.path) }); }
 
     const linksHtml = links.map((l) => `<li style="margin:4px 0"><a href="${esc(l.url)}" style="color:#178a5c">${esc(l.label)}</a></li>`).join("");
     const detailHtml = `<table style="border-collapse:collapse;margin:8px 0 18px;font-size:13px">${detail

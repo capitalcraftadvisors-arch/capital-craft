@@ -178,8 +178,9 @@ export default function EmailComposerModal({
 }
 
 // CC / BCC chip field — type an address, Enter or "Add" turns it into a
-// removable chip. Autocompletes from the shared address book (listId).
-function ChipField({ label, values, onChange, listId }: { label: string; values: string[]; onChange: (v: string[]) => void; listId: string }) {
+// removable chip. Autocompletes from the shared address book (listId), if any.
+// Also used by Sustera's quotation email (components/quotation).
+export function ChipField({ label, values, onChange, listId }: { label: string; values: string[]; onChange: (v: string[]) => void; listId?: string }) {
   const [draft, setDraft] = useState("");
   const add = () => {
     const e = draft.trim().toLowerCase();
@@ -201,7 +202,7 @@ function ChipField({ label, values, onChange, listId }: { label: string; values:
         </div>
       )}
       <div className="flex gap-2">
-        <input value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+        <input value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={add} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
           placeholder={`Add ${label} address`} inputMode="email" list={listId}
           className="flex-1 min-w-0 rounded-input border border-line px-3 py-2 text-[13px] outline-none focus:border-blue" />
         <button type="button" onClick={add} disabled={!EMAIL_RE.test(draft.trim())}

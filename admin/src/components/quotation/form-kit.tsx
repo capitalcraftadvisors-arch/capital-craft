@@ -90,26 +90,32 @@ export function saveUrl(url: string, name: string) {
   const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
 }
 
-// Save the file the server sent back.
-export async function saveDownload(res: Response) {
-  const cd = res.headers.get("Content-Disposition") || "";
-  const url = URL.createObjectURL(await res.blob());
-  saveUrl(url, (cd.match(/filename="([^"]+)"/) || [])[1] || "quotation.pdf");
-  URL.revokeObjectURL(url);
-}
-
-// POST /api/epc/quotation and save the file; resolves to the response's
-// next suggested serial no. Throws a readable message on failure.
-export async function downloadQuotation(body: object): Promise<string | null> {
+// POST /api/epc/quotation → the generated file (named as the server named it)
+// + the next suggested serial no. Throws a readable message on failure.
+async function fetchQuotation(body: object): Promise<{ file: File; next: string | null }> {
   const res = await fetch("/api/epc/quotation", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
     body: JSON.stringify(body),
   });
   if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j?.error || "Couldn't generate the document."); }
-  const next = res.headers.get("X-Next-Serial");
-  await saveDownload(res);
+  const name = ((res.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/) || [])[1] || "quotation.pdf";
+  const blob = await res.blob();
+  return { file: new File([blob], name, { type: blob.type || "application/pdf" }), next: res.headers.get("X-Next-Serial") };
+}
+
+/** Generate the document and save it; resolves to the next suggested serial no. */
+export async function downloadQuotation(body: object): Promise<string | null> {
+  const { file, next } = await fetchQuotation(body);
+  const url = URL.createObjectURL(file);
+  saveUrl(url, file.name);
+  URL.revokeObjectURL(url);
   return next;
+}
+
+/** Generate the document as a File (e.g. to hand to the phone's share menu). */
+export async function quotationFile(body: object): Promise<File> {
+  return (await fetchQuotation(body)).file;
 }
 
 export function Toggle({ on, onClick, label, grow }: { on: boolean; onClick: () => void; label: string; grow?: boolean }) {

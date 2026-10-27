@@ -10,6 +10,7 @@ import fs from "fs";
 import path from "path";
 import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { downloadBuffer } from "./gcs";
 
 export type QuotationInput = {
@@ -121,4 +122,16 @@ export async function readBundledTemplate(key: string): Promise<Buffer> {
   const buf = fs.existsSync(local) ? fs.readFileSync(local) : await downloadBuffer(`templates/${file}`);
   loaded.set(file, buf);
   return buf;
+}
+
+/** The EPC's quotation template (read with the caller's token — RLS: their own
+ *  row, or any for an admin), or null when none is set up. */
+export async function epcQuoteTemplate(db: SupabaseClient, bizId: string): Promise<{ id: string; storage_path: string } | null> {
+  try {
+    const { data } = await db.from("epc_quotation_templates").select("id, storage_path")
+      .eq("epc_business_id", bizId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    return data?.storage_path ? (data as { id: string; storage_path: string }) : null;
+  } catch {
+    return null; // table missing → treated as no template
+  }
 }
