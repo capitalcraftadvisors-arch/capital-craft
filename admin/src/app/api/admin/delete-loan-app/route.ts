@@ -56,6 +56,12 @@ export async function POST(req: NextRequest) {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
+    // Only the owner account may delete a loan application (0105). Checked
+    // before anything is touched — the GCS purge below can't be undone.
+    const { data: isOwner, error: ownerErr } = await supabase.rpc("is_owner_account");
+    if (ownerErr) return err(ownerErr.message, 500);
+    if (isOwner !== true) return err("You don't have permission to delete loan applications.", 403);
+
     // ── load target ───────────────────────────────────────
     const { data: target, error: loadErr } = await supabase
       .from("epc_applications")

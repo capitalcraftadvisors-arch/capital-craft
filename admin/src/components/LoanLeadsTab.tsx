@@ -68,6 +68,8 @@ export default function LoanLeadsTab() {
   // Active and dead leads apart. Dead leads are deleted 30 days after being
   // marked dead (migration 0101, daily in the database).
   const [view, setView] = useState<"active" | "dead">("active");
+  // The lead last opened — scrolled to and highlighted on the way back.
+  const [highlightId, setHighlightId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -81,6 +83,27 @@ export default function LoanLeadsTab() {
     setLoading(false);
   }
   useEffect(() => { void load(); }, []);
+
+  function openLead(id: string) {
+    sessionStorage.setItem("leadsList.scroll", String(window.scrollY));
+    sessionStorage.setItem("leadsList.lastRowId", id);
+    router.push(`/admin/lead/${id}/view`);
+  }
+  // Back from a lead: same scroll, its tab (active / dead), the row flashing.
+  useEffect(() => {
+    if (loading) return;
+    const y = sessionStorage.getItem("leadsList.scroll");
+    const id = sessionStorage.getItem("leadsList.lastRowId");
+    sessionStorage.removeItem("leadsList.scroll");
+    sessionStorage.removeItem("leadsList.lastRowId");
+    if (!id) return;
+    if (rows.find((r) => r.id === id)?.dead_at) setView("dead");
+    setHighlightId(id);
+    if (y) requestAnimationFrame(() => window.scrollTo(0, Number(y) || 0));
+    const t = window.setTimeout(() => setHighlightId(null), 2100);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   const deadCount = useMemo(() => rows.filter((r) => r.dead_at).length, [rows]);
   const filtered = useMemo(() => {
@@ -180,11 +203,12 @@ export default function LoanLeadsTab() {
                 filtered.map((r) => (
                   <tr
                     key={r.id}
-                    onClick={() => router.push(`/admin/lead/${r.id}/view`)}
+                    onClick={() => openLead(r.id)}
+                    style={{ transition: "background-color 2s ease-out", backgroundColor: highlightId === r.id ? "#dceffb" : undefined }}
                     className={"border-b border-[#f0f4f2] last:border-0 cursor-pointer " + (r.dead_at ? "bg-[#fdf0f0] hover:bg-[#fbe6e6]" : "hover:bg-[#f7f7fd]")}
                   >
                     <td className="px-4 py-3">
-                      <div className="font-semibold text-[#0f3d2e]">{r.name ? <RowLink href={`/admin/lead/${r.id}/view`} onOpen={() => router.push(`/admin/lead/${r.id}/view`)}>{r.name}</RowLink> : "—"}</div>
+                      <div className="font-semibold text-[#0f3d2e]">{r.name ? <RowLink href={`/admin/lead/${r.id}/view`} onOpen={() => openLead(r.id)}>{r.name}</RowLink> : "—"}</div>
                       <div className="text-[12px] text-[#5a8a76] flex items-center gap-2">
                         <span className="font-mono text-[#4338ca]">{r.lead_display_id || "—"}</span>
                         {r.mobile && <span>· +91 {r.mobile}</span>}

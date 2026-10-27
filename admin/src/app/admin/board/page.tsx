@@ -949,15 +949,14 @@ function Inner() {
   // "My Day" queue — the RM's OWN cases that need action, across all sources,
   // ranked most-urgent first (red → yellow → green, longest-in-stage on top).
   const breaches = visible.filter((c) => c.idleDays >= sla).length;
-  // Business disbursed within the SELECTED board period. Each tranche is counted
-  // in the month it was ACTUALLY paid (1st and 2nd disbursements independently),
-  // so changing the period dropdown (Previous month, All time, custom) always
-  // recomputes the real payout for that window.
+  // Business disbursed within the SELECTED board period — the 1st disbursement
+  // only, in the month it was ACTUALLY paid, so changing the period dropdown (Previous
+  // month, All time, custom) always recomputes the real payout for that window.
   const inSelPeriod = (d: string | null) =>
     boardPeriod === "all" ? true
     : boardPeriod === "custom" ? inPeriod(d, "custom", boardFrom ? `${boardFrom}-01` : "", boardTo ? monthEnd(boardTo) : "")
     : inPeriod(d, boardPeriod);
-  const mtd = cases.reduce((sum, c) => sum + c.tranches.reduce((s, t) => s + (inSelPeriod(t.date) ? t.amount : 0), 0), 0);
+  const mtd = cases.reduce((sum, c) => sum + c.tranches.reduce((s, t) => s + (t.phase === 1 && inSelPeriod(t.date) ? t.amount : 0), 0), 0);
   const pct = Math.min(100, Math.round(mtd / (target * 1e5) * 100));
   const periodLabel = boardPeriod === "custom"
     ? (boardFrom || boardTo ? `${boardFrom || "…"} → ${boardTo || "…"}` : "Custom")

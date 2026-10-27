@@ -30,6 +30,7 @@ import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness } from "@/lib/auth";
 import { computeCentralSubsidy, computeEmi, formatRupees, DEFAULT_INDICATIVE_ROI, TENURES } from "@/lib/emi";
 import { numberToWordsIndian } from "@/lib/numberToWords";
+import { invalidateLoanBoards } from "@/lib/ops-board";
 
 export default function IntakePage() {
   return (
@@ -74,6 +75,9 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // answered the explicit "co-applicant required?" question with Yes. Either one
 // reveals the co-applicant document slots in the table and its detail turns.
 const hasCoapp = (f: Form) => f._has_coapp === "1" || f.coapp_needed === "yes";
+// The co-applicant Yes / No answer is the decision (a "No" also drops one read earlier).
+const coappDecision = (turnId: string | undefined, value: string): Form =>
+  (turnId === "coapp_needed" && value ? { _has_coapp: value === "yes" ? "1" : "" } : {});
 // Is this doc turn's file already on the profile? Drives the standalone doc
 // turns' `when` gate (e.g. the bank statement self-skips once uploaded).
 function docProvided(turnId: string, f: Form): boolean {
@@ -106,7 +110,13 @@ const SCRIPT: Turn[] = [
     when: (f) => !(f.system_type && f.system_type.trim()), choices: [
       { value: "on_grid", label: "On-Grid" }, { value: "off_grid", label: "Off-Grid" }, { value: "hybrid", label: "Hybrid" },
     ] },
-  // 4b) Applicant email — asked when missing (a converted lead may not carry one).
+  // 4b) Applicant mobile — asked when missing (no info sheet).
+  { id: "borrower_mobile", bot: "Applicant's mobile number?", kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile",
+    when: (f) => !(f.borrower_mobile && f.borrower_mobile.trim()),
+    validate: (v) => (!v.trim() || MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile, or skip.") },
+  { id: "lead_owner_name", bot: "Lead owner's name? (optional)", kind: "text", field: "lead_owner_name", placeholder: "Lead owner", optional: true,
+    when: (f) => !(f.lead_owner_name && f.lead_owner_name.trim()) },
+  // 4c) Applicant email — asked when missing (a converted lead may not carry one).
   { id: "borrower_email", bot: "Applicant's email? (optional)", kind: "text", field: "borrower_email", placeholder: "name@example.com", optional: true,
     when: (f) => !(f.borrower_email && f.borrower_email.trim()),
     validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email, or skip.") },
@@ -132,6 +142,10 @@ const SCRIPT: Turn[] = [
   //    as pending and never block. Replaces the old bundle auto-sort + the
   //    one-at-a-time review/re-ask turns.
   { id: "doc_table", bot: "Now the documents. Drop each one into its box — I'll read it as it lands. Tick “Don't have it” for anything you can't add right now.", kind: "doc_table", docLabel: "Documents" },
+  // Co-applicant details the documents don't carry — only with a co-applicant.
+  { id: "coapp_relation", bot: "Co-applicant's relation to the applicant?", kind: "text", field: "coapp_relation", placeholder: "e.g. spouse", optional: true, when: hasCoapp },
+  { id: "coapp_mobile", bot: "Co-applicant's mobile number?", kind: "text", field: "coapp_mobile", placeholder: "10-digit mobile", optional: true, when: hasCoapp, validate: (v) => (!v.trim() || MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile, or skip.") },
+  { id: "coapp_email", bot: "Co-applicant's email?", kind: "text", field: "coapp_email", placeholder: "name@example.com", optional: true, when: hasCoapp, validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email, or skip.") },
 
   // Bank statement — its own upload step (not one of the table's slots).
   { id: "bank", bot: "Upload the bank statement.", kind: "docs", docLabel: "Bank statement", when: (f) => !docProvided("bank", f),
@@ -140,6 +154,9 @@ const SCRIPT: Turn[] = [
   // 6) Quotation / proforma — its own step (never in the table; Gemini tags it "other").
   { id: "quotation", bot: "Upload the quotation / proforma invoice — I'll read the project cost & size.", kind: "docs", docLabel: "Quotation / invoice",
     uploads: [{ name: "proforma", label: "Quotation / invoice" }], extractRoute: "extract-loan-docs" },
+  { id: "loan_amount", bot: "Loan amount required (₹)?", kind: "text", field: "loan_amount_required", placeholder: "e.g. 250000",
+    when: (f) => !(Number(f.loan_amount_required) > 0),
+    validate: (v) => (!v.trim() || /^\d+$/.test(v.trim()) ? null : "Enter the amount in digits, e.g. 250000.") },
 
   // 11) Employment
   { id: "employment_type", bot: "Employment type?", kind: "choice", field: "employment_type", choices: [
@@ -162,15 +179,10 @@ const SCRIPT: Turn[] = [
   // These never appear in the create flow (when:()=>false). They're re-asked ONLY
   // when the RM ticks them in the edit table (a selected target bypasses `when`).
   // Every field is in the update-fields allow-list, so answering persists it.
-  { id: "edit_borrower_mobile", bot: "Applicant's mobile number?", kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile", when: () => false, validate: (v) => (!v.trim() || MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile, or skip.") },
   { id: "edit_borrower_email", bot: "Applicant's email?", kind: "text", field: "borrower_email", placeholder: "name@example.com", when: () => false, validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email, or skip.") },
   { id: "edit_system_type", bot: "Type of solar system?", kind: "choice", field: "system_type", when: () => false, choices: [
     { value: "on_grid", label: "On-Grid" }, { value: "off_grid", label: "Off-Grid" }, { value: "hybrid", label: "Hybrid" },
   ] },
-  { id: "edit_loan_amount", bot: "Loan amount required (₹)?", kind: "text", field: "loan_amount_required", placeholder: "e.g. 250000", when: () => false },
-  { id: "edit_coapp_relation", bot: "Co-applicant's relation to the applicant?", kind: "text", field: "coapp_relation", placeholder: "e.g. spouse", when: () => false },
-  { id: "edit_coapp_mobile", bot: "Co-applicant's mobile number?", kind: "text", field: "coapp_mobile", placeholder: "10-digit mobile", when: () => false, validate: (v) => (!v.trim() || MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile, or skip.") },
-  { id: "edit_coapp_email", bot: "Co-applicant's email?", kind: "text", field: "coapp_email", placeholder: "name@example.com", when: () => false, validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email, or skip.") },
 ];
 
 // The complete-step payloads, keyed by step. Persistence during the flow is via
@@ -185,7 +197,8 @@ const STEP_PAYLOAD: Record<number, (f: Form) => Record<string, unknown>> = {
     borrower_pan: f.borrower_pan || "", borrower_father_name: f.borrower_father_name || "",
     install_pincode: f.install_pincode || "", install_state: f.install_state || "", install_district: f.install_district || "", install_city: f.install_city || "",
     system_type: f.system_type || "", plant_use_type: f.plant_use_type || "",
-    consent_policies: ["terms_conditions", "privacy_policy", "cookie_policy"],
+    // Consent is recorded only when the customer gave it (a skipped consent stays pending).
+    consent_policies: f.consent === "yes" ? ["terms_conditions", "privacy_policy", "cookie_policy"] : [],
   }),
   2: (f) => ({
     aadhaar_name: f.aadhaar_name || "", aadhaar_dob: f.aadhaar_dob || "", aadhaar_gender: f.aadhaar_gender || "",
@@ -212,7 +225,7 @@ const STEP_PAYLOAD: Record<number, (f: Form) => Record<string, unknown>> = {
     coapp_aadhaar_front_path: f.coapp_aadhaar_front_path || "", coapp_aadhaar_back_path: f.coapp_aadhaar_back_path || "", coapp_aadhaar_face_path: f.coapp_aadhaar_face_path || "",
   }),
   4: (f) => ({
-    employment_type: f.employment_type || "", profession: f.profession || "", profession_other: "", organization_name: f.organization_name || "", annual_income: f.annual_income || "",
+    employment_type: f.employment_type || "", profession: f.profession || "", profession_other: f.profession_other || "", organization_name: f.organization_name || "", annual_income: f.annual_income || "",
     bank_statement_method: f.bank_statement_method || "manual_epdf", bank_statement_path: f.bank_statement_path || "", bank_statement_uploaded_at: f.bank_statement_uploaded_at || "",
     bank_account_holder: f.bank_account_holder || "", bank_name: f.bank_name || "", bank_account_no: f.bank_account_no || "",
     bank_ifsc: f.bank_ifsc || "", bank_account_type: f.bank_account_type || "", bank_mobile: f.bank_mobile || "", bank_email: f.bank_email || "",
@@ -393,6 +406,9 @@ function Inner() {
   const [editing, setEditing] = useState<{ index: number; turnId: string } | null>(null);
   const [mode, setMode] = useState<"create" | "edit">("create");
   const [editMode, setEditMode] = useState(false);
+  // Edit of an application never taken through the steps (a converted lead, an
+  // unfinished draft): finishing it runs the same server steps as a new one.
+  const [unfinished, setUnfinished] = useState(false);
   // Edit-in-chat intro: Q1 (edit filled?) → pick list → re-ask; Q2 (complete?) → ask missing.
   const [editStep, setEditStep] = useState<"q1" | "pick" | "q2" | "flow" | "done" | null>(null);
   const [editStage, setEditStage] = useState<"selected" | "complete">("complete");
@@ -475,6 +491,7 @@ function Inner() {
           setForm(pf);
           setAppId(appParam);
           setEditMode(true);
+          setUnfinished(app.status === "draft" || (Number(app.current_step) || 1) < 6);
           setMode("edit");
           if (pf.central_subsidy) setCentralSub(pf.central_subsidy);
           if (pf.state_subsidy) setStateSub(pf.state_subsidy);
@@ -560,7 +577,7 @@ function Inner() {
   useEffect(() => {
     if (!editMode || editStep !== "flow" || turn) return;
     if (editStage === "selected" && !isProfileComplete(form)) setEditStep("q2");
-    else { say("bot", "Changes saved — the profile is up to date."); setDonId(appId); setEditStep("done"); }
+    else void finishEdit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [turn, editMode, editStep, editStage]);
 
@@ -652,7 +669,11 @@ function Inner() {
     }
     // Every answer is editable by default — tap the ✎ on any message to change it.
     pushUser(label, { turnId: turn.id, field: turn.field, editable: opts.editable ?? true });
-    const nextForm = { ...form, ...(turn.field ? { [turn.field]: value } : {}), ...(opts.extra ?? {}) };
+    if (editMode && editStage === "selected" && turn.id === "coapp_needed" && value === "yes") {
+      setEditTargets((s) => { const n = new Set(s); ["doc_table", "coapp_relation", "coapp_mobile", "coapp_email"].forEach((t) => n.add(t)); return n; });
+      setEditUnits((s) => { const n = new Set(s); n.add("coapp_aadhaar"); n.add("coapp_pan"); return n; });
+    }
+    const nextForm = { ...form, ...(turn.field ? { [turn.field]: value } : {}), ...coappDecision(turn.id, value), ...(opts.extra ?? {}) };
     setForm(nextForm);
     void persistForm(nextForm); // silent background save so nothing is lost
     advance();
@@ -668,6 +689,8 @@ function Inner() {
   async function skipText() {
     const t = active; if (!t) return;
     pushUndo();
+    // Editing: skipping a detail already on the profile keeps it as is.
+    if (editMode && t.field && (form[t.field] || "").trim()) { pushUser("— skipped —", { turnId: t.id }); advance(); return; }
     // Required fields can be skipped too (e.g. "no mobile right now") — but we
     // record them so the application finishes as an incomplete draft, not a
     // full submission.
@@ -733,7 +756,7 @@ function Inner() {
     const field = t?.field;
     // Changing the EPC partner re-points this application (epc_business_id) —
     // it never creates a new one.
-    const nextForm: Form = { ...form, ...(field ? { [field]: value } : {}), ...(t?.kind === "epc" ? { epc_business_id: value } : {}), ...(extra ?? {}) };
+    const nextForm: Form = { ...form, ...(field ? { [field]: value } : {}), ...coappDecision(turnId, value), ...(t?.kind === "epc" ? { epc_business_id: value } : {}), ...(extra ?? {}) };
     setForm(nextForm);
     setMsgs((m) => m.map((x, i) => (i === index ? { ...x, text: label, edited: true } : x)));
     setEditing(null); setInput("");
@@ -879,7 +902,8 @@ function Inner() {
   async function persistForm(f: Form) {
     if (!appId) return;
     try {
-      await fetch(`/api/admin/loan-app/${appId}/update-fields`, { method: "PATCH", headers: hdr(), body: JSON.stringify(f) });
+      const coapp = hasCoapp(f) ? { bill_on_applicant_name: false } : f.coapp_needed === "no" ? { bill_on_applicant_name: true } : {};
+      await fetch(`/api/admin/loan-app/${appId}/update-fields`, { method: "PATCH", headers: hdr(), body: JSON.stringify({ ...f, ...coapp }) });
     } catch { /* best-effort */ }
   }
 
@@ -896,6 +920,56 @@ function Inner() {
     } finally { setBusy(false); }
   }
 
+  // Walk the server steps in order — records consent, writes the step-level
+  // fields (co-applicant flag …) and advances current_step; step 5 only with a
+  // loan configuration. update-fields already wrote the columns; these confirm.
+  async function runSteps(config: Record<string, unknown> | null): Promise<boolean> {
+    for (const step of [1, 2, 3, 4] as const) {
+      const r = await fetch(`/api/admin/loan-app/${appId}/complete-step-${step}`, { method: step === 1 ? "PATCH" : "POST", headers: hdr(), body: JSON.stringify(STEP_PAYLOAD[step](form)) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j?.ok) { setError(j?.error || `Couldn't save step ${step}.`); return false; }
+    }
+    if (!config) { invalidateLoanBoards(); return true; }
+    const r5 = await fetch(`/api/admin/loan-app/${appId}/complete-step-5`, { method: "POST", headers: hdr(), body: JSON.stringify(config) });
+    const j5 = await r5.json().catch(() => ({}));
+    if (!r5.ok || !j5?.ok) { setError(j5?.error || "Couldn't save loan configuration."); return false; }
+    invalidateLoanBoards();
+    return true;
+  }
+  async function submitApp(): Promise<boolean> {
+    const r6 = await fetch(`/api/admin/loan-app/${appId}/complete-step-6`, { method: "POST", headers: hdr(), body: JSON.stringify({}) });
+    const j6 = await r6.json().catch(() => ({}));
+    if (!r6.ok || !j6?.ok) { setError(j6?.error || "Couldn't submit the application."); return false; }
+    invalidateLoanBoards();
+    return true;
+  }
+  // The saved loan configuration (from the profile), for step 5.
+  const savedConfig = (f: Form) => (f.selected_tenure_years ? {
+    roi_percent: Number(f.roi_percent) || DEFAULT_INDICATIVE_ROI, central_subsidy: Number(f.central_subsidy) || 0, state_subsidy: Number(f.state_subsidy) || 0,
+    selected_tenure_years: Number(f.selected_tenure_years), selected_monthly_emi: Number(f.selected_monthly_emi) || 0, selected_subsidy_emi: Number(f.selected_subsidy_emi) || 0,
+  } : null);
+
+  // End of an edit. An unfinished application (converted lead / draft) gets the
+  // steps a new one gets — consent, co-applicant flag, current_step — and is
+  // submitted once nothing required is missing, so the classic form, the
+  // profile and the tables all see it complete.
+  async function finishEdit(config?: Record<string, unknown>) {
+    if (!unfinished) { say("bot", "Changes saved — the profile is up to date."); setDonId(appId); setEditStep("done"); return; }
+    setBusy(true); setError(null);
+    try {
+      if (!(await runSteps(config ?? savedConfig(form)))) return;
+      const pending = pendingOf(config ? { ...form, selected_tenure_years: String(config.selected_tenure_years) } : form);
+      if (pending.length) {
+        say("bot", `Saved as a draft — still pending: ${pending.join(", ")}.`);
+      } else {
+        if (!(await submitApp())) return;
+        setUnfinished(false);
+        say("bot", "All done — the profile is complete and submitted.");
+      }
+      setDonId(appId); setEditStep("done");
+    } finally { setBusy(false); }
+  }
+
   // Step 5 → save config → submit (step 6) unless something's missing → draft.
   async function finishLoanConfig() {
     if (!appId || tenure == null) { setError("Pick a tenure to continue."); return; }
@@ -907,27 +981,16 @@ function Inner() {
       const principal = Math.max(0, loan - central - stateS);
       const monthly = computeEmi(loan, DEFAULT_INDICATIVE_ROI, tenure);
       const subEmi = computeEmi(principal, DEFAULT_INDICATIVE_ROI, tenure);
+      const config = { roi_percent: DEFAULT_INDICATIVE_ROI, central_subsidy: central, state_subsidy: stateS, selected_tenure_years: tenure, selected_monthly_emi: monthly, selected_subsidy_emi: subEmi };
       if (editMode) {
-        const ok = await patchFields({ roi_percent: DEFAULT_INDICATIVE_ROI, central_subsidy: central, state_subsidy: stateS, selected_tenure_years: tenure, selected_monthly_emi: monthly, selected_subsidy_emi: subEmi });
-        if (!ok) { setBusy(false); return; }
         pushUser("Save changes", {});
+        if (unfinished) { setBusy(false); await finishEdit(config); return; }
+        const ok = await patchFields(config);
+        if (!ok) { setBusy(false); return; }
         say("bot", "Changes saved — the profile is up to date.");
         setDonId(appId); setBusy(false); return;
       }
-      // Walk the server steps in order — records consent + advances current_step.
-      // update-fields already wrote the columns during the flow; these confirm.
-      for (const step of [1, 2, 3, 4] as const) {
-        const method = step === 1 ? "PATCH" : "POST";
-        const r = await fetch(`/api/admin/loan-app/${appId}/complete-step-${step}`, { method, headers: hdr(), body: JSON.stringify(STEP_PAYLOAD[step](form)) });
-        const jj = await r.json().catch(() => ({}));
-        if (!r.ok || !jj?.ok) { setError(jj?.error || `Couldn't save step ${step}.`); setBusy(false); return; }
-      }
-      const r5 = await fetch(`/api/admin/loan-app/${appId}/complete-step-5`, { method: "POST", headers: hdr(), body: JSON.stringify({
-        roi_percent: DEFAULT_INDICATIVE_ROI, central_subsidy: central, state_subsidy: stateS,
-        selected_tenure_years: tenure, selected_monthly_emi: monthly, selected_subsidy_emi: subEmi,
-      }) });
-      const j5 = await r5.json().catch(() => ({}));
-      if (!r5.ok || !j5?.ok) { setError(j5?.error || "Couldn't save loan configuration."); setBusy(false); return; }
+      if (!(await runSteps(config))) { setBusy(false); return; }
 
       if (missing.length > 0) {
         // Something required was skipped → keep it as a draft to finish later.
@@ -935,9 +998,7 @@ function Inner() {
         say("bot", `Saved to your applications table as a draft — still pending: ${missing.join(", ")}. Open it anytime from the table to add what's left.`);
         setDonDraft(true); setDonId(appId); setBusy(false); return;
       }
-      const r6 = await fetch(`/api/admin/loan-app/${appId}/complete-step-6`, { method: "POST", headers: hdr(), body: JSON.stringify({}) });
-      const j6 = await r6.json().catch(() => ({}));
-      if (!r6.ok || !j6?.ok) { setError(j6?.error || "Couldn't submit the application."); setBusy(false); return; }
+      if (!(await submitApp())) { setBusy(false); return; }
       pushUser("Create the application", {});
       say("bot", "All done — the profile is ready and now in your applications table. You can open it to review or edit anytime.");
       setDonId(appId);
@@ -951,11 +1012,13 @@ function Inner() {
     pushUser(yes ? "Yes — edit some details" : "No", {});
     if (yes) { setPickSel([]); setEditStep("pick"); return; }
     if (!isProfileComplete(form)) setEditStep("q2");
+    else if (unfinished) void finishEdit();
     else { say("bot", "Your profile is already completed — nothing pending."); setDonId(appId); setEditStep("done"); }
   }
   function answerQ2(yes: boolean) {
     pushUser(yes ? "Yes — complete it" : "No, later", {});
     if (yes) startFlow("complete");
+    else if (unfinished) void finishEdit();
     else { say("bot", "Okay — your changes are saved. You can finish it anytime."); setDonId(appId); setEditStep("done"); }
   }
   function editSelected() {
@@ -1523,7 +1586,7 @@ const DOC_ROW_PATH: Record<DocSlot, string> = {
 const DOC_UNIT_FIELDS: Partial<Record<DocUnit, (f: Form) => Fetched[]>> = {
   aadhaar: (f) => [frow("Name", f.aadhaar_name || f.borrower_name, "aadhaar_name"), frow("DOB", f.aadhaar_dob, "aadhaar_dob"), frow("Gender", f.aadhaar_gender, "aadhaar_gender"), frow("Aadhaar", f.aadhaar_number, "aadhaar_number"), frow("Address", f.aadhaar_address, "aadhaar_address")],
   applicant_pan: (f) => [frow("PAN", f.borrower_pan, "borrower_pan"), frow("Name", f.borrower_name, "borrower_name"), frow("Father", f.borrower_father_name, "borrower_father_name")],
-  ebill: (f) => [frow("Monthly bill (₹)", f.monthly_bill_amount, "monthly_bill_amount"), frow("DISCOM", f.discom_name, "discom_name"), frow("Bill name", f.ebill_name, "ebill_name")],
+  ebill: (f) => [frow("Monthly bill (₹)", f.monthly_bill_amount, "monthly_bill_amount"), frow("DISCOM", f.discom_name, "discom_name"), frow("Bill name", f.ebill_name, "ebill_name"), frow("CA number", f.ca_number, "ca_number")],
   coapp_aadhaar: (f) => [frow("Name", f.coapp_aadhaar_name || f.coapp_name, "coapp_aadhaar_name"), frow("DOB", f.coapp_aadhaar_dob, "coapp_aadhaar_dob"), frow("Aadhaar", f.coapp_aadhaar_number, "coapp_aadhaar_number"), frow("Address", f.coapp_aadhaar_address, "coapp_aadhaar_address")],
   coapp_pan: (f) => [frow("PAN", f.coapp_pan, "coapp_pan"), frow("Name", f.coapp_name, "coapp_name"), frow("Father", f.coapp_father_name, "coapp_father_name")],
 };
@@ -2009,8 +2072,11 @@ function LoanConfigDock({ loanAmt, subsidyCase, setSubsidyCase, centralSub, setC
   );
 }
 
+// The name of a pending detail, as the question asks it.
 function fieldLabel(t: Turn): string {
-  return t.placeholder || t.field || "detail";
+  if (t.kind === "consent") return "Consent";
+  if (t.kind === "loanconfig") return "Loan configuration";
+  return t.docLabel || t.bot.replace(/\?.*$/, "").trim() || t.field || "detail";
 }
 
 // Fields where we show the typed amount in words (Indian format) for confirmation.
@@ -2040,7 +2106,8 @@ const DOC_PATHS: Record<string, string[]> = {
 function isTurnFilled(t: Turn, f: Form): boolean {
   // Creation-time input aids (EPC pick, paste sheet) + transient `_` fields are
   // never re-asked in edit mode.
-  if (t.kind === "epc" || t.kind === "consent" || t.kind === "paste") return true;
+  if (t.kind === "epc" || t.kind === "paste") return true;
+  if (t.kind === "consent") return f.consent === "yes";
   if (t.field && t.field.startsWith("_")) return true;
   // The document table is "filled" when every applicable slot is on the profile.
   if (t.kind === "doc_table") return docTableComplete(f);
@@ -2056,14 +2123,13 @@ function isEditableTurn(t: Turn): boolean {
   if (t.field && t.field.startsWith("_")) return false;
   return t.kind === "text" || t.kind === "pincode" || t.kind === "choice" || t.kind === "docs" || t.kind === "doc_table" || t.kind === "loanconfig";
 }
-// Every required (non-optional, applicable) detail is present.
-function isProfileComplete(f: Form): boolean {
-  return SCRIPT.every((t) => {
-    if (t.optional) return true;
-    if (t.when && !t.when(f)) return true;
-    return isEditableTurn(t) ? isTurnFilled(t, f) : true;
-  });
+// The required (non-optional, applicable) details still missing — consent included.
+function pendingOf(f: Form): string[] {
+  return SCRIPT.filter((t) => !t.optional && (!t.when || t.when(f)) && (isEditableTurn(t) || t.kind === "consent") && !isTurnFilled(t, f))
+    .map(fieldLabel);
 }
+// Every required (non-optional, applicable) detail is present.
+const isProfileComplete = (f: Form) => pendingOf(f).length === 0;
 // The already-filled details, for the multi-select edit list.
 // ── Edit table (grouped "what to edit" picker — mirrors the EPC portal chatbot) ──
 // Each row maps to the turn(s) re-asked when it's ticked; document rows also carry
@@ -2090,20 +2156,22 @@ function editTableGroups(f: Form): EditGroup[] {
     ] },
     { title: "Applicant details", rows: [
       { key: "name", label: "Name & father's name", value: fv("borrower_name") || "—", turns: ["doc_table"], units: ["applicant_pan"] },
-      { key: "mobile", label: "Mobile", value: fv("borrower_mobile") || "—", turns: ["edit_borrower_mobile"] },
+      { key: "mobile", label: "Mobile", value: fv("borrower_mobile") || "—", turns: ["borrower_mobile"] },
       { key: "email", label: "Email", value: fv("borrower_email") || "—", turns: ["edit_borrower_email"] },
       { key: "aadhaar_fields", label: "DOB · gender · address", value: "from Aadhaar", turns: ["doc_table"], units: ["aadhaar"] },
       { key: "pincode", label: "Installation pincode", value: fv("install_pincode") || "—", turns: ["install_pincode"] },
       { key: "system_type", label: "System type", value: SYS_LABEL[f.system_type] || "—", turns: ["edit_system_type"] },
       { key: "use", label: "Property use", value: USE_LABEL[f.plant_use_type] || "—", turns: ["plant_use_type"] },
+      { key: "lead_owner", label: "Lead owner", value: fv("lead_owner_name") || "—", turns: ["lead_owner_name"] },
+      { key: "coapp", label: "Co-applicant", value: hasCoapp(f) ? "Yes" : f.coapp_needed === "no" ? "No" : "—", turns: ["coapp_needed"] },
     ] },
   ];
   if (hasCoapp(f)) groups.push({ title: "Co-applicant", rows: [
     { key: "coapp_aadhaar", label: "Co-applicant Aadhaar", doc: true, on: on("coapp_aadhaar_front_path"), turns: ["doc_table"], units: ["coapp_aadhaar"] },
     { key: "coapp_pan", label: "Co-applicant PAN", doc: true, on: on("coapp_pan_path") || on("coapp_pan"), turns: ["doc_table"], units: ["coapp_pan"] },
-    { key: "coapp_relation", label: "Relation", value: fv("coapp_relation") || "—", turns: ["edit_coapp_relation"] },
-    { key: "coapp_mobile", label: "Mobile", value: fv("coapp_mobile") || "—", turns: ["edit_coapp_mobile"] },
-    { key: "coapp_email", label: "Email", value: fv("coapp_email") || "—", turns: ["edit_coapp_email"] },
+    { key: "coapp_relation", label: "Relation", value: fv("coapp_relation") || "—", turns: ["coapp_relation"] },
+    { key: "coapp_mobile", label: "Mobile", value: fv("coapp_mobile") || "—", turns: ["coapp_mobile"] },
+    { key: "coapp_email", label: "Email", value: fv("coapp_email") || "—", turns: ["coapp_email"] },
   ] });
   groups.push({ title: "Project & bill", rows: [
     { key: "project", label: "Project size & total cost", value: [fv("project_size") && fv("project_size") + " " + (f.project_size_unit || "kw"), rupee("total_project_cost")].filter(Boolean).join(" · ") || "—", turns: ["quotation"] },
@@ -2115,7 +2183,7 @@ function editTableGroups(f: Form): EditGroup[] {
     { key: "bank_details", label: "Bank a/c · IFSC · name · type", value: [f.bank_name, f.bank_ifsc].filter(Boolean).join(" · ") || "—", turns: ["bank"] },
   ] });
   groups.push({ title: "Loan configuration", rows: [
-    { key: "loan_amount", label: "Loan amount", value: rupee("loan_amount_required") || "—", turns: ["edit_loan_amount"] },
+    { key: "loan_amount", label: "Loan amount", value: rupee("loan_amount_required") || "—", turns: ["loan_amount"] },
     { key: "loanconfig", label: "Subsidy · tenure · EMI", value: fv("selected_tenure_years") ? f.selected_tenure_years + " yr" : "—", turns: ["loanconfig"] },
   ] });
   return groups;
@@ -2125,18 +2193,19 @@ function editTableGroups(f: Form): EditGroup[] {
 // Map an existing application row → the chat's form field map (all strings;
 // the boolean e-bill flag becomes "yes"/"no").
 const PREFILL_KEYS = [
-  "borrower_name", "borrower_mobile", "borrower_email", "borrower_pan", "customer_photo_path", "lead_owner_name", "install_pincode", "install_state", "install_district", "install_city", "system_type", "plant_use_type",
+  "borrower_name", "borrower_mobile", "borrower_email", "borrower_pan", "borrower_father_name", "customer_photo_path", "lead_owner_name", "install_pincode", "install_state", "install_district", "install_city", "system_type", "plant_use_type",
   "aadhaar_name", "aadhaar_dob", "aadhaar_gender", "aadhaar_number", "aadhaar_care_of", "aadhaar_address", "aadhaar_front_path", "aadhaar_back_path", "aadhaar_face_path",
   "project_size", "project_size_unit", "total_project_cost", "loan_amount_required", "monthly_bill_amount", "discom_name", "ca_number", "ebill_address_line", "ebill_name", "ebill_path", "ebill_uploaded_at", "proforma_invoice_path", "proforma_uploaded_at", "rooftop_photo_path", "rooftop_photo_uploaded_at",
-  "coapp_name", "coapp_father_name", "coapp_dob", "coapp_pan", "coapp_pan_path", "coapp_relation", "coapp_aadhaar_name", "coapp_aadhaar_dob", "coapp_aadhaar_gender", "coapp_aadhaar_number", "coapp_aadhaar_care_of", "coapp_aadhaar_address", "coapp_aadhaar_front_path", "coapp_aadhaar_back_path", "coapp_aadhaar_face_path",
+  "coapp_name", "coapp_mobile", "coapp_email", "coapp_father_name", "coapp_dob", "coapp_pan", "coapp_pan_path", "coapp_relation", "coapp_aadhaar_name", "coapp_aadhaar_dob", "coapp_aadhaar_gender", "coapp_aadhaar_number", "coapp_aadhaar_care_of", "coapp_aadhaar_address", "coapp_aadhaar_front_path", "coapp_aadhaar_back_path", "coapp_aadhaar_face_path",
   "employment_type", "profession", "profession_other", "organization_name", "annual_income", "bank_statement_method", "bank_statement_path", "bank_statement_uploaded_at", "bank_account_holder", "bank_name", "bank_account_no", "bank_ifsc", "bank_account_type", "bank_mobile", "bank_email",
   "central_subsidy", "state_subsidy", "roi_percent", "selected_tenure_years", "selected_monthly_emi", "selected_subsidy_emi",
 ];
 function prefillFromApp(a: Record<string, any>): Form {
   const f: Form = {};
   for (const k of PREFILL_KEYS) if (a[k] != null && a[k] !== "") f[k] = String(a[k]);
-  if (a.bill_on_applicant_name === true) f.bill_on_applicant_name = "yes";
-  else if (a.bill_on_applicant_name === false) { f.bill_on_applicant_name = "no"; f._has_coapp = "1"; }
+  if (a.bill_on_applicant_name === true) { f.bill_on_applicant_name = "yes"; f.coapp_needed = "no"; }
+  else if (a.bill_on_applicant_name === false || a.coapp_name) { f.bill_on_applicant_name = "no"; f._has_coapp = "1"; f.coapp_needed = "yes"; }
+  if (a.consent_at) f.consent = "yes";
   return f;
 }
 
@@ -2217,6 +2286,7 @@ function mapExtract(turn: Turn, j: Record<string, any>): { patch: Form; fields: 
       fields.push(row("Monthly bill", eb.monthly_bill_amount != null ? `₹${eb.monthly_bill_amount}` : "", "monthly_bill_amount"));
       fields.push(row("DISCOM", eb.discom_name, "discom_name"));
       fields.push(row("Bill name", eb.ebill_name, "ebill_name"));
+      fields.push(row("CA number", eb.ca_number, "ca_number"));
     }
     return { patch, fields };
   }
@@ -2225,7 +2295,7 @@ function mapExtract(turn: Turn, j: Record<string, any>): { patch: Form; fields: 
     return { patch: {
       bank_statement_method: j.method ?? "manual_epdf", bank_statement_path: j.storage_path ?? "", bank_statement_uploaded_at: new Date().toISOString(),
       bank_account_holder: f.account_holder ?? "", bank_name: f.bank_name ?? "", bank_account_no: f.account_no ?? "", bank_ifsc: f.ifsc ?? "", bank_account_type: f.account_type ?? "", bank_mobile: f.mobile ?? "", bank_email: f.email ?? "",
-    }, fields: [row("Holder", f.account_holder, "bank_account_holder"), row("Bank", f.bank_name, "bank_name"), row("A/C no.", f.account_no, "bank_account_no"), row("IFSC", f.ifsc, "bank_ifsc")] };
+    }, fields: [row("Holder", f.account_holder, "bank_account_holder"), row("Bank", f.bank_name, "bank_name"), row("A/C no.", f.account_no, "bank_account_no"), row("IFSC", f.ifsc, "bank_ifsc"), row("Type", f.account_type, "bank_account_type")] };
   }
   return { patch: {}, fields: [] };
 }

@@ -97,9 +97,9 @@ export type OpsCase = {
   boardDate: string | null;
   disbursed: number;
   disbursedThisMonthAt: string | null;
-  // Each disbursement tranche with its OWN amount + date, so a period total can
-  // count each tranche in the month it was actually paid (loans only).
-  tranches: { amount: number; date: string | null }[];
+  // Each disbursement tranche (1st / 2nd) with its OWN amount + date, so a period
+  // total can count each tranche in the month it was actually paid (loans only).
+  tranches: { phase: 1 | 2; amount: number; date: string | null }[];
   commentCount: number;    // number of comments on the case — My Day badge
   followUpAt: string | null;      // "YYYY-MM-DD" call-back date (ops_case_touch)
   lastContactedAt: string | null; // ISO — when an RM last called / WhatsApp'd
@@ -336,8 +336,8 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       disbursed: num(r.first_disbursement_amount) + num(r.second_disbursement_amount),
       disbursedThisMonthAt: r.first_disbursement_date || r.second_disbursement_date || null,
       tranches: [
-        { amount: num(r.first_disbursement_amount),  date: r.first_disbursement_date ?? null },
-        { amount: num(r.second_disbursement_amount), date: r.second_disbursement_date ?? null },
+        { phase: 1 as const, amount: num(r.first_disbursement_amount),  date: r.first_disbursement_date ?? null },
+        { phase: 2 as const, amount: num(r.second_disbursement_amount), date: r.second_disbursement_date ?? null },
       ].filter((t) => t.amount > 0),
       commentCount: commentCount.get(`loan:${r.id}`) ?? 0,
       followUpAt: touchBy.get(`loan:${r.id}`)?.followUpAt ?? null,

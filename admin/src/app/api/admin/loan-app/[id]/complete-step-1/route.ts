@@ -156,13 +156,12 @@ export async function PATCH(
       lead_owner_name,
       system_type:     SYSTEM_TYPES.has(system_type) ? system_type : null,
       plant_use_type:  (plant_use_type === "residential" || plant_use_type === "commercial") ? plant_use_type : null,
-      consent_at,
       // Only overwrite the photo path when the client sent one — preserves
       // an existing photo on an edit-pass re-save.
       ...(customer_photo_path ? { customer_photo_path } : {}),
-      consent_policies,
-      consent_ip,
-      consent_user_agent,
+      // Consent is stamped only when policies were accepted — a re-save
+      // without them keeps the consent already on file (or none).
+      ...(consent_policies.length ? { consent_at, consent_policies, consent_ip, consent_user_agent } : {}),
     };
 
     // Fold current_step advance into the same UPDATE — one round-trip,
