@@ -369,7 +369,7 @@ function CustomerForm({ doc: start, row, quoteNo, onClose, onSaved }: {
       // The panel type sets the watts printed on the PCR / agreement (and the panel count).
       const pick = k === "panel_type"
         ? (v: string) => { const w = SARVATRA.wattsOf(v); setF((p) => ({ ...p, panel_type: v, ...(w ? { wp: `${w}+Wp` } : {}) })); }
-        : k === "kw" ? (v: string) => set("kw", decimal(v))
+        : k === "kw" ? (v: string) => set("kw", v.replace(/[^\d.+]/g, ""))
         : (v: string) => set(k, v);
       return <SearchableSelect key={k} label={LABEL[k]} value={value} onChange={pick} required={req} clearable={k === "floors"}
         options={search[1] ? merge(search[0], search[1]) : search[0]} field={search[1]} />;

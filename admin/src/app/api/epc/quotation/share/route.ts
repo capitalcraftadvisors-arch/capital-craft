@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
     });
     const tpl = await epcQuoteTemplate(db, claims.business_id);
     if (tpl?.storage_path !== SARVATRA.key) return err("Not available for your account.", 403);
-    if (!(Number(b.price) > 0) || !(Number(b.kw) > 0)) return err("This customer has no system size or price.", 400);
+    if (!(Number(b.price) > 0) || !(SARVATRA.kwOf(b.kw) > 0)) return err("This customer has no system size or price.", 400);
 
     const doc = String(b.doc ?? "");
     const file = await buildSarvatraFile(doc, b, String(b.date ?? "") || new Date());

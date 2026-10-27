@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json().catch(() => ({}))) as Partial<QuotationInput>;
     if (!body.customer_name || !String(body.customer_name).trim()) return err("Customer name is required.", 400);
-    if (!body.kw || Number(body.kw) <= 0) return err("System size (kW) is required.", 400);
+    if (!(SARVATRA.kwOf(body.kw) > 0)) return err("System size (kW) is required.", 400);
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
       global: { headers: { Authorization: `Bearer ${token}` } },

@@ -1,14 +1,15 @@
 "use client";
 
 // EPC login password — a DRAFTED email the main admin checks before sending.
-// Opening it generates a new strong password and drafts the mail (login link,
-// login mobile, password). The admin can edit To / Subject / the message and
+// Opening it makes the EPC's password ("<name>@<last 4 mobile digits>$", which
+// the EPC must change at first login) and drafts the mail (login link, login
+// mobile, password). The admin can edit To / Subject / the message and
 // writes any CC; it always goes from the Capital Craft Gmail. Only after the
 // mail is sent is the password saved — so sending again (a resend) gives the
 // EPC a new password and the old one stops working.
 
 import { useEffect, useState } from "react";
-import { generateStrongPassword } from "@/lib/password-gen";
+import { epcPassword } from "@/lib/password-gen";
 import { loginPasswordStatus, sendPasswordDraft } from "@/lib/passwords";
 import { DEFAULT_MAIL_SENDER } from "@/lib/mail-sender";
 import { fmtDate } from "@/lib/dates";
@@ -47,7 +48,7 @@ export default function EpcPasswordEmailModal({ open, epc, onClose }: { open: bo
   // A fresh password + draft every time it opens.
   useEffect(() => {
     if (!open) return;
-    const pw = generateStrongPassword();
+    const pw = epcPassword(epc.tradeName, epc.mobile ?? "");
     setPassword(pw);
     setTo(epc.email ?? ""); setCc("");
     setSubject("Your Capital Craft partner portal login");

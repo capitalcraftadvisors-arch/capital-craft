@@ -36,6 +36,7 @@ export type SarvatraInput = {
   city: string;
   state: string;              // full name, e.g. Rajasthan
   kw: number;
+  kw_text: string;            // the size as written, e.g. "3+"
   panel_brand: string;        // one or more, "Adani / Waaree"
   panel_type: string;
   panels: number;
@@ -102,7 +103,7 @@ export function sarvatraInput(b: Record<string, unknown>, date: string | Date): 
   return {
     quote_no: s("quote_no"), date: fmtDateIST(date).replace(/\//g, "-"),
     title: s("title"), customer_name: s("customer_name"),
-    contact: s("contact"), city: s("city"), state: s("state"), kw: t.kw,
+    contact: s("contact"), city: s("city"), state: s("state"), kw: t.kw, kw_text: s("kw") || num(t.kw),
     panel_brand: s("panel_brand") || SARVATRA.panel, panel_type: s("panel_type") || SARVATRA.panelType, panels: t.panels,
     inverter_brand: s("inverter_brand") || SARVATRA.inverter, inverter_kw: n("inverter_kw") || t.kw,
     phase: s("phase") || SARVATRA.phases[0], inverter_location: s("inverter_location"),
@@ -184,7 +185,7 @@ export async function buildSarvatraQuotation(i: SarvatraInput, template: Buffer)
     { kind: "text", at: [90, 704.7], to: 142.3, text: i.customer_name, bold: true, fit: 140 },
     { kind: "text", at: [255.3, 704.7], to: 306.8, text: i.contact, bold: true, fit: 125 },
     { kind: "text", at: [396.9, 704.7], to: 439.5, text: [i.city, STATE_CODES[i.state] ?? i.state].filter(Boolean).join(", "), bold: true, fit: 155 },
-    { kind: "text", at: [73.5, 651.4], to: 80.6, text: num(i.kw), bold: true, fit: 44 },
+    { kind: "text", at: [73.5, 651.4], to: 80.6, text: i.kw_text, bold: true, fit: 44 },
     { kind: "line", at: [205.4, 655.2], to: 410.1, fit: 340, parts: [
       { text: i.panel_brand, bold: true },
       { text: ` - ${i.panel_type} ${dcrLabel(i.dcr_type)}`, like: [234.5, 655.2], bold: true },
@@ -270,7 +271,7 @@ export async function buildSarvatraPcr(i: SarvatraInput, template: Buffer): Prom
     v([356.9, 584.7], 406.3, i.spc_name, 210),
     v([82.2, 583.9], 129.7, i.date, 190),
     // project details
-    v([126.7, 532.9], 131.6, num(i.kw), 58),
+    v([126.7, 532.9], 131.6, i.kw_text, 58),
     v([284.9, 532.9], 347.1, subsidyLabel(i), 125),
     v([126.7, 512.7], 149.8, i.panel_brand, 125),
     v([317.5, 512.7], 378.6, i.cell_type, 95),
@@ -323,7 +324,7 @@ export async function buildSarvatraAgreement(i: SarvatraInput, template: Buffer)
   ], fonts);
   // 5 — Annexure A, system specification
   editPage(doc, pages[4], [
-    v([258.5, 743.7], 285, `${num(i.kw)} kWp`, 280),
+    v([258.5, 743.7], 285, `${i.kw_text} kWp`, 280),
     v([258.5, 721.2], 283.5, i.panel_brand, 280),
     v([258.5, 697.9], 315.3, `${i.wp.replace(/\s*wp$/i, " Wp")} x ${k.panels}`, 280),
     v([258.5, 675.4], 315.5, dcrLabel(i.dcr_type), 280),

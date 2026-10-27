@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
     if ([...cc, ...bcc].some((e) => !EMAIL_RE.test(e))) return err("A CC / BCC address isn't valid.", 400);
     const subject = String(b.subject ?? "").trim();
     if (!subject) return err("Enter a subject.", 400);
-    if (!(Number(b.price) > 0) || !(Number(b.kw) > 0)) return err("This customer has no system size or price.", 400);
+    if (!(Number(b.price) > 0) || !(SARVATRA.kwOf(b.kw) > 0)) return err("This customer has no system size or price.", 400);
 
     const file = await buildSarvatraFile(String(b.doc ?? ""), b, String(b.date ?? "") || new Date());
     if (!file) return err("Unknown document.", 400);

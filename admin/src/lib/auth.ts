@@ -98,13 +98,26 @@ const IMPERSONATE_KEY = "cc_admin_impersonating";
 
 // password: required once CC has set one for the account (migration 0094) —
 // the server then answers passwordRequired until it's given and correct.
-export async function login(mobile: string, otp: string, password?: string): Promise<{ ok: true; business: Business } | { ok: false; error: string; passwordRequired?: boolean }> {
+type LoginResult = { ok: true; business: Business } | { ok: false; error: string; passwordRequired?: boolean; changeToken?: string };
+
+// A first login with a password CC issued (0103) returns changeToken instead of
+// a session: the EPC sets their own password with changePassword().
+export async function login(mobile: string, otp: string, password?: string): Promise<LoginResult> {
+  return authCall({ mobile, otp, ...(password ? { password } : {}) });
+}
+
+/** Sets the EPC's own password in place of the issued one, then logs in. */
+export const changePassword = (changeToken: string, newPassword: string) =>
+  authCall({ action: "change_password", change_token: changeToken, new_password: newPassword });
+
+async function authCall(payload: Record<string, unknown>): Promise<LoginResult> {
   const res = await fetch(`${FUNCTIONS_URL}/auth`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mobile, otp, ...(password ? { password } : {}) }),
+    body: JSON.stringify(payload),
   });
   const data = await res.json();
+  if (data.must_change_password) return { ok: false, error: "", changeToken: data.change_token };
   if (!data.ok) return { ok: false, error: data.error || "login_failed", passwordRequired: !!data.password_required };
   localStorage.setItem(TOKEN_KEY, data.token);
   localStorage.setItem(BUSINESS_KEY, JSON.stringify(data.business));

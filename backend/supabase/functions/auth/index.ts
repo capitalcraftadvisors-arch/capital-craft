@@ -7,6 +7,11 @@
 // password yet (new sign-ups, not-yet-set) logs in with the mobile only.
 // 5 wrong passwords lock the account for 15 minutes.
 //
+// Issued EPC passwords must be changed at first login (0103): the right
+// password then gives no session, only { must_change_password, change_token }
+// (15 minutes, can't open the portal); { action: "change_password",
+// change_token, new_password } sets the EPC's own password and logs in.
+//
 // Signing key selection (no code change needed to roll back):
 //   - If APP_SIGNING_JWK is set, sign with ES256 using that private JWK.
 //   - Otherwise, sign with HS256 using APP_JWT_SECRET (legacy fallback).
@@ -77,7 +82,11 @@ async function sign(claims: Record<string, unknown>, expiresAt?: Date): Promise<
 // The caller's verified login token (Authorization: Bearer …), or null.
 async function callerClaims(req: Request): Promise<JWTPayload | null> {
   const h = req.headers.get("authorization") ?? "";
-  const token = h.toLowerCase().startsWith("bearer ") ? h.slice(7).trim() : "";
+  return verifyToken(h.toLowerCase().startsWith("bearer ") ? h.slice(7).trim() : "");
+}
+
+// A token this function signed (any purpose), verified; null if invalid / expired.
+async function verifyToken(token: string): Promise<JWTPayload | null> {
   if (!token) return null;
   try {
     const { alg } = decodeProtectedHeader(token);
@@ -90,6 +99,55 @@ async function callerClaims(req: Request): Promise<JWTPayload | null> {
 async function sha256Hex(s: string): Promise<string> {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+const CHANGE_TOKEN_MINUTES = 15;
+const BIZ_COLS = "id, status, business_type, current_step, contact_name, loan_app_unlocked, service_type, role, allowed_modules, parent_user_id";
+
+// The EPC's own password in place of the issued one, then a normal login.
+async function changePassword(changeToken: unknown, newPassword: unknown): Promise<Response> {
+  const t = await verifyToken(typeof changeToken === "string" ? changeToken : "");
+  if (!t || t.purpose !== "pw_change" || typeof t.sub !== "string") {
+    return json({ ok: false, error: "This step has expired — log in again." }, 401);
+  }
+  const { data: r, error } = await supabase.rpc("set_own_password", {
+    p_business_id: t.sub, p_password: typeof newPassword === "string" ? newPassword.replace(/\s+/g, "") : "",
+  });
+  if (error) return json({ ok: false, error: error.message }, 500);
+  if (r === "weak") return json({ ok: false, error: "Use at least 8 characters with a letter and a number." }, 400);
+  if (r === "same") return json({ ok: false, error: "Choose a password different from the one we emailed." }, 400);
+  if (r !== "ok") return json({ ok: false, error: "Couldn't set the password — log in again." }, 400);
+  const { data: biz } = await supabase.from("epc_business").select(BIZ_COLS).eq("id", t.sub).maybeSingle();
+  if (!biz) return json({ ok: false, error: "Account not found." }, 404);
+  return session(biz);
+}
+
+// Stamp the login and hand out the session token.
+async function session(biz: Record<string, any>): Promise<Response> {
+  // Stamp last login (fire-and-forget; never block auth on it). Powers the
+  // Team view's "Last login" without a separate tracking system.
+  supabase.from("epc_business").update({ last_login_at: new Date().toISOString() }).eq("id", biz.id)
+    .then(({ error }) => { if (error) console.warn("last_login_at update failed:", error.message); });
+  // Append a login event (fire-and-forget) — powers "Logins / Active EPC" in
+  // the analytics EPC-health panel (a count over a window, not just the latest).
+  supabase.from("epc_login_events").insert({ epc_business_id: biz.id })
+    .then(({ error }) => { if (error) console.warn("login event insert failed:", error.message); });
+
+  const claims = {
+    sub: biz.id,
+    role: "authenticated",            // Supabase-standard claim — do NOT change
+    business_id: biz.id,
+    business_type: biz.business_type ?? null,
+    // Hierarchy: the app-level role + the authoritative module permission set.
+    // Named hierarchy_role so it never collides with the "authenticated" role.
+    hierarchy_role: biz.role ?? null,               // 'MAIN_ADMIN' | 'OPERATIONS_USER' | null
+    allowed_modules: biz.allowed_modules ?? null,   // e.g. ['epcs','apps',...]
+  };
+
+  const token = await sign(claims);
+
+  // is_owner drives the Pri portal's visibility (0096); the server re-checks it.
+  return json({ ok: true, token, business: { ...biz, is_owner: biz.business_type === "admin" && await isOwner(biz.id) } });
 }
 
 const MCP_KEY_DAYS = 90;
@@ -151,12 +209,13 @@ serve(async (req) => {
     const body = await req.json();
     if (body?.action === "mcp_create") return await mcpCreate(req);
     if (body?.action === "mcp_exchange") return await mcpExchange(body.key);
+    if (body?.action === "change_password") return await changePassword(body.change_token, body.new_password);
     const { mobile, password } = body;
 
     // Find or create
     let { data: biz } = await supabase
       .from("epc_business")
-      .select("id, status, business_type, current_step, contact_name, loan_app_unlocked, service_type, role, allowed_modules, parent_user_id")
+      .select(BIZ_COLS)
       .eq("contact_mobile", mobile)
       .maybeSingle();
 
@@ -170,42 +229,24 @@ serve(async (req) => {
       if (pw === "required") return json({ ok: false, password_required: true, error: "Enter your password." }, 401);
       if (pw === "bad") return json({ ok: false, password_required: true, error: "Wrong password." }, 401);
       if (pw === "locked") return json({ ok: false, password_required: true, error: "Too many wrong attempts. Try again in 15 minutes." }, 429);
+      // Right issued password → no session yet; only a pass to set their own password.
+      if (pw === "change") {
+        const change_token = await sign({ sub: biz.id, role: "anon", purpose: "pw_change" }, new Date(Date.now() + CHANGE_TOKEN_MINUTES * 60000));
+        return json({ ok: false, must_change_password: true, change_token }, 403);
+      }
     }
 
     if (!biz) {
       const { data: created, error } = await supabase
         .from("epc_business")
         .insert({ contact_mobile: mobile })
-        .select("id, status, business_type, current_step, contact_name, loan_app_unlocked, service_type, role, allowed_modules, parent_user_id")
+        .select(BIZ_COLS)
         .single();
       if (error) return json({ ok: false, error: error.message }, 500);
       biz = created;
     }
 
-    // Stamp last login (fire-and-forget; never block auth on it). Powers the
-    // Team view's "Last login" without a separate tracking system.
-    supabase.from("epc_business").update({ last_login_at: new Date().toISOString() }).eq("id", biz.id)
-      .then(({ error }) => { if (error) console.warn("last_login_at update failed:", error.message); });
-    // Append a login event (fire-and-forget) — powers "Logins / Active EPC" in
-    // the analytics EPC-health panel (a count over a window, not just the latest).
-    supabase.from("epc_login_events").insert({ epc_business_id: biz.id })
-      .then(({ error }) => { if (error) console.warn("login event insert failed:", error.message); });
-
-    const claims = {
-      sub: biz.id,
-      role: "authenticated",            // Supabase-standard claim — do NOT change
-      business_id: biz.id,
-      business_type: biz.business_type ?? null,
-      // Hierarchy: the app-level role + the authoritative module permission set.
-      // Named hierarchy_role so it never collides with the "authenticated" role.
-      hierarchy_role: biz.role ?? null,               // 'MAIN_ADMIN' | 'OPERATIONS_USER' | null
-      allowed_modules: biz.allowed_modules ?? null,   // e.g. ['epcs','apps',...]
-    };
-
-    const token = await sign(claims);
-
-    // is_owner drives the Pri portal's visibility (0096); the server re-checks it.
-    return json({ ok: true, token, business: { ...biz, is_owner: biz.business_type === "admin" && await isOwner(biz.id) } });
+    return await session(biz);
   } catch (e) {
     return json({ ok: false, error: String(e) }, 500);
   }

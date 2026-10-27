@@ -12,7 +12,7 @@
 // database enforces that only the main admin can set one.
 
 import { insuranceClient as callerClient } from "./insurance-server";
-import { generateStrongPassword } from "./password-gen";
+import { generateStrongPassword, epcPassword } from "./password-gen";
 import { sendMail, mailConfigured } from "./mailer";
 import { EMAIL_RE } from "./validators";
 
@@ -80,9 +80,6 @@ async function savePassword(db: ReturnType<typeof callerClient>, accountId: stri
   return { ok: true, sentTo: to };
 }
 
-// Strong and space-free (generated passwords never contain whitespace).
-const STRONG = (p: string) => p.length >= 12 && !/\s/.test(p) && /[A-Z]/.test(p) && /[a-z]/.test(p) && /[0-9]/.test(p) && /[^A-Za-z0-9]/.test(p);
-
 /** Sends the main admin's reviewed draft (it must still contain the password), then saves the password. */
 export async function sendPasswordDraft(
   token: string,
@@ -95,13 +92,17 @@ export async function sendPasswordDraft(
   const badCc = cc.find((x) => !EMAIL_RE.test(x));
   if (badCc) return { ok: false, error: `"${badCc}" isn't a valid CC email.`, status: 400 };
   if (!d.subject.trim()) return { ok: false, error: "Subject is required.", status: 400 };
-  if (!STRONG(d.password)) return { ok: false, error: "Password isn't strong — reopen the draft.", status: 400 };
   if (!d.body.includes(d.password)) return { ok: false, error: "The email must still contain the password.", status: 400 };
   if (!mailConfigured()) return { ok: false, error: "Email isn't configured yet (app password missing).", status: 500 };
 
   const db = callerClient(token);
-  const { data: acc } = await db.from("epc_business").select("id").eq("id", accountId).maybeSingle();
+  const { data: acc } = await db.from("epc_business")
+    .select("id, trade_name, legal_name, contact_name, contact_mobile").eq("id", accountId).maybeSingle();
   if (!acc) return { ok: false, error: "Account not found.", status: 404 };
+  // Only the EPC's own issued format (same name order as the email modal).
+  if (d.password !== epcPassword(acc.trade_name || acc.legal_name || acc.contact_name || "EPC", acc.contact_mobile ?? "")) {
+    return { ok: false, error: "The password doesn't match this EPC — reopen the draft.", status: 400 };
+  }
 
   const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
   try {

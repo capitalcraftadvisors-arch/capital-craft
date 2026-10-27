@@ -3,12 +3,13 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Button from "./ui/Button";
 import Input from "./ui/Input";
-import { login, routeForBusiness } from "@/lib/auth";
+import { login, changePassword, routeForBusiness } from "@/lib/auth";
 import { MOBILE_RE } from "@/lib/validators";
 
 // Mobile first. An account CC has set a password for (migration 0094) is
 // answered with passwordRequired → the password field appears; accounts
-// without a password yet log straight in with the mobile, as before.
+// without a password yet log straight in with the mobile, as before. The first
+// login with a password CC issued (0103) asks for the EPC's own password.
 export default function LoginForm() {
   const router = useRouter();
   const [mobile, setMobile] = useState("");
@@ -18,6 +19,22 @@ export default function LoginForm() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pwError, setPwError] = useState<string | null>(null);
+  const [changeToken, setChangeToken] = useState<string | null>(null);
+  const [newPw, setNewPw] = useState("");
+  const [confirmPw, setConfirmPw] = useState("");
+
+  async function handleChange(e: React.FormEvent) {
+    e.preventDefault();
+    setPwError(null);
+    const pw = newPw.replace(/\s+/g, "");
+    if (pw.length < 8 || !/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) { setPwError("Use at least 8 characters with a letter and a number."); return; }
+    if (pw !== confirmPw.replace(/\s+/g, "")) { setPwError("The passwords don't match."); return; }
+    setLoading(true);
+    const r = await changePassword(changeToken!, pw);
+    setLoading(false);
+    if (!r.ok) { setPwError(r.error); return; }
+    router.replace(routeForBusiness(r.business) as any);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -33,6 +50,7 @@ export default function LoginForm() {
     const r = await login(mobile, "000000", needPassword ? pw : undefined);
     setLoading(false);
     if (!r.ok) {
+      if (r.changeToken) { setChangeToken(r.changeToken); return; }
       if (r.passwordRequired) {
         // First time: just reveal the password field; after that show the reason.
         if (needPassword) setPwError(r.error); else setNeedPassword(true);
@@ -45,6 +63,19 @@ export default function LoginForm() {
     // cc_greet flag) now plays ON the dashboard via <LoginWelcome/>, so it covers
     // the dashboard as it loads — no flash of the login page in between.
     router.replace(routeForBusiness(r.business) as any);
+  }
+
+  if (changeToken) {
+    return (
+      <form onSubmit={handleChange} className="space-y-5">
+        <h2 className="font-display text-[18px] font-bold text-text">Set your password</h2>
+        <Input label="New password" type="password" autoComplete="new-password" autoFocus value={newPw} onChange={(e) => setNewPw(e.target.value)} />
+        <Input label="Confirm password" type="password" autoComplete="new-password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} error={pwError ?? undefined} />
+        <Button type="submit" variant="primary" fullWidth loading={loading} className="!bg-[#1e3a8a] hover:!bg-[#17307a]">
+          Set password
+        </Button>
+      </form>
+    );
   }
 
   return (

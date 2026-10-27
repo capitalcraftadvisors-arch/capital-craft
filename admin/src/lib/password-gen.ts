@@ -27,3 +27,17 @@ export function generateStrongPassword(length = 14): string {
   }
   return chars.join("");
 }
+
+/** An EPC's issued login password — easy to remember, changed by the EPC at
+ *  first login (migration 0103): "<name>@<last 4 mobile digits>$", e.g.
+ *  "A V SOLAR" + 7875006650 → "avsolar@6650$". The name is lowercased, company
+ *  words (private limited, pvt ltd, limited, ltd, llp, a leading m/s) dropped,
+ *  and everything but letters and digits removed ("epc" if nothing is left). */
+export function epcPassword(name: string, mobile: string): string {
+  const base = name.toLowerCase()
+    .replace(/^\s*m\s*\/\s*s\b\.?/, " ")
+    .replace(/\b(private\s+limited|pvt\.?\s*ltd\.?|limited|ltd\.?|llp)(?=\W|$)/g, " ")
+    .replace(/[^a-z0-9]+/g, "");
+  return `${base || "epc"}@${mobile.replace(/\D/g, "").slice(-4)}$`;
+}
+

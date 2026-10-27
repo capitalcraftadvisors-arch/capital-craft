@@ -66,7 +66,9 @@ export const SARVATRA = {
   // A panel's watt rating from its type or Wp ("Bifacial 545+ Wp" / "545+Wp" → 545; 0 = none written).
   wattsOf: (s: string) => Number(/(\d{3,4})\s*\+?\s*w/i.exec(s)?.[1]) || 0,
   inverter: "Polycab",
-  kwOptions: ["3", "4", "5", "6", "7", "8", "9", "10", "12", "15"],
+  // System size as written on the documents ("3+" = 3 kW and above); any custom size can be typed.
+  kwOptions: ["3+", "4+", "5+", "6+", "7+", "8+", "9+", "10+", "12+", "15+"],
+  kwOf: (v: unknown) => parseFloat(String(v ?? "")) || 0, // "3+" → 3
   floors: Array.from({ length: 12 }, (_, n) => `G+${n + 1}`),
   titles: ["Mr.", "Mrs.", "Ms.", "Dr."],
   phases: ["Single Phase", "Three Phase"],
@@ -101,7 +103,7 @@ export const SARVATRA = {
 // approval 30% of the price; material dispatch is whatever remains.
 export function sarvatraTerms(v: Record<string, unknown>) {
   const opt = (k: string) => (v[k] === "" || v[k] == null ? null : Number(v[k]) || 0);
-  const kw = Number(v.kw) || 0;
+  const kw = SARVATRA.kwOf(v.kw);
   const price = Number(v.price) || 0;
   const central = opt("central_subsidy") ?? centralSubsidyFor(kw, SARVATRA.commercial(String(v.connection_type ?? "")));
   const booking = opt("booking") ?? SARVATRA.booking;
