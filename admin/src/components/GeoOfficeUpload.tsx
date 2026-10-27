@@ -474,10 +474,18 @@ export default function GeoOfficeUpload({
       // Real parse error — not "no GPS". Fall through to the OCR-stamp check.
       console.warn("[GeoOfficeUpload] EXIF read failed:", err);
     }
-    // No EXIF GPS and just taken with the phone camera ("Upload photo" → Camera)? The browser
-    // stripped its location, so read the live GPS now and burn the stamp on —
-    // the same geo-tag the live camera gives.
-    if (!coords && file.type.startsWith("image/") && Date.now() - file.lastModified < FRESH_CAPTURE_MS) {
+    // No EXIF GPS? Read a burned-in GPS-stamp banner (GPS Map Camera etc.) first —
+    // a stamped photo carries the site's own location.
+    if (!coords) {
+      setStatus("Reading location stamp…");
+      coords = await readStampGps(file);
+    }
+    // Still nothing, and just taken with a PHONE camera ("Upload photo" → Camera)? The
+    // browser stripped its location, so read the live GPS now and burn the stamp on —
+    // the same geo-tag the live camera gives. Never on a laptop / desktop: a freshly
+    // downloaded photo there would get the office's location instead of the site's.
+    if (!coords && file.type.startsWith("image/") && Date.now() - file.lastModified < FRESH_CAPTURE_MS
+        && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
       setStatus("Getting your location… please allow location access.");
       const live = await requestLiveGeo();
       if (!live) {
@@ -499,11 +507,6 @@ export default function GeoOfficeUpload({
       await persist(tagged ?? file, live);
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
-    }
-    // No EXIF GPS? Try to OCR a burned-in GPS-stamp banner (GPS Map Camera etc.).
-    if (!coords) {
-      setStatus("Reading location stamp…");
-      coords = await readStampGps(file);
     }
     if (!coords) {
       setStatus(null);
