@@ -409,6 +409,9 @@ function Inner() {
   // Edit of an application never taken through the steps (a converted lead, an
   // unfinished draft): finishing it runs the same server steps as a new one.
   const [unfinished, setUnfinished] = useState(false);
+  // Consent already recorded on the file (edit mode) — a consent given in the
+  // chat is stamped through step 1 only when it wasn't.
+  const [consentOnFile, setConsentOnFile] = useState(false);
   // Edit-in-chat intro: Q1 (edit filled?) → pick list → re-ask; Q2 (complete?) → ask missing.
   const [editStep, setEditStep] = useState<"q1" | "pick" | "q2" | "flow" | "done" | null>(null);
   const [editStage, setEditStage] = useState<"selected" | "complete">("complete");
@@ -492,6 +495,7 @@ function Inner() {
           setAppId(appParam);
           setEditMode(true);
           setUnfinished(app.status === "draft" || (Number(app.current_step) || 1) < 6);
+          setConsentOnFile(!!app.consent_at);
           setMode("edit");
           if (pf.central_subsidy) setCentralSub(pf.central_subsidy);
           if (pf.state_subsidy) setStateSub(pf.state_subsidy);
@@ -923,12 +927,14 @@ function Inner() {
   // Walk the server steps in order — records consent, writes the step-level
   // fields (co-applicant flag …) and advances current_step; step 5 only with a
   // loan configuration. update-fields already wrote the columns; these confirm.
+  async function postStep(step: 1 | 2 | 3 | 4): Promise<boolean> {
+    const r = await fetch(`/api/admin/loan-app/${appId}/complete-step-${step}`, { method: step === 1 ? "PATCH" : "POST", headers: hdr(), body: JSON.stringify(STEP_PAYLOAD[step](form)) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j?.ok) { setError(j?.error || `Couldn't save step ${step}.`); return false; }
+    return true;
+  }
   async function runSteps(config: Record<string, unknown> | null): Promise<boolean> {
-    for (const step of [1, 2, 3, 4] as const) {
-      const r = await fetch(`/api/admin/loan-app/${appId}/complete-step-${step}`, { method: step === 1 ? "PATCH" : "POST", headers: hdr(), body: JSON.stringify(STEP_PAYLOAD[step](form)) });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j?.ok) { setError(j?.error || `Couldn't save step ${step}.`); return false; }
-    }
+    for (const step of [1, 2, 3, 4] as const) if (!(await postStep(step))) return false;
     if (!config) { invalidateLoanBoards(); return true; }
     const r5 = await fetch(`/api/admin/loan-app/${appId}/complete-step-5`, { method: "POST", headers: hdr(), body: JSON.stringify(config) });
     const j5 = await r5.json().catch(() => ({}));
@@ -954,7 +960,17 @@ function Inner() {
   // submitted once nothing required is missing, so the classic form, the
   // profile and the tables all see it complete.
   async function finishEdit(config?: Record<string, unknown>) {
-    if (!unfinished) { say("bot", "Changes saved — the profile is up to date."); setDonId(appId); setEditStep("done"); return; }
+    if (!unfinished) {
+      // A submitted file: save a re-picked loan configuration, and record a
+      // consent given in this edit (step 1 stamps it and never rewinds).
+      if (config && !(await patchFields(config))) return;
+      if (form.consent === "yes" && !consentOnFile) {
+        setBusy(true); setError(null);
+        try { if (!(await postStep(1))) return; } finally { setBusy(false); }
+        setConsentOnFile(true);
+      }
+      say("bot", "Changes saved — the profile is up to date."); setDonId(appId); setEditStep("done"); return;
+    }
     setBusy(true); setError(null);
     try {
       if (!(await runSteps(config ?? savedConfig(form)))) return;
@@ -984,11 +1000,7 @@ function Inner() {
       const config = { roi_percent: DEFAULT_INDICATIVE_ROI, central_subsidy: central, state_subsidy: stateS, selected_tenure_years: tenure, selected_monthly_emi: monthly, selected_subsidy_emi: subEmi };
       if (editMode) {
         pushUser("Save changes", {});
-        if (unfinished) { setBusy(false); await finishEdit(config); return; }
-        const ok = await patchFields(config);
-        if (!ok) { setBusy(false); return; }
-        say("bot", "Changes saved — the profile is up to date.");
-        setDonId(appId); setBusy(false); return;
+        setBusy(false); await finishEdit(config); return;
       }
       if (!(await runSteps(config))) { setBusy(false); return; }
 

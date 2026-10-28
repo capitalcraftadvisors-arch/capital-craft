@@ -186,7 +186,7 @@ function Inner() {
     return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Loan application not found.</p></main>;
   }
 
-  const dl = deadlineState(loan.first_disbursement_date);
+  const dl = deadlineState(loan.first_disbursement_date, loan.second_disbursement_amount != null);
   // Pendings (maker-checker): a team member can't enter a disbursement while the
   // approval details await the main admin's check (the DB trigger enforces it too).
   const approvalLocked = !isMainAdmin(getBusiness()) && loan.approval_review_status === "pending";

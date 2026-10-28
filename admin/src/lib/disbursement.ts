@@ -21,6 +21,8 @@ export type DeadlineTone = "green" | "amber" | "red";
 export type DeadlineState = {
   /** true once first_disbursement_date is set — i.e. the clock is running. */
   started: boolean;
+  /** true once the 2nd tranche is paid — the window is closed, nothing is due. */
+  done: boolean;
   /** Days left. Negative = overdue. Defaults to the full window before start. */
   daysRemaining: number;
   overdue: boolean;
@@ -49,11 +51,11 @@ function startOfDay(d: Date): Date {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export function deadlineState(firstDisbursementDate?: string | null): DeadlineState {
+export function deadlineState(firstDisbursementDate?: string | null, secondDisbursed = false): DeadlineState {
   // Clock not started — show the full window as the default.
   if (!firstDisbursementDate) {
     return {
-      started: false,
+      started: false, done: false,
       daysRemaining: DISBURSEMENT_WINDOW_DAYS,
       overdue: false,
       tone: "green",
@@ -65,7 +67,7 @@ export function deadlineState(firstDisbursementDate?: string | null): DeadlineSt
   const start = parseDateOnly(firstDisbursementDate);
   if (!start) {
     return {
-      started: false,
+      started: false, done: false,
       daysRemaining: DISBURSEMENT_WINDOW_DAYS,
       overdue: false,
       tone: "green",
@@ -75,6 +77,10 @@ export function deadlineState(firstDisbursementDate?: string | null): DeadlineSt
   }
 
   const deadline = new Date(start.getFullYear(), start.getMonth(), start.getDate() + DISBURSEMENT_WINDOW_DAYS);
+  // Fully disbursed — the 2nd tranche is in, so there is no countdown left.
+  if (secondDisbursed) {
+    return { started: true, done: true, daysRemaining: DISBURSEMENT_WINDOW_DAYS, overdue: false, tone: "green", label: "Done", deadline };
+  }
   const today = startOfDay(new Date());
   const daysRemaining = Math.round((deadline.getTime() - today.getTime()) / DAY_MS);
   const overdue = daysRemaining < 0;
@@ -84,7 +90,7 @@ export function deadlineState(firstDisbursementDate?: string | null): DeadlineSt
     ? `${Math.abs(daysRemaining)} ${Math.abs(daysRemaining) === 1 ? "day" : "days"} overdue`
     : `${daysRemaining} ${daysRemaining === 1 ? "day" : "days"} left`;
 
-  return { started: true, daysRemaining, overdue, tone, label, deadline };
+  return { started: true, done: false, daysRemaining, overdue, tone, label, deadline };
 }
 
 // Tailwind classes for the countdown pill, keyed by tone. Brand green /

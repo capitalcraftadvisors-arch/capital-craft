@@ -46,9 +46,17 @@ export const DOC_TAGS: { value: string; label: string }[] = [
   { value: "install_pincode", label: "Address / pincode" },
 ];
 
+// Edit-table keys that aren't one of the tag chips above.
+const EDIT_KEY_LABELS: Record<string, string> = {
+  aadhaar_front: "Aadhaar — front", aadhaar_back: "Aadhaar — back",
+  coapp_aadhaar_front: "Co-applicant Aadhaar — front", coapp_aadhaar_back: "Co-applicant Aadhaar — back",
+  coapp_mobile: "Co-applicant mobile", coapp_email: "Co-applicant email",
+  borrower_email: "Email", system_type: "System type", plant_use_type: "Property use", loan_config: "Loan configuration",
+};
+
 export function docTagLabel(v: string | null | undefined): string | null {
   if (!v) return null;
-  return DOC_TAGS.find((d) => d.value === v)?.label ?? null;
+  return DOC_TAGS.find((d) => d.value === v)?.label ?? EDIT_KEY_LABELS[v] ?? null;
 }
 
 // One-tap issue templates. Comprehensive across the documents/fields we ask for;

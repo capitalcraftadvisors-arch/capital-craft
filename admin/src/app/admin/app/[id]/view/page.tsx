@@ -34,6 +34,7 @@ import EmailComposerModal from "@/components/EmailComposerModal";
 import { TabButton, DownloadMenu, KebabMenu, ProfileRail } from "@/components/ProfileTabBar";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
+import { loanDocChecklist } from "@/lib/loan-doc-checklist";
 import { deadlineState, DEADLINE_PILL, remainingAmount, fmtDateShort } from "@/lib/disbursement";
 import { fmtDateTime } from "@/lib/dates";
 import { fmtRupees, fmtRupeesExact } from "@/lib/money";
@@ -598,7 +599,7 @@ function Inner() {
   const decidedByLabel = decidedLender ? (LENDER_LABEL[String(decidedLender)] ?? String(decidedLender)) : null;
   const approvalDetails = (loan.approval_details ?? null) as ApprovalDetails | null;
 
-  const dl = deadlineState(loan.first_disbursement_date);
+  const dl = deadlineState(loan.first_disbursement_date, loan.second_disbursement_amount != null);
   const firstDone  = loan.first_disbursement_amount != null;
   const secondDone = loan.second_disbursement_amount != null;
   const reviewLabel = ["approved", "rejected"].includes(String(loan.completion_docs_status))
@@ -610,23 +611,14 @@ function Inner() {
   // Node 1 "Submitted" completes only when every step 1–4 application doc is
   // present (tranche/completion docs excluded) — mirrors the dashboard's
   // loanDocsPending. The Docs Sent button stays gated on this.
-  const hasCat = (c: string) => docs.some((d) => d.category === c);
   // Every document through Step 4 is REQUIRED to enable Doc Sent — Applicant PAN
   // + Applicant photo + Aadhaar (front/back) [Steps 1–2], Quotation + Electricity
   // bill + Rooftop photo [Step 3], Bank statement [Step 4], and the co-applicant
-  // KYC when there is a co-applicant. Missing any one blocks Doc Sent. Each doc
-  // is matched by its user_application_docs category OR its *_path column, so it
-  // counts however it was captured. Sanction Letter / Tranche docs come later and
-  // are NOT required here.
-  const appDocsComplete =
-    hasCat("borrower_pan") &&
-    (hasCat("customer_photo")   || !!loan.customer_photo_path || aadhaarFaceCountsAsPhoto(loan)) &&
-    !!loan.aadhaar_front_path && !!loan.aadhaar_back_path &&
-    (hasCat("quotation")        || !!loan.proforma_invoice_path) &&
-    (hasCat("electricity_bill") || !!loan.ebill_path) &&
-    (hasCat("borrower_photo")   || !!loan.rooftop_photo_path) &&
-    (hasCat("bank_statement")   || !!loan.bank_statement_path) &&
-    (!hasCoapp || (!!loan.coapp_pan_path && !!loan.coapp_aadhaar_front_path && !!loan.coapp_aadhaar_back_path));
+  // KYC when there is a co-applicant. One shared rule (lib/loan-doc-checklist)
+  // with the loan table's docs badge. Sanction Letter / Tranche docs come later
+  // and are NOT required here.
+  const hasCat = (c: string) => docs.some((d) => d.category === c);
+  const appDocsComplete = loanDocChecklist(loan, docs.map((d) => d.category)).every((d) => d.ok);
 
   // ── Per-lender (loan_application_lenders) derived state ──────────────
   const latest = latestLenderStatus(lenderRows);

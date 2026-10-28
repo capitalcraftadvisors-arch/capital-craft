@@ -62,7 +62,7 @@ function Inner() {
     return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Application not found.</p></main>;
   }
 
-  const dl = deadlineState(loan.first_disbursement_date);
+  const dl = deadlineState(loan.first_disbursement_date, loan.second_disbursement_amount != null);
   const sanctioned = loan.sanctioned_amount != null ? Number(loan.sanctioned_amount) : null;
   const firstSaved = loan.first_disbursement_amount != null;
   const remaining = remainingAmount(sanctioned, loan.first_disbursement_amount);
@@ -107,8 +107,8 @@ function Inner() {
           </div>
         </div>
 
-        {/* The deadline, said plainly. */}
-        <div
+        {/* The deadline, said plainly — gone once the 2nd tranche is paid. */}
+        {!dl.done && <div
           className={[
             "rounded-[12px] border p-4 sm:p-5 mb-4 text-[13px]",
             dl.overdue ? "border-red-200 bg-red-50 text-red-800" : "border-[#d3e9f7] bg-[#f4fafe] text-[#0f3d2e]",
@@ -132,7 +132,7 @@ function Inner() {
               documents. The second disbursement is released after our team reviews them.
             </p>
           )}
-        </div>
+        </div>}
 
         <div className="space-y-4">
           <SectionCard title="Disbursement" accent="green" icon={I.money}>

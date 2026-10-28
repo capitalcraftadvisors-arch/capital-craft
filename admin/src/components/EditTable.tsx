@@ -13,6 +13,7 @@
 import { getToken } from "@/lib/auth";
 import { getDocumentUrl } from "@/lib/storage";
 import type { LoanForm, LoanDocRow } from "@/lib/loan-form";
+import { DOC_CATEGORY } from "@/lib/loan-doc-checklist";
 
 const SYS_LABEL: Record<string, string> = { on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" };
 const USE_LABEL: Record<string, string> = { residential: "Residential", commercial: "Commercial" };
@@ -25,19 +26,29 @@ export function editGroups(form: LoanForm, docRows: LoanDocRow[]): { title: stri
   const has = (k: string) => !!(form[k] && String(form[k]).trim());
   const panRow = docRows.find((d) => d.category === "borrower_pan");
   const hasCoapp = has("coapp_aadhaar_front_path") || has("coapp_pan_path") || has("coapp_pan") || has("coapp_aadhaar_number") || has("coapp_mobile");
+  // A document is on file as its *_path column OR a user_application_docs row
+  // (same rule as lib/loan-doc-checklist) — View opens whichever exists.
+  const doc = (key: string, label: string, col: string, cat: string): EditItem => {
+    const r = docRows.find((d) => d.category === cat);
+    return { key, label, doc: true, on: has(col) || !!r, path: form[col] || undefined, rowId: r?.id };
+  };
   return [
     { title: "Documents", items: [
-      { key: "aadhaar", label: "Aadhaar (front & back)", doc: true, on: has("aadhaar_front_path"), path: form.aadhaar_front_path },
+      // Front and back separately — each can be viewed and opened on its own.
+      { key: "aadhaar_front", label: "Aadhaar — front", doc: true, on: has("aadhaar_front_path"), path: form.aadhaar_front_path },
+      { key: "aadhaar_back", label: "Aadhaar — back", doc: true, on: has("aadhaar_back_path"), path: form.aadhaar_back_path },
       { key: "pan", label: "PAN card", doc: true, on: has("borrower_pan") || !!panRow, rowId: panRow?.id, path: panRow?.storage_path ?? undefined },
-      { key: "ebill", label: "Electricity bill", doc: true, on: has("ebill_path"), path: form.ebill_path },
-      { key: "rooftop", label: "Rooftop photo", doc: true, on: has("rooftop_photo_path"), path: form.rooftop_photo_path },
-      { key: "selfie", label: "Applicant photo", doc: true, on: has("customer_photo_path"), path: form.customer_photo_path },
-      { key: "bank", label: "Bank statement", doc: true, on: has("bank_statement_path"), path: form.bank_statement_path },
+      doc("ebill", "Electricity bill", "ebill_path", DOC_CATEGORY.ebill),
+      doc("rooftop", "Rooftop photo", "rooftop_photo_path", DOC_CATEGORY.rooftop),
+      doc("selfie", "Applicant photo", "customer_photo_path", DOC_CATEGORY.photo),
+      doc("bank", "Bank statement", "bank_statement_path", DOC_CATEGORY.bank),
     ] },
     ...(hasCoapp ? [{ title: "Co-applicant", items: [
-      { key: "coapp_aadhaar", label: "Co-applicant Aadhaar", doc: true, on: has("coapp_aadhaar_front_path"), path: form.coapp_aadhaar_front_path },
+      { key: "coapp_aadhaar_front", label: "Co-applicant Aadhaar — front", doc: true, on: has("coapp_aadhaar_front_path"), path: form.coapp_aadhaar_front_path },
+      { key: "coapp_aadhaar_back", label: "Co-applicant Aadhaar — back", doc: true, on: has("coapp_aadhaar_back_path"), path: form.coapp_aadhaar_back_path },
       { key: "coapp_pan", label: "Co-applicant PAN", doc: true, on: has("coapp_pan_path") || has("coapp_pan"), path: form.coapp_pan_path },
       { key: "coapp_mobile", label: "Co-applicant mobile", value: form.coapp_mobile || "—" },
+      { key: "coapp_email", label: "Co-applicant email", value: form.coapp_email || "—" },
     ] }] : []),
     { title: "Applicant details", items: [
       { key: "borrower_email", label: "Email", value: form.borrower_email || "—" },
@@ -46,7 +57,7 @@ export function editGroups(form: LoanForm, docRows: LoanDocRow[]): { title: stri
       { key: "plant_use_type", label: "Property use", value: USE_LABEL[form.plant_use_type] || "—" },
     ] },
     { title: "Quotation & loan", items: [
-      { key: "quotation", label: "Quotation document", doc: true, on: has("proforma_invoice_path"), path: form.proforma_invoice_path },
+      doc("quotation", "Quotation document", "proforma_invoice_path", DOC_CATEGORY.quotation),
       { key: "loan_amount", label: "Loan amount", value: form.loan_amount_required ? `₹${Number(form.loan_amount_required).toLocaleString("en-IN")}` : "—" },
       { key: "loan_config", label: "Loan configuration", value: form.selected_tenure_years ? `${form.selected_tenure_years} yr tenure` : "—" },
     ] },

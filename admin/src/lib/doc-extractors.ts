@@ -68,7 +68,8 @@ export async function geminiExtractBankStatement(images: GeminiImage[]): Promise
     schema: obj({ account_holder: STR, bank_name: STR, account_no: STR, ifsc: STR, account_type: STR, mobile: STR, email: STR }),
     prompt:
       "Read this Indian bank statement / passbook / cancelled cheque. Extract ONLY what is literally printed; if a field is absent, return null. " +
-      "account_holder = the name the account is held in. bank_name = the bank's name. account_no = the account number (digits only). " +
+      "account_holder = the name the account is held in (on a passbook, the value after 'Name'; drop Mr./Mrs./Smt./Shri). bank_name = the bank's name. " +
+      "account_no = the number printed next to 'Account No' / 'A/c No' (digits only) — NEVER the CIF / customer ID, MICR, nomination number, cheque number, phone, helpline or toll-free (1800…) numbers. " +
       "ifsc = the 11-character IFSC (4 letters, then 0, then 6 alphanumerics). account_type = Savings or Current if shown. " +
       "mobile = a 10-digit mobile number if shown. email = an email if shown.",
   });

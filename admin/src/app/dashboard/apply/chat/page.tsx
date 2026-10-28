@@ -220,6 +220,9 @@ const SCRIPT: Turn[] = [
   { id: "mobile_move", bot: "", kind: "decision", decide: (f) => ({ form: f._mobile_of === "coapp" ? { ...f, coapp_mobile: f.borrower_mobile, borrower_mobile: "" } : f }) },
   { id: "applicant_mobile", bot: (f) => `Mobile number of ${f.borrower_name || "the applicant"}.`, kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile", validate: mobileErr, when: (f) => hasCoapp(f) && f._mobile_of === "coapp" },
   { id: "coapp_mobile", bot: (f) => `Mobile number of ${f.coapp_name || "the co-applicant"}.`, kind: "text", field: "coapp_mobile", placeholder: "10-digit mobile", when: (f) => hasCoapp(f) && f._mobile_of !== "coapp", validate: mobileErr },
+  // Edit-only (opened from Capital Craft's Message to EPC).
+  { id: "coapp_email", bot: (f) => `Email address of ${f.coapp_name || "the co-applicant"}?`, kind: "text", field: "coapp_email", placeholder: "name@example.com", when: () => false,
+    validate: (v) => (EMAIL_RE.test(v.trim()) ? null : "Enter a valid email address.") },
   { id: "final_docs", bot: (f) => `Please upload ${f.borrower_name ? `${f.borrower_name}'s` : "the applicant's"} photo and bank statement.`, kind: "doc_table", rows: finalRows },
   { id: "quotation", bot: "Please upload the quotation / proforma invoice.", kind: "quotation" },
   // Everything uploaded so far, in one editable table (incl. the quotation) —
@@ -457,12 +460,15 @@ function ChatInner() {
   // co-applicant → quotation → details → loan → consent.
   function buildEditScript(keys: string[]): Turn[] {
     const has = (k: string) => keys.includes(k);
+    // Aadhaar is read front + back together — either side opens the pair.
+    const unitOn = (u: Unit) => has(u) || has(u + "_front") || has(u + "_back");
     const turns: Turn[] = [...EDIT_INTRO];
-    const appUnits = (["aadhaar", "pan", "ebill", "rooftop", "selfie", "bank"] as Unit[]).filter((u) => has(u));
+    const appUnits = (["aadhaar", "pan", "ebill", "rooftop", "selfie", "bank"] as Unit[]).filter(unitOn);
     if (appUnits.length) turns.push({ id: "doc_table", bot: "Re-upload the selected document(s) — details are read again automatically.", kind: "doc_table", rows: APPLICANT_ROWS.filter((r) => appUnits.includes(r.unit)) });
-    const coUnits = (["coapp_aadhaar", "coapp_pan"] as Unit[]).filter((u) => has(u));
+    const coUnits = (["coapp_aadhaar", "coapp_pan"] as Unit[]).filter(unitOn);
     if (coUnits.length) turns.push({ id: "coapp_docs", bot: "Re-upload the co-applicant document(s).", kind: "coapp_docs", rows: COAPP_ROWS.filter((r) => coUnits.includes(r.unit)) });
     if (has("coapp_mobile")) turns.push(cloneTurn("coapp_mobile"));
+    if (has("coapp_email")) turns.push(cloneTurn("coapp_email"));
     if (has("quotation")) turns.push(cloneTurn("quotation"));
     if (has("borrower_email")) turns.push(cloneTurn("borrower_email"));
     if (has("install_pincode")) turns.push(cloneTurn("install_pincode"));
@@ -702,6 +708,8 @@ function ChatInner() {
           // Co-applicant — from the role decision (edit: from what's on file).
           has_coapp: hasCoapp(form),
           coapp_mobile: form.coapp_mobile || null,
+          // The submit writes coapp_email — send what's on file so it's never wiped.
+          coapp_email: form.coapp_email || null,
           coapp_pan: form.coapp_pan || null,
           coapp_name: form.coapp_name || (hasCoapp(form) ? personName(p2Of(form)) : "") || null,
           coapp_father_name: form.coapp_father_name || undefined,

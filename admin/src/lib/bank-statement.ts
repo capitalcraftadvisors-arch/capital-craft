@@ -111,17 +111,25 @@ export function parseBankStatement(text: string): BankStatementFields {
 
   // ── Account number ────────────────────────────────────────
   // Prefer labelled hits (Account No, A/c No, Account Number).
-  // Fall back to any long digit run (9-18 digits) not near IFSC/PAN.
+  // Fall back to a long digit run (9-18 digits) that isn't another known number:
+  // a helpline / toll-free (1800 / 1860, hyphen-grouped), a 10-digit mobile, or a
+  // CIF / MICR / customer-ID / nomination value printed on passbooks & cheques.
   let account_no: string | null = null;
   const labelledAccount =
-    t.match(/(?:account\s*(?:no\.?|number|#)|a\/c\s*(?:no\.?|number)?|acct\s*no\.?)\s*[:\-]?\s*([\dX*\s\-]{9,25})/i);
-  if (labelledAccount) {
-    account_no = cleanAccount(labelledAccount[1]);
+    // (the value may sit on the next line, but never merges two lines' digits)
+    t.match(/(?:account\s*(?:no\.?|number|#)|a\/c\s*(?:no\.?|number)?|acct\s*no\.?)\s*[:\-]?\s*([\dX*][\dX* \-]{8,24})/i);
+  const labelledDigits = labelledAccount ? cleanAccount(labelledAccount[1]) : "";
+  if (labelledDigits.length >= 9 && !isOtherNumber(labelledAccount![1], labelledDigits)) {
+    account_no = labelledDigits;
   } else {
-    const runs = Array.from(t.matchAll(/\b\d[\d\s\-]{8,20}\d\b/g))
-      .map((m) => cleanAccount(m[0]))
-      .filter((s) => s.length >= 9 && s.length <= 18);
-    if (runs.length > 0) account_no = runs[0];
+    const others = new Set(
+      Array.from(t.matchAll(/(?:cif|micr|customer\s*id|cust\.?\s*id|nom(?:ination)?\.?\s*reg(?:n|istration)?\.?\s*no|phone|mobile|helpline)\s*(?:no\.?|number)?\s*[:\-]?\s*(\d[\d \-]{5,24})/gi))
+        .map((m) => cleanAccount(m[1])),
+    );
+    const runs = Array.from(t.matchAll(/\b\d[\d \-]{8,20}\d\b/g))
+      .map((m) => ({ raw: m[0], digits: cleanAccount(m[0]) }))
+      .filter((r) => r.digits.length >= 9 && r.digits.length <= 18 && !others.has(r.digits) && !isOtherNumber(r.raw, r.digits));
+    if (runs.length > 0) account_no = runs[0].digits;
   }
 
   // ── Account type ──────────────────────────────────────────
@@ -134,9 +142,11 @@ export function parseBankStatement(text: string): BankStatementFields {
   // Prefer explicit labels; fall back to the first name-shaped line
   // that isn't the bank name or an obvious noise line.
   let account_holder: string | null = null;
-  const labelledHolder = t.match(/(?:account\s*holder(?:\s*name)?|customer\s*name|name\s*of\s*(?:account\s*holder|customer)|holder\s*name)\s*[:\-]\s*([A-Z][A-Za-z .'-]{2,80})/i);
+  const labelledHolder = t.match(/(?:account\s*holder(?:\s*name)?|customer\s*name|name\s*of\s*(?:account\s*holder|customer)|holder\s*name)\s*[:\-]\s*([A-Z][A-Za-z .'-]{2,80})/i)
+    // Passbooks print a plain "Name :" line (not Branch / Bank / Father's name).
+    ?? t.match(/^\s*name\s*[:\-]\s*([A-Za-z][A-Za-z .'-]{2,60})$/im);
   if (labelledHolder) {
-    account_holder = clean(labelledHolder[1]);
+    account_holder = titleName(stripHonorific(clean(labelledHolder[1])));
   } else {
     const noise = /(bank|branch|address|ifsc|account|statement|customer id|micr|nomination|balance|opening|closing|period|from|to|page|date|txn|transaction)/i;
     const candidate = lines.find(
@@ -207,8 +217,25 @@ function canonicalBank(hit: string): string {
 
 function looksLikeName(line: string): boolean {
   if (!line || /\d/.test(line)) return false;
-  const words = line.split(/\s+/).filter((w) => /^[A-Za-z][A-Za-z.'-]+$/.test(w));
-  return words.length >= 2;
+  // Every word capitalised (a printed name) — lower-case OCR noise is rejected.
+  const parts = line.split(/\s+/).filter(Boolean);
+  const words = parts.filter((w) => /^[A-Z][A-Za-z.'-]+$/.test(w));
+  return words.length >= 2 && words.length === parts.length;
+}
+
+// A digit run that is a phone / helpline number, never an account number.
+function isOtherNumber(raw: string, digits: string): boolean {
+  return /^18[06]0/.test(digits)               // toll-free / helpline
+    || /^[6-9]\d{9}$/.test(digits)             // a 10-digit mobile
+    || (raw.match(/-/g) ?? []).length >= 2;     // hyphen-grouped phone (1800-11-22-11)
+}
+
+// "Mr. / Nr. (OCR'd Mr.) / Smt. / Shri …" off the front of a printed name.
+function stripHonorific(name: string): string {
+  return name.replace(/^(?:mr|nr|mrs|ms|miss|smt|shri|sri|kumari|km|m\/s)\.?\s+/i, "").trim();
+}
+function titleName(name: string): string {
+  return name.split(/\s+/).map((w) => (w ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w)).join(" ");
 }
 
 function escapeRegex(s: string): string {

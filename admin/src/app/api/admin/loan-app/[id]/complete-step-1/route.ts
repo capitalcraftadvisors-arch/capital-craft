@@ -166,7 +166,7 @@ export async function PATCH(
 
     // Fold current_step advance into the same UPDATE — one round-trip,
     // one atomic commit for the field writes + consent + step transition.
-    patch.current_step = 2;
+    patch.current_step = Math.max(Number(app.current_step) || 1, 2);
 
     let { error: updErr } = await supabase
       .from("epc_applications")
@@ -184,7 +184,7 @@ export async function PATCH(
     // Append-only activity trail (migration 0042). Best-effort.
     await logLoanActivityServer(supabase, appId, "step_completed", claims.business_id ?? null, { step: 1 });
 
-    return NextResponse.json({ ok: true, next_step: 2 });
+    return NextResponse.json({ ok: true, next_step: patch.current_step });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[complete-step-1] error:", msg);

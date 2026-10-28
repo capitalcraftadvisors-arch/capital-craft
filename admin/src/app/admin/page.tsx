@@ -38,6 +38,7 @@ import LoanLeadsTab from "@/components/LoanLeadsTab";
 import { latestLenderStatus, latestStatusLabel, type LoanLenderRow } from "@/lib/loan-lenders";
 import { LENDER_LABEL } from "@/components/ApprovalDetailsTable";
 import { otherInsDoc, OTHER_INS_LIST_CACHE } from "@/lib/other-insurance";
+import { loanDocChecklist } from "@/lib/loan-doc-checklist";
 
 type Tab = "epcs" | "apps" | "loanleads" | "insurance" | "otherins" | "leads";
 
@@ -1338,6 +1339,10 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     customer_photo_path: string | null;
     // false = a co-applicant was added (its docs then become required).
     bill_on_applicant_name: boolean | null;
+    aadhaar_face_path: string | null;
+    // user_application_docs categories (embedded in the list query) — a document
+    // uploaded as a row counts the same as its *_path column.
+    docs?: { category: string }[] | null;
     coapp_pan_path: string | null;
     coapp_aadhaar_front_path: string | null;
     coapp_aadhaar_back_path: string | null;
@@ -1462,7 +1467,9 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         // RFD rows carry status='rfd'; disbursed rows are detected by amount).
         "status, created_at, created_by, created_by_user_id, reviewed_at, aborted_at, approved_lender, rejected_lender, " +
         "aadhaar_front_path, aadhaar_back_path, ebill_path, proforma_invoice_path, " +
-        "rooftop_photo_path, bank_statement_path, customer_photo_path, bill_on_applicant_name, " +
+        "rooftop_photo_path, bank_statement_path, customer_photo_path, aadhaar_face_path, bill_on_applicant_name, " +
+        // Doc categories in the SAME request (no extra query) for the docs badge.
+        "docs:user_application_docs(category), " +
         "coapp_pan_path, coapp_aadhaar_front_path, coapp_aadhaar_back_path, " +
         "attention_status, attention_resolved_at, epc_last_activity_at, msg_admin_seen_at, " +
         "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
@@ -1571,11 +1578,10 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
   // count only when a co-applicant exists (bill_on_applicant_name === false).
   // Applicant PAN lives in user_application_docs (not fetched here), so it's not
   // part of this quick count — the chip reflects the uploaded file-path docs.
+  // Same rule as the loan profile's Doc Sent gate (lib/loan-doc-checklist).
   function docStat(r: Row): { have: number; need: number } {
-    const core = [r.aadhaar_front_path, r.aadhaar_back_path, r.ebill_path, r.proforma_invoice_path, r.rooftop_photo_path, r.bank_statement_path, r.customer_photo_path];
-    const coapp = r.bill_on_applicant_name === false ? [r.coapp_pan_path, r.coapp_aadhaar_front_path, r.coapp_aadhaar_back_path] : [];
-    const all = [...core, ...coapp];
-    return { have: all.filter(Boolean).length, need: all.length };
+    const all = loanDocChecklist(r, (r.docs ?? []).map((d) => d.category));
+    return { have: all.filter((d) => d.ok).length, need: all.length };
   }
   function displayEpc(r: Row): string {
     return nameCase(r.epc_business?.trade_name
@@ -1715,8 +1721,8 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         const rb = b.status === "approved" && !!b.first_disbursement_date;
         if (ra !== rb) return ra ? -1 : 1;
         if (ra && rb) {
-          return deadlineState(a.first_disbursement_date).daysRemaining
-               - deadlineState(b.first_disbursement_date).daysRemaining;
+          return deadlineState(a.first_disbursement_date, a.second_disbursement_amount != null).daysRemaining
+               - deadlineState(b.first_disbursement_date, b.second_disbursement_amount != null).daysRemaining;
         }
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
       });
@@ -1914,7 +1920,20 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                 <td className="px-3 py-3 text-center">
                   <p className="text-[13px] text-[#0f3d2e] truncate">{displayEpc(r)}</p>
                 </td>
-                <td className="px-3 py-3 text-center text-[13px] font-semibold text-[#0f3d2e]">{displayAmount(r)}</td>
+                <td className="px-3 py-3 text-center">
+                  {(() => {
+                    const applied = r.loan_amount_required ?? r.loan_amount;
+                    const shown = amountFor(r);
+                    const differs = applied != null && shown != null && Number(applied) !== Number(shown);
+                    const over = differs && Number(shown) > Number(applied);
+                    return (
+                      <>
+                        <p className={["text-[13px] font-semibold", over ? "text-red-700" : "text-[#0f3d2e]"].join(" ")}>{displayAmount(r)}</p>
+                        {differs && <p className={["text-[11px] mt-0.5", over ? "text-red-700" : "text-[#5a8a76]"].join(" ")}>Applied {fmtRupees(applied)}</p>}
+                      </>
+                    );
+                  })()}
+                </td>
                 {/* Loan apps have no internal admin status — show the lender
                     outcome (same 3 buckets as the EPC's own view). Once the 1st
                     disbursement is entered, surface that instead — display-only,
@@ -1939,7 +1958,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                   {r.status !== "approved" ? (
                     <span className="text-[13px] text-[#5a8a76]">—</span>
                   ) : (() => {
-                    const dl = deadlineState(r.first_disbursement_date);
+                    const dl = deadlineState(r.first_disbursement_date, r.second_disbursement_amount != null);
                     return (
                       <span className={["inline-block px-2 py-1 rounded-[6px] text-[11px] font-semibold whitespace-nowrap", DEADLINE_PILL[dl.tone]].join(" ")}>
                         {dl.label}
