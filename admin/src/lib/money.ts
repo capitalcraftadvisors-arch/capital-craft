@@ -14,6 +14,14 @@ export function fmtRupeesExact(n: number | null | undefined): string {
   return "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 6 });
 }
 
+/** "80%" — `part` as a share of `whole` (at most 1 decimal); null when either is missing or 0.
+ *  E.g. the loan amount as a share of the project cost. */
+export function pctOf(part: unknown, whole: unknown): string | null {
+  const p = Number(part), w = Number(whole);
+  if (!Number.isFinite(p) || !Number.isFinite(w) || p <= 0 || w <= 0) return null;
+  return `${Number(((p / w) * 100).toFixed(1))}%`;
+}
+
 /** Like fmtRupees but ALSO shows "—" for 0 (lender summaries / ZIP routes). */
 export function rupees(n: unknown): string {
   const v = Number(n);

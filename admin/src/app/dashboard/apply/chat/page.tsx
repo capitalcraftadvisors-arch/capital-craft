@@ -29,13 +29,16 @@ import { getBusiness, getToken } from "@/lib/auth";
 import { fetchEpcName } from "@/lib/epc-name";
 import { deleteDocument, getDocumentUrl } from "@/lib/storage";
 import { nameDocument } from "@/lib/ocr";
-import { hydrateLoanForm } from "@/lib/loan-form";
+import { locateUpload, LOCATION_OFF_MSG } from "@/components/GeoOfficeUpload";
+import { hydrateLoanForm, type LoanDocRow } from "@/lib/loan-form";
 import { numberToWordsIndian } from "@/lib/numberToWords";
 import { nameReadable } from "@/lib/name-match";
 import { fmtDate, toIsoDate } from "@/lib/dates";
 import { coappReasonText, decideRoles, eligibility, idNamesMatch, isBillOwner, personName, type IneligibleReason, type PersonFacts, type RoleDecision } from "@/lib/loan-roles";
 import EditTable from "@/components/EditTable";
 import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES, formatRupees } from "@/lib/emi";
+import { pctOf } from "@/lib/money";
+import { CATEGORY_LABEL } from "@/lib/loan-form";
 
 const MOBILE_RE = /^[6-9]\d{9}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -59,6 +62,7 @@ type Turn = {
   when?: (f: Form) => boolean; // conditional turn — skipped when this returns false
   next?: (f: Form) => string | undefined; // choice turn: the turn an answer jumps to (none → the next turn)
   decide?: (f: Form) => Step; // decision turn — runs on arrival, takes no input
+  extras?: ExtraKey[]; // edit mode: the any-number uploads this step opens (other docs, more bills / rooftop photos)
 };
 
 const mobileErr = (v: string) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile number.");
@@ -193,6 +197,7 @@ const YES_NO: Choice[] = [{ value: "true", label: "Yes" }, { value: "false", lab
 const IDS_CHOICES: Choice[] = [{ value: "replace", label: "Replace" }, { value: "same", label: "Same person, continue" }];
 const RELATIONS: Choice[] = ["Father", "Mother", "Spouse", "Son", "Daughter", "Brother", "Sister", "Other"].map((v) => ({ value: v, label: v }));
 const MOBILE_OF: Choice[] = [{ value: "applicant", label: "Applicant" }, { value: "coapp", label: "Co-applicant" }];
+const CATEGORY_CHOICES: Choice[] = Object.entries(CATEGORY_LABEL).map(([value, label]) => ({ value, label }));
 const idsText = (a?: string, b?: string) => `Aadhaar shows ${a}, PAN shows ${b}.`;
 
 // Docs-first flow: the mobile creates the draft, then each person's documents
@@ -244,6 +249,7 @@ const SCRIPT: Turn[] = [
     { value: "off_grid", label: "Off-Grid", sub: "Battery / standalone" },
     { value: "hybrid", label: "Hybrid", sub: "Grid + battery" },
   ] },
+  { id: "connection_category", bot: "Type of category?", kind: "choice", field: "connection_category", choices: CATEGORY_CHOICES },
   { id: "loan_amount", bot: "Loan amount required?", kind: "number", field: "loan_amount_required", placeholder: "Amount in ₹" },
   { id: "tenure", bot: "Finally, the loan configuration — subsidy and tenure.", kind: "tenure" },
   // Lead owner — the EPC's team member who brought this lead, asked just before
@@ -268,9 +274,10 @@ const PICK_LABEL: Record<string, string> = {
   aadhaar: "Aadhaar", pan: "PAN card", ebill: "Electricity bill", rooftop: "Rooftop photo",
   selfie: "Applicant photo", bank: "Bank statement",
   coapp_aadhaar: "Co-applicant Aadhaar", coapp_pan: "Co-applicant PAN", coapp_mobile: "Co-applicant mobile",
-  borrower_email: "Email", install_pincode: "Pincode", system_type: "System type", plant_use_type: "Property use",
+  borrower_email: "Email", install_pincode: "Pincode", system_type: "System type", plant_use_type: "Property use", connection_category: "Category",
   quotation: "Quotation", loan_amount: "Loan amount", loan_config: "Loan configuration",
   lead_owner_name: "Lead owner name", lead_owner_phone: "Lead owner phone",
+  other_docs: "Other documents", extra_bills: "More electricity bills", extra_rooftops: "More rooftop photos",
 };
 
 // Fields whose typed amount is echoed in Indian words under the input.
@@ -472,6 +479,8 @@ function ChatInner() {
     if (appUnits.length) turns.push({ id: "doc_table", bot: "Re-upload the selected document(s) — details are read again automatically.", kind: "doc_table", rows: APPLICANT_ROWS.filter((r) => appUnits.includes(r.unit)) });
     const coUnits = (["coapp_aadhaar", "coapp_pan"] as Unit[]).filter(unitOn);
     if (coUnits.length) turns.push({ id: "coapp_docs", bot: "Re-upload the co-applicant document(s).", kind: "coapp_docs", rows: COAPP_ROWS.filter((r) => coUnits.includes(r.unit)) });
+    const extras = (Object.keys(EXTRA_PICK) as ExtraKey[]).filter((k) => has(EXTRA_PICK[k]));
+    if (extras.length) turns.push({ id: "extra_docs", bot: "Add the documents below.", kind: "doc_table", rows: [], extras });
     if (has("coapp_mobile")) turns.push(cloneTurn("coapp_mobile"));
     if (has("coapp_email")) turns.push(cloneTurn("coapp_email"));
     if (has("quotation")) turns.push(cloneTurn("quotation"));
@@ -479,6 +488,7 @@ function ChatInner() {
     if (has("install_pincode")) turns.push(cloneTurn("install_pincode"));
     if (has("system_type")) turns.push(cloneTurn("system_type"));
     if (has("plant_use_type")) turns.push(cloneTurn("plant_use_type"));
+    if (has("connection_category")) turns.push(cloneTurn("connection_category"));
     if (has("loan_amount")) turns.push(cloneTurn("loan_amount"));
     if (has("loan_config")) turns.push(cloneTurn("tenure"));
     if (has("lead_owner_name")) turns.push(cloneTurn("lead_owner_name"));
@@ -682,6 +692,7 @@ function ChatInner() {
           install_city: form.install_city || null,
           system_type: form.system_type || null,
           plant_use_type: form.plant_use_type || null,
+          connection_category: form.connection_category || null,
           // Applicant docs
           borrower_pan: form.borrower_pan || null,
           borrower_father_name: form.borrower_father_name || null,
@@ -896,6 +907,12 @@ function ChatInner() {
                   {amt > 0 && amountInWords(amt) && (
                     <div className="text-[11.5px] text-[#14235c] px-4">₹{amt.toLocaleString("en-IN")} — <span className="font-medium">{amountInWords(amt)} rupees</span></div>
                   )}
+                  {/* The loan as a share of the project cost read from the quotation. */}
+                  {amt > 0 && pctOf(amt, form.total_project_cost) && (
+                    <div className="text-[11.5px] text-[#14235c] px-4">
+                      <span className="font-semibold">{pctOf(amt, form.total_project_cost)}</span> of the project cost ({formatRupees(Number(form.total_project_cost))})
+                    </div>
+                  )}
                 </div>
               );
             })()}
@@ -944,8 +961,10 @@ function ChatInner() {
             {turn.kind === "doc_table" && appId && (
               <DocTable
                 key={"applicant-docs-" + idx} appId={appId} form={form} docRows={docRows} rows={rowsOf(turn, form) ?? APPLICANT_ROWS} onPatch={merge} onDone={finishDocTable}
-                // The first table (applying) also takes any other documents, and more bills for commercial.
-                extras={!editMode && turn.id === "doc_table" ? { bills: form.plant_use_type === "commercial" } : undefined}
+                // The first table (applying) also takes any other documents, and more bills /
+                // rooftop photos for commercial; an edit step opens just the granted ones.
+                extras={turn.extras ? { bills: form.plant_use_type === "commercial", only: turn.extras }
+                  : !editMode && turn.id === "doc_table" ? { bills: form.plant_use_type === "commercial" } : undefined}
               />
             )}
 
@@ -1021,7 +1040,11 @@ const QUOTATION_ROW: Row = { slot: "quotation", label: "Quotation / proforma inv
 function firstRows(f: Form): Row[] {
   const pick = (u: Unit) => APPLICANT_ROWS.filter((r) => r.unit === u);
   return [...pick("ebill"), ...pick("aadhaar"), ...pick("pan"), ...pick("rooftop")]
-    .map((r) => ({ ...r, label: r.label.replace("Applicant ", ""), required: r.unit === "aadhaar" || (r.unit === "pan" && f._p1_pan_required === "1") }));
+    .map((r) => ({
+      ...r,
+      label: r.unit === "rooftop" && f.plant_use_type === "commercial" ? GEO_ROOFTOP : r.label.replace("Applicant ", ""),
+      required: r.unit === "aadhaar" || (r.unit === "pan" && f._p1_pan_required === "1"),
+    }));
 }
 function secondRows(f: Form): Row[] {
   const who = f._p2_role !== "owner" ? "Applicant" : nameReadable(f.ebill_name) ? `${billName(f)} (bill owner)` : "Bill owner";
@@ -1033,6 +1056,16 @@ function finalRows(f: Form): Row[] {
     .map((r) => ({ ...r, label: `${whose} ${r.unit === "selfie" ? "photo" : "bank statement"}` }));
 }
 const rowsOf = (t: Turn, f: Form) => (typeof t.rows === "function" ? t.rows(f) : t.rows);
+
+// A commercial site's rooftop photos must carry their location — GPS in the
+// photo, a GPS-camera stamp, or the phone's live GPS (GeoOfficeUpload's rule).
+const GEO_ROOFTOP = "Rooftop photo (geo-tagged)";
+const NO_GEO_MSG = "No location found in this photo. Upload a rooftop photo taken with location on, or a GPS-camera photo with the location printed on it.";
+async function geoTagged(file: File, category: string): Promise<{ file: File; gps: string }> {
+  const r = await locateUpload(file, category);
+  if ("error" in r) throw new Error(r.error === "location_off" ? LOCATION_OFF_MSG : NO_GEO_MSG);
+  return { file: r.file, gps: JSON.stringify(r.gps) };
+}
 
 // Form keys that mark each unit already read (for prefill/done).
 const UNIT_DONE_KEY: Record<Unit, string[]> = {
@@ -1057,7 +1090,7 @@ const UNIT_FIELDS: Partial<Record<Unit, (f: Form) => { label: string; field: str
 
 type SlotFile = { file: File; thumb: string | null };
 
-function DocTable({ appId, form, rows, docRows = [], review = false, extras, onPatch, onDone }: { appId: string; form: Form; rows: Row[]; docRows?: { id: string; category: string; storage_path: string | null }[]; review?: boolean; extras?: { bills: boolean }; onPatch: (p: Form) => void; onDone: (r: { name: string; thumb: string | null }[]) => void }) {
+function DocTable({ appId, form, rows, docRows = [], review = false, extras, onPatch, onDone }: { appId: string; form: Form; rows: Row[]; docRows?: { id: string; category: string; storage_path: string | null }[]; review?: boolean; extras?: { bills: boolean; only?: ExtraKey[] }; onPatch: (p: Form) => void; onDone: (r: { name: string; thumb: string | null }[]) => void }) {
   const [extrasBusy, setExtrasBusy] = useState(false);
   const [files, setFiles] = useState<Partial<Record<Slot, SlotFile>>>({});
   const [skipped, setSkipped] = useState<Partial<Record<Slot, boolean>>>({});
@@ -1177,7 +1210,13 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
     const category = unit === "rooftop" ? "borrower_photo" : unit === "selfie" ? "customer_photo" : "bank_statement";
     const pathField = unit === "rooftop" ? "rooftop_photo_path" : unit === "selfie" ? "customer_photo_path" : "bank_statement_path";
     const fd = new FormData();
-    fd.append("file", fileOf(unit as Slot));
+    if (unit === "rooftop" && form.plant_use_type === "commercial") {
+      const g = await geoTagged(fileOf("rooftop"), category);
+      fd.append("file", g.file);
+      fd.append("gps", g.gps);
+    } else {
+      fd.append("file", fileOf(unit as Slot));
+    }
     fd.append("table", "user_application_docs");
     fd.append("category", category);
     fd.append("application_id", appId);
@@ -1270,7 +1309,8 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
 
   return (
     <div className="flex flex-col gap-2">
-      <div className="rounded-xl border border-line bg-white overflow-hidden">
+      {/* An edit step for the any-number uploads alone has no table rows. */}
+      {rows.length > 0 && <div className="rounded-xl border border-line bg-white overflow-hidden">
         <table className="w-full border-collapse">
           <thead>
             <tr className="bg-[#eef3fc] border-b border-[#dbe4f6] text-[11px] font-semibold text-[#14235c]">
@@ -1295,8 +1335,8 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
             })}
           </tbody>
         </table>
-      </div>
-      {extras && <ExtraDocs appId={appId} form={form} bills={extras.bills} onPatch={onPatch} onBusy={setExtrasBusy} />}
+      </div>}
+      {extras && <ExtraDocs appId={appId} form={form} docRows={docRows} bills={extras.bills} only={extras.only} onPatch={onPatch} onBusy={setExtrasBusy} />}
       <div className="flex items-center gap-2 flex-wrap">
         <button onClick={done} disabled={!allSettled} className="px-4 py-2 rounded-lg bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-50">Continue →</button>
         {!allSettled && <span className="text-[11px] text-text-muted">Add or tick “Don&apos;t have it” for every row to continue.</span>}
@@ -1305,25 +1345,41 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
   );
 }
 
-// ── Extra documents (first table) ────────────────────────────────────────────
+// ── Extra documents (first table, or an edit step) ───────────────────────────
 // Any number of other documents — each named by the AI reader from what it is
 // ("ITR 2024-25"), else its file name — and, for a commercial customer, more
-// electricity bills (the first bill in the table stays the one that's read).
-// Each file uploads on pick as its own user_application_docs row (other /
-// electricity_bill). The lists live in the form (`_extra_docs` / `_extra_bills`,
-// never submitted) so they're still shown on coming back to this table.
+// electricity bills (the first bill in the table stays the one that's read) and
+// more geo-tagged rooftop photos. Each file uploads on pick as its own
+// user_application_docs row. The lists live in the form (`_extra_*`, never
+// submitted) so they're still shown on coming back; an edit starts from what's
+// already on file. Capital Craft opens them for an edit with the keys in
+// EXTRA_PICK (the edit-table / Message-to-EPC rows).
 type ExtraDoc = { id: string; name: string };
-type ExtraKey = "_extra_docs" | "_extra_bills";
-const extraList = (f: Form, key: ExtraKey): ExtraDoc[] => { try { return JSON.parse(f[key] || "[]") as ExtraDoc[]; } catch { return []; } };
+type ExtraKey = "_extra_docs" | "_extra_bills" | "_extra_rooftops";
+const EXTRA_KEYS: ExtraKey[] = ["_extra_docs", "_extra_bills", "_extra_rooftops"];
+const EXTRA_PICK: Record<ExtraKey, string> = { _extra_docs: "other_docs", _extra_bills: "extra_bills", _extra_rooftops: "extra_rooftops" };
+// Each list's document category. More rooftop photos (commercial, geo-tagged)
+// have their own, so re-uploading the first rooftop photo never removes them.
+const EXTRA_CATEGORY: Record<ExtraKey, string> = { _extra_docs: "other", _extra_bills: "electricity_bill", _extra_rooftops: "rooftop_photo_extra" };
+const extraList = (f: Form, key: ExtraKey, docRows: LoanDocRow[]): ExtraDoc[] => {
+  if (f[key]) { try { return JSON.parse(f[key]) as ExtraDoc[]; } catch { return []; } }
+  // Not in the form yet (an edit) → what's on file; the first bill is its own row.
+  return docRows
+    .filter((d) => d.category === EXTRA_CATEGORY[key] && !(key === "_extra_bills" && d.storage_path === f.ebill_path))
+    .map((d) => ({ id: d.id, name: (d.file_name ?? "").replace(/\.[^.]+$/, "") || "Document" }));
+};
 
-function ExtraDocs({ appId, form, bills, onPatch, onBusy }: { appId: string; form: Form; bills: boolean; onPatch: (p: Form) => void; onBusy: (busy: boolean) => void }) {
-  const [lists, setLists] = useState<Record<ExtraKey, ExtraDoc[]>>(() => ({ _extra_docs: extraList(form, "_extra_docs"), _extra_bills: extraList(form, "_extra_bills") }));
+function ExtraDocs({ appId, form, docRows, bills, only, onPatch, onBusy }: { appId: string; form: Form; docRows: LoanDocRow[]; bills: boolean; only?: ExtraKey[]; onPatch: (p: Form) => void; onBusy: (busy: boolean) => void }) {
+  const [lists, setLists] = useState<Record<ExtraKey, ExtraDoc[]>>(() =>
+    Object.fromEntries(EXTRA_KEYS.map((k) => [k, extraList(form, k, docRows)])) as Record<ExtraKey, ExtraDoc[]>);
+  // Which lists show: an edit step's granted ones, else all that apply.
+  const shows = (k: ExtraKey) => (only ? only.includes(k) : k === "_extra_docs" || bills);
   const [pending, setPending] = useState<{ key: string; list: ExtraKey; name: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
   const first = useRef(true);
   useEffect(() => {
     if (first.current) { first.current = false; return; }
-    onPatch({ _extra_docs: JSON.stringify(lists._extra_docs), _extra_bills: JSON.stringify(lists._extra_bills) });
+    onPatch(Object.fromEntries(EXTRA_KEYS.map((k) => [k, JSON.stringify(lists[k])])));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lists]);
   useEffect(() => { onBusy(pending.length > 0); }, [pending.length, onBusy]);
@@ -1335,9 +1391,15 @@ function ExtraDocs({ appId, form, bills, onPatch, onBusy }: { appId: string; for
       const named = list === "_extra_docs" ? await nameDocument(file) : null;
       const ext = /\.[^.]+$/.exec(file.name)?.[0] ?? "";
       const fd = new FormData();
-      fd.append("file", named ? new File([file], `${named}${ext}`, { type: file.type }) : file);
+      if (list === "_extra_rooftops") {
+        const g = await geoTagged(file, EXTRA_CATEGORY[list]);
+        fd.append("file", g.file);
+        fd.append("gps", g.gps);
+      } else {
+        fd.append("file", named ? new File([file], `${named}${ext}`, { type: file.type }) : file);
+      }
       fd.append("table", "user_application_docs");
-      fd.append("category", list === "_extra_bills" ? "electricity_bill" : "other");
+      fd.append("category", EXTRA_CATEGORY[list]);
       fd.append("application_id", appId);
       fd.append("uploaded_by", "epc");
       const res = await fetch("/api/upload", { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
@@ -1345,8 +1407,9 @@ function ExtraDocs({ appId, form, bills, onPatch, onBusy }: { appId: string; for
       if (!res.ok || !j?.ok || !j.id) { setError(j?.error || `Couldn't upload ${file.name}.`); return; }
       const doc = { id: String(j.id), name: named ?? file.name.replace(/\.[^.]+$/, "") };
       setLists((l) => ({ ...l, [list]: [...l[list], doc] }));
-    } catch {
-      setError(`Couldn't upload ${file.name}.`);
+    } catch (e) {
+      // A rooftop photo with no location says why; anything else is a failed upload.
+      setError(list === "_extra_rooftops" && e instanceof Error ? e.message : `Couldn't upload ${file.name}.`);
     } finally {
       setPending((p) => p.filter((x) => x.key !== key));
     }
@@ -1386,7 +1449,7 @@ function ExtraDocs({ appId, form, bills, onPatch, onBusy }: { appId: string; for
             {waiting.map((p) => (
               <li key={p.key} className="flex items-center gap-2 text-[11.5px] text-text-muted min-w-0">
                 <span className="w-3.5 h-3.5 rounded-full border-2 border-[#1e3a8a]/30 border-t-[#1e3a8a] animate-spin shrink-0" />
-                <span className="truncate">{p.name} · {list === "_extra_docs" ? "Reading…" : "Uploading…"}</span>
+                <span className="truncate">{p.name} · {list === "_extra_bills" ? "Uploading…" : "Reading…"}</span>
               </li>
             ))}
           </ul>
@@ -1398,8 +1461,13 @@ function ExtraDocs({ appId, form, bills, onPatch, onBusy }: { appId: string; for
   return (
     <div className="flex flex-col gap-1">
       <div className="rounded-xl border border-line bg-white overflow-hidden">
-        {bills && block("_extra_bills", "More electricity bills", (_d, i) => `Electricity bill ${i + 2}`, true)}
-        {block("_extra_docs", "Other documents", (d) => d.name, !bills)}
+        {([
+          ["_extra_bills", "More electricity bills", (_d, i) => `Electricity bill ${i + 2}`],
+          ["_extra_rooftops", "More rooftop photos (geo-tagged)", (_d, i) => `Rooftop photo ${i + 2}`],
+          ["_extra_docs", "Other documents", (d) => d.name],
+        ] as [ExtraKey, string, (d: ExtraDoc, i: number) => string][])
+          .filter(([k]) => shows(k))
+          .map(([k, title, label], i) => <Fragment key={k}>{block(k, title, label, i === 0)}</Fragment>)}
       </div>
       {error && <span className="text-[11.5px] text-red-600">{error}</span>}
     </div>

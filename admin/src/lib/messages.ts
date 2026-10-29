@@ -39,6 +39,9 @@ export const DOC_TAGS: { value: string; label: string }[] = [
   { value: "rooftop", label: "Rooftop photo" },
   { value: "selfie", label: "Applicant photo" },
   { value: "bank", label: "Bank statement" },
+  { value: "other_docs", label: "Other documents" },
+  { value: "extra_bills", label: "More electricity bills" },
+  { value: "extra_rooftops", label: "More rooftop photos" },
   { value: "quotation", label: "Quotation" },
   { value: "coapp_aadhaar", label: "Co-applicant Aadhaar" },
   { value: "coapp_pan", label: "Co-applicant PAN" },
@@ -51,7 +54,7 @@ const EDIT_KEY_LABELS: Record<string, string> = {
   aadhaar_front: "Aadhaar — front", aadhaar_back: "Aadhaar — back",
   coapp_aadhaar_front: "Co-applicant Aadhaar — front", coapp_aadhaar_back: "Co-applicant Aadhaar — back",
   coapp_mobile: "Co-applicant mobile", coapp_email: "Co-applicant email",
-  borrower_email: "Email", system_type: "System type", plant_use_type: "Property use", loan_config: "Loan configuration",
+  borrower_email: "Email", system_type: "System type", plant_use_type: "Property use", connection_category: "Category", loan_config: "Loan configuration",
 };
 
 export function docTagLabel(v: string | null | undefined): string | null {
@@ -74,6 +77,9 @@ export const MSG_TEMPLATES: MsgTemplate[] = [
   { label: "Rooftop photo unclear", body: "The rooftop photo is unclear — please re-take a clear, geo-tagged photo at the site.", doc: "rooftop" },
   { label: "Applicant photo needed", body: "The applicant's photo is missing or unclear — please upload a clear photo.", doc: "selfie" },
   { label: "Bank statement incomplete", body: "The bank statement is incomplete — please upload the last 6 months, clearly readable.", doc: "bank" },
+  { label: "Other documents needed", body: "Please upload the additional documents needed for this file.", doc: "other_docs" },
+  { label: "More electricity bills needed", body: "Please upload the electricity bills of all the connections at this site.", doc: "extra_bills" },
+  { label: "More rooftop photos needed", body: "Please upload more geo-tagged rooftop photos covering the whole installation area.", doc: "extra_rooftops" },
   { label: "Quotation missing", body: "The quotation / proforma invoice is missing — please upload it.", doc: "quotation" },
   { label: "Quotation unclear", body: "The quotation is unclear or the project size/cost doesn't match — please re-check and re-upload.", doc: "quotation" },
   { label: "Co-applicant docs needed", body: "Co-applicant Aadhaar and PAN are required for this file — please add them.", doc: "coapp_aadhaar" },

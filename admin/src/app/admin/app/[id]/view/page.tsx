@@ -42,7 +42,8 @@ import { loanChecks } from "@/lib/loan-verification";
 import { cachedLoanUpdateCount } from "@/lib/use-epc-updates";
 import { deadlineState, DEADLINE_PILL, remainingAmount, fmtDateShort } from "@/lib/disbursement";
 import { fmtDateTime } from "@/lib/dates";
-import { fmtRupees, fmtRupeesExact } from "@/lib/money";
+import { fmtRupees, fmtRupeesExact, pctOf } from "@/lib/money";
+import { CATEGORY_LABEL } from "@/lib/loan-form";
 import { initialsOf } from "@/lib/names";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import {
@@ -108,6 +109,7 @@ const LOAN_STATUS_LABEL: Record<string, string> = {
 const DOC_LABEL: Record<string, string> = {
   customer_photo:   "Applicant photo",
   borrower_photo:   "Rooftop photo",
+  rooftop_photo_extra: "Rooftop photo",
   borrower_pan:     "PAN card",
   borrower_aadhaar: "Aadhaar",
   quotation:        "Quotation / Proforma",
@@ -188,7 +190,7 @@ const NAMED_SLOT_CATEGORIES = new Set<string>([
   "borrower_pan", "customer_photo", "borrower_photo", "quotation", "electricity_bill",
   "bank_statement", "sanction_letter", "feasibility_report", "mmr_advance_receipt",
   "completion_invoice", "completion_panel_photo", "completion_inverter_photo",
-  "completion_meter_photo", "completion_report",
+  "completion_meter_photo", "completion_report", "rooftop_photo_extra",
 ]);
 
 function buildLoanDocGroups(loan: Loan, docsIn: Doc[]): LoanDocGroup[] {
@@ -229,9 +231,19 @@ function buildLoanDocGroups(loan: Loan, docsIn: Doc[]): LoanDocGroup[] {
     slots: [
       slot("quotation", "Quotation / Proforma invoice", ["quotation"],        loan.proforma_invoice_path),
       ...billSlots(),
-      slot("rooftop",   "Rooftop photo",                ["borrower_photo"],   loan.rooftop_photo_path),
+      ...rooftopSlots(),
     ],
   });
+
+  // Rooftop photos: the first (borrower_photo / rooftop_photo_path), then the
+  // geo-tagged extra ones a commercial application adds (rooftop_photo_extra).
+  function rooftopSlots(): LoanSlot[] {
+    const out = [slot("rooftop", "Rooftop photo", ["borrower_photo"], loan.rooftop_photo_path)];
+    const extra = docs.filter((d) => d.category === "rooftop_photo_extra" && !usedRowIds.has(d.id)).reverse();
+    extra.forEach((d) => { usedRowIds.add(d.id); out.push(fromRow(`rooftop_${d.id}`, "Rooftop photo", d)); });
+    if (out.length > 1) out.forEach((x, i) => { x.label = `Rooftop photo ${i + 1}`; });
+    return out;
+  }
 
   // Electricity bills: the read bill (ebill_path) first, then every other
   // electricity_bill row — a commercial customer may add more than one; the
@@ -1206,7 +1218,13 @@ function Inner() {
   const loanRows: FieldRow[] = [
     { k: "Project size", v: kw },
     { k: "Project cost", v: fmtRupees(loan.total_project_cost) },
-    { k: "Loan amount required", v: fmtRupees(loan.loan_amount_required) },
+    {
+      k: "Loan amount required",
+      // With its share of the project cost — "₹1,60,000 (80% of project cost)".
+      v: loan.loan_amount_required != null
+        ? fmtRupees(loan.loan_amount_required) + (pctOf(loan.loan_amount_required, loan.total_project_cost) ? ` (${pctOf(loan.loan_amount_required, loan.total_project_cost)} of project cost)` : "")
+        : null,
+    },
     {
       k: "Down payment",
       v: loan.total_project_cost && loan.loan_amount_required
@@ -1214,7 +1232,7 @@ function Inner() {
         : null,
       optional: true,
     },
-    { k: "System type", v: loan.system_type ? SYSTEM_LABEL[loan.system_type] ?? loan.system_type : null },
+    { k: "Category", v: loan.connection_category ? CATEGORY_LABEL[loan.connection_category] ?? loan.connection_category : null },
     { k: "Monthly bill", v: fmtRupees(loan.monthly_bill_amount) },
     { k: "DISCOM", v: loan.discom_name },
     { k: "K Number", v: loan.ca_number, copy: loan.ca_number },

@@ -261,8 +261,52 @@ async function stampedFile(canvas: HTMLCanvasElement, coords: Gps, category: str
 
 // A photo picked through "Upload photo" counts as JUST TAKEN with the phone
 // camera when its file is this fresh. Phone browsers strip the location from
-// such photos, so they get the live GPS instead (see handleUploadFile).
+// such photos, so they get the live GPS instead (see locateUpload).
 const FRESH_CAPTURE_MS = 5 * 60 * 1000;
+
+// The upload path's location proof — shared with the EPC chatbot's commercial
+// rooftop photos. EXIF GPS first; else a burned-in GPS-stamp banner (GPS Map
+// Camera etc. — a stamped photo carries the site's own location); else a photo
+// JUST taken with a PHONE camera (the browser stripped its location) gets the
+// live GPS + the same burned-in stamp as "Take photo" — never on a laptop /
+// desktop, where a fresh download would get the office's location instead of
+// the site's. Nothing → "no_location"; the phone's location off → "location_off".
+export async function locateUpload(
+  file: File, category: string, onStatus?: (s: string) => void,
+): Promise<{ file: File; gps: Gps } | { error: "no_location" | "location_off" }> {
+  onStatus?.("Reading location from photo…");
+  let coords: Gps | null = null;
+  try {
+    coords = await readExifGps(file);
+  } catch (err) {
+    // Real parse error — not "no GPS". Fall through to the OCR-stamp check.
+    console.warn("[GeoOfficeUpload] EXIF read failed:", err);
+  }
+  if (!coords) {
+    onStatus?.("Reading location stamp…");
+    coords = await readStampGps(file);
+  }
+  if (coords) return { file, gps: coords };
+  if (file.type.startsWith("image/") && Date.now() - file.lastModified < FRESH_CAPTURE_MS
+      && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
+    onStatus?.("Getting your location… please allow location access.");
+    const live = await requestLiveGeo();
+    if (!live) return { error: "location_off" };
+    const bmp = await createImageBitmap(file).catch(() => null);
+    let tagged: File | null = null;
+    if (bmp) {
+      const canvas = document.createElement("canvas");
+      canvas.width = bmp.width;
+      canvas.height = bmp.height;
+      canvas.getContext("2d")?.drawImage(bmp, 0, 0);
+      bmp.close();
+      tagged = await stampedFile(canvas, live, category);
+    }
+    return { file: tagged ?? file, gps: live };
+  }
+  return { error: "no_location" };
+}
+export const LOCATION_OFF_MSG = "Turn on location (GPS) and allow location access, then take the photo again.";
 
 export default function GeoOfficeUpload({
   category, label, businessId, applicationId, uploadedBy, hint,
@@ -466,58 +510,17 @@ export default function GeoOfficeUpload({
       return;
     }
 
-    setStatus("Reading location from photo…");
-    let coords: Gps | null = null;
-    try {
-      coords = await readExifGps(file);
-    } catch (err) {
-      // Real parse error — not "no GPS". Fall through to the OCR-stamp check.
-      console.warn("[GeoOfficeUpload] EXIF read failed:", err);
-    }
-    // No EXIF GPS? Read a burned-in GPS-stamp banner (GPS Map Camera etc.) first —
-    // a stamped photo carries the site's own location.
-    if (!coords) {
-      setStatus("Reading location stamp…");
-      coords = await readStampGps(file);
-    }
-    // Still nothing, and just taken with a PHONE camera ("Upload photo" → Camera)? The
-    // browser stripped its location, so read the live GPS now and burn the stamp on —
-    // the same geo-tag the live camera gives. Never on a laptop / desktop: a freshly
-    // downloaded photo there would get the office's location instead of the site's.
-    if (!coords && file.type.startsWith("image/") && Date.now() - file.lastModified < FRESH_CAPTURE_MS
-        && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) {
-      setStatus("Getting your location… please allow location access.");
-      const live = await requestLiveGeo();
-      if (!live) {
-        setStatus(null);
-        setError("Turn on location (GPS) and allow location access, then take the photo again.");
-        if (fileInputRef.current) fileInputRef.current.value = "";
-        return;
-      }
-      const bmp = await createImageBitmap(file).catch(() => null);
-      let tagged: File | null = null;
-      if (bmp) {
-        const canvas = document.createElement("canvas");
-        canvas.width = bmp.width;
-        canvas.height = bmp.height;
-        canvas.getContext("2d")?.drawImage(bmp, 0, 0);
-        bmp.close();
-        tagged = await stampedFile(canvas, live, category);
-      }
-      await persist(tagged ?? file, live);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
-    if (!coords) {
+    const r = await locateUpload(file, category, setStatus);
+    if ("error" in r) {
       setStatus(null);
-      setError(
-        "No location found in this photo. Upload a photo taken with location on, " +
-          "or a GPS-camera photo with the location printed on it, or use “Take photo”.",
-      );
+      setError(r.error === "location_off"
+        ? LOCATION_OFF_MSG
+        : "No location found in this photo. Upload a photo taken with location on, " +
+          "or a GPS-camera photo with the location printed on it, or use “Take photo”.");
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
-    await persist(file, coords);
+    await persist(r.file, r.gps);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 

@@ -12,7 +12,7 @@
 
 import { getToken } from "@/lib/auth";
 import { getDocumentUrl } from "@/lib/storage";
-import type { LoanForm, LoanDocRow } from "@/lib/loan-form";
+import { CATEGORY_LABEL, type LoanForm, type LoanDocRow } from "@/lib/loan-form";
 import { DOC_CATEGORY } from "@/lib/loan-doc-checklist";
 
 const SYS_LABEL: Record<string, string> = { on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" };
@@ -32,6 +32,13 @@ export function editGroups(form: LoanForm, docRows: LoanDocRow[]): { title: stri
     const r = docRows.find((d) => d.category === cat);
     return { key, label, doc: true, on: has(col) || !!r, path: form[col] || undefined, rowId: r?.id };
   };
+  // Any-number uploads (EPC chatbot): how many are on file. The first bill is
+  // its own row above, so extra bills leave it out.
+  const many = (key: string, label: string, cat: string): EditItem => {
+    const n = docRows.filter((d) => d.category === cat && !(cat === "electricity_bill" && d.storage_path === form.ebill_path)).length;
+    return { key, label, value: n ? `${n} on file` : "—" };
+  };
+  const commercial = form.plant_use_type === "commercial";
   return [
     { title: "Documents", items: [
       // Front and back separately — each can be viewed and opened on its own.
@@ -42,6 +49,11 @@ export function editGroups(form: LoanForm, docRows: LoanDocRow[]): { title: stri
       doc("rooftop", "Rooftop photo", "rooftop_photo_path", DOC_CATEGORY.rooftop),
       doc("selfie", "Applicant photo", "customer_photo_path", DOC_CATEGORY.photo),
       doc("bank", "Bank statement", "bank_statement_path", DOC_CATEGORY.bank),
+      ...(commercial ? [
+        many("extra_bills", "More electricity bills", "electricity_bill"),
+        many("extra_rooftops", "More rooftop photos (geo-tagged)", "rooftop_photo_extra"),
+      ] : []),
+      many("other_docs", "Other documents", "other"),
     ] },
     ...(hasCoapp ? [{ title: "Co-applicant", items: [
       { key: "coapp_aadhaar_front", label: "Co-applicant Aadhaar — front", doc: true, on: has("coapp_aadhaar_front_path"), path: form.coapp_aadhaar_front_path },
@@ -55,6 +67,7 @@ export function editGroups(form: LoanForm, docRows: LoanDocRow[]): { title: stri
       { key: "install_pincode", label: "Installation pincode", value: form.install_pincode || "—" },
       { key: "system_type", label: "System type", value: SYS_LABEL[form.system_type] || "—" },
       { key: "plant_use_type", label: "Property use", value: USE_LABEL[form.plant_use_type] || "—" },
+      { key: "connection_category", label: "Category", value: CATEGORY_LABEL[form.connection_category] || "—" },
     ] },
     { title: "Quotation & loan", items: [
       doc("quotation", "Quotation document", "proforma_invoice_path", DOC_CATEGORY.quotation),

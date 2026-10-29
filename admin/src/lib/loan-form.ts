@@ -9,7 +9,10 @@
 import { supabase } from "@/lib/supabase";
 
 export type LoanForm = Record<string, string>;
-export type LoanDocRow = { id: string; category: string; storage_path: string | null };
+// The electricity connection's category (0109) — asked by the EPC chatbot.
+export const CATEGORY_LABEL: Record<string, string> = { domestic: "Domestic", non_domestic: "Non-domestic" };
+
+export type LoanDocRow = { id: string; category: string; storage_path: string | null; file_name?: string | null };
 
 export type HydratedLoan = {
   form: LoanForm;
@@ -20,7 +23,7 @@ export type HydratedLoan = {
 export async function hydrateLoanForm(id: string): Promise<HydratedLoan> {
   const [{ data: la }, { data: docs }] = await Promise.all([
     supabase().from("epc_applications").select("*").eq("id", id).maybeSingle(),
-    supabase().from("user_application_docs").select("id, category, storage_path").eq("application_id", id),
+    supabase().from("user_application_docs").select("id, category, storage_path, file_name").eq("application_id", id),
   ]);
   const a = (la ?? {}) as Record<string, any>;
   const p: LoanForm = {};

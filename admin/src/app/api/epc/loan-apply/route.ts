@@ -121,6 +121,10 @@ export async function POST(req: NextRequest) {
       if (borrower_email && !EMAIL_RE.test(borrower_email)) return err("Enter a valid email.", 400);
       if (install_pincode && !PIN_RE.test(install_pincode)) return err("Enter a valid 6-digit pincode.", 400);
       if (system_type && !SYSTEM_TYPES.has(system_type)) return err("Choose a valid system type.", 400);
+      const connection_category = strOrNull(b.connection_category);
+      if (connection_category && connection_category !== "domestic" && connection_category !== "non_domestic") {
+        return err("Choose Domestic or Non-domestic.", 400);
+      }
       if (plant_use_type && plant_use_type !== "residential" && plant_use_type !== "commercial") {
         return err("Choose Residential or Commercial.", 400);
       }
@@ -425,6 +429,7 @@ export async function POST(req: NextRequest) {
           ...(b.install_city     !== undefined ? { install_city:     strOrNull(b.install_city) } : {}),
           ...(b.system_type      !== undefined ? { system_type:      strOrNull(b.system_type) } : {}),
           ...(b.plant_use_type   !== undefined ? { plant_use_type:   strOrNull(b.plant_use_type) } : {}),
+          ...(b.connection_category !== undefined ? { connection_category: strOrNull(b.connection_category) } : {}),
           // Consent is captured at the end of the chatbot (just before submit).
           ...(b.consented === true ? {
             consent_at: now, consent_policies: CONSENT_POLICIES,
