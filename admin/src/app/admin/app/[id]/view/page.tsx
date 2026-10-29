@@ -2,13 +2,14 @@
 
 // Loan Application — admin View profile.
 //
-// Dense, single-window operations layout on the SAME green design language as
-// the EPC View (green #178a5c primary, sky-blue #185fa5 accents, white).
-// Chrome comes from @/components/view/ViewKit (SectionCard/KV/DocGrid/Pill/
-// BigProgressStep), so the two dashboards stay visually in step.
+// The progress stages are the tabs (Application · Lender · Approval ·
+// Disbursement); the page opens on the case's current stage. The header holds
+// ONE next-step button plus Edit and ⋮; owner + comments sit beside every tab.
+// Chrome comes from @/components/view/ViewKit, same green design language as
+// the EPC View.
 //
-// Read-only summary — "Edit" jumps to /admin/app/[id]/step-1. Disbursement
-// entry stays on the dedicated /disbursement screen; this page only displays it.
+// Read-only summary — "Edit" jumps to the chat / step forms. Disbursement entry
+// stays on the dedicated /disbursement screen; this page only displays it.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
@@ -21,7 +22,8 @@ import EditLoanDatesModal from "@/components/EditLoanDatesModal";
 import { invalidate } from "@/lib/list-cache";
 import CommentsSection from "@/components/CommentsSection";
 import OwnershipCard from "@/components/OwnershipCard";
-import LoanActivityLogModal from "@/components/LoanActivityLogModal";
+import { LoanActivityList } from "@/components/LoanActivityLogModal";
+import { COMPLETION_CATEGORIES, TRANCHE1_DOCS } from "@/components/CompletionDocsSection";
 import { LENDER_LABEL, type ApprovalDetails } from "@/components/ApprovalDetailsTable";
 import LoanLenderPickerModal, { type PickerLender } from "@/components/LoanLenderPickerModal";
 import LoanLenderStatusBox from "@/components/LoanLenderStatusBox";
@@ -31,20 +33,41 @@ import {
 } from "@/lib/loan-lenders";
 import LenderPickerModal, { type LenderKey } from "@/components/LenderPickerModal";
 import EmailComposerModal from "@/components/EmailComposerModal";
-import { TabButton, DownloadMenu, KebabMenu, ProfileRail } from "@/components/ProfileTabBar";
+import { DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
 import { loanDocChecklist } from "@/lib/loan-doc-checklist";
+import { loanChecks } from "@/lib/loan-verification";
+import { cachedLoanUpdateCount } from "@/lib/use-epc-updates";
 import { deadlineState, DEADLINE_PILL, remainingAmount, fmtDateShort } from "@/lib/disbursement";
 import { fmtDateTime } from "@/lib/dates";
 import { fmtRupees, fmtRupeesExact } from "@/lib/money";
+import { initialsOf } from "@/lib/names";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import {
-  I, SectionCard, KV, StepBlock, DocGrid, BigProgressStep, BigConnector, type ViewDocSlot,
+  I, DocGrid, DocViewer, FieldCol, FillCount, fieldFill, fillText, fillTone, ProgressTabs, ChecksPanel, CopyButton, Section, StatCards, StepBlock,
+  type FieldRow, type ViewDocSlot, type ViewerItem, type StageState,
 } from "@/components/view/ViewKit";
+import LoanApprovalForm from "@/components/LoanApprovalForm";
+import LoanDisbursementPanel from "@/components/LoanDisbursementPanel";
 
 type Loan = Record<string, any>;
-type Doc  = { id: string; category: string; storage_path: string; file_name: string | null; mime_type: string | null; created_at?: string | null };
+type Doc  = {
+  id: string; category: string; storage_path: string; file_name: string | null; mime_type: string | null;
+  created_at?: string | null;
+};
+// Another application with the same mobile / PAN / K number (Checks → Duplicate).
+type DupRow = {
+  id: string; loan_display_id: string | null; aadhaar_name: string | null; borrower_name: string | null;
+  status: string | null; aborted_at: string | null; created_at: string | null;
+  borrower_mobile: string | null; borrower_pan: string | null; ca_number: string | null;
+};
+// Signed URLs for every document, minted in ONE request (doc-urls) — pictures,
+// the header photo and instant View. They live 1h; reuse them for 50 min.
+type SignedUrls = { rows: Record<string, string>; paths: Record<string, string>; at: number };
+const URL_TTL_MS = 50 * 60_000;
+
+type Stage = "submitted" | "docs" | "approved" | "first" | "second";
 
 // Slot key → epc_applications *_path column, for admin doc-removal (trash) on
 // path-backed slots. Keys NOT listed here are doc-row backed (deleted by id).
@@ -100,6 +123,13 @@ const PAUSE = (
     <path d="M10 5v14M14 5v14" />
   </svg>
 );
+// "Message EPC" — a chat bubble with text lines.
+const MSG_EPC = (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12z" />
+    <path d="M8.5 10.5h7M8.5 14h4.5" />
+  </svg>
+);
 
 function displayId(loan: Loan): string {
   if (loan.loan_display_id) return loan.loan_display_id;
@@ -127,8 +157,25 @@ function fmtApproval(v: number | null | undefined, money: boolean, suffix?: stri
 
 // ── Document grouping (missing-doc visibility) ───────────────────────
 
-type LoanSlot = { key: string; label: string; docId: string | null; path: string | null };
+type LoanSlot = {
+  key: string; label: string; docId: string | null; path: string | null;
+  // Viewer details (filled when the slot has a file).
+  file?: string | null; mime?: string | null; at?: string | null;
+};
 type LoanDocGroup = { title: string; slots: LoanSlot[] };
+
+// Upload time of a *_path document: its *_uploaded_at column when there is one,
+// else the Date.now() prefix every upload route puts in the object name.
+const PATH_UPLOADED_AT: Record<string, string> = {
+  quotation: "proforma_uploaded_at", ebill: "ebill_uploaded_at",
+  rooftop: "rooftop_photo_uploaded_at", bank_statement: "bank_statement_uploaded_at",
+};
+function pathUploadedAt(loan: Loan, key: string, path: string): string | null {
+  const col = PATH_UPLOADED_AT[key];
+  if (col && loan[col]) return String(loan[col]);
+  const m = /\/(\d{13})[_.]/.exec(path);
+  return m ? new Date(Number(m[1])).toISOString() : null;
+}
 
 // Every user_application_docs category that a NAMED slot below owns. Any row in
 // one of these categories belongs to its slot — never to "Other documents".
@@ -148,14 +195,20 @@ function buildLoanDocGroups(loan: Loan, docsIn: Doc[]): LoanDocGroup[] {
   // any older duplicate is superseded (not the stale first copy).
   const docs = [...docsIn].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
   const usedRowIds = new Set<string>();
+  const fromRow = (key: string, label: string, d: Doc): LoanSlot => ({
+    key, label, docId: d.id, path: null, file: d.storage_path, mime: d.mime_type, at: d.created_at ?? null,
+  });
+  const fromPath = (key: string, label: string, path: string | null | undefined): LoanSlot => ({
+    key, label, docId: null, path: path ?? null, file: path ?? null, at: path ? pathUploadedAt(loan, key, path) : null,
+  });
   const slot = (
     key: string, label: string, cats: string[], path: string | null | undefined,
   ): LoanSlot => {
     for (const cat of cats) {
       const row = docs.find((d) => d.category === cat && !usedRowIds.has(d.id));
-      if (row) { usedRowIds.add(row.id); return { key, label, docId: row.id, path: null }; }
+      if (row) { usedRowIds.add(row.id); return fromRow(key, label, row); }
     }
-    return { key, label, docId: null, path: path ?? null };
+    return fromPath(key, label, path);
   };
 
   const groups: LoanDocGroup[] = [];
@@ -201,13 +254,13 @@ function buildLoanDocGroups(loan: Loan, docsIn: Doc[]): LoanDocGroup[] {
   bankRows.forEach((d) => usedRowIds.add(d.id));
   const bankSlots: LoanSlot[] = [];
   if (loan.bank_statement_path) {
-    bankSlots.push({ key: "bank_statement", label: "Bank statement", docId: null, path: loan.bank_statement_path });
+    bankSlots.push(fromPath("bank_statement", "Bank statement", loan.bank_statement_path));
   }
   bankRows.forEach((d) => {
-    bankSlots.push({ key: `bank_statement_${d.id}`, label: "Bank statement", docId: d.id, path: null });
+    bankSlots.push(fromRow(`bank_statement_${d.id}`, "Bank statement", d));
   });
   if (bankSlots.length === 0) {
-    bankSlots.push({ key: "bank_statement", label: "Bank statement", docId: null, path: null });
+    bankSlots.push(fromPath("bank_statement", "Bank statement", null));
   }
   if (bankSlots.length > 1) {
     bankSlots.forEach((s, i) => { s.label = `Bank statement ${i + 1}`; });
@@ -247,12 +300,7 @@ function buildLoanDocGroups(loan: Loan, docsIn: Doc[]): LoanDocGroup[] {
   if (others.length > 0) {
     groups.push({
       title: "Other documents",
-      slots: others.map((d) => ({
-        key: `other-${d.id}`,
-        label: DOC_LABEL[d.category] ?? d.category.replace(/_/g, " "),
-        docId: d.id,
-        path: null,
-      })),
+      slots: others.map((d) => fromRow(`other-${d.id}`, DOC_LABEL[d.category] ?? d.category.replace(/_/g, " "), d)),
     });
   }
 
@@ -276,6 +324,16 @@ function Inner() {
   // "/admin/board" in sessionStorage so Back returns there, not the console.
   const [returnTo, setReturnTo] = useState<string | null>(null);
   useEffect(() => { if (typeof window !== "undefined") setReturnTo(sessionStorage.getItem("ccReturnTo")); }, []);
+  // Under xl the Submitted cards stack ABOVE Documents, so their details open
+  // in place (pushing Documents down) instead of floating over it.
+  const [stacked, setStacked] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1279px)");
+    const on = () => setStacked(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
   function goBack() {
     const to = typeof window !== "undefined" ? sessionStorage.getItem("ccReturnTo") : null;
     if (to) { sessionStorage.removeItem("ccReturnTo"); router.push(to as unknown as string); }
@@ -288,7 +346,6 @@ function Inner() {
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [delOpen, setDelOpen] = useState(false);
-  const [activityOpen, setActivityOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [trancheBusy, setTrancheBusy] = useState<null | "1" | "2">(null);
   const [approveOpen, setApproveOpen] = useState(false);
@@ -300,12 +357,19 @@ function Inner() {
   const [abortOpen, setAbortOpen] = useState(false);
   const [abortReason, setAbortReason] = useState("");
   const [lenderRows, setLenderRows] = useState<LoanLenderRow[]>([]);
-  // 6h — which approved lender's details are shown in the Approval Details card.
-  const [detailsLender, setDetailsLender] = useState<string>("");
   // Bumped to re-read the file (and its docs) after a server-side change.
   const [reloadKey, setReloadKey] = useState(0);
   const [swapBusy, setSwapBusy] = useState(false);
   const [datesOpen, setDatesOpen] = useState(false);
+  const [urls, setUrls] = useState<SignedUrls | null>(null);
+  const [dups, setDups] = useState<DupRow[] | null>(null);
+  // Open stage tab — null = the case's current stage.
+  const [tab, setTab] = useState<Stage | null>(null);
+  // Lender whose approval form is open on the Approved stage (picked, or
+  // "Change lender"); null = the saved / only lender.
+  const [formLender, setFormLender] = useState<PickerLender | null>(null);
+  // Document open in the in-page viewer (slot key).
+  const [viewerKey, setViewerKey] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -328,20 +392,46 @@ function Inner() {
       setLenderRows((ll ?? []) as unknown as LoanLenderRow[]);
       setLoading(false);
 
+      // ONE request signs every document — document pictures, instant View, and
+      // the header photo (this replaced the header photo's own sign call).
+      const res = await fetch(`/api/admin/loan-app/${params.id}/doc-urls`, {
+        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      }).catch(() => null);
+      const data = res?.ok ? await res.json().catch(() => null) : null;
+      const signed: SignedUrls | null = data?.ok ? { rows: data.rows ?? {}, paths: data.paths ?? {}, at: Date.now() } : null;
+      setUrls(signed);
+      // Applicant photo, else the face cropped from the borrower's Aadhaar.
       const photoDoc = docRows.find((d) => d.category === "customer_photo");
-      if (photoDoc) {
-        const url = await getDocumentUrl(photoDoc.id);
-        if (url) setPhotoUrl(url);
-      } else if (la?.aadhaar_face_path) {
-        // No dedicated applicant photo — fall back to the face cropped from the
-        // borrower's Aadhaar (captured at OCR time) as the applicant photo.
-        const url = await signPath(la.aadhaar_face_path as string);
-        if (url) setPhotoUrl(url);
-      } else {
-        setPhotoUrl(null); // a re-read (e.g. after a role swap) may leave no photo
-      }
+      setPhotoUrl(
+        photoDoc ? signed?.rows[photoDoc.id] ?? null
+        : la?.aadhaar_face_path ? signed?.paths[la.aadhaar_face_path as string] ?? null
+        : null,
+      );
     })();
   }, [params.id, reloadKey]);
+
+  // Duplicate check — another application with the same mobile, PAN or K number
+  // (the same roof financed twice). One small query per profile open; it re-runs
+  // only if one of those three values changes, never on focus.
+  const dupMobile = loan?.borrower_mobile as string | undefined;
+  const dupPan = loan?.borrower_pan as string | undefined;
+  const dupCa = loan?.ca_number as string | undefined;
+  useEffect(() => {
+    if (!loan?.id) return;
+    const or = ([["borrower_mobile", dupMobile], ["borrower_pan", dupPan], ["ca_number", dupCa]] as const)
+      .map(([c, v]) => [c, String(v ?? "").trim().replace(/"/g, "")] as const)
+      .filter(([, v]) => v.length >= 4)
+      .map(([c, v]) => `${c}.eq."${v}"`);
+    if (!or.length) { setDups([]); return; }
+    void supabase().from("epc_applications")
+      .select("id, loan_display_id, aadhaar_name, borrower_name, status, aborted_at, created_at, borrower_mobile, borrower_pan, ca_number")
+      .or(or.join(","))
+      .neq("id", loan.id)
+      .order("created_at", { ascending: false })
+      .limit(5)
+      .then(({ data }: { data: DupRow[] | null }) => setDups(data ?? []));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loan?.id, dupMobile, dupPan, dupCa]);
 
   // Deep-link from the Task Manager (change #10): dragging a loan into a stage
   // opens the real workflow popup here (?do=docsent | reject | abort). Approve
@@ -370,8 +460,14 @@ function Inner() {
   }, [loan]);
   const docGroups = useMemo(() => (loan ? buildLoanDocGroups(loan, docs) : []), [loan, docs]);
 
+  // A URL from the one-shot doc-urls batch while it's still valid, else null.
+  const fresh = (u: string | undefined) => (u && urls && Date.now() - urls.at < URL_TTL_MS ? u : null);
+
+  const urlForDoc = async (id: string) => fresh(urls?.rows[id]) ?? await getDocumentUrl(id);
+  const urlForPath = async (path: string) => fresh(urls?.paths[path]) ?? await signPath(path);
+
   async function openDoc(id: string) {
-    const url = await getDocumentUrl(id);
+    const url = await urlForDoc(id);
     if (url) window.open(url, "_blank", "noopener");
   }
 
@@ -408,7 +504,7 @@ function Inner() {
   }
 
   async function openPath(path: string) {
-    const url = await signPath(path);
+    const url = await urlForPath(path);
     if (url) window.open(url, "_blank", "noopener");
   }
 
@@ -424,7 +520,8 @@ function Inner() {
     } catch { /* best effort */ }
   }
 
-  // Remove a doc-row-backed document (user_application_docs) — immediate.
+  // Remove a doc-row-backed document (user_application_docs) — DocGrid has
+  // already confirmed, and shows the button to the owner only.
   async function removeDocRow(docId: string) {
     const ok = await deleteDocument(docId);
     if (!ok) { alert("Couldn't remove the document."); return; }
@@ -432,7 +529,7 @@ function Inner() {
   }
 
   // Remove a *_path-backed document via the admin-only route (nulls the column
-  // + deletes exactly that GCS object + writes activity log) — immediate.
+  // + deletes exactly that GCS object + writes activity log) — after DocGrid's confirm.
   async function removePathDoc(column: string) {
     try {
       const res = await fetch("/api/admin/delete-doc-path", {
@@ -448,15 +545,14 @@ function Inner() {
     }
   }
 
+  const isPdf = (s: LoanSlot) => /pdf/i.test(s.mime ?? "") || /\.pdf$/i.test(s.file ?? "");
+
   function toViewSlots(g: LoanDocGroup): ViewDocSlot[] {
     return g.slots.map((s) => ({
       key: s.key,
       label: s.label,
-      onView: s.docId
-        ? () => void openDoc(s.docId!)
-        : s.path
-        ? () => void openPath(s.path!)
-        : undefined,
+      title: s.file?.split("/").pop(),
+      onView: s.docId || s.path ? () => setViewerKey(s.key) : undefined,
       onDownload: s.docId
         ? () => void downloadDoc(s.docId!)
         : s.path
@@ -643,16 +739,6 @@ function Inner() {
       .filter((r) => !DEFAULT_LOAN_LENDERS.some((d) => d.key === r.lender_key))
       .map((r) => ({ key: r.lender_key, label: r.lender_label })),
   ];
-  // Approval Details are shown per selected lender via chips (6h). Default to
-  // the finalized lender (approved_lender), else the first approved lender.
-  const selDetailsKey = detailsLender || (loan.approved_lender as string) || approvedRows[0]?.lender_key || "";
-  const selRow = approvedRows.find((r) => r.lender_key === selDetailsKey) ?? null;
-  const shownDetails = ((selRow?.approval_details as ApprovalDetails | null) ?? approvalDetails) as ApprovalDetails | null;
-  const shownCredit =
-    (selRow?.approval_details as { credit_score?: number | null } | null)?.credit_score ??
-    (selDetailsKey === loan.approved_lender ? (loan.credit_score ?? null) : null);
-  const shownLenderLabel = selRow?.lender_label
-    || (selDetailsKey ? (LENDER_LABEL[selDetailsKey] ?? selDetailsKey) : (decidedByLabel ?? "—"));
 
   // Tracker reads an "effective" status so a held case still shows where it
   // was parked (Resume returns it there).
@@ -692,7 +778,23 @@ function Inner() {
   // applicant ↔ co-applicant swap are the main admin's only.
   const canChangeReview = approvedPlus || rejected || aborted || anyLenderActivity;
   const mainAdmin = isMainAdmin(getBusiness());
+  const canHold = (underReview || docsSent) && !anyApprovedLender;
   const kebabItems = [
+    {
+      label: downloading ? "Preparing…" : "Download ZIP",
+      icon: I.download,
+      onClick: () => { if (!downloading) setZipPickerOpen(true); },
+    },
+    ...(["1", "2"] as const).filter((t) => (t === "1" ? tranche1Exists : tranche2Exists)).map((t) => ({
+      label: trancheBusy === t ? "Preparing…" : `Download Tranche ${t}`,
+      icon: I.download,
+      onClick: () => { if (!trancheBusy) void downloadTranche(t); },
+    })),
+    ...(canHold && !onHold && !aborted ? [{
+      label: "Put on hold",
+      icon: PAUSE,
+      onClick: () => holdCase(),
+    }] : []),
     ...(!aborted ? [{
       label: "Abort application",
       icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M5.6 5.6l12.8 12.8" /></svg>),
@@ -790,11 +892,22 @@ function Inner() {
     finally { setStatusBusy(false); }
   }
 
-  // Approve routes to the approval-details screen for that lender; the approval
-  // page writes the lender's approved_at + approval_details and syncs status.
+  // Approve opens the approval-details form for that lender right here, on the
+  // Approved stage; saving writes the lender's approved_at + approval_details.
   function approvePickLender(lender: PickerLender) {
-    if (!loan) return;
-    router.push(`/admin/app/${loan.id}/approval?lender=${lender.key}&label=${encodeURIComponent(lender.label)}` as any);
+    setApproveOpen(false);
+    setChangeLenderOpen(false);
+    setFormLender(lender);
+    setTab("approved");
+  }
+
+  // Re-read just the loan row (after a disbursement / review save).
+  async function reloadLoan() {
+    const { data } = await supabase().from("epc_applications")
+      .select("*, epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)")
+      .eq("id", params.id)
+      .maybeSingle();
+    if (data) setLoan(data);
   }
 
   async function rejectLenderNow(lender: PickerLender, reason?: string, date?: string) {
@@ -833,7 +946,6 @@ function Inner() {
       };
       await supabase().from("epc_applications").update(patch).eq("id", loan.id);
       setLoan((prev) => (prev ? ({ ...prev, ...patch } as Loan) : prev));
-      setDetailsLender(key);
       await logLoanActivity(loan.id, "status_change", { detail: `Finalized ${row.lender_label} for disbursement` });
       setStatusMsg(`${row.lender_label} finalized.`);
     } catch (e) { setStatusMsg("Couldn't finalize: " + (e as Error).message); }
@@ -896,593 +1008,494 @@ function Inner() {
     }
   }
 
-  // Header status/decision actions — Submitted → Docs Sent → Approve/Reject,
-  // plus Hold/Resume. Approve/Reject handlers unchanged; the back-transitions
-  // retarget to Docs Sent, and Docs Sent → Under Review is the single undo.
-  // Per-lender action bar: the three controls stay visible at every stage
-  // (6f). Doc Sent opens a lender picker (already-sent lenders excluded, 6b/6g);
-  // Approve / Reject pick from the lenders that have docs (6e).
-  const statusActions =
-    onHold ? (
-      <>
-        <span className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border bg-[#fff2cc] text-[#8a6500] border-[#f3d9a4] inline-flex items-center gap-1.5">
-          {PAUSE} On hold
-        </span>
-        <HAction variant="primary" disabled={statusBusy} onClick={resumeHold}>Resume</HAction>
-      </>
-    ) : (
-      <>
-        <HAction
-          variant="primary"
-          icon={I.send}
-          disabled={statusBusy || !appDocsComplete}
-          title={appDocsComplete ? undefined : "Upload all required documents first"}
-          onClick={() => setSendOpen(true)}
-        >
-          Email
-        </HAction>
-        <HAction
-          variant="approve"
-          icon={I.check}
-          disabled={statusBusy || withDocs.length === 0}
-          title={withDocs.length ? undefined : "Send docs to a lender first"}
-          onClick={() => setApproveOpen(true)}
-        >
-          Approve
-        </HAction>
-        <HAction
-          variant="reject"
-          disabled={statusBusy || withDocs.length === 0}
-          title={withDocs.length ? undefined : "Send docs to a lender first"}
-          onClick={() => setRejectOpen(true)}
-        >
-          Reject
-        </HAction>
-        {(underReview || docsSent) && !anyApprovedLender && (
-          <HAction variant="amber" icon={PAUSE} disabled={statusBusy} onClick={holdCase}>Hold</HAction>
-        )}
-      </>
-    );
+  // ── Progress bar = tabs ─────────────────────────────────────────────
+  // The five stage circles ARE the tabs. Click one to open that stage:
+  // Submitted = the whole application; Docs Sent = lenders; Approved = the
+  // approval-details form; 1st / 2nd Disbursement = that tranche's documents and
+  // amount — each showing what's filled and what isn't. Opens on the current stage.
+  const checklist = loanDocChecklist(loan, docs.map((d) => d.category));
+  const docsHave = checklist.filter((d) => d.ok).length;
+  // Tranche documents on file (same required sets as the disbursement stages).
+  const docCats = new Set(docs.map((d) => d.category));
+  const t1Need = TRANCHE1_DOCS.filter((d) => !(loan.approved_lender === "solfin" && d.category === "mmr_advance_receipt"));
+  const t1Have = t1Need.filter((d) => docCats.has(d.category)).length;
+  const t2Have = COMPLETION_CATEGORIES.filter((c) => docCats.has(c)).length;
+  const stageNow: Stage =
+    !tDocsSent ? (appDocsComplete ? "docs" : "submitted")
+    : !tApproved ? "approved"
+    : !firstDone ? "first"
+    : "second";
+  const held = (s: Stage, st: StageState): StageState => (onHold && s === stageNow ? "hold" : st);
+  // When each finished step happened (date + time). Disbursements carry only
+  // the disbursement date the admin enters, so those show the date alone.
+  const sentAt = lenderRows.find((r) => r.docs_sent_at)?.docs_sent_at ?? null;
+  const decidedAt = tApproved
+    ? lenderRows.find((r) => r.lender_key === loan.approved_lender)?.approved_at ?? loan.approved_at ?? null
+    : tRejected ? loan.rejected_at ?? null : null;
+  const withWhen = (what: ReactNode, at: string | null | undefined) =>
+    at ? <>{what}<br />{fmtDateTime(at)}</> : what;
+  const stages: Array<{ key: Stage; label: string; sub?: ReactNode; icon: ReactNode; state: StageState }> = [
+    {
+      key: "submitted", label: "Submitted", icon: I.send,
+      state: held("submitted", appDocsComplete ? "done" : "current"),
+      sub: appDocsComplete ? (loan.submitted_at ? fmtDateTime(loan.submitted_at) : "Complete") : <><FillCount have={docsHave} total={checklist.length} /> documents</>,
+    },
+    {
+      key: "docs", label: "Docs Sent", icon: I.files,
+      state: held("docs", tDocsSent ? "done" : appDocsComplete ? "current" : "pending"),
+      sub: tDocsSent ? (sentAt ? fmtDateTime(sentAt) : "Sent to lender") : onHold ? "On hold" : appDocsComplete ? "Ready to send" : "Pending",
+    },
+    {
+      key: "approved", label: tRejected ? "Rejected" : "Approved", icon: I.circleCheck,
+      state: held("approved", tApproved ? "done" : tRejected ? "failed" : tDocsSent ? "current" : "pending"),
+      sub: decidedByLabel ? withWhen(decidedByLabel, decidedAt) : tDocsSent ? "Awaiting decision" : "Pending",
+    },
+    {
+      key: "first", label: "1st Disbursement", icon: I.money,
+      state: held("first", firstDone ? "done" : tApproved ? "current" : "pending"),
+      sub: firstDone ? fmtDateShort(loan.first_disbursement_date) : tApproved ? <><FillCount have={t1Have} total={t1Need.length} /> documents</> : "Pending",
+    },
+    {
+      key: "second", label: "2nd Disbursement", icon: I.check,
+      state: held("second", secondDone ? "done" : firstDone ? "current" : "pending"),
+      sub: secondDone ? fmtDateShort(loan.second_disbursement_date) : firstDone ? <><FillCount have={t2Have} total={COMPLETION_CATEGORIES.length} /> documents</> : "Pending",
+    },
+  ];
+  const activeTab: Stage = tab ?? stageNow;
+  const canAct = !aborted && !onHold;
+
+  const sendButton = (primary: boolean) => (
+    <HAction
+      variant={primary ? "primary" : "outline"}
+      icon={I.send}
+      disabled={statusBusy || !appDocsComplete}
+      title={appDocsComplete ? undefined : "Upload all required documents first"}
+      onClick={() => setSendOpen(true)}
+    >
+      Send to lender
+    </HAction>
+  );
+
+  // ── Approved stage — which lender's approval form to show ───────────
+  // The saved (finalized) lender's details open for editing; before approval,
+  // the only lender with the documents opens straight away, else "Approved by
+  // lender" asks which one.
+  const savedLender: PickerLender | null = approvedPlus && loan.approved_lender
+    ? {
+        key: String(loan.approved_lender),
+        label: lenderRows.find((r) => r.lender_key === loan.approved_lender)?.lender_label ?? LENDER_LABEL[String(loan.approved_lender)] ?? String(loan.approved_lender),
+      }
+    : null;
+  const formFor: PickerLender | null =
+    formLender ?? savedLender ?? (!tRejected && withDocsOptions.length === 1 ? withDocsOptions[0] : null);
+  const formEdit: "approval" | null = savedLender && formFor?.key === savedLender.key ? "approval" : null;
+  const approveNow = () => (withDocsOptions.length === 1 ? approvePickLender(withDocsOptions[0]) : setApproveOpen(true));
+
+  // Edit the application itself; each stage's details are edited in its stage.
+  const editItems = aborted ? [] : [
+    // Chatbot — asks only for what's still missing.
+    { label: "Continue in chat", onClick: () => router.push(`/admin/app/intake?app=${loan.id}&edit=1` as any) },
+    // The classic step-by-step wizard.
+    { label: "Edit in form", onClick: () => router.push(`/admin/app/${loan.id}/step-1` as any) },
+  ];
+  // This admin's unread EPC replies — from the console's cache, never a fetch.
+  const msgCount = cachedLoanUpdateCount(loan.id);
+
+  // ── Checks (data already on the row — no request) ───────────────────
+  const checks = loanChecks(loan, docs.map((d) => d.category), {
+    approved: approvedPlus, decided: approvedPlus || rejected, duplicates: dups ? dups.length : null,
+  });
+  const dupList = dups && dups.length > 0 ? (
+    <ul className="space-y-1">
+      {dups.map((d) => {
+        const why = [
+          d.borrower_mobile && d.borrower_mobile === loan.borrower_mobile ? "Mobile" : null,
+          d.borrower_pan && d.borrower_pan === loan.borrower_pan ? "PAN" : null,
+          d.ca_number && d.ca_number === loan.ca_number ? "K No." : null,
+        ].filter(Boolean).join(" · ");
+        return (
+          <li key={d.id} className="text-[12px]">
+            <a href={`/admin/app/${d.id}/view`} target="_blank" rel="noopener" className="font-semibold text-[#185fa5] hover:underline">
+              {d.loan_display_id ?? "—"}
+            </a>
+            <span className="text-[#7a958a]"> · {d.aadhaar_name || d.borrower_name || "—"} · {why} · {d.aborted_at ? "Aborted" : (LOAN_STATUS_LABEL[d.status ?? ""] ?? d.status)}</span>
+          </li>
+        );
+      })}
+    </ul>
+  ) : null;
+
+  const approvedAmt = tApproved ? (loan.sanctioned_amount ?? approvalDetails?.approved_loan_amount ?? null) : null;
+  const disbursedAmt = Number(loan.first_disbursement_amount ?? 0) + Number(loan.second_disbursement_amount ?? 0);
+  const tranchesPaid = (firstDone ? 1 : 0) + (secondDone ? 1 : 0);
+  const initials = initialsOf(applicantName);
+  const kw = loan.project_size ? `${loan.project_size} ${String(loan.project_size_unit ?? "kw").toUpperCase()}` : null;
+
+  // Every uploaded document, in page order — the viewer's previous / next.
+  const viewerItems: ViewerItem[] = docGroups.flatMap((g) => g.slots).filter((s) => s.docId || s.path).map((s) => ({
+    key: s.key,
+    label: s.label,
+    at: s.at ? fmtDateTime(s.at) : null,
+    pdf: isPdf(s),
+    getUrl: () => (s.docId ? urlForDoc(s.docId) : urlForPath(s.path!)),
+    onOpen: () => void (s.docId ? openDoc(s.docId) : openPath(s.path!)),
+    onDownload: () => void (s.docId ? downloadDoc(s.docId) : downloadPath(s.path!)),
+  }));
+  const viewerIndex = viewerKey ? viewerItems.findIndex((v) => v.key === viewerKey) : -1;
+
+  // ── Submitted — every field, per column (optional ones don't count) ──
+  const yesNo = (v: unknown) => (v == null ? null : v ? "Yes" : "No");
+  const applicantRows: FieldRow[] = [
+    { k: "Name", v: loan.aadhaar_name || loan.borrower_name },
+    { k: "Lead owner", v: loan.lead_owner_name, optional: true },
+    { k: "Father's name", v: loan.borrower_father_name },
+    { k: "Gender", v: loan.aadhaar_gender },
+    { k: "Date of birth", v: loan.aadhaar_dob },
+    { k: "PAN", v: loan.borrower_pan, copy: loan.borrower_pan },
+    { k: "Aadhaar", v: loan.aadhaar_number_masked },
+    { k: "Email", v: loan.borrower_email, valueClass: "text-[#185fa5]", copy: loan.borrower_email },
+    { k: "Phone no", v: loan.borrower_mobile ? `+91 ${loan.borrower_mobile}` : null, copy: loan.borrower_mobile },
+    { k: "Earning", v: yesNo(loan.applicant_earning) },
+    { k: "Monthly income", v: loan.monthly_income != null ? fmtRupees(loan.monthly_income) : null, optional: loan.applicant_earning !== true },
+    { k: "Address", v: loan.aadhaar_address, wrap: true },
+  ];
+  const coappRows: FieldRow[] = hasCoapp ? [
+    { k: "Name", v: loan.coapp_name },
+    { k: "Father's name", v: loan.coapp_father_name },
+    { k: "DOB", v: loan.coapp_dob },
+    { k: "Relation", v: loan.coapp_relation },
+    { k: "Reason", v: loan.coapp_role_reason, wrap: true, optional: true },
+    { k: "PAN", v: loan.coapp_pan, copy: loan.coapp_pan },
+    { k: "Mobile", v: loan.coapp_mobile ? `+91 ${loan.coapp_mobile}` : null, copy: loan.coapp_mobile },
+    { k: "Email", v: loan.coapp_email, copy: loan.coapp_email, optional: true },
+    { k: "Earning", v: yesNo(loan.coapp_earning) },
+    { k: "Monthly income", v: loan.coapp_monthly_income != null ? fmtRupees(loan.coapp_monthly_income) : null, optional: loan.coapp_earning !== true },
+    { k: "Aadhaar name", v: loan.coapp_aadhaar_name },
+    { k: "Aadhaar", v: loan.coapp_aadhaar_number_masked },
+    { k: "Address", v: loan.coapp_aadhaar_address, wrap: true },
+  ] : [];
+  const gps = loan.rooftop_photo_gps as { lat?: number; lng?: number } | null;
+  const siteRows: FieldRow[] = [
+    { k: "Name on E-Bill", v: loan.ebill_name },
+    { k: "Address", v: loan.ebill_address_line, wrap: true },
+    { k: "Pincode", v: loan.install_pincode },
+    { k: "City", v: loan.install_city },
+    { k: "District", v: loan.install_district },
+    { k: "State", v: loan.install_state },
+    ...(gps ? [{ k: "Rooftop GPS", v: `${gps.lat?.toFixed?.(5) ?? "?"}, ${gps.lng?.toFixed?.(5) ?? "?"}`, optional: true }] : []),
+  ];
+  const loanRows: FieldRow[] = [
+    { k: "Project size", v: kw },
+    { k: "Project cost", v: fmtRupees(loan.total_project_cost) },
+    { k: "Loan amount required", v: fmtRupees(loan.loan_amount_required) },
+    {
+      k: "Down payment",
+      v: loan.total_project_cost && loan.loan_amount_required
+        ? fmtRupees(Math.max(0, Number(loan.total_project_cost) - Number(loan.loan_amount_required)))
+        : null,
+      optional: true,
+    },
+    { k: "System type", v: loan.system_type ? SYSTEM_LABEL[loan.system_type] ?? loan.system_type : null },
+    { k: "Monthly bill", v: fmtRupees(loan.monthly_bill_amount) },
+    { k: "DISCOM", v: loan.discom_name },
+    { k: "K Number", v: loan.ca_number, copy: loan.ca_number },
+  ];
+  const employmentRows: FieldRow[] = [
+    { k: "Employment", v: loan.employment_type ? EMPLOYMENT_LABEL[loan.employment_type] ?? loan.employment_type : null },
+    { k: "Organization", v: loan.organization_name, optional: loan.employment_type !== "salaried" },
+    { k: "Profession", v: loan.profession === "Other" && loan.profession_other ? `Other — ${loan.profession_other}` : loan.profession, optional: loan.employment_type !== "self_employed" },
+    { k: "Annual income", v: fmtRupees(loan.annual_income) },
+  ];
+  const bankRows: FieldRow[] = [
+    { k: "Bank name", v: loan.bank_name },
+    { k: "Account holder", v: loan.bank_account_holder },
+    { k: "Account no", v: maskAcct(loan.bank_account_no), copy: loan.bank_account_no },
+    { k: "IFSC code", v: loan.bank_ifsc, copy: loan.bank_ifsc },
+    { k: "Type", v: loan.bank_account_type },
+  ];
+  const fillOf = (...cols: FieldRow[][]) => { const f = fieldFill(...cols); return <FillCount have={f.have} total={f.total} />; };
+  const checksCounted = checks.filter((c) => c.status !== "na");
+  const checksOk = checksCounted.filter((c) => c.status === "pass").length;
 
   return (
     <main className="min-h-screen bg-white">
-      {/* ── STICKY HEADER — name / loan-ID · created / EPC, + actions ──── */}
-      <header className="border-b border-[#cdeadd] bg-white/95 backdrop-blur sticky top-0 z-30">
-        <div className="w-full px-5 sm:px-8 py-4 flex items-start justify-between gap-4 flex-wrap">
-          <div className="flex items-start gap-4 min-w-0">
+      {/* ── HEADER — who it is, one quiet info line · plain buttons ── */}
+      <header className="border-b border-[#eef3f1] bg-white/95 backdrop-blur sticky top-0 z-30">
+        <div className="w-full px-5 sm:px-8 py-4 flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3.5 min-w-0">
             <button
               onClick={goBack}
-              className="text-[13px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1 shrink-0 mt-1"
+              title={returnTo === "/admin/board" ? "Back to Task Manager" : "Back to console"}
+              aria-label={returnTo === "/admin/board" ? "Back to Task Manager" : "Back to console"}
+              className="w-9 h-9 -ml-2 rounded-full grid place-items-center text-[#5a8a76] hover:bg-[#eef6f1] hover:text-[#0f3d2e] shrink-0"
             >
-              ← {returnTo === "/admin/board" ? "Back to Task Manager" : "Back to console"}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
             </button>
-            <div className="w-px h-14 bg-[#e2efe9] shrink-0" />
-            <div
-              className="w-16 h-16 rounded-[12px] bg-[#d6efe3] text-[#178a5c] grid place-items-center shrink-0 overflow-hidden"
-              style={photoUrl ? undefined : { transform: "scale(1.25)", transformOrigin: "center" }}
-            >
+            <div className="w-12 h-12 rounded-full bg-[#e6f6ee] text-[#178a5c] grid place-items-center shrink-0 overflow-hidden text-[16px] font-semibold">
               {photoUrl ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img src={photoUrl} alt="" className="w-full h-full object-cover" style={{ imageOrientation: "from-image" }} />
               ) : (
-                I.user
+                initials || I.user
               )}
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-[22px] font-semibold text-[#0f3d2e] truncate">{applicantName}</span>
+              <div className="flex items-center gap-2.5 min-w-0">
+                <h1 className="text-[22px] font-semibold text-[#0f3d2e] truncate leading-tight">{applicantName}</h1>
                 <StatusBadge status={aborted ? "aborted" : loan.status} lender={decidedByLabel} />
               </div>
-              {/* Loan ID, with "Created …" where "via <EPC>" used to sit. */}
-              <div className="text-[13px] flex items-center gap-2 mt-1 min-w-0">
-                <span className="font-semibold text-[#185fa5]">{displayId(loan)}</span>
-                {loan.created_at && (
-                  <>
-                    <span className="text-[#c7ddd2]">·</span>
-                    <span className="text-[#5a8a76] whitespace-nowrap">Created {fmtDateShort(loan.created_at)}</span>
-                  </>
-                )}
+              <div className="flex items-center gap-2 mt-1 text-[13px] text-[#7a958a] min-w-0">
+                <span className="group inline-flex items-center gap-1 font-medium text-[#185fa5] shrink-0">
+                  {displayId(loan)}
+                  <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex"><CopyButton value={displayId(loan)} label="Copy loan ID" /></span>
+                </span>
+                <span className="truncate">
+                  {[loan.system_type ? SYSTEM_LABEL[loan.system_type] ?? loan.system_type : null, kw, epcName].filter(Boolean).join("  ·  ")}
+                </span>
               </div>
-              {/* EPC partner — directly under the loan ID. */}
-              <div className="text-[13px] text-[#5a8a76] truncate mt-0.5">{epcName}</div>
             </div>
           </div>
-
+          <div className="flex items-center gap-1.5">
+            {onHold && !aborted && (
+              <HAction variant="amber" icon={PAUSE} disabled={statusBusy} onClick={resumeHold}>Resume</HAction>
+            )}
+            <a
+              href={`/admin/app/${loan.id}/messages`}
+              title={loan.attention_status === "open" ? "Open issue with the EPC" : undefined}
+              className="relative h-9 px-3 rounded-[8px] inline-flex items-center gap-1.5 text-[13px] font-semibold text-[#178a5c] border border-[#cdeadd] bg-[#f4fbf7] hover:bg-[#e9f6ef] hover:border-[#9fd6bd]"
+            >
+              {MSG_EPC}
+              Message EPC
+              {msgCount > 0 ? (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[17px] h-[17px] px-1 rounded-full bg-red-600 text-white text-[10px] font-bold grid place-items-center">{msgCount}</span>
+              ) : loan.attention_status === "open" ? (
+                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-600" />
+              ) : null}
+            </a>
+            {editItems.length > 0 && <DownloadMenu label="Edit" icon={I.edit} items={editItems} />}
+            <KebabMenu items={kebabItems} ghost />
+          </div>
         </div>
-        {/* A rejected app already shows its reason in the red line below, so the
-            grey status confirmation would just repeat it — suppress it there. */}
-        {statusMsg && !rejected && <div className="px-5 sm:px-8 pb-2 text-[12px] text-[#5a8a76]">{statusMsg}</div>}
-        {aborted && loan.abort_reason && (
-          <div className="px-5 sm:px-8 pb-2 text-[12px] font-medium text-red-700">Aborted — {loan.abort_reason}</div>
-        )}
-        {/* ONE rejection-reason line. syncHeadline copies the latest lender's
-            reason into loan.rejection_reason, so showing both the app-level line
-            and the per-lender line repeats the same text. Per-lender rows (which
-            name the lender) take precedence and are de-duplicated by reason text;
-            the app-level reason is the fallback when no lender row carries one.
-            Hidden once a lender approves (the approval is then the headline). */}
+        {/* Status lines: the last action, an abort, or ONE rejection reason
+            (per-lender rows de-duplicated by text; the app-level reason is the
+            fallback; hidden once a lender approves). */}
         {(() => {
+          const lines: Array<{ key: string; text: string; red?: boolean }> = [];
+          if (statusMsg && !rejected) lines.push({ key: "msg", text: statusMsg });
+          if (aborted && loan.abort_reason) lines.push({ key: "abort", text: `Aborted — ${loan.abort_reason}`, red: true });
           const lenderRej = loan.status !== "approved"
             ? lenderRows.filter((r) => r.rejected_at && (r.rejection_reason ?? "").trim())
             : [];
           if (lenderRej.length > 0) {
             const seen = new Set<string>();
-            const uniq = lenderRej.filter((r) => {
+            lenderRej.forEach((r) => {
               const k = (r.rejection_reason ?? "").trim().toLowerCase();
-              if (seen.has(k)) return false;
+              if (seen.has(k)) return;
               seen.add(k);
-              return true;
+              lines.push({ key: r.id, text: `Rejection reason${r.lender_label ? ` (${r.lender_label})` : ""}: ${r.rejection_reason}`, red: true });
             });
-            return uniq.map((r) => (
-              <div key={r.id} className="px-5 sm:px-8 pb-2 text-[12px] font-medium text-red-700">
-                Rejection reason{r.lender_label ? ` (${r.lender_label})` : ""}: {r.rejection_reason}
-              </div>
-            ));
+          } else if (rejected && loan.rejection_reason) {
+            lines.push({ key: "rej", text: `Rejection reason: ${loan.rejection_reason}`, red: true });
           }
-          if (rejected && loan.rejection_reason) {
-            return (
-              <div className="px-5 sm:px-8 pb-2 text-[12px] font-medium text-red-700">
-                Rejection reason: {loan.rejection_reason}
-              </div>
-            );
-          }
-          return null;
+          if (!lines.length) return null;
+          return (
+            <div className="w-full px-5 sm:px-8 pb-3 -mt-1 space-y-0.5">
+              {lines.map((l) => (
+                <div key={l.key} className={["text-[12.5px]", l.red ? "font-medium text-red-700" : "text-[#7a958a]"].join(" ")}>{l.text}</div>
+              ))}
+            </div>
+          );
         })()}
       </header>
 
-      <div className="w-full px-5 sm:px-8 py-4 lg:flex lg:gap-6" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
-
-        {/* ── LEFT NAV RAIL — a slim icon strip that expands on hover, so the
-             profile uses the whole window until you reach for an action
-             (mirrors the main-console sidebar). ── */}
-        <ProfileRail>
-              <TabButton label="Profile" icon={I.user} active rail />
-              {/* After approval, Edit becomes a dropdown of the three editable
-                  sections (each editable once, then locked). Before approval it's
-                  the normal jump to the step flow. */}
-              {approvedPlus && !aborted ? (
-                <DownloadMenu
-                  label="Edit"
-                  icon={I.edit}
-                  rail
-                  items={[
-                    {
-                      // Chatbot — resumes the chat and asks only what's missing.
-                      label: "Continue in chat",
-                      onClick: () => router.push(`/admin/app/intake?app=${loan.id}&edit=1` as any),
-                    },
-                    {
-                      // Full profile/step edit — the classic wizard.
-                      label: "Edit in form",
-                      onClick: () => router.push(`/admin/app/${loan.id}/step-1` as any),
-                    },
-                    {
-                      // Approval details INCLUDE the sanction letter. Fully editable,
-                      // repeatedly — no edit-once lock.
-                      label: "Approval details",
-                      onClick: () => router.push(`/admin/app/${loan.id}/approval?lender=${loan.approved_lender ?? ""}&edit=approval` as any),
-                    },
-                    {
-                      // "Sanction details" = the disbursement values (matches the
-                      // profile's Sanction-details card). Fully editable, repeatedly.
-                      label: "Sanction details",
-                      onClick: () => router.push(`/admin/app/${loan.id}/disbursement` as any),
-                    },
-                  ]}
-                />
-              ) : aborted ? (
-                <TabButton label="Edit" icon={I.edit} disabled rail title="Aborted — cannot edit" />
-              ) : (
-                <DownloadMenu
-                  label="Edit"
-                  icon={I.edit}
-                  rail
-                  items={[
-                    {
-                      // Chatbot — asks only for what's still missing.
-                      label: "Continue in chat",
-                      onClick: () => router.push(`/admin/app/intake?app=${loan.id}&edit=1` as any),
-                    },
-                    {
-                      // The classic step-by-step wizard (unchanged).
-                      label: "Classic form",
-                      onClick: () => router.push(`/admin/app/${loan.id}/step-1` as any),
-                    },
-                  ]}
-                />
-              )}
-              <TabButton label="Activity Log" icon={I.eye} rail onClick={() => setActivityOpen(true)} />
-              <TabButton
-                label="Message to EPC"
-                icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>}
-                rail
-                href={`/admin/app/${loan.id}/messages`}
-                title={loan.attention_status === "open" ? "Open issue with the EPC" : "Message the EPC"}
-              />
-              <DownloadMenu
-                icon={I.download}
-                rail
-                disabled={downloading}
-                busyLabel={downloading ? "Preparing…" : null}
-                items={[
-                  { label: "Download ZIP", onClick: () => setZipPickerOpen(true) },
-                  ...(tranche1Exists ? [{ label: "Download Tranche 1", onClick: () => void downloadTranche("1"), disabled: trancheBusy === "1" }] : []),
-                  ...(tranche2Exists ? [{ label: "Download Tranche 2", onClick: () => void downloadTranche("2"), disabled: trancheBusy === "2" }] : []),
-                ]}
-              />
-        </ProfileRail>
-
-        {/* ── CONTENT COLUMN ─────────────────────────────────────────── */}
-        <div className="flex-1 min-w-0">
-
-        {/* ── ACTION STRIP — stage actions (were the right side of the tab bar). ── */}
-        <div className="flex items-center gap-2 flex-wrap justify-end mb-4">
-          {aborted ? (
-            <KebabMenu items={kebabItems} />
-          ) : (
-            <>
-              {statusActions}
-              {/* Disbursement page hosts the Tranche-1 upload; the 1st-amount
-                  field there opens once both Tranche-1 docs are uploaded. Gated on
-                  the application being APPROVED at the app level (not merely a
-                  lender row carrying approved_at) so a case whose headline is still
-                  submitted/docs_sent can never be disbursed. */}
-              {approvedPlus && (
-                <HAction variant="amber" icon={I.money} onClick={() => router.push(`/admin/app/${loan.id}/disbursement` as any)}>
-                  Disbursement
-                </HAction>
-              )}
-              {/* Three-dot menu — Change review (undo lender decision) + Delete. */}
-              <KebabMenu items={kebabItems} />
-            </>
-          )}
+      <div className="w-full px-5 sm:px-8" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
+        {/* ── Key numbers ── */}
+        <div className="pt-6 pb-2">
+          <StatCards
+            items={[
+              { label: "Loan applied", value: fmtRupees(loan.loan_amount_required) },
+              { label: "Approved", value: approvedAmt != null ? fmtRupees(approvedAmt) : "—", sub: approvedAmt != null ? decidedByLabel ?? undefined : undefined, tone: approvedAmt != null ? "text-[#178a5c]" : "text-[#c3cbc7]" },
+              { label: "Disbursed", value: disbursedAmt > 0 ? fmtRupees(disbursedAmt) : "—", sub: tApproved ? `${tranchesPaid} of 2 tranches` : undefined, tone: disbursedAmt > 0 ? "text-[#185fa5]" : "text-[#c3cbc7]" },
+              { label: "Documents", value: fillText(docsHave, checklist.length), tone: fillTone(docsHave, checklist.length) },
+            ]}
+          />
         </div>
 
-        {/* ── PROGRESS TRACKER — hidden once all stages are complete (2nd disbursement) ── */}
-        {!secondDone && (
-        <div className="rounded-[12px] border border-[#cdeadd] bg-white p-5 sm:p-6 mb-4">
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-[13px] font-bold text-[#0f3d2e]">Application progress</span>
-            {tRejected && <span className="text-[13px] font-bold text-[#dc2626]">Rejected</span>}
-          </div>
-          <div className="flex items-center gap-2 sm:gap-4">
-            <BigProgressStep
-              icon={I.send}
-              done={appDocsComplete}
-              inProgress={!appDocsComplete}
-              label="Submitted"
-              sub={appDocsComplete ? (loan.submitted_at ? fmtDateShort(loan.submitted_at) : "Complete") : "Awaiting documents"}
-              mutedIfPending
-            />
-            <BigConnector active={appDocsComplete} />
-            <BigProgressStep
-              icon={I.files}
-              done={tDocsSent}
-              inProgress={!tDocsSent && appDocsComplete && !onHold}
-              label="Docs Sent"
-              sub={tDocsSent ? "Sent to lender" : onHold ? "On hold" : appDocsComplete ? "Ready to send" : "Pending"}
-              mutedIfPending
-            />
-            <BigConnector active={tDocsSent} />
-            <BigProgressStep
-              icon={I.circleCheck}
-              done={tApproved}
-              failed={tRejected}
-              label={tRejected ? "Rejected" : "Approved"}
-              sub={decidedByLabel ?? (tDecided ? "—" : "Awaiting decision")}
-              mutedIfPending
-            />
-            <BigConnector active={tApproved} />
-            <BigProgressStep
-              icon={I.money}
-              done={firstDone}
-              label="1st Disbursement"
-              sub={firstDone ? fmtDateShort(loan.first_disbursement_date) : "Pending"}
-              mutedIfPending
-            />
-            <BigConnector active={firstDone} />
-            <BigProgressStep
-              icon={I.check}
-              done={secondDone}
-              label="2nd Disbursement"
-              sub={secondDone ? "Complete" : "Pending"}
-              mutedIfPending
-            />
-          </div>
+        {/* ── PROGRESS BAR = TABS ── */}
+        <div className="pt-7 pb-2 border-b border-[#eef3f1]">
+          <ProgressTabs items={stages} value={activeTab} onChange={(k) => setTab(k as Stage)} />
         </div>
-        )}
 
-        {/* ── DENSE GRID ────────────────────────────────────────────────── */}
-        <div className="grid gap-3 lg:grid-cols-3 items-start">
+        {/* Three equal columns, as before: the stage body spans two, the side
+            one. The Submitted body splits its two with the SAME gap, so cards,
+            documents and side column come out exactly the same width. */}
+        <div className="grid gap-x-6 lg:grid-cols-3 items-start pb-12">
+          <div className="min-w-0 lg:col-span-2">
 
-          {/* COL 1 — ownership, applicant, co-applicant, employment & bank */}
-          <div className="flex flex-col gap-3">
-            <OwnershipCard
-              module="apps"
-              recordId={loan.id}
-              createdByUserId={loan.created_by_user_id ?? null}
-              assignedToUserId={loan.assigned_to_user_id ?? null}
-            />
-            <SectionCard title="Applicant identity" accent="blue" icon={I.user}>
-              <KV k="Name" v={loan.aadhaar_name || loan.borrower_name} />
-              <KV k="Lead owner" v={loan.lead_owner_name} />
-              <KV k="Father's name" v={loan.borrower_father_name} />
-              <KV k="Gender" v={loan.aadhaar_gender} />
-              <KV k="Date of birth" v={loan.aadhaar_dob} />
-              <KV k="PAN" v={loan.borrower_pan} />
-              <KV k="Aadhaar" v={loan.aadhaar_number_masked} />
-              <KV k="Email" v={loan.borrower_email} valueClass="text-[#185fa5]" />
-              <KV k="Phone no" v={loan.borrower_mobile ? `+91 ${loan.borrower_mobile}` : null} />
-              {loan.applicant_earning != null && <KV k="Earning" v={loan.applicant_earning ? "Yes" : "No"} />}
-              {loan.monthly_income != null && <KV k="Monthly income" v={fmtRupees(loan.monthly_income)} />}
-              <KV k="Address" v={loan.aadhaar_address} />
-            </SectionCard>
+            {/* ── SUBMITTED — the original card layout: details (and checks)
+                open on hover on the left, documents always open on the right ── */}
+            {activeTab === "submitted" && (
+              <div className="grid gap-x-6 gap-y-4 pt-6 xl:grid-cols-2 items-start">
+                <div className="flex flex-col gap-4 min-w-0">
+                  <Section card dropdown inline={stacked} icon={I.users} title="Identity" summary={fillOf(applicantRows, coappRows)}>
+                    <div className="grid gap-x-12 gap-y-6 md:grid-cols-2 xl:grid-cols-1">
+                      <FieldCol title="Applicant" rows={applicantRows} />
+                      <FieldCol title="Co-applicant" rows={coappRows}>
+                        {!hasCoapp && <p className="text-[14px] text-[#9aa5a0] py-[5px]">No co-applicant</p>}
+                      </FieldCol>
+                    </div>
+                  </Section>
 
-            {hasCoapp && (
-              <SectionCard title="Co-applicant" accent="green" icon={I.users}>
-                <KV k="Name" v={loan.coapp_name} />
-                <KV k="Father's name" v={loan.coapp_father_name} />
-                <KV k="DOB" v={loan.coapp_dob} />
-                <KV k="Relation" v={loan.coapp_relation} />
-                {loan.coapp_role_reason && <KV k="Reason" v={loan.coapp_role_reason} wrap />}
-                <KV k="PAN" v={loan.coapp_pan} />
-                <KV k="Mobile" v={loan.coapp_mobile ? `+91 ${loan.coapp_mobile}` : null} />
-                <KV k="Email" v={loan.coapp_email} />
-                {loan.coapp_earning != null && <KV k="Earning" v={loan.coapp_earning ? "Yes" : "No"} />}
-                {loan.coapp_monthly_income != null && <KV k="Monthly income" v={fmtRupees(loan.coapp_monthly_income)} />}
-                {loan.coapp_aadhaar_number_masked && (
+                  <Section card dropdown inline={stacked} icon={I.building} title="Installation site" summary={fillOf(siteRows)}>
+                    <FieldCol title="Installation site" rows={siteRows} />
+                  </Section>
+
+                  <Section card dropdown inline={stacked} icon={I.money} title="Loan requirement" summary={fillOf(loanRows)}>
+                    <FieldCol title="Loan requirement" rows={loanRows} />
+                  </Section>
+
+                  <Section card dropdown inline={stacked} icon={I.briefcase} title="Employment" summary={fillOf(employmentRows)}>
+                    <FieldCol title="Employment" rows={employmentRows} />
+                  </Section>
+
+                  <Section card dropdown inline={stacked} icon={I.bank} title="Bank details" summary={fillOf(bankRows)}>
+                    <FieldCol title="Bank details" rows={bankRows} />
+                  </Section>
+
+                  <Section card dropdown inline={stacked} icon={I.circleCheck} title="Checks" summary={<FillCount have={checksOk} total={checksCounted.length} />}>
+                    <ChecksPanel items={checks} extra={dupList ? { dup: dupList } : undefined} />
+                  </Section>
+                </div>
+
+                <div className="flex flex-col gap-4 min-w-0">
+                  <Section card white icon={I.files} title="Documents" summary={<FillCount have={docsHave} total={checklist.length} />}>
+                    <div className="space-y-3">
+                      {docGroups.map((g) => {
+                        // A tranche's Download button sits at the bottom of ITS group
+                        // and shows only once every slot in that tranche is uploaded.
+                        const complete = g.slots.length > 0 && g.slots.every((s) => !!s.docId || !!s.path);
+                        const tranche: "1" | "2" | null =
+                          g.title === "1st Tranche Docs" ? "1" : g.title === "2nd Tranche Docs" ? "2" : null;
+                        return (
+                          <StepBlock key={g.title} title={g.title}>
+                            <DocGrid slots={toViewSlots(g)} eyeIcon={I.eye} />
+                            {tranche && complete && (
+                              <button
+                                type="button"
+                                disabled={trancheBusy !== null}
+                                onClick={() => void downloadTranche(tranche)}
+                                className="mt-3 text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center gap-1.5 border border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5] disabled:opacity-50"
+                              >
+                                {I.download} {trancheBusy === tranche ? "Preparing…" : `Download Tranche ${tranche}`}
+                              </button>
+                            )}
+                          </StepBlock>
+                        );
+                      })}
+                    </div>
+                  </Section>
+                </div>
+              </div>
+            )}
+
+            {/* ── DOCS SENT — lenders ── */}
+            {activeTab === "docs" && (
+              <Section title="Lenders" right={canAct ? sendButton(!tDocsSent) : undefined}>
+                <LoanLenderStatusBox rows={lenderRows} />
+              </Section>
+            )}
+
+            {/* ── APPROVED — the approval-details form ── */}
+            {activeTab === "approved" && (
+              <>
+                {approvedRows.length > 1 && (
+                  <Section title="Approved lenders">
+                    <ul className="divide-y divide-[#f1f5f3] max-w-[640px]">
+                      {approvedRows.map((r) => {
+                        const d = (r.approval_details ?? null) as ApprovalDetails | null;
+                        const finalized = loan.approved_lender === r.lender_key;
+                        return (
+                          <li key={r.id} className="py-2 flex items-center gap-3 text-[13px]">
+                            <span className="flex-1 min-w-0 font-semibold text-[#0f3d2e] truncate">{r.lender_label}</span>
+                            <span className="text-[#5a8a76]">{fmtApproval(d?.approved_loan_amount, true)}</span>
+                            {finalized ? (
+                              <span className="text-[12px] font-semibold px-2 py-0.5 rounded-[6px] bg-[#e6f6ee] text-[#178a5c]">Finalized</span>
+                            ) : canAct ? (
+                              <HAction variant="outline" disabled={statusBusy} onClick={() => void finalizeLender(r.lender_key)}>Finalize</HAction>
+                            ) : null}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </Section>
+                )}
+                {formFor && !aborted ? (
                   <>
-                    <KV k="Aadhaar name" v={loan.coapp_aadhaar_name} />
-                    <KV k="Aadhaar" v={loan.coapp_aadhaar_number_masked} />
-                    <KV k="Address" v={loan.coapp_aadhaar_address} />
+                    {!approvedPlus && canAct && (
+                      <div className="flex justify-end gap-2 pt-5">
+                        <HAction variant="reject" disabled={statusBusy} onClick={() => setRejectOpen(true)}>Rejected by lender</HAction>
+                      </div>
+                    )}
+                    <LoanApprovalForm
+                      key={`${formFor.key}:${formEdit ?? "new"}`}
+                      loan={loan}
+                      lender={formFor.key}
+                      lenderLabel={formFor.label}
+                      editMode={formEdit}
+                      hasSanctionLetter={hasCat("sanction_letter")}
+                      onSaved={() => { setFormLender(null); setReloadKey((k) => k + 1); }}
+                      onCancel={formLender ? () => setFormLender(null) : undefined}
+                    />
                   </>
-                )}
-              </SectionCard>
-            )}
-
-            <SectionCard title="Installation site details" accent="blue" icon={I.building}>
-              <KV k="Name on E-Bill" v={loan.ebill_name} />
-              <KV k="Address" v={loan.ebill_address_line} />
-              <KV k="Pincode" v={loan.install_pincode} />
-              <KV k="City" v={loan.install_city} />
-              <KV k="District" v={loan.install_district} />
-              <KV k="State" v={loan.install_state} />
-              {loan.rooftop_photo_gps && (
-                <KV
-                  k="Rooftop GPS"
-                  v={`${(loan.rooftop_photo_gps as any).lat?.toFixed?.(5) ?? "?"}, ${(loan.rooftop_photo_gps as any).lng?.toFixed?.(5) ?? "?"}`}
-                />
-              )}
-              <div className="mt-3">
-                <StepBlock title="Loan requirements">
-                  <KV k="Project size" v={loan.project_size ? `${loan.project_size} ${(loan.project_size_unit ?? "kw").toUpperCase()}` : null} />
-                  <KV k="Project cost" v={fmtRupees(loan.total_project_cost)} />
-                  <KV k="Loan amount required" v={fmtRupees(loan.loan_amount_required)} />
-                  <KV
-                    k="Down payment"
-                    v={loan.total_project_cost && loan.loan_amount_required
-                      ? fmtRupees(Math.max(0, Number(loan.total_project_cost) - Number(loan.loan_amount_required)))
-                      : null}
-                  />
-                  <KV k="System type" v={loan.system_type ? SYSTEM_LABEL[loan.system_type] ?? loan.system_type : null} />
-                  <KV k="Monthly bill" v={fmtRupees(loan.monthly_bill_amount)} />
-                  <KV k="DISCOM" v={loan.discom_name} />
-                  <KV k="K Number" v={loan.ca_number} />
-                </StepBlock>
-              </div>
-            </SectionCard>
-
-            <SectionCard title="Employment & bank" tint icon={I.bank} adminOnly>
-              <StepBlock title="Employment">
-                <KV k="Employment" v={loan.employment_type ? EMPLOYMENT_LABEL[loan.employment_type] ?? loan.employment_type : null} />
-                <KV k="Organization" v={loan.organization_name} />
-                <KV k="Profession" v={loan.profession === "Other" && loan.profession_other ? `Other — ${loan.profession_other}` : loan.profession} />
-                <KV k="Annual income" v={fmtRupees(loan.annual_income)} />
-              </StepBlock>
-              <div className="mt-3">
-                <StepBlock title="Bank">
-                  <KV k="Bank name" v={loan.bank_name} />
-                  <KV k="Account no" v={maskAcct(loan.bank_account_no)} />
-                  <KV k="IFSC code" v={loan.bank_ifsc} />
-                  <KV k="Type" v={loan.bank_account_type} />
-                </StepBlock>
-              </div>
-            </SectionCard>
-          </div>
-
-          {/* COL 2 — documents */}
-          <div className="flex flex-col gap-3">
-            <SectionCard title="Documents" accent="green" icon={I.files}>
-              <div className="space-y-3">
-                {docGroups.map((g) => {
-                  // A tranche's Download button sits at the bottom of ITS group
-                  // and shows only once every slot in that tranche is uploaded.
-                  const complete = g.slots.length > 0 && g.slots.every((s) => !!s.docId || !!s.path);
-                  const tranche: "1" | "2" | null =
-                    g.title === "1st Tranche Docs" ? "1" : g.title === "2nd Tranche Docs" ? "2" : null;
-                  return (
-                    <StepBlock key={g.title} title={g.title}>
-                      <DocGrid slots={toViewSlots(g)} eyeIcon={I.eye} />
-                      {tranche && complete && (
-                        <button
-                          type="button"
-                          disabled={trancheBusy !== null}
-                          onClick={() => void downloadTranche(tranche)}
-                          className="mt-3 text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center gap-1.5 border border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5] disabled:opacity-50"
-                        >
-                          {I.download} {trancheBusy === tranche ? "Preparing…" : `Download Tranche ${tranche}`}
-                        </button>
-                      )}
-                    </StepBlock>
-                  );
-                })}
-              </div>
-            </SectionCard>
-          </div>
-
-          {/* COL 3 — decision, sanction, comments */}
-          <div className="flex flex-col gap-3">
-            {/* Lender status — directly above Approval details (loan #L1). */}
-            {lenderRows.length > 0 && <LoanLenderStatusBox rows={lenderRows} />}
-            {approvedPlus && approvalDetails && (
-              <SectionCard title="Approval details" accent="green" icon={I.circleCheck} adminOnly>
-                {/* Header band — the selected lender name sits directly under
-                    the "Approval details" title (loan #L2). Lender tabs (chips)
-                    and the credit-score box are pinned to the top-right corner.
-                    The finalize ACTION is a full-width bar under the table (see
-                    below); here we only show a "✓ Finalized" marker for the
-                    lender that has been chosen for disbursement. */}
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  {/* Left — lender name (+ finalized marker), tight under heading. */}
-                  <div className="leading-snug">
-                    <div className="text-[18px] text-[#178a5c] font-bold">{shownLenderLabel}</div>
-                    {approvedRows.length > 1 && loan.approved_lender === selDetailsKey && (
-                      <div className="text-[12px] font-semibold text-[#0f7a52] mt-1">✓ Finalized</div>
-                    )}
-                  </div>
-                  {/* Right — lender tabs above the credit-score box. */}
-                  <div className="shrink-0 flex flex-col items-end gap-2">
-                    {approvedRows.length > 1 && (
-                      <div className="flex justify-end flex-wrap gap-1.5">
-                        {approvedRows.map((r) => {
-                          const isFinal = loan.approved_lender === r.lender_key;
-                          const isSel = selDetailsKey === r.lender_key;
-                          return (
-                            <button
-                              key={r.id}
-                              type="button"
-                              onClick={() => setDetailsLender(r.lender_key)}
-                              className={[
-                                "inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-semibold border transition-colors",
-                                isSel ? "bg-[#178a5c] text-white border-[#178a5c]"
-                                      : "bg-white text-[#0f3d2e] border-[#cdeadd] hover:bg-[#f0faf5]",
-                              ].join(" ")}
-                            >
-                              {isFinal && <span className={isSel ? "text-white" : "text-[#178a5c]"}>✓</span>}
-                              {r.lender_label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                    {/* Credit score box. */}
-                    <div className="text-center rounded-[10px] border border-[#cdeadd] bg-[#f0faf5] px-4 py-2.5">
-                      <div className="text-[10px] uppercase tracking-wide text-[#5a8a76]">Credit score</div>
-                      <div className="text-[18px] font-bold text-[#0f3d2e] leading-tight">
-                        {shownCredit != null ? shownCredit : "None"}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-[15px] border-collapse">
-                    <thead>
-                      <tr className="border-b-2 border-[#e0f0e8]">
-                        <th className="py-2 pr-4 text-left font-medium text-[#5a8a76]"></th>
-                        <th className="py-2 px-3 text-right text-[11px] font-semibold uppercase tracking-wider text-[#8ab3a1]">Applied</th>
-                        <th className="py-2 px-3 text-right text-[11px] font-semibold uppercase tracking-wider text-[#178a5c]">Approved</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[
-                        { label: "Loan Amount", applied: shownDetails?.applied_loan_amount, approved: shownDetails?.approved_loan_amount, money: true, suffix: undefined as string | undefined },
-                        { label: "Tenure",      applied: shownDetails?.applied_tenure_years, approved: shownDetails?.approved_tenure_years, money: false, suffix: "years" },
-                        { label: "EMI",         applied: shownDetails?.tentative_emi,         approved: shownDetails?.approved_emi,         money: true, suffix: undefined },
-                      ].map((r) => (
-                        <tr key={r.label} className="border-b border-[#e0f0e8] last:border-0">
-                          <td className="py-2.5 pr-4 text-[#5a8a76] font-medium">{r.label}</td>
-                          {/* Applied = muted; Approved = bold dark. */}
-                          <td className="py-2.5 px-3 text-right font-medium text-[#9aa5a0]">{fmtApproval(r.applied, r.money, r.suffix)}</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-[#0f3d2e]">{fmtApproval(r.approved, r.money, r.suffix)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Finalize action — full-width bar directly under the table
-                    (loan #L2). Appears only when a non-finalized approved
-                    lender's tab is selected; finalizing makes it the
-                    disbursement lender. */}
-                {approvedRows.length > 1 && selRow && selDetailsKey !== loan.approved_lender && (
-                  <button
-                    type="button"
-                    disabled={statusBusy}
-                    onClick={() => void finalizeLender(selDetailsKey)}
-                    className="mt-3 w-full inline-flex items-center justify-center gap-1.5 rounded-[8px] bg-[#178a5c] text-white text-[14px] font-semibold px-4 py-2.5 hover:bg-[#0f7a52] disabled:opacity-60"
+                ) : (
+                  <Section
+                    title="Lender decision"
+                    right={canAct ? (
+                      withDocs.length > 0 ? (
+                        <>
+                          <HAction variant="primary" icon={I.check} disabled={statusBusy} onClick={approveNow}>Approved by lender</HAction>
+                          <HAction variant="reject" disabled={statusBusy} onClick={() => setRejectOpen(true)}>Rejected by lender</HAction>
+                        </>
+                      ) : sendButton(false)
+                    ) : undefined}
                   >
-                    Finalize {shownLenderLabel}
-                  </button>
+                    <LoanLenderStatusBox rows={lenderRows} />
+                  </Section>
                 )}
-
-                {/* Sanction letter — status lives here in Approval details. */}
-                <div className="mt-3">
-                  {loan.sanction_letter_unavailable ? (
-                    <p className="text-[12px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2 flex items-center gap-1.5">
-                      <span aria-hidden>⚠</span> Sanction letter was not available at the time of filling.
-                    </p>
-                  ) : hasCat("sanction_letter") ? (
-                    <div className="flex items-center justify-between gap-2 text-[13px] text-[#0f3d2e] bg-[#f0faf5] border border-[#cdeadd] rounded-[8px] px-3 py-2">
-                      <span className="font-semibold">Sanction letter on file</span>
-                      <button
-                        type="button"
-                        onClick={() => { const d = docs.find((x) => x.category === "sanction_letter"); if (d) void openDoc(d.id); }}
-                        className="inline-flex items-center gap-1 text-[#185fa5] font-semibold hover:underline"
-                      >
-                        {I.eye} View
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-[12px] text-[#5a8a76]">Sanction letter: pending.</p>
-                  )}
-                </div>
-
-                <p className="text-[12px] text-[#5a8a76] mt-2">Recorded {fmtDate(loan.approved_at)} · read-only</p>
-              </SectionCard>
+              </>
             )}
 
-            {(approvedPlus || firstDone || secondDone) && (
-              <SectionCard title="Sanction details" accent="green" icon={I.money} adminOnly>
-                <StepBlock title="1st Disbursement">
-                  <KV k="Amount" v={fmtRupeesExact(loan.first_disbursement_amount)} valueClass="text-[#178a5c]" />
-                  <KV k="Date" v={fmtDateShort(loan.first_disbursement_date)} />
-                  <div className="flex justify-between items-center text-[14px] py-[5px] gap-3">
-                    <span className="text-[#5a8a76] shrink-0">Countdown to 2nd</span>
-                    <span className={["inline-flex px-2 py-0.5 rounded-[6px] text-[12px] font-semibold", secondDone ? "bg-[#e6f6ee] text-[#178a5c]" : DEADLINE_PILL[dl.tone]].join(" ")}>
-                      {secondDone ? "Done" : firstDone ? dl.label : "—"}
-                    </span>
-                  </div>
-                  {/* Once the 2nd tranche is paid there is nothing pending — hide it. */}
-                  {!secondDone && (
-                    <KV k="Remaining (pending)" v={fmtRupeesExact(remainingAmount(loan.sanctioned_amount, loan.first_disbursement_amount))} />
-                  )}
-                </StepBlock>
-                <div className="mt-3">
-                  <StepBlock title="2nd Disbursement">
-                    <KV k="Amount" v={fmtRupeesExact(loan.second_disbursement_amount)} valueClass="text-[#178a5c]" />
-                    <KV k="Date" v={fmtDateShort(loan.second_disbursement_date)} />
-                    <div className="flex justify-between items-center text-[14px] py-[5px] gap-3">
-                      <span className="text-[#5a8a76] shrink-0">Documents review</span>
-                      <span className={["inline-flex px-2 py-0.5 rounded-[6px] text-[12px] font-semibold",
-                        reviewLabel === "Reviewed" ? "bg-[#e6f6ee] text-[#178a5c]" : "bg-[#fef0d6] text-[#854f0b]"].join(" ")}>
-                        {reviewLabel}
-                      </span>
-                    </div>
-                  </StepBlock>
-                </div>
-              </SectionCard>
-            )}
+            {/* ── 1st / 2nd DISBURSEMENT — that tranche's documents and amount ── */}
+            {activeTab === "first" && <LoanDisbursementPanel loan={loan} part="first" onChanged={reloadLoan} />}
+            {activeTab === "second" && <LoanDisbursementPanel loan={loan} part="second" onChanged={reloadLoan} />}
+          </div>
 
-            <SectionCard title="Comments" tint icon={I.lock} adminOnly>
+          {/* ── SIDE — assigned + comments, on every stage ── */}
+          <aside className="min-w-0 flex flex-col gap-4 pt-6">
+            <Section card icon={I.users} title="Assigned">
+              <OwnershipCard
+                bare
+                module="apps"
+                recordId={loan.id}
+                createdByUserId={loan.created_by_user_id ?? null}
+                assignedToUserId={loan.assigned_to_user_id ?? null}
+              />
+            </Section>
+            <Section card icon={I.lock} title="Comments">
               <CommentsSection
                 applicationId={loan.id}
                 epcName={applicantName}
-                maxListHeight={200}
+                maxListHeight={360}
               />
-            </SectionCard>
-          </div>
+            </Section>
+            {/* Loads on first open (once per visit, again after a change here). */}
+            <Section card dropdown icon={I.activity} title="Activity">
+              <div className="pt-1">
+                <LoanActivityList key={`${loan.status}:${loan.aborted_at ?? ""}:${reloadKey}`} loan={loan} compact />
+              </div>
+            </Section>
+          </aside>
         </div>
-        </div>{/* /content column */}
       </div>
 
       <LenderPickerModal
@@ -1571,11 +1584,11 @@ function Inner() {
           </div>
         </div>
       )}
-      <LoanActivityLogModal
-        open={activityOpen}
-        onClose={() => setActivityOpen(false)}
-        loan={loan}
-        borrowerName={applicantName}
+      <DocViewer
+        items={viewerItems}
+        index={viewerIndex >= 0 ? viewerIndex : null}
+        onIndex={(i) => setViewerKey(viewerItems[i]?.key ?? null)}
+        onClose={() => setViewerKey(null)}
       />
       <EditLoanDatesModal
         open={datesOpen}
@@ -1648,7 +1661,7 @@ function StatusBadge({ status, lender }: { status: string | null | undefined; le
     s === "under_review" ? "bg-[#fef0d6] text-[#854f0b] border-[#f3d9a4]" :
                        "bg-slate-100 text-slate-600 border-slate-200";
   return (
-    <span className={["shrink-0 inline-flex px-2 py-0.5 rounded-full border text-[11px] font-semibold uppercase tracking-wide whitespace-nowrap", cls].join(" ")}>
+    <span className={["shrink-0 inline-flex px-2.5 py-0.5 rounded-full border text-[12px] font-medium whitespace-nowrap", cls].join(" ")}>
       {label}
     </span>
   );

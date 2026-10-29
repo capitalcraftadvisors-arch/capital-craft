@@ -20,11 +20,12 @@ import { getCached, setCached, invalidate } from "@/lib/list-cache";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import { useAdminNames } from "@/lib/use-admin-names";
 import { useEpcUpdates } from "@/lib/use-epc-updates";
+import { KpiTile } from "@/components/view/ViewKit";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import LoginWelcome from "@/components/LoginWelcome";
 import RowLink from "@/components/RowLink";
 import { toast } from "sonner";
-import { nameCase } from "@/lib/names";
+import { nameCase, initialsOf } from "@/lib/names";
 import {
   deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort, remainingAmount,
   displayAmount as amountFor,
@@ -604,19 +605,6 @@ function DashboardKpis({ tab, period, pFrom, pTo, epc }: { tab: string; period: 
       <KpiTile label="Approved loan amount" value={money(d.approved.amount)} sub={files(d.approved.files)} accent="#0f7a52" />
       <KpiTile label="1st tranche disbursed" value={money(d.firstTranche.amount)} sub={files(d.firstTranche.files)} accent="#185fa5" />
       <KpiTile label="2nd tranche pending" value={money(d.secondPending.amount)} sub={files(d.secondPending.files)} accent={d.secondPending.files > 0 ? "#854f0b" : "#94a3b8"} />
-    </div>
-  );
-}
-
-function KpiTile({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent: string }) {
-  return (
-    <div className="rounded-lg border border-line bg-white px-3 py-2 shadow-sm">
-      <div className="flex items-center gap-1.5">
-        <span className="inline-block w-1 h-3 rounded-full shrink-0" style={{ backgroundColor: accent }} />
-        <span className="text-[10px] font-medium text-text-muted uppercase tracking-wide truncate">{label}</span>
-      </div>
-      <div className="text-[17px] font-display font-bold text-text mt-1 leading-none">{value}</div>
-      {sub && <div className="text-[10px] text-text-muted mt-0.5 truncate">{sub}</div>}
     </div>
   );
 }
@@ -1613,7 +1601,6 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
   function displayAmount(r: Row): string {
     return fmtRupees(amountFor(r));
   }
-
   // EPC options for the filter dropdown — only EPCs actually present in the list.
   const epcOptions = useMemo(() => {
     const seen = new Set<string>();
@@ -1727,14 +1714,15 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
       });
     }
-    const upd = (r: Row) => !!r.epc_last_activity_at && (!r.msg_admin_seen_at || r.msg_admin_seen_at < r.epc_last_activity_at);
+    // EPC-updated profiles float up — per admin: only until THIS admin opens it.
+    const upd = (r: Row) => (loanCounts.get(r.id) ?? 0) > 0;
     return out.sort((a, b) => {
-      const au = upd(a) ? 1 : 0, bu = upd(b) ? 1 : 0; // EPC-updated profiles float up
+      const au = upd(a) ? 1 : 0, bu = upd(b) ? 1 : 0;
       if (au !== bu) return bu - au;
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, q, categoryFilter, statusFilter, epcFilter, lenderFilter, dateFrom, dateTo, sortKey, period, pFrom, pTo]);
+  }, [rows, q, categoryFilter, statusFilter, epcFilter, lenderFilter, dateFrom, dateTo, sortKey, period, pFrom, pTo, loanCounts]);
 
   const fyRows = useMemo(() => rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo)), [rows, period, pFrom, pTo]);
   const cards: SummaryCard[] = [
@@ -1837,44 +1825,42 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-        <table className="w-full min-w-[960px] text-[14px] table-fixed">
+        <table className="w-full min-w-[920px] text-[14px] table-fixed">
           {/* Percentage widths — the table fills the page evenly and scrolls sideways
               only on small screens. */}
           <colgroup>
+            <col style={{ width: "23%" }} />
             <col style={{ width: "15%" }} />
-            <col style={{ width: "13%" }} />
-            <col style={{ width: "9%"  }} />
             <col style={{ width: "11%" }} />
-            <col style={{ width: "9%"  }} />
-            <col style={{ width: "9%"  }} />
-            <col style={{ width: "10%" }} />
-            <col style={{ width: "8%"  }} />
             <col style={{ width: "16%" }} />
+            <col style={{ width: "13%" }} />
+            <col style={{ width: "12%" }} />
+            <col style={{ width: "10%" }} />
           </colgroup>
-          {/* Everything centred except Borrower details, which stays left. */}
-          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-[#5a8a76]">
+          {/* Everything centred except Borrower, which stays left. */}
+          <thead className="border-b border-[#e3eee8] text-[#7a958a]">
             <tr>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-left">Borrower details</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">EPC partner</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Amount</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Status</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Disbursement</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">
+              <th className="px-4 py-3 font-medium text-[11.5px] uppercase tracking-wide text-left">Borrower</th>
+              <th className="px-3 py-3 font-medium text-[11.5px] uppercase tracking-wide text-center">EPC partner</th>
+              <th className="px-3 py-3 font-medium text-[11.5px] uppercase tracking-wide text-center">Amount</th>
+              <th className="px-3 py-3 font-medium text-[11.5px] uppercase tracking-wide text-center">Status</th>
+              <th className="px-3 py-3 font-medium text-[11.5px] uppercase tracking-wide text-center">
                 <button type="button" onClick={() => setSortKey((k) => (k === "days" ? "created" : "days"))} className="inline-flex items-center gap-1 uppercase tracking-wide" title="Sort by fewest days remaining">
-                  Days remaining
+                  Disbursement
                   <span className={sortKey === "days" ? "opacity-100" : "opacity-30"}>↑</span>
                 </button>
               </th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Created on</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Created by</th>
-              <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Action</th>
+              <th className="px-3 py-3 font-medium text-[11.5px] uppercase tracking-wide text-center">Created</th>
+              <th className="px-3 py-3 font-medium text-[11.5px] uppercase tracking-wide text-center">Action</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={9} className="px-5 py-10 text-center text-[#5a8a76]">{!loaded ? "Loading…" : rows.length ? "No applications match." : "No applications yet."}</td></tr>
+              <tr><td colSpan={7} className="px-5 py-10 text-center text-[#5a8a76]">{!loaded ? "Loading…" : rows.length ? "No applications match." : "No applications yet."}</td></tr>
             ) : filtered.map((r) => {
               const isHighlighted = highlightId === r.id;
+              const d = docStat(r);
+              const unseen = loanCounts.get(r.id) ?? 0;
               return (
               <tr
                 key={r.id}
@@ -1884,39 +1870,31 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                   backgroundColor: isHighlighted ? "#dceffb" : undefined,
                 }}
                 onClick={() => navigateToView(r)}
-                className="border-b border-[#eaf3ee] cursor-pointer hover:bg-[#f7fcfa] align-top"
+                className="border-b border-[#eef3f1] last:border-b-0 cursor-pointer hover:bg-[#f7fcfa] transition-colors"
               >
-                {/* Borrower detail box: applicant icon + name + CC id + masked Aadhaar */}
-                <td className="px-3 py-3">
-                  <div className="flex items-start gap-3">
-                    <span className="w-9 h-9 rounded-md bg-[#dceffb] text-[#185fa5] grid place-items-center shrink-0">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
+                {/* Borrower: initials + name + loan ID · documents */}
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <span className="w-9 h-9 rounded-full bg-[#e6f6ee] text-[#178a5c] grid place-items-center shrink-0 text-[12.5px] font-semibold">
+                      {initialsOf(displayBorrower(r))}
                     </span>
                     <div className="min-w-0">
-                      <p className="text-[13px] font-semibold text-[#0f3d2e] truncate flex items-center gap-1">
+                      <p className="text-[13.5px] font-semibold text-[#0f3d2e] truncate flex items-center gap-1">
                         <RowLink href={`/admin/app/${r.id}/view`} onOpen={() => navigateToView(r)} className="truncate">{displayBorrower(r)}</RowLink>
                         {isDup(r) && <span title="Same person as another application — matches on PAN / mobile, or name + father's name — possible duplicate" className="text-[#d97706] shrink-0">⚠</span>}
                       </p>
-                      {r.loan_display_id && (
-                        <p className="text-[11px] font-mono text-[#185fa5] mt-0.5">{r.loan_display_id}</p>
-                      )}
-                      {(() => {
-                        const d = docStat(r);
-                        const done = d.have >= d.need;
-                        return (
-                          <span
-                            title={done ? "All uploaded documents present" : "Some documents still pending"}
-                            className={["inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold", done ? "bg-[#e6f6ee] text-[#0f7a52]" : "bg-[#fef0d6] text-[#854f0b]"].join(" ")}
-                          >
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
-                            {d.have}/{d.need} docs
-                          </span>
-                        );
-                      })()}
+                      <p className="text-[11.5px] mt-0.5 flex items-center gap-1.5 min-w-0">
+                        {r.loan_display_id && <span className="font-mono text-[#185fa5] truncate">{r.loan_display_id}</span>}
+                        <span
+                          title={d.have >= d.need ? "All documents uploaded" : "Some documents still pending"}
+                          className={["shrink-0 font-semibold tabular-nums", d.have >= d.need ? "text-[#178a5c]" : "text-[#d4900f]"].join(" ")}
+                        >
+                          {r.loan_display_id ? "· " : ""}{d.have}/{d.need} docs
+                        </span>
+                      </p>
                     </div>
                   </div>
                 </td>
-                {/* EPC partner — name only. */}
                 <td className="px-3 py-3 text-center">
                   <p className="text-[13px] text-[#0f3d2e] truncate">{displayEpc(r)}</p>
                 </td>
@@ -1929,85 +1907,77 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                     return (
                       <>
                         <p className={["text-[13px] font-semibold", over ? "text-red-700" : "text-[#0f3d2e]"].join(" ")}>{displayAmount(r)}</p>
-                        {differs && <p className={["text-[11px] mt-0.5", over ? "text-red-700" : "text-[#5a8a76]"].join(" ")}>Applied {fmtRupees(applied)}</p>}
+                        {differs && <p className={["text-[11px] mt-0.5", over ? "text-red-700" : "text-[#7a958a]"].join(" ")}>Applied {fmtRupees(applied)}</p>}
                       </>
                     );
                   })()}
                 </td>
-                {/* Loan apps have no internal admin status — show the lender
-                    outcome (same 3 buckets as the EPC's own view). Once the 1st
-                    disbursement is entered, surface that instead — display-only,
-                    the underlying status field is unchanged. */}
+                {/* Status pill — display-only, the underlying status is unchanged. */}
                 <td className="px-3 py-3 text-center">
                   {(() => { const p = loanPill(r); return <span className={`${PILL} ${p.cls}`}>{p.label}</span>; })()}
                 </td>
-                {/* Disbursement + countdown — only meaningful once approved. */}
+                {/* Disbursement: amount + date, and the countdown once approved. */}
                 <td className="px-3 py-3 text-center">
                   {r.status !== "approved" ? (
-                    <span className="text-[13px] text-[#5a8a76]">—</span>
-                  ) : r.first_disbursement_amount != null ? (
-                    <>
-                      <p className="text-[13px] font-semibold text-[#0f3d2e]">{fmtRupees(r.first_disbursement_amount)}</p>
-                      <p className="text-[11px] text-[#5a8a76] mt-0.5">{fmtDateShort(r.first_disbursement_date)}</p>
-                    </>
+                    <span className="text-[13px] text-[#b4bdb9]">—</span>
                   ) : (
-                    <span className="text-[13px] text-[#5a8a76]">—</span>
+                    <>
+                      {r.first_disbursement_amount != null && (
+                        <>
+                          <p className="text-[13px] font-semibold text-[#0f3d2e]">{fmtRupees(r.first_disbursement_amount)}</p>
+                          <p className="text-[11px] text-[#7a958a] mt-0.5">{fmtDateShort(r.first_disbursement_date)}</p>
+                        </>
+                      )}
+                      {(() => {
+                        const dl = deadlineState(r.first_disbursement_date, r.second_disbursement_amount != null);
+                        return (
+                          <span className={["inline-block mt-1 px-2 py-0.5 rounded-[6px] text-[11px] font-semibold whitespace-nowrap", DEADLINE_PILL[dl.tone]].join(" ")}>
+                            {dl.label}
+                          </span>
+                        );
+                      })()}
+                    </>
                   )}
                 </td>
+                {/* Created — date, then time · who. */}
                 <td className="px-3 py-3 text-center">
-                  {r.status !== "approved" ? (
-                    <span className="text-[13px] text-[#5a8a76]">—</span>
-                  ) : (() => {
-                    const dl = deadlineState(r.first_disbursement_date, r.second_disbursement_amount != null);
-                    return (
-                      <span className={["inline-block px-2 py-1 rounded-[6px] text-[11px] font-semibold whitespace-nowrap", DEADLINE_PILL[dl.tone]].join(" ")}>
-                        {dl.label}
-                      </span>
-                    );
-                  })()}
+                  <p className="text-[13px] font-medium text-[#0f3d2e]">{fmtAddedDate(r.created_at)}</p>
+                  <p className="text-[11px] text-[#7a958a] mt-0.5 truncate">
+                    {fmtAddedTime(r.created_at)} · {r.created_by === "epc" ? "EPC" : r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : "Admin"}
+                  </p>
                 </td>
-                {/* Added on — date bold dark, time smaller grey beneath. */}
-                <td className="px-3 py-3 text-center">
-                  <p className="text-[13px] font-semibold text-[#0f3d2e]">{fmtAddedDate(r.created_at)}</p>
-                  <p className="text-[11px] text-[#5a8a76] mt-0.5">{fmtAddedTime(r.created_at)}</p>
-                </td>
-                <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">
-                  {r.created_by === "epc" ? "EPC" : r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : "Admin"}
-                </td>
-                {/* Action: Email (send to lender) + Message to EPC (with this
-                    admin's unseen-reply count). stopPropagation so the buttons
-                    don't also trigger the row's navigate. */}
+                {/* Action: email to lender + message to EPC (this admin's unseen
+                    replies). stopPropagation so they don't also open the row. */}
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <div className="inline-flex flex-col items-center gap-1">
-                    <div className="inline-flex items-center justify-center gap-2">
+                    <div className="inline-flex items-center justify-center gap-1.5">
                       <button
                         type="button"
                         onClick={() => setEmailRow(r)}
-                        title="Send this application to a lender by email"
-                        className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 bg-[#178a5c] text-white hover:bg-[#12734c] transition-colors"
+                        title="Email to lender"
+                        aria-label="Email to lender"
+                        className="grid place-items-center w-8 h-8 rounded-[8px] border border-[#cdeadd] bg-white text-[#178a5c] hover:bg-[#f0faf5] hover:border-[#178a5c] transition-colors"
                       >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
-                        Email
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
                       </button>
                       <button
                         type="button"
                         onClick={() => router.push(`/admin/app/${r.id}/messages` as any)}
                         title="Message to EPC"
                         aria-label="Message to EPC"
-                        className="relative grid place-items-center w-8 h-8 rounded-input border border-[#cdeadd] bg-white text-[#178a5c] hover:bg-[#f0faf5] transition-colors"
+                        className="relative grid place-items-center w-8 h-8 rounded-[8px] border border-[#cdeadd] bg-white text-[#178a5c] hover:bg-[#f0faf5] hover:border-[#178a5c] transition-colors"
                       >
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                        {(loanCounts.get(r.id) ?? 0) > 0 && (
+                        {unseen > 0 && (
                           <span className="absolute -top-1.5 -right-1.5 min-w-[17px] h-[17px] px-1 grid place-items-center rounded-full bg-[#dc2626] text-white text-[10px] font-bold leading-none">
-                            {(loanCounts.get(r.id) ?? 0) > 9 ? "9+" : (loanCounts.get(r.id) ?? 0)}
+                            {unseen > 9 ? "9+" : unseen}
                           </span>
                         )}
                       </button>
                     </div>
-                    {/* Mail-sent date — sits under the Email button so the team can
-                        see at a glance when docs were emailed to a lender. */}
+                    {/* When the documents were last emailed to a lender. */}
                     {r.aborted_at == null && lenderSentAt[r.id] && (
-                      <p className="text-[11px] text-[#5a8a76] whitespace-nowrap">Sent {fmtDateShort(lenderSentAt[r.id])}</p>
+                      <p className="text-[11px] text-[#7a958a] whitespace-nowrap">Sent {fmtDateShort(lenderSentAt[r.id])}</p>
                     )}
                   </div>
                 </td>
@@ -2257,9 +2227,10 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
       return true;
     });
 
-    const upd = (r: Row) => !!r.epc_last_activity_at && (!r.msg_admin_seen_at || r.msg_admin_seen_at < r.epc_last_activity_at);
+    // EPC-updated profiles float up — per admin: only until THIS admin opens it.
+    const upd = (r: Row) => (insCounts.get(r.id) ?? 0) > 0;
     return out.sort((a, b) => {
-      const au = upd(a) ? 1 : 0, bu = upd(b) ? 1 : 0; // EPC-updated profiles float up
+      const au = upd(a) ? 1 : 0, bu = upd(b) ? 1 : 0;
       if (au !== bu) return bu - au;
       const da = daysOf(a), db = daysOf(b);
       const ha = da !== null, hb = db !== null;
@@ -2268,7 +2239,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, q, categoryFilter, statusFilter, epcFilter, expiryFilter, dateFrom, dateTo, period, pFrom, pTo]);
+  }, [rows, q, categoryFilter, statusFilter, epcFilter, expiryFilter, dateFrom, dateTo, period, pFrom, pTo, insCounts]);
 
   // Issued / Rejected / Hold / Draft / Under Review (migration 0047).
   const STATUS_LABEL: Record<string, string> = {

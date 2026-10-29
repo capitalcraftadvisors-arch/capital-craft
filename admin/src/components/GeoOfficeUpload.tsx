@@ -523,6 +523,7 @@ export default function GeoOfficeUpload({
 
   async function remove() {
     if (!doc) return;
+    if (!window.confirm("Delete this photo? This can't be undone.")) return;
     setError(null);
     // Custom-upload mode: just clear locally; the next upload overwrites the
     // stored path (there's no doc row to delete).

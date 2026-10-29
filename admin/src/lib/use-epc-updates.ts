@@ -27,6 +27,13 @@ export function epcUpdatesKey(): string {
   return EPC_UPDATES_CACHE + ":" + (getBusiness()?.id ?? "anon");
 }
 
+/** This admin's unread EPC-reply count for one loan, from the console's cached
+ *  counts only — never a fetch (a profile must not run the 4-5 count queries). */
+export function cachedLoanUpdateCount(appId: string): number {
+  const c = getCached<Serialized>(epcUpdatesKey(), 12 * 3_600_000);
+  return c?.loan.find(([id]) => id === appId)?.[1] ?? 0;
+}
+
 export function useEpcUpdates(): {
   loanCounts: Map<string, number>; insCounts: Map<string, number>; loading: boolean;
 } {

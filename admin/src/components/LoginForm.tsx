@@ -68,10 +68,10 @@ export default function LoginForm() {
   if (changeToken) {
     return (
       <form onSubmit={handleChange} className="space-y-5">
-        <h2 className="font-display text-[18px] font-bold text-text">Set your password</h2>
-        <Input label="New password" type="password" autoComplete="new-password" autoFocus value={newPw} onChange={(e) => setNewPw(e.target.value)} />
-        <Input label="Confirm password" type="password" autoComplete="new-password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} error={pwError ?? undefined} />
-        <Button type="submit" variant="primary" fullWidth loading={loading} className="!bg-[#1e3a8a] hover:!bg-[#17307a]">
+        <h2 className="font-display text-[18px] font-bold text-[#0f1f4d]">Set your password</h2>
+        <Input label="New password" type="password" autoComplete="new-password" autoFocus value={newPw} onChange={(e) => setNewPw(e.target.value)} className={FIELD} />
+        <Input label="Confirm password" type="password" autoComplete="new-password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} error={pwError ?? undefined} className={FIELD} />
+        <Button type="submit" variant="primary" fullWidth loading={loading} className={CTA}>
           Set password
         </Button>
       </form>
@@ -86,6 +86,8 @@ export default function LoginForm() {
         autoComplete="tel"
         maxLength={10}
         placeholder="9876543210"
+        leftIcon={<span className="text-[15px] font-medium text-[#0f1f4d]/80">+91</span>}
+        className={`${FIELD} !pl-12 tracking-wide`}
         value={mobile}
         onChange={(e) => { setMobile(e.target.value.replace(/\D/g, "")); setNeedPassword(false); setPassword(""); setPwError(null); }}
         error={error ?? undefined}
@@ -99,10 +101,11 @@ export default function LoginForm() {
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           error={pwError ?? undefined}
+          className={FIELD}
           rightSlot={
             <button type="button" onClick={() => setShowPw((s) => !s)}
               aria-label={showPw ? "Hide password" : "Show password"} title={showPw ? "Hide password" : "Show password"}
-              className="p-1.5 rounded text-text-muted hover:text-text">
+              className="p-1.5 rounded text-[#0f1f4d]/50 hover:text-[#0f1f4d]">
               {showPw ? (
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c7 0 10 8 10 8a13.2 13.2 0 0 1-1.67 2.68M6.6 6.6A13.5 13.5 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.4-1.6" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /><path d="M2 2l20 20" /></svg>
               ) : (
@@ -112,10 +115,15 @@ export default function LoginForm() {
           }
         />
       )}
-      <Button type="submit" variant="primary" fullWidth loading={loading}
-        className="!bg-[#1e3a8a] hover:!bg-[#17307a]">
+      <Button type="submit" variant="primary" fullWidth loading={loading} className={CTA}>
         Login
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
       </Button>
     </form>
   );
 }
+
+// The login page's look: tall white fields with a hairline border and navy
+// text, a deep navy button with a soft highlight.
+const FIELD = "!py-3.5 !rounded-[12px] !bg-white !border-[#dfe3ec] !text-[#0f1f4d] placeholder:!text-[#0f1f4d]/30 focus:!border-[#1a3a9c]/60 focus:!shadow-[0_0_0_3px_rgba(26,58,156,0.12)]";
+const CTA = "!bg-gradient-to-b !from-[#1f3f9e] !to-[#0f2a6e] hover:!brightness-110 !text-white !rounded-[12px] !py-3.5 tracking-wide !shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_14px_30px_-14px_rgba(15,42,110,0.6)]";

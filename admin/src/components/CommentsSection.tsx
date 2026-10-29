@@ -94,16 +94,17 @@ export default function CommentsSection({
     const t = text.trim();
     if (!t || !keyVal) return;
     setBusy(true);
-    const { error } = await supabase().from(table).insert({
+    // The insert returns the saved row — prepend it instead of re-reading the list.
+    const { data, error } = await supabase().from(table).insert({
       [keyCol]: keyVal,
       author_id: myId,
       author_name: me?.contact_name ?? null,
       comment_text: t,
-    });
+    }).select("id, author_id, author_name, comment_text, created_at, updated_at").single();
     setBusy(false);
     if (error) { alert("Couldn't save comment: " + error.message); return; }
     setText("");
-    await load();
+    if (data) setRows((r) => [data as unknown as Row, ...r]);
     onChanged?.();
   }
 
@@ -128,12 +129,9 @@ export default function CommentsSection({
             disabled={busy || !text.trim()}
             className="shrink-0 self-start px-4 py-2 bg-[#178a5c] text-white text-[13px] font-semibold rounded-input hover:bg-[#12734c] disabled:opacity-50"
           >
-            {busy ? "Saving…" : "Add"}
+            {busy ? "Saving…" : "Post"}
           </button>
         </div>
-        <p className="text-[11px] text-text-muted mt-1">
-          Admin-only note. EPCs never see these.
-        </p>
       </div>
 
       {/* Scrollable list */}

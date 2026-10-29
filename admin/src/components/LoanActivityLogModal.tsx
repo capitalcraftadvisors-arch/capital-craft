@@ -98,6 +98,15 @@ function fmtDate(v: string): string {
   return fmtDateTime(v);
 }
 
+// Older chatbot saves logged every column name ("intake chat: install_pincode,
+// borrower_pan, …"); read them the way new saves are written (update-fields).
+function editText(detail: string | null): string {
+  const m = /^intake chat:\s*(.+)$/i.exec(detail ?? "");
+  if (!m) return detail || "Details edited";
+  const n = m[1].split(",").filter((s) => s.trim()).length;
+  return `Updated ${n} detail${n === 1 ? "" : "s"} via chatbot`;
+}
+
 function evFromLog(r: LogRow, names: Map<string, string>): Ev {
   // Admin actions attribute to the individual (Manish / Malvika / …) via the
   // actor_id → name map, falling back to any stored actor_name, then "Admin".
@@ -116,7 +125,7 @@ function evFromLog(r: LogRow, names: Map<string, string>): Ev {
     case "rejected":
       return { at: r.created_at, by, text: r.detail || "Rejected by lender", tone: RED, svg: I_X_CIRC };
     case "field_edit":
-      return { at: r.created_at, by, text: r.detail || "Details edited", tone: BLUE, svg: I_PENCIL };
+      return { at: r.created_at, by, text: editText(r.detail), tone: BLUE, svg: I_PENCIL };
     case "email_sent":
       return { at: r.created_at, by, text: r.detail || "Emailed to lender", tone: BLUE, svg: I_MAIL };
     default:
@@ -161,13 +170,16 @@ function buildEvents(loan: Record<string, any>, logs: LogRow[], names: Map<strin
   return out.sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
 }
 
-export default function LoanActivityLogModal({ open, onClose, loan, borrowerName }: Props) {
+/** The loan's activity, newest first. Loads when it mounts (one read), so a
+ *  folded section or a closed modal costs nothing. `compact` = the slim
+ *  timeline for the profile's side column. */
+export function LoanActivityList({ loan, compact }: { loan: Record<string, any>; compact?: boolean }) {
   const [logs, setLogs] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const adminNames = useAdminNames();
 
   useEffect(() => {
-    if (!open || !loan?.id) return;
+    if (!loan?.id) return;
     let cancelled = false;
     void (async () => {
       setLoading(true);
@@ -183,10 +195,55 @@ export default function LoanActivityLogModal({ open, onClose, loan, borrowerName
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [open, loan?.id]);
+  }, [loan?.id]);
 
+  if (loading) return <p className="text-[13px] text-[#5a8a76]">Loading activity…</p>;
+  const events = buildEvents(loan, logs, adminNames);
+  if (events.length === 0) return <p className="text-[13px] text-[#5a8a76]">No activity recorded yet.</p>;
+
+  if (compact) {
+    return (
+      <ol className="ml-2 border-l border-[#e3eee8] space-y-3.5">
+        {events.map((e, i) => (
+          <li key={`${e.at}-${i}`} className="relative pl-4">
+            <span className={["absolute -left-[9px] top-0 w-[17px] h-[17px] rounded-full bg-white grid place-items-center [&>svg]:w-[13px] [&>svg]:h-[13px]", e.tone].join(" ")}>{e.svg}</span>
+            <p className="text-[13px] text-[#0f3d2e] leading-snug">{e.text}</p>
+            <p className="text-[11.5px] text-[#7a958a] mt-0.5">{fmtDate(e.at)}{e.by ? ` · ${e.by}` : ""}</p>
+            {e.note && <p className="text-[12px] text-[#5a8a76] mt-0.5 italic">“{e.note}”</p>}
+          </li>
+        ))}
+      </ol>
+    );
+  }
+
+  return (
+    <ol className="space-y-2">
+      {events.map((e, i) => (
+        <li
+          key={`${e.at}-${i}`}
+          className="border-l-4 border-[#cdeadd] pl-4 py-2 bg-[#f7fcfa] rounded-r-[8px]"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <span className={["shrink-0 mt-0.5", e.tone].join(" ")}>{e.svg}</span>
+              <p className="text-[14px] text-[#0f3d2e]">{e.text}</p>
+            </div>
+            <span className="text-[11px] text-[#5a8a76] shrink-0">{fmtDate(e.at)}</span>
+          </div>
+          {e.by && (
+            <p className="text-[12px] text-[#5a8a76] mt-0.5 pl-[26px]">by {e.by}</p>
+          )}
+          {e.note && (
+            <p className="text-[12px] text-[#5a8a76] mt-0.5 pl-[26px] italic">“{e.note}”</p>
+          )}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+export default function LoanActivityLogModal({ open, onClose, loan, borrowerName }: Props) {
   if (!open) return null;
-  const events = loan ? buildEvents(loan, logs, adminNames) : [];
 
   return (
     <div
@@ -217,34 +274,7 @@ export default function LoanActivityLogModal({ open, onClose, loan, borrowerName
         </div>
 
         <div className="flex-1 overflow-y-auto p-5">
-          {loading ? (
-            <p className="text-[13px] text-[#5a8a76]">Loading activity…</p>
-          ) : events.length === 0 ? (
-            <p className="text-[13px] text-[#5a8a76]">No activity recorded yet.</p>
-          ) : (
-            <ol className="space-y-2">
-              {events.map((e, i) => (
-                <li
-                  key={`${e.at}-${i}`}
-                  className="border-l-4 border-[#cdeadd] pl-4 py-2 bg-[#f7fcfa] rounded-r-[8px]"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-2.5 min-w-0">
-                      <span className={["shrink-0 mt-0.5", e.tone].join(" ")}>{e.svg}</span>
-                      <p className="text-[14px] text-[#0f3d2e]">{e.text}</p>
-                    </div>
-                    <span className="text-[11px] text-[#5a8a76] shrink-0">{fmtDate(e.at)}</span>
-                  </div>
-                  {e.by && (
-                    <p className="text-[12px] text-[#5a8a76] mt-0.5 pl-[26px]">by {e.by}</p>
-                  )}
-                  {e.note && (
-                    <p className="text-[12px] text-[#5a8a76] mt-0.5 pl-[26px] italic">“{e.note}”</p>
-                  )}
-                </li>
-              ))}
-            </ol>
-          )}
+          {loan ? <LoanActivityList loan={loan} /> : null}
         </div>
       </div>
     </div>

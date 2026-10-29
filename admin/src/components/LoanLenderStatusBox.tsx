@@ -1,60 +1,37 @@
 "use client";
-import { fmtDateTime } from "@/lib/dates";
+import { fmtDate } from "@/lib/dates";
 
-// Per-application lender status box on the loan View page: one row per lender,
-// columns Docs sent / Approved / Rejected, each with its own timestamp. Mirrors
-// the design of the EPC lender-status box.
+// Per-application lender list on the loan View page's Lender tab: one row per
+// lender — docs-sent date, the decision as a pill (with its date), and the
+// rejection reason on one line.
 
 import type { LoanLenderRow } from "@/lib/loan-lenders";
-
-function fmt(ts: string | null): string {
-  return ts ? fmtDateTime(ts) : "";
-}
-
-function Cell({ at, color }: { at: string | null; color: string }) {
-  return (
-    <td className="text-center px-2 py-1.5 align-top">
-      {at ? (
-        <div>
-          <span style={{ color }} className="font-bold text-[12px]">✓</span>
-          <div className="text-[9px] text-[#5a8a76] leading-tight">{fmt(at)}</div>
-        </div>
-      ) : (
-        <span className="text-[#c7ddd2]">—</span>
-      )}
-    </td>
-  );
-}
 
 export default function LoanLenderStatusBox({ rows }: { rows: LoanLenderRow[] }) {
   if (!rows.length) return null;
   return (
-    <div className="rounded-[10px] border border-[#cdeadd] bg-white overflow-hidden">
-      <div className="px-3 py-1.5 border-b border-[#e0f0e8] bg-[#f0faf5] text-[12px] font-bold text-[#0f3d2e]">
-        Lender status
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-[12px]">
-          <thead className="text-[9px] uppercase tracking-wide text-[#5a8a76] border-b border-[#eef1f4]">
-            <tr>
-              <th className="text-left font-medium px-3 py-1.5">Lender</th>
-              <th className="text-center font-medium px-2 py-1.5">Docs</th>
-              <th className="text-center font-medium px-2 py-1.5">Appr.</th>
-              <th className="text-center font-medium px-2 py-1.5">Rej.</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="border-b border-[#f0f4f2] last:border-0">
-                <td className="text-left px-3 py-1.5 font-semibold text-[#0f3d2e] whitespace-nowrap">{r.lender_label}</td>
-                <Cell at={r.docs_sent_at} color="#185fa5" />
-                <Cell at={r.approved_at} color="#0f7a52" />
-                <Cell at={r.rejected_at} color="#9f1239" />
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <ul className="divide-y divide-[#eef3f1]">
+      {rows.map((r) => {
+        const pill = r.approved_at
+          ? { text: `Approved ${fmtDate(r.approved_at)}`, cls: "bg-[#e6f6ee] text-[#178a5c]" }
+          : r.rejected_at
+          ? { text: `Rejected ${fmtDate(r.rejected_at)}`, cls: "bg-red-50 text-red-700" }
+          : r.docs_sent_at
+          ? { text: "Waiting", cls: "bg-[#fef0d6] text-[#854f0b]" }
+          : null;
+        return (
+          <li key={r.id} className="py-2.5">
+            <div className="flex items-center gap-3 text-[13px]">
+              <span className="flex-1 min-w-0 font-semibold text-[#0f3d2e] truncate">{r.lender_label}</span>
+              {r.docs_sent_at && <span className="shrink-0 text-[12px] text-[#5a8a76]">Sent {fmtDate(r.docs_sent_at)}</span>}
+              {pill && <span className={["shrink-0 text-[12px] font-semibold px-2 py-0.5 rounded-[6px]", pill.cls].join(" ")}>{pill.text}</span>}
+            </div>
+            {r.rejected_at && r.rejection_reason && (
+              <div className="text-[12px] text-red-700 mt-0.5">{r.rejection_reason}</div>
+            )}
+          </li>
+        );
+      })}
+    </ul>
   );
 }

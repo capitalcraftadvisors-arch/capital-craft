@@ -23,6 +23,23 @@ export type LoanDocCols = {
   coapp_aadhaar_back_path?: string | null;
 };
 
+// Every *_path column on epc_applications that stores a viewable document —
+// the server whitelist for signing (sign-doc, doc-urls).
+export const LOAN_PATH_COLUMNS = [
+  "aadhaar_front_path",
+  "aadhaar_back_path",
+  "aadhaar_face_path",
+  "ebill_path",
+  "proforma_invoice_path",
+  "bank_statement_path",
+  "customer_photo_path",
+  "rooftop_photo_path",
+  "coapp_pan_path",
+  "coapp_aadhaar_front_path",
+  "coapp_aadhaar_back_path",
+  "coapp_aadhaar_face_path",
+] as const;
+
 // user_application_docs category for each document stored as a row.
 export const DOC_CATEGORY = {
   pan: "borrower_pan",

@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { getSignedReadUrl } from "@/lib/gcs";
+import { LOAN_PATH_COLUMNS as PATH_COLUMNS } from "@/lib/loan-doc-checklist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,22 +29,6 @@ const SUPABASE_ANON =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-// Every *_path column on epc_applications that stores a viewable document.
-const PATH_COLUMNS = [
-  "aadhaar_front_path",
-  "aadhaar_back_path",
-  "aadhaar_face_path",
-  "ebill_path",
-  "proforma_invoice_path",
-  "bank_statement_path",
-  "customer_photo_path",
-  "rooftop_photo_path",
-  "coapp_pan_path",
-  "coapp_aadhaar_front_path",
-  "coapp_aadhaar_back_path",
-  "coapp_aadhaar_face_path",
-] as const;
 
 function err(message: string, status: number) {
   return NextResponse.json({ ok: false, error: message }, { status });

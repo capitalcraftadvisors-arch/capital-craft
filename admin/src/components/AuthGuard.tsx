@@ -2,7 +2,7 @@
 
 import { ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Business, ModuleKey, getBusiness, getToken, routeForBusiness, setBusiness, portalAccess, canAccessModule } from "@/lib/auth";
+import { Business, ModuleKey, getBusiness, getToken, routeForBusiness, setBusiness, portalAccess, canAccessModule, onSessionChangeElsewhere } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { useIdleLogout } from "@/lib/use-idle-logout";
 
@@ -38,6 +38,9 @@ export default function AuthGuard({ children, allow, requireModule }: Props) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
   useIdleLogout(); // sign out after 1h of inactivity (egress precaution)
+  // Another tab signed in as someone else (or out) → reload as that account, so
+  // this tab never acts under a name it still shows.
+  useEffect(() => onSessionChangeElsewhere(() => window.location.reload()), []);
 
   useEffect(() => {
     const token = getToken();

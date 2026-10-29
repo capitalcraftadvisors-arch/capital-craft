@@ -18,13 +18,14 @@ import { getBusiness, getToken } from "@/lib/auth";
 type ModuleKey = "epcs" | "apps" | "loanleads" | "leads" | "insurance";
 
 export default function OwnershipCard({
-  module, recordId, createdByUserId, assignedToUserId, onChanged,
+  module, recordId, createdByUserId, assignedToUserId, onChanged, bare,
 }: {
   module: ModuleKey;
   recordId: string;
   createdByUserId: string | null;
   assignedToUserId: string | null;
   onChanged?: (assignee: string | null) => void;
+  bare?: boolean; // contents only — the page supplies its own (flat) section
 }) {
   const [names, setNames] = useState<Map<string, string>>(new Map());
   const [team, setTeam] = useState<{ value: string; label: string }[]>([]);
@@ -71,8 +72,8 @@ export default function OwnershipCard({
     }
   }
 
-  return (
-    <SectionCard title="Ownership" tint icon={I.users} adminOnly>
+  const body = (
+    <>
       <KV k="Created by" v={createdByUserId ? nameOf(createdByUserId) : "System / legacy"} />
       <KV k="Assigned to" v={assignee ? nameOf(assignee) : "Unassigned"} valueClass="text-[#185fa5]" />
       {isMainAdmin && (
@@ -87,6 +88,12 @@ export default function OwnershipCard({
           />
         </div>
       )}
+    </>
+  );
+  if (bare) return body;
+  return (
+    <SectionCard title="Ownership" tint icon={I.users} adminOnly>
+      {body}
     </SectionCard>
   );
 }

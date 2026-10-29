@@ -189,7 +189,7 @@ function Inner() {
       setAdminInfo((ai as AdminInfo | null) ?? null);
       setLoans((la ?? []) as typeof loans);
     })();
-  }, [params.id, activityRefresh]);
+  }, [params.id]); // a comment only refreshes the Activity log, never the whole profile
 
   // Global lender registry — same list/query the main table dropdown uses.
   useEffect(() => {

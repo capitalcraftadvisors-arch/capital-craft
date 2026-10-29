@@ -5,3 +5,8 @@
 export function nameCase(name: string | null | undefined): string {
   return (name ?? "").toLowerCase().replace(/(^|[\s(\-./])(\p{L})/gu, (_, sep: string, ch: string) => sep + ch.toUpperCase());
 }
+
+/** Avatar initials — first letters of the first two words ("Manoj Kumar" → "MK"). */
+export function initialsOf(name: string | null | undefined): string {
+  return (name ?? "").split(/\s+/).filter((w) => /^\p{L}/u.test(w)).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+}

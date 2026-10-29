@@ -39,7 +39,7 @@ export type CompletionCategory = typeof COMPLETION_CATEGORIES[number];
 
 // Tranche-1 admin documents — uploaded here alongside the completion set but
 // NOT part of the 2nd-tranche review gate (they belong to the 1st tranche).
-const TRANCHE1_DOCS: { category: "feasibility_report" | "mmr_advance_receipt"; title: string }[] = [
+export const TRANCHE1_DOCS: { category: "feasibility_report" | "mmr_advance_receipt"; title: string }[] = [
   { category: "feasibility_report",  title: "Feasibility Approval Report" },
   { category: "mmr_advance_receipt", title: "MMR / Advance Receipt" },
 ];
@@ -108,6 +108,7 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
   // refresh so the slot falls back to its uploader. The docsUploaded/docsTotal
   // gate recomputes from the new set, so a removed required doc re-blocks review.
   async function removeDoc(id: string) {
+    if (!window.confirm("Delete this document? This can't be undone.")) return;
     const ok = await deleteDocument(id);
     if (!ok) { alert("Couldn't remove the document."); return; }
     setTick((n) => n + 1);
@@ -125,19 +126,22 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
       {mode !== "tranche2" && uploadedBy === "admin" && (
         <>
           <p className="text-[12px] font-bold uppercase tracking-wide text-[#5a8a76]">1st Tranche Docs</p>
-          {TRANCHE1_DOCS.map((d) => (
-            <DocSlot key={d.category} title={d.category === "mmr_advance_receipt" && advanceReceiptOptional ? `${d.title} (optional)` : d.title} hint="Image or PDF." doc={byCat(d.category)} onOpen={open} onRemove={removeDoc}>
-              <FileUpload
-                applicationId={applicationId}
-                table="user_application_docs"
-                category={d.category}
-                uploadedBy={uploadedBy}
-                maxFiles={1}
-                label=""
-                onUploaded={() => setTick((n) => n + 1)}
-              />
-            </DocSlot>
-          ))}
+          {/* The two tranche-1 slots side by side. */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {TRANCHE1_DOCS.map((d) => (
+              <DocSlot key={d.category} title={d.category === "mmr_advance_receipt" && advanceReceiptOptional ? `${d.title} (optional)` : d.title} hint="Image or PDF." doc={byCat(d.category)} onOpen={open} onRemove={removeDoc}>
+                <FileUpload
+                  applicationId={applicationId}
+                  table="user_application_docs"
+                  category={d.category}
+                  uploadedBy={uploadedBy}
+                  maxFiles={1}
+                  label=""
+                  onUploaded={() => setTick((n) => n + 1)}
+                />
+              </DocSlot>
+            ))}
+          </div>
         </>
       )}
       {mode === "tranche1" ? null : (
@@ -145,6 +149,8 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
       {uploadedBy === "admin" && (
         <p className="text-[12px] font-bold uppercase tracking-wide text-[#5a8a76] pt-2 border-t border-[#eaf3ee]">2nd Tranche Docs</p>
       )}
+      {/* The five slots — side by side for the admin; the EPC page keeps them stacked. */}
+      <div className={uploadedBy === "admin" ? "grid gap-4 sm:grid-cols-2" : "space-y-5"}>
       {/* 1 — Invoice / tax invoice */}
       <DocSlot
         title="Invoice / tax invoice"
@@ -206,6 +212,7 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
           <span />
         </DocSlot>
       )}
+      </div>
 
       {/* Optional extra / supporting documents. Stored under "other", so they are
           NEVER part of the required completion set and can't affect the

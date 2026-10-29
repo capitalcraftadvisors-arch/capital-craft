@@ -212,6 +212,7 @@ export default function FileUpload(props: Props) {
   }
 
   async function removeDoc(d: DocRow) {
+    if (!window.confirm(`Delete "${d.file_name || label}"? This can't be undone.`)) return;
     const ok = await deleteDocument(d.id);
     if (!ok) {
       setError("Could not delete this file.");

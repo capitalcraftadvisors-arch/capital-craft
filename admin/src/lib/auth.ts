@@ -134,6 +134,22 @@ export function logout() {
   localStorage.removeItem(IMPERSONATE_KEY);
 }
 
+// The login is shared by every tab of this browser (localStorage). When ANOTHER
+// tab signs in as a different account, or signs out, `cb` runs — so this tab
+// never keeps acting (marking messages seen, saving) under a name it no longer
+// shows. A refresh of the same account's row is ignored.
+export function onSessionChangeElsewhere(cb: () => void): () => void {
+  const idOf = (v: string | null) => {
+    try { return v ? ((JSON.parse(v) as { id?: string }).id ?? null) : null; } catch { return null; }
+  };
+  const h = (e: StorageEvent) => {
+    if (e.key === TOKEN_KEY && e.newValue === null) cb();
+    else if (e.key === BUSINESS_KEY && idOf(e.oldValue) !== idOf(e.newValue)) cb();
+  };
+  window.addEventListener("storage", h);
+  return () => window.removeEventListener("storage", h);
+}
+
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(TOKEN_KEY);

@@ -2,15 +2,10 @@
 
 // Loan Application — DISBURSEMENT screen (admin).
 //
-// Reached from the "Disbursement" button on an approved row. Header carries
-// the 45-day countdown + sanctioned amount + a short profile overview, then
-// three tabs:
-//   1. Disbursement details — 1st amount (starts the 45-day clock), remaining,
-//      the 3 completion docs, admin review, then the 2nd amount.
-//   2. View profile         — routes to the EXISTING loan View, untouched.
-//
-// (No Activity log tab here — the View profile already carries the activity
-// log, so a second copy on this screen was redundant.)
+// Header carries the 45-day countdown + sanctioned amount + a short profile
+// overview; below it the sanction letter and the shared LoanDisbursementPanel
+// (1st tranche docs + 1st amount, completion docs + review + 2nd amount) — the
+// same panel the loan profile's disbursement stages show.
 //
 // Only admins reach this page (AuthGuard) AND only admins can write the
 // amounts — migration 0044's trg_disbursement_admin_only enforces that at the
@@ -20,30 +15,12 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
-import { getBusiness, isMainAdmin } from "@/lib/auth";
-import { reviewPatch, invalidatePendingCount } from "@/lib/review";
-import { logLoanActivity } from "@/lib/loanAudit";
-import { invalidateLoanBoards } from "@/lib/ops-board";
-import CompletionDocsSection from "@/components/CompletionDocsSection";
-import EmailComposerModal from "@/components/EmailComposerModal";
-import { LENDER_LABEL } from "@/lib/lender-summary";
-import DateField from "@/components/ui/DateField";
 import FileUpload from "@/components/FileUpload";
-import { I, SectionCard, KV, Pill, StatusBtn } from "@/components/view/ViewKit";
-import {
-  deadlineState, DEADLINE_PILL, remainingAmount, fmtRupeesExact, fmtDateShort,
-  DISBURSEMENT_WINDOW_DAYS,
-} from "@/lib/disbursement";
+import LoanDisbursementPanel from "@/components/LoanDisbursementPanel";
+import { I, Pill, Section } from "@/components/view/ViewKit";
+import { deadlineState, DEADLINE_PILL, fmtRupeesExact, fmtDateShort } from "@/lib/disbursement";
 
 type Loan = Record<string, any>;
-type Tab = "disbursement";
-
-// Local calendar date as YYYY-MM-DD (never toISOString — that shifts IST back a day).
-function todayISO(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
 
 export default function LoanDisbursementPage() {
   return (
@@ -59,24 +36,6 @@ function Inner() {
 
   const [loan, setLoan] = useState<Loan | null>(null);
   const [loading, setLoading] = useState(true);
-  const [tab, setTab] = useState<Tab>("disbursement");
-
-  const [firstAmt, setFirstAmt]   = useState("");
-  const [firstDate, setFirstDate] = useState(todayISO());
-  const [secondAmt, setSecondAmt]   = useState("");
-  const [secondDate, setSecondDate] = useState(todayISO());
-  const [busy, setBusy] = useState(false);
-  const [emailOpen, setEmailOpen] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [docsUploaded, setDocsUploaded] = useState(0);
-  // Completion set is now 5 (invoice + 3 geo photos + report); the component
-  // reports the live total via onCountChange, this is just the pre-load default.
-  const [docsTotal, setDocsTotal] = useState(5);
-  // Tranche-1 docs (Feasibility + MMR / Advance receipt) — gate the 1st
-  // disbursement (RFD step removed: docs done ⇒ disbursement opens).
-  const [t1Uploaded, setT1Uploaded] = useState(0);
-  const [t1Total, setT1Total] = useState(0);
 
   async function load() {
     const { data } = await supabase()
@@ -85,99 +44,19 @@ function Inner() {
       .eq("id", params.id)
       .maybeSingle();
     setLoan(data);
-    if (data) {
-      if (data.first_disbursement_amount != null) setFirstAmt(String(data.first_disbursement_amount));
-      if (data.first_disbursement_date) setFirstDate(String(data.first_disbursement_date).slice(0, 10));
-      if (data.second_disbursement_amount != null) setSecondAmt(String(data.second_disbursement_amount));
-      if (data.second_disbursement_date) setSecondDate(String(data.second_disbursement_date).slice(0, 10));
-    }
     setLoading(false);
   }
 
   useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [params.id]);
 
   const applicantName = useMemo(
-    () => loan?.borrower_name || loan?.aadhaar_name || "(unnamed applicant)",
+    () => loan?.aadhaar_name || loan?.borrower_name || "(unnamed applicant)",
     [loan],
   );
   const epcName = useMemo(() => {
     if (!loan?.epc_business) return "—";
     return loan.epc_business.trade_name || loan.epc_business.legal_name || loan.epc_business.contact_name || "—";
   }, [loan]);
-
-  async function saveFirst() {
-    if (!loan || busy) return;
-    if (!["approved", "rfd", "sent_to_nbfc", "disbursed"].includes(String(loan.status))) {
-      setError("This application is not approved yet. A lender must approve it before any disbursement.");
-      return;
-    }
-    const amt = Number(firstAmt);
-    if (!Number.isFinite(amt) || amt <= 0) { setError("Enter a valid first disbursement amount."); return; }
-    const sanctioned = Number(loan.sanctioned_amount ?? 0);
-    if (sanctioned > 0 && amt > sanctioned) {
-      const ok = window.confirm(
-        `The first disbursement (${fmtRupeesExact(amt)}) is MORE than the sanctioned amount (${fmtRupeesExact(sanctioned)}).\n\nAre you sure?`,
-      );
-      if (!ok) return;
-    }
-    setBusy(true); setError(null); setMsg(null);
-    const { error: e } = await supabase()
-      .from("epc_applications")
-      .update({ first_disbursement_amount: amt, first_disbursement_date: firstDate, ...reviewPatch("disb1") })
-      .eq("id", loan.id);
-    if (e) { setError("Couldn't save — " + e.message); setBusy(false); return; }
-    await logLoanActivity(loan.id, "status_change", {
-      detail: `First disbursement ${fmtRupeesExact(amt)} on ${fmtDateShort(firstDate)} — 45-day clock started`,
-    });
-    invalidateLoanBoards(); // disbursement moves the case on the Task Manager / list
-    invalidatePendingCount();
-    setMsg("First disbursement saved — the 45-day clock has started.");
-    await load();
-    setBusy(false);
-  }
-
-  async function saveReview(next: "approved" | "rejected") {
-    if (!loan || busy) return;
-    setBusy(true); setError(null); setMsg(null);
-    const me = getBusiness();
-    const { error: e } = await supabase()
-      .from("epc_applications")
-      .update({
-        completion_docs_status: next,
-        completion_reviewed_at: new Date().toISOString(),
-        completion_reviewed_by: me?.contact_name || "admin",
-      })
-      .eq("id", loan.id);
-    if (e) { setError("Couldn't save the review — " + e.message); setBusy(false); return; }
-    await logLoanActivity(loan.id, "status_change", {
-      detail: next === "approved"
-        ? "Completion documents reviewed and approved — 2nd disbursement unlocked"
-        : "Completion documents rejected — resubmission required",
-    });
-    setMsg(next === "approved" ? "Documents approved." : "Documents rejected.");
-    await load();
-    setBusy(false);
-  }
-
-  async function saveSecond() {
-    if (!loan || busy) return;
-    const amt = Number(secondAmt);
-    if (!Number.isFinite(amt) || amt <= 0) { setError("Enter a valid second disbursement amount."); return; }
-    setBusy(true); setError(null); setMsg(null);
-    const { error: e } = await supabase()
-      .from("epc_applications")
-      .update({ second_disbursement_amount: amt, second_disbursement_date: secondDate, ...reviewPatch("disb2") })
-      .eq("id", loan.id);
-    if (e) { setError("Couldn't save — " + e.message); setBusy(false); return; }
-    await logLoanActivity(loan.id, "status_change", {
-      detail: `Second disbursement ${fmtRupeesExact(amt)} on ${fmtDateShort(secondDate)}`,
-    });
-    invalidateLoanBoards(); // 2nd disbursement moves the case on the Task Manager / list
-    invalidatePendingCount();
-    setMsg("Second disbursement saved.");
-    await load();
-    setBusy(false);
-  }
 
   if (loading) {
     return <main className="min-h-screen grid place-items-center"><p className="text-[#5a8a76]">Loading…</p></main>;
@@ -187,26 +66,7 @@ function Inner() {
   }
 
   const dl = deadlineState(loan.first_disbursement_date, loan.second_disbursement_amount != null);
-  // Pendings (maker-checker): a team member can't enter a disbursement while the
-  // approval details await the main admin's check (the DB trigger enforces it too).
-  const approvalLocked = !isMainAdmin(getBusiness()) && loan.approval_review_status === "pending";
   const sanctioned = loan.sanctioned_amount != null ? Number(loan.sanctioned_amount) : null;
-  const firstSaved = loan.first_disbursement_amount != null;
-  // No disbursement is allowed until a lender has APPROVED the application (which
-  // also means docs were sent). Gating on the app-level status keeps the tracker
-  // honest — a case still at submitted/docs_sent can never record a disbursement.
-  const isApproved = ["approved", "rfd", "sent_to_nbfc", "disbursed"].includes(String(loan.status));
-  // The 1st-disbursement entry opens once both Tranche-1 documents are uploaded
-  // (or it was already recorded) AND the application is approved.
-  const tranche1Complete = isApproved && (firstSaved || (t1Total > 0 && t1Uploaded >= t1Total));
-  const remaining = remainingAmount(sanctioned, loan.first_disbursement_amount);
-  const reviewState: string | null = loan.completion_docs_status ?? null;
-  const allDocsIn = docsUploaded >= docsTotal;
-  const secondUnlocked = reviewState === "approved";
-
-  const inputCls =
-    "w-full border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] " +
-    "focus:border-[#185fa5] outline-none bg-white";
 
   return (
     <main className="min-h-screen bg-white">
@@ -226,7 +86,7 @@ function Inner() {
       <div className="w-full max-w-5xl mx-auto px-5 sm:px-8 py-6" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
 
         {/* ── HEADER — days left, sanctioned, overview ─────────── */}
-        <div className="rounded-[12px] border border-[#cdeadd] bg-[#f0faf5] p-5 sm:p-6 mb-4">
+        <div className="rounded-[12px] border border-[#cdeadd] bg-[#f0faf5] p-5 sm:p-6 mb-2">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="min-w-0">
               <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">{applicantName}</div>
@@ -253,231 +113,27 @@ function Inner() {
           </div>
         </div>
 
-        {/* ── TABS ─────────────────────────────────────────────── */}
-        {/* No Activity log here — the View profile already has one; a second
-            copy on this screen was redundant. */}
-        <div className="flex gap-2 mb-4 border-b border-[#cdeadd]">
-          <TabBtn active={tab === "disbursement"} onClick={() => setTab("disbursement")}>Disbursement details</TabBtn>
-          {/* Leads to the EXISTING View profile — deliberately unchanged. */}
-          <TabBtn active={false} onClick={() => router.push(`/admin/app/${loan.id}/view` as any)}>View profile</TabBtn>
-        </div>
+        {/* Sanction letter — the same slot as Approval details (view / delete /
+            upload here too). Uploading it clears "not available at filling". */}
+        <Section title="Sanction letter">
+          <FileUpload
+            applicationId={loan.id}
+            category="sanction_letter"
+            table="user_application_docs"
+            uploadedBy="admin"
+            maxFiles={1}
+            uploadHint="PDF or image"
+            onUploaded={() => {
+              if (loan.sanction_letter_unavailable) {
+                void supabase().from("epc_applications").update({ sanction_letter_unavailable: false }).eq("id", loan.id)
+                  .then(() => setLoan((l) => (l ? { ...l, sanction_letter_unavailable: false } : l)));
+              }
+            }}
+          />
+        </Section>
 
-        {tab === "disbursement" && (
-          <div className="space-y-4">
-            {!isApproved && (
-              <div className="rounded-[8px] border border-[#f3d9a4] bg-[#fef8ee] px-4 py-3 text-[13px] text-[#854f0b]">
-                This application is not approved yet. Disbursement opens only after a lender approves it (which requires the documents to have been sent). Approve it from the application page first.
-              </div>
-            )}
-            {/* Sanction letter — the same slot as Approval details (view / delete /
-                upload here too). Uploading it clears "not available at filling". */}
-            <SectionCard title="Sanction letter" accent="blue" icon={I.files}>
-              <FileUpload
-                applicationId={loan.id}
-                category="sanction_letter"
-                table="user_application_docs"
-                uploadedBy="admin"
-                maxFiles={1}
-                uploadHint="PDF or image"
-                onUploaded={() => {
-                  if (loan.sanction_letter_unavailable) {
-                    void supabase().from("epc_applications").update({ sanction_letter_unavailable: false }).eq("id", loan.id)
-                      .then(() => setLoan((l) => (l ? { ...l, sanction_letter_unavailable: false } : l)));
-                  }
-                }}
-              />
-            </SectionCard>
-
-            {/* 1st disbursement — opens once both Tranche-1 docs are uploaded. */}
-            <SectionCard title="1st Tranche documents" accent="blue" icon={I.files}>
-              <p className="text-[13px] text-[#5a8a76] mb-3">
-                {loan.approved_lender === "solfin"
-                  ? "Upload the Feasibility Report. The MMR / Advance Receipt is optional for Solfin. Once the required document is in, the 1st-disbursement entry below opens."
-                  : "Upload the Feasibility Report and MMR / Advance Receipt. Once both are in, the 1st-disbursement entry below opens."}
-              </p>
-              <CompletionDocsSection
-                applicationId={loan.id}
-                uploadedBy="admin"
-                mode="tranche1"
-                advanceReceiptOptional={loan.approved_lender === "solfin"}
-                onCountChange={(u, t) => { setT1Uploaded(u); setT1Total(t); }}
-              />
-            </SectionCard>
-
-            <SectionCard title="First disbursement" accent="green" icon={I.money}>
-              {!tranche1Complete || approvalLocked ? (
-                <p className="text-[13px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2">
-                  {approvalLocked
-                    ? "Waiting for the admin to approve the approval details."
-                    : !isApproved
-                    ? "The application must be approved by a lender before the 1st disbursement can be entered."
-                    : "Upload both Tranche-1 documents above to open the 1st disbursement."}
-                </p>
-              ) : (
-                <>
-                  {firstSaved ? (
-                    <div className="mb-3 text-[12px] text-[#5a8a76]">
-                      Deadline (45 days): <span className="font-semibold text-[#0f3d2e]">{fmtDateShort(loan.disbursement_deadline)}</span>
-                      {" · "}Remaining (pending): <span className="font-semibold text-[#0f3d2e]">{fmtRupeesExact(remaining)}</span>
-                    </div>
-                  ) : (
-                    <p className="text-[13px] text-[#5a8a76] mb-3">
-                      Entering the first disbursement starts the {DISBURSEMENT_WINDOW_DAYS}-day completion clock from the date below.
-                    </p>
-                  )}
-                  <div className="grid sm:grid-cols-2 gap-3">
-                    <div>
-                      <p className="text-[12px] text-[#5a8a76] mb-1">First disbursement amount</p>
-                      <input type="text" inputMode="decimal" className={inputCls} placeholder="0"
-                        value={firstAmt} onChange={(e) => setFirstAmt(e.target.value.replace(/[^\d.]/g, ""))} />
-                    </div>
-                    <div>
-                      <p className="text-[12px] text-[#5a8a76] mb-1">Date</p>
-                      <DateField className={inputCls} value={firstDate} onChange={(iso) => setFirstDate(iso)} ariaLabel="First disbursement date" />
-                    </div>
-                  </div>
-                  {sanctioned != null && firstAmt && Number(firstAmt) > 0 && (
-                    <p className="text-[12px] text-[#5a8a76] mt-2">
-                      Remaining after this: <span className="font-semibold text-[#0f3d2e]">{fmtRupeesExact(remainingAmount(sanctioned, Number(firstAmt)))}</span>
-                    </p>
-                  )}
-                  <div className="mt-4">
-                    <button type="button" onClick={() => void saveFirst()} disabled={busy}
-                      className="px-4 py-2 bg-[#178a5c] text-white rounded text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-60">
-                      {busy ? "Saving…" : firstSaved ? "Update first disbursement" : "Save first disbursement"}
-                    </button>
-                  </div>
-                </>
-              )}
-            </SectionCard>
-
-            {/* Completion docs — only meaningful once the clock is running. */}
-            <SectionCard title={`Completion documents (${docsUploaded}/${docsTotal})`} accent="blue" icon={I.files}>
-              {!firstSaved ? (
-                <p className="text-[13px] text-[#5a8a76]">
-                  Enter the first disbursement to begin collecting completion documents.
-                </p>
-              ) : (
-                <>
-                  <p className="text-[13px] text-[#5a8a76] mb-4">
-                    Collected from the customer. The EPC can upload these too — same slots.
-                  </p>
-                  <CompletionDocsSection
-                    applicationId={loan.id}
-                    uploadedBy="admin"
-                    mode="tranche2"
-                    onCountChange={(u, t) => { setDocsUploaded(u); setDocsTotal(t); }}
-                  />
-                </>
-              )}
-            </SectionCard>
-
-            {/* Admin review — gate for the 2nd disbursement. */}
-            {firstSaved && (
-              <SectionCard title="Completion documents" accent="blue" icon={I.lock} adminOnly>
-                <KV k="Status" v={reviewState ? reviewState[0].toUpperCase() + reviewState.slice(1) : "Not reviewed"} />
-                {loan.completion_reviewed_at && (
-                  <KV k="Reviewed" v={`${fmtDateShort(loan.completion_reviewed_at)}${loan.completion_reviewed_by ? ` · ${loan.completion_reviewed_by}` : ""}`} />
-                )}
-                {!allDocsIn && reviewState !== "approved" && (
-                  <p className="text-[12px] text-[#854f0b] mt-2">
-                    All {docsTotal} completion documents must be uploaded before review.
-                  </p>
-                )}
-                <div className="flex gap-2 mt-3 flex-wrap">
-                  {/* Email the 2nd-tranche completion docs to the lender who approved
-                      this loan (opens the editable email popup). */}
-                  {loan.approved_lender && (
-                    <button
-                      type="button"
-                      disabled={busy || !allDocsIn}
-                      onClick={() => setEmailOpen(true)}
-                      title={allDocsIn ? "Email the completion documents to the lender" : "Upload all completion documents first"}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[8px] text-[13px] font-semibold bg-[#178a5c] text-white hover:bg-[#12734c] disabled:opacity-50"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>
-                      Email to {LENDER_LABEL[loan.approved_lender as "creditfair" | "aerem" | "solfin"] ?? "lender"}
-                    </button>
-                  )}
-                  <StatusBtn kind="approve" busy={busy || !allDocsIn} onClick={() => void saveReview("approved")}>
-                    Approve documents
-                  </StatusBtn>
-                  <StatusBtn kind="danger" busy={busy || !allDocsIn} onClick={() => void saveReview("rejected")}>
-                    Reject
-                  </StatusBtn>
-                </div>
-              </SectionCard>
-            )}
-
-            {/* 2nd disbursement — unlocked by an approved review. */}
-            {firstSaved && (
-              <SectionCard title="Second disbursement" accent="green" icon={I.money}>
-                {approvalLocked || (!secondUnlocked && loan.second_disbursement_amount == null) ? (
-                  <p className="text-[13px] text-[#5a8a76]">
-                    {approvalLocked
-                      ? "Waiting for the admin to approve the approval details."
-                      : "Available once the completion documents are reviewed and approved above."}
-                  </p>
-                ) : (
-                  <>
-                    <p className="text-[13px] text-[#5a8a76] mb-3">
-                      Pending after the first disbursement: <span className="font-semibold text-[#0f3d2e]">{fmtRupeesExact(remaining)}</span>
-                    </p>
-                    <div className="grid sm:grid-cols-2 gap-3">
-                      <div>
-                        <p className="text-[12px] text-[#5a8a76] mb-1">Second disbursement amount</p>
-                        <input type="text" inputMode="decimal" className={inputCls} placeholder="0"
-                          value={secondAmt} onChange={(e) => setSecondAmt(e.target.value.replace(/[^\d.]/g, ""))} />
-                      </div>
-                      <div>
-                        <p className="text-[12px] text-[#5a8a76] mb-1">Date</p>
-                        <DateField className={inputCls} value={secondDate} onChange={(iso) => setSecondDate(iso)} ariaLabel="Second disbursement date" />
-                      </div>
-                    </div>
-                    <div className="mt-4">
-                      <button type="button" onClick={() => void saveSecond()} disabled={busy}
-                        className="px-4 py-2 bg-[#178a5c] text-white rounded text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-60">
-                        {busy ? "Saving…" : loan.second_disbursement_amount != null ? "Update second disbursement" : "Save second disbursement"}
-                      </button>
-                    </div>
-                  </>
-                )}
-              </SectionCard>
-            )}
-
-            {msg && <p className="text-[13px] text-[#178a5c]">{msg}</p>}
-            {error && <p className="text-[13px] text-red-600">{error}</p>}
-          </div>
-        )}
+        <LoanDisbursementPanel loan={loan} part="all" onChanged={load} />
       </div>
-      {loan && (
-        <EmailComposerModal
-          open={emailOpen}
-          onClose={() => setEmailOpen(false)}
-          endpoint={`/api/admin/loan-app/${loan.id}/send-to-lender`}
-          extraParams={{ scope: "completion" }}
-          defaultLender={(loan.approved_lender as string) ?? null}
-          title="Email completion documents"
-          onSent={() => { setEmailOpen(false); setMsg("Completion documents emailed to the lender."); }}
-        />
-      )}
     </main>
-  );
-}
-
-function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "px-4 py-2.5 text-[14px] font-semibold border-b-2 -mb-px transition-colors",
-        active
-          ? "border-[#178a5c] text-[#178a5c]"
-          : "border-transparent text-[#5a8a76] hover:text-[#0f3d2e]",
-      ].join(" ")}
-    >
-      {children}
-    </button>
   );
 }
