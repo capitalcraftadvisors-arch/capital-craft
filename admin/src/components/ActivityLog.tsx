@@ -19,6 +19,7 @@ import { fmtDateTime } from "@/lib/dates";
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
+import { lenderName, useLenders } from "@/lib/lenders";
 import { useAdminNames } from "@/lib/use-admin-names";
 
 type LogRow = {
@@ -41,6 +42,7 @@ export default function ActivityLog({ businessId, refreshKey }: Props) {
   const [rows, setRows] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const adminNames = useAdminNames();
+  useLenders(); // lender names in the lines below come from the registry
 
   useEffect(() => {
     let cancelled = false;
@@ -194,10 +196,7 @@ function prettyField(f: string): string {
 }
 
 function prettyLender(f: string): string {
-  if (f === "creditfair") return "Credit Fair";
-  if (f === "aerem")      return "Aerem";
-  if (f === "solfin")     return "Solfin";
-  return f || "lender";
+  return lenderName(f) || "lender";
 }
 
 function prettyStatus(s: string): string {

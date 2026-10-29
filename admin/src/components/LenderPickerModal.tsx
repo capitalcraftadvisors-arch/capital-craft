@@ -3,7 +3,7 @@
 // Shared modal for the "Download ZIP" flow.
 //
 // UX: admin clicks Download ZIP → this modal opens with a dropdown of the
-// three lenders (CreditFair / Aerem / Solfin). Admin picks one, clicks
+// portal's lenders (the registry — lib/lenders). Admin picks one, clicks
 // Confirm, modal closes, parent triggers the ZIP fetch with the chosen
 // lender as a query param.
 //
@@ -15,14 +15,10 @@
 import { useState } from "react";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
+import { useLenders } from "@/lib/lenders";
 
-export type LenderKey = "creditfair" | "aerem" | "solfin";
-
-const LENDER_OPTIONS: { value: LenderKey; label: string }[] = [
-  { value: "creditfair", label: "Credit Fair" },
-  { value: "aerem",      label: "Aerem" },
-  { value: "solfin",     label: "Solfin" },
-];
+// A registered lender's key (lenders registry).
+export type LenderKey = string;
 
 type Props = {
   open: boolean;
@@ -34,6 +30,7 @@ type Props = {
 export default function LenderPickerModal({ open, onClose, onConfirm, epcName }: Props) {
   const [lender, setLender] = useState<LenderKey | "">("");
   const [busy, setBusy] = useState(false);
+  const lenders = useLenders();
 
   if (!open) return null;
 
@@ -85,7 +82,7 @@ export default function LenderPickerModal({ open, onClose, onConfirm, epcName }:
         <Select
           label="Lender"
           placeholder="Select a lender…"
-          options={LENDER_OPTIONS}
+          options={lenders.map((l) => ({ value: l.key, label: l.label }))}
           value={lender}
           onChange={(e) => setLender(e.target.value as LenderKey | "")}
         />

@@ -11,7 +11,8 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import LoanApprovalForm from "@/components/LoanApprovalForm";
-import { LENDER_LABEL } from "@/components/ApprovalDetailsTable";
+import { useLenders } from "@/lib/lenders";
+import { lenderLabelIn } from "@/lib/loan-lenders";
 
 export default function LoanApprovalPage() {
   return (
@@ -25,6 +26,7 @@ function Inner() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const search = useSearchParams();
+  const lenders = useLenders();
   const lender = search.get("lender") ?? "";
   const editMode = search.get("edit") as "approval" | "sanction" | null;
 
@@ -76,7 +78,7 @@ function Inner() {
           <div className="text-[14px] text-[#5a8a76] mt-0.5 truncate">
             {applicantName}
             {lenderKey && (
-              <> · approved by <span className="font-semibold text-[#178a5c]">{search.get("label") || LENDER_LABEL[lenderKey] || lenderKey}</span></>
+              <> · approved by <span className="font-semibold text-[#178a5c]">{search.get("label") || lenderLabelIn(lenders, lenderKey)}</span></>
             )}
           </div>
         </div>

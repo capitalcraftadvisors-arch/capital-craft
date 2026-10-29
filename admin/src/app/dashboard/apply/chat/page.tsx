@@ -9,13 +9,14 @@
 //                for the owning EPC), read into the in-memory form
 //   • submit   → POST /api/epc/loan-apply { phase:"submit", ...all fields }
 //
-// Flow: greeting → customer mobile (creates the draft) → document TABLE (e-bill,
-// Aadhaar, PAN, rooftop) → earning (Yes / No) → role decision (lib/loan-roles):
+// Flow: greeting → customer mobile (creates the draft) → residential / commercial
+// → document TABLE (e-bill — more than one for commercial — Aadhaar, PAN,
+// rooftop, any other documents) → earning (Yes / No) → role decision (lib/loan-roles):
 // a second person's Aadhaar + PAN only when the first can't be the sole
 // applicant (bill owner over 60 / under 21 / not earning, or the bill in someone
 // else's name) → the roles, stated in one line → relation + whose mobile (only
 // with a co-applicant) → applicant photo + bank statement → quotation → review →
-// the details not on any document (email, pincode, system type, use) → loan
+// the details not on any document (email, pincode, system type) → loan
 // amount → tenure → lead owner → consent → success. Swapping roles is the
 // Capital Craft team's (admin profile), not the EPC's. All uploads/OCR run
 // against the EPC's own token; RLS scopes writes. Roles are decided here and
@@ -26,7 +27,8 @@ import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { getBusiness, getToken } from "@/lib/auth";
 import { fetchEpcName } from "@/lib/epc-name";
-import { getDocumentUrl } from "@/lib/storage";
+import { deleteDocument, getDocumentUrl } from "@/lib/storage";
+import { nameDocument } from "@/lib/ocr";
 import { hydrateLoanForm } from "@/lib/loan-form";
 import { numberToWordsIndian } from "@/lib/numberToWords";
 import { nameReadable } from "@/lib/name-match";
@@ -199,7 +201,14 @@ const idsText = (a?: string, b?: string) => `Aadhaar shows ${a}, PAN shows ${b}.
 // asked, and consent is last.
 const SCRIPT: Turn[] = [
   { id: "borrower_mobile", bot: "Customer's mobile number.", kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile", validate: mobileErr },
-  // First person — Aadhaar + PAN with the bill and rooftop; checks only when needed.
+  // Asked first: commercial customers may add more than one electricity bill
+  // in the document table that follows.
+  { id: "plant_use_type", bot: "Residential or commercial use?", kind: "choice", field: "plant_use_type", choices: [
+    { value: "residential", label: "Residential", sub: "Home / society" },
+    { value: "commercial", label: "Commercial", sub: "Shop / office / factory" },
+  ] },
+  // First person — Aadhaar + PAN with the bill and rooftop (+ any other
+  // documents); checks only when needed.
   { id: "doc_table", bot: "Please upload the documents below.", kind: "doc_table", rows: firstRows },
   { id: "p1_ids", bot: (f) => idsText(f.aadhaar_name, f._pan_name), kind: "choice", field: "_p1_ids", choices: IDS_CHOICES, when: (f) => f._p1_ids !== "same" && !idNamesMatch(p1Of(f)), next: (f) => (f._p1_ids === "replace" ? "doc_table" : undefined) },
   { id: "p1_owner", bot: (f) => `Is the electricity bill in ${n1(f)}'s name?`, kind: "choice", field: "_p1_owner", choices: YES_NO, when: (f) => !nameReadable(f.ebill_name) },
@@ -234,10 +243,6 @@ const SCRIPT: Turn[] = [
     { value: "on_grid", label: "On-Grid", sub: "Connected to the grid" },
     { value: "off_grid", label: "Off-Grid", sub: "Battery / standalone" },
     { value: "hybrid", label: "Hybrid", sub: "Grid + battery" },
-  ] },
-  { id: "plant_use_type", bot: "Residential or commercial use?", kind: "choice", field: "plant_use_type", choices: [
-    { value: "residential", label: "Residential", sub: "Home / society" },
-    { value: "commercial", label: "Commercial", sub: "Shop / office / factory" },
   ] },
   { id: "loan_amount", bot: "Loan amount required?", kind: "number", field: "loan_amount_required", placeholder: "Amount in ₹" },
   { id: "tenure", bot: "Finally, the loan configuration — subsidy and tenure.", kind: "tenure" },
@@ -937,7 +942,11 @@ function ChatInner() {
             )}
 
             {turn.kind === "doc_table" && appId && (
-              <DocTable key={"applicant-docs-" + idx} appId={appId} form={form} docRows={docRows} rows={rowsOf(turn, form) ?? APPLICANT_ROWS} onPatch={merge} onDone={finishDocTable} />
+              <DocTable
+                key={"applicant-docs-" + idx} appId={appId} form={form} docRows={docRows} rows={rowsOf(turn, form) ?? APPLICANT_ROWS} onPatch={merge} onDone={finishDocTable}
+                // The first table (applying) also takes any other documents, and more bills for commercial.
+                extras={!editMode && turn.id === "doc_table" ? { bills: form.plant_use_type === "commercial" } : undefined}
+              />
             )}
 
             {turn.kind === "coapp_docs" && appId && (
@@ -1048,7 +1057,8 @@ const UNIT_FIELDS: Partial<Record<Unit, (f: Form) => { label: string; field: str
 
 type SlotFile = { file: File; thumb: string | null };
 
-function DocTable({ appId, form, rows, docRows = [], review = false, onPatch, onDone }: { appId: string; form: Form; rows: Row[]; docRows?: { id: string; category: string; storage_path: string | null }[]; review?: boolean; onPatch: (p: Form) => void; onDone: (r: { name: string; thumb: string | null }[]) => void }) {
+function DocTable({ appId, form, rows, docRows = [], review = false, extras, onPatch, onDone }: { appId: string; form: Form; rows: Row[]; docRows?: { id: string; category: string; storage_path: string | null }[]; review?: boolean; extras?: { bills: boolean }; onPatch: (p: Form) => void; onDone: (r: { name: string; thumb: string | null }[]) => void }) {
+  const [extrasBusy, setExtrasBusy] = useState(false);
   const [files, setFiles] = useState<Partial<Record<Slot, SlotFile>>>({});
   const [skipped, setSkipped] = useState<Partial<Record<Slot, boolean>>>({});
   // Slots the user re-opened via "Replace" — shows the file picker again even
@@ -1099,7 +1109,7 @@ function DocTable({ appId, form, rows, docRows = [], review = false, onPatch, on
   const reading = Object.values(reads).some((x) => x?.status === "reading");
   // In review mode every row is already uploaded (or optional), so Continue is
   // always available — the table is for checking/fixing, not forced completion.
-  const allSettled = review || (!reading && rows.every(rowSettled));
+  const allSettled = review || (!reading && !extrasBusy && rows.every(rowSettled));
 
   async function callRoute(unit: Unit, f: Partial<Record<Slot, SlotFile>>): Promise<Form> {
     const fileOf = (s: Slot) => { const x = f[s]?.file; if (!x) throw new Error("File missing — re-attach it."); return x; };
@@ -1286,10 +1296,112 @@ function DocTable({ appId, form, rows, docRows = [], review = false, onPatch, on
           </tbody>
         </table>
       </div>
+      {extras && <ExtraDocs appId={appId} form={form} bills={extras.bills} onPatch={onPatch} onBusy={setExtrasBusy} />}
       <div className="flex items-center gap-2 flex-wrap">
         <button onClick={done} disabled={!allSettled} className="px-4 py-2 rounded-lg bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-50">Continue →</button>
         {!allSettled && <span className="text-[11px] text-text-muted">Add or tick “Don&apos;t have it” for every row to continue.</span>}
       </div>
+    </div>
+  );
+}
+
+// ── Extra documents (first table) ────────────────────────────────────────────
+// Any number of other documents — each named by the AI reader from what it is
+// ("ITR 2024-25"), else its file name — and, for a commercial customer, more
+// electricity bills (the first bill in the table stays the one that's read).
+// Each file uploads on pick as its own user_application_docs row (other /
+// electricity_bill). The lists live in the form (`_extra_docs` / `_extra_bills`,
+// never submitted) so they're still shown on coming back to this table.
+type ExtraDoc = { id: string; name: string };
+type ExtraKey = "_extra_docs" | "_extra_bills";
+const extraList = (f: Form, key: ExtraKey): ExtraDoc[] => { try { return JSON.parse(f[key] || "[]") as ExtraDoc[]; } catch { return []; } };
+
+function ExtraDocs({ appId, form, bills, onPatch, onBusy }: { appId: string; form: Form; bills: boolean; onPatch: (p: Form) => void; onBusy: (busy: boolean) => void }) {
+  const [lists, setLists] = useState<Record<ExtraKey, ExtraDoc[]>>(() => ({ _extra_docs: extraList(form, "_extra_docs"), _extra_bills: extraList(form, "_extra_bills") }));
+  const [pending, setPending] = useState<{ key: string; list: ExtraKey; name: string }[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) { first.current = false; return; }
+    onPatch({ _extra_docs: JSON.stringify(lists._extra_docs), _extra_bills: JSON.stringify(lists._extra_bills) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lists]);
+  useEffect(() => { onBusy(pending.length > 0); }, [pending.length, onBusy]);
+
+  async function upload(list: ExtraKey, file: File) {
+    const key = uidGen();
+    setPending((p) => [...p, { key, list, name: file.name }]);
+    try {
+      const named = list === "_extra_docs" ? await nameDocument(file) : null;
+      const ext = /\.[^.]+$/.exec(file.name)?.[0] ?? "";
+      const fd = new FormData();
+      fd.append("file", named ? new File([file], `${named}${ext}`, { type: file.type }) : file);
+      fd.append("table", "user_application_docs");
+      fd.append("category", list === "_extra_bills" ? "electricity_bill" : "other");
+      fd.append("application_id", appId);
+      fd.append("uploaded_by", "epc");
+      const res = await fetch("/api/upload", { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok || !j.id) { setError(j?.error || `Couldn't upload ${file.name}.`); return; }
+      const doc = { id: String(j.id), name: named ?? file.name.replace(/\.[^.]+$/, "") };
+      setLists((l) => ({ ...l, [list]: [...l[list], doc] }));
+    } catch {
+      setError(`Couldn't upload ${file.name}.`);
+    } finally {
+      setPending((p) => p.filter((x) => x.key !== key));
+    }
+  }
+  function add(list: ExtraKey, files: FileList | null) {
+    setError(null);
+    for (const f of Array.from(files ?? [])) {
+      if (f.type.startsWith("image/") || f.type.includes("pdf")) void upload(list, f);
+    }
+  }
+  async function remove(list: ExtraKey, d: ExtraDoc) {
+    if (!window.confirm(`Delete "${d.name}"? This can't be undone.`)) return;
+    if (!(await deleteDocument(d.id))) { setError(`Couldn't delete ${d.name}.`); return; }
+    setLists((l) => ({ ...l, [list]: l[list].filter((x) => x.id !== d.id) }));
+  }
+
+  const block = (list: ExtraKey, title: string, label: (d: ExtraDoc, i: number) => string, top: boolean) => {
+    const waiting = pending.filter((p) => p.list === list);
+    return (
+      <div className={top ? "" : "border-t border-line/70"}>
+        <div className="flex items-center justify-between gap-2 px-3 py-2">
+          <span className="text-[12.5px] text-text leading-snug">{title}</span>
+          <label className="inline-flex items-center gap-1 rounded-lg border border-dashed border-line hover:border-[#1e3a8a] bg-white px-2.5 py-1.5 cursor-pointer text-[11.5px] font-semibold text-[#1e3a8a] whitespace-nowrap">
+            <span className="text-[13px] leading-none">＋</span> Add
+            <input type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={(e) => { add(list, e.target.files); e.currentTarget.value = ""; }} />
+          </label>
+        </div>
+        {(lists[list].length > 0 || waiting.length > 0) && (
+          <ul className="px-3 pb-2.5 flex flex-col gap-1.5">
+            {lists[list].map((d, i) => (
+              <li key={d.id} className="flex items-center gap-2 text-[12px] text-text min-w-0">
+                <span className="w-6 h-6 rounded-md bg-[#f4f7fd] border border-[#c7d5f0] grid place-items-center text-[11px] shrink-0">📄</span>
+                <span className="truncate flex-1">{label(d, i)}</span>
+                <button onClick={() => void remove(list, d)} aria-label={`Delete ${label(d, i)}`} className="text-[#9aa5a0] hover:text-red-600 text-[13px] leading-none px-1">✕</button>
+              </li>
+            ))}
+            {waiting.map((p) => (
+              <li key={p.key} className="flex items-center gap-2 text-[11.5px] text-text-muted min-w-0">
+                <span className="w-3.5 h-3.5 rounded-full border-2 border-[#1e3a8a]/30 border-t-[#1e3a8a] animate-spin shrink-0" />
+                <span className="truncate">{p.name} · {list === "_extra_docs" ? "Reading…" : "Uploading…"}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="rounded-xl border border-line bg-white overflow-hidden">
+        {bills && block("_extra_bills", "More electricity bills", (_d, i) => `Electricity bill ${i + 2}`, true)}
+        {block("_extra_docs", "Other documents", (d) => d.name, !bills)}
+      </div>
+      {error && <span className="text-[11.5px] text-red-600">{error}</span>}
     </div>
   );
 }

@@ -21,7 +21,8 @@ const SUPABASE_ANON =
 type FoundRow = { id: string; storage_path: string; category: string; business_id?: string };
 type Found =
   | ({ table: "epc_documents" } & FoundRow)
-  | ({ table: "user_application_docs" } & FoundRow);
+  | ({ table: "user_application_docs" } & FoundRow)
+  | ({ table: "stakeholder_docs" } & FoundRow);
 
 async function findDoc(supabase: SupabaseClient, id: string): Promise<Found | null> {
   const e = await supabase
@@ -37,6 +38,14 @@ async function findDoc(supabase: SupabaseClient, id: string): Promise<Found | nu
     .eq("id", id)
     .maybeSingle();
   if (u.data) return { table: "user_application_docs", ...(u.data as FoundRow) };
+
+  // Team member / partner documents (0106) — the main admin's only, by RLS.
+  const s = await supabase
+    .from("stakeholder_docs")
+    .select("id, storage_path, category")
+    .eq("id", id)
+    .maybeSingle();
+  if (s.data) return { table: "stakeholder_docs", ...(s.data as FoundRow) };
 
   return null;
 }

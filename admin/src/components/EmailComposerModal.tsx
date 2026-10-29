@@ -13,12 +13,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { getToken } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
-
-const LENDERS = [
-  { v: "creditfair", l: "Credit Fair" },
-  { v: "aerem", l: "Aerem" },
-  { v: "solfin", l: "Solfin" },
-];
+import { useLenders } from "@/lib/lenders";
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type Preview = { subject: string; toName: string; detail: [string, string][]; docLabels: string[]; ccDefault: string[]; bccDefault: string[]; allowedLenders?: string[] };
@@ -26,6 +21,8 @@ type Preview = { subject: string; toName: string; detail: [string, string][]; do
 export default function EmailComposerModal({
   open, onClose, endpoint, title = "Send to lender", defaultLender, onSent, extraParams,
 }: { open: boolean; onClose: () => void; endpoint: string; title?: string; defaultLender?: string | null; onSent?: (lender: string) => void; extraParams?: Record<string, unknown> }) {
+  // Every lender the portal works with (the registry).
+  const LENDERS = useLenders().map((x) => ({ v: x.key, l: x.label }));
   const [lender, setLender] = useState<string>(defaultLender || "creditfair");
   // Lenders that approved this application's EPC — only these can be picked. Empty
   // = no restriction (fall back to all).

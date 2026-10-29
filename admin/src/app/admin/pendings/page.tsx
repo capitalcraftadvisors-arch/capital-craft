@@ -17,7 +17,8 @@ import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { fmtRupeesExact } from "@/lib/money";
 import { fmtDate } from "@/lib/dates";
 import { invalidateLoanBoards } from "@/lib/ops-board";
-import { LENDER_LABEL } from "@/components/ApprovalDetailsTable";
+import { useLenders } from "@/lib/lenders";
+import { lenderLabelIn } from "@/lib/loan-lenders";
 import { approveReview, approveEpcReview, rememberPendingCount, PENDING_FILTER, REVIEW_LABEL, type ReviewItem } from "@/lib/review";
 import { invalidate } from "@/lib/list-cache";
 
@@ -37,6 +38,7 @@ const epc = (r: Row) => r.epc_business?.trade_name || r.epc_business?.legal_name
 function Inner() {
   const router = useRouter();
   const allowed = isMainAdmin(getBusiness());
+  const lenders = useLenders();
   const [rows, setRows] = useState<Row[] | null>(null);
   const [epcRows, setEpcRows] = useState<Row[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -156,7 +158,7 @@ function Inner() {
                   <Td><Link href={`/admin/app/${r.id}/view` as any} className="font-semibold text-text hover:underline">{name(r)}</Link></Td>
                   <Td>{r.loan_display_id || "—"}</Td>
                   <Td>{epc(r)}</Td>
-                  <Td>{LENDER_LABEL[String(r.approved_lender)] ?? r.approved_lender ?? "—"}</Td>
+                  <Td>{r.approved_lender ? lenderLabelIn(lenders, String(r.approved_lender)) : "—"}</Td>
                   <Td>{fmtRupeesExact(r.sanctioned_amount)}</Td>
                   <Td>{r.approval_details?.approved_tenure_years ? `${r.approval_details.approved_tenure_years} yrs` : "—"}</Td>
                   <Td>{fmtRupeesExact(r.approval_details?.approved_emi)}</Td>

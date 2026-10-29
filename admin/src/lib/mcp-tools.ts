@@ -10,7 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fmtDateIST as dt } from "./dates";
 import { remainingAmount } from "./disbursement";
 import { PENDING_FILTER } from "./review";
-import { LENDER_LABEL } from "./lender-summary";
+import { DEFAULT_LOAN_LENDERS, lenderLabelIn } from "./loan-lenders";
 
 type Args = Record<string, unknown>;
 type Row = Record<string, any>;
@@ -26,7 +26,7 @@ const str = (v: unknown) => (typeof v === "string" ? v : "");
 // Search text safe for a PostgREST or() filter (letters, digits, space, - /).
 const clean = (v: unknown) => str(v).replace(/[^\p{L}\p{N} \-/]/gu, "").trim().slice(0, 60);
 const limitOf = (v: unknown) => Math.min(200, Math.max(1, Math.floor(Number(v) || 50)));
-const lender = (k: unknown) => (k ? LENDER_LABEL[k as keyof typeof LENDER_LABEL] ?? String(k) : null);
+const lender = (k: unknown) => (k ? lenderLabelIn(DEFAULT_LOAN_LENDERS, String(k)) : null);
 const epcName = (b: Row | null | undefined) => b?.trade_name || b?.legal_name || b?.contact_name || null;
 const num = (v: unknown) => (v == null ? null : Number(v));
 
@@ -183,7 +183,7 @@ export const MCP_TOOLS: McpTool[] = [
     inputSchema: { type: "object", properties: {
       query: { type: "string", description: "Applicant name, loan ID (e.g. CC-RES-00210) or mobile." },
       stage: { type: "string", enum: LOAN_STAGES },
-      lender: { type: "string", enum: Object.keys(LENDER_LABEL) },
+      lender: { type: "string", description: "Lender key, e.g. creditfair, aerem, solfin (or any lender added in the portal)." },
       ...periodProp,
       limit: { type: "number", description: "Max rows (default 50, max 200)." },
     } },

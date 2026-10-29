@@ -25,12 +25,8 @@ import React from "react";
 import DateField from "@/components/ui/DateField";
 import type { LenderKey } from "@/components/LenderPickerModal";
 import { rupeesInWords, yearsInWords } from "@/lib/numberToWords";
-
-export const LENDER_LABEL: Record<string, string> = {
-  creditfair: "Credit Fair",
-  aerem:      "Aerem",
-  solfin:     "Solfin",
-};
+import { useLenders } from "@/lib/lenders";
+import { lenderLabelIn } from "@/lib/loan-lenders";
 
 // Persisted shape → epc_applications.approval_details (jsonb).
 export type ApprovalDetails = {
@@ -149,7 +145,8 @@ type Props = {
 
 export default function ApprovalDetailsTable({ value, onChange, readOnly }: Props) {
   const ro = readOnly || !onChange;
-  const lender = value.approved_by ? (LENDER_LABEL[String(value.approved_by)] ?? String(value.approved_by)) : "—";
+  const lenders = useLenders();
+  const lender = value.approved_by ? lenderLabelIn(lenders, String(value.approved_by)) : "—";
 
   function set(key: keyof ApprovalDetails, raw: string) {
     if (!onChange) return;

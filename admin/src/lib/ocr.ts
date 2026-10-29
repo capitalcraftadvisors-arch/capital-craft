@@ -127,6 +127,25 @@ export async function extractGstLegalName(file: File): Promise<GstLegalNameOcrRe
   return res.json();
 }
 
+/** A short AI title for any document ("ITR 2024-25"), or null → keep the file's own name. */
+export async function nameDocument(file: File): Promise<string | null> {
+  try {
+    const base64 = await fileToBase64(file);
+    const res = await fetch(`/api/ocr`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${getToken() ?? ""}`,
+      },
+      body: JSON.stringify({ type: "doc_name", imageBase64: base64, mimeType: file.type }),
+    });
+    const j = await res.json().catch(() => null);
+    return j?.ok && typeof j.name === "string" ? j.name : null;
+  } catch {
+    return null;
+  }
+}
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const r = new FileReader();

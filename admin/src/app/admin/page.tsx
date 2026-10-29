@@ -36,8 +36,8 @@ import LenderCell from "@/components/LenderCell";
 import AdminPendingPill from "@/components/AdminPendingPill";
 import { epcLocked, saveEpcLenderState } from "@/lib/review";
 import LoanLeadsTab from "@/components/LoanLeadsTab";
-import { latestLenderStatus, latestStatusLabel, type LoanLenderRow } from "@/lib/loan-lenders";
-import { LENDER_LABEL } from "@/components/ApprovalDetailsTable";
+import { latestLenderStatus, latestStatusLabel, lenderLabelIn, type LoanLenderRow } from "@/lib/loan-lenders";
+import { addLender as addRegistryLender, useLenders } from "@/lib/lenders";
 import { otherInsDoc, OTHER_INS_LIST_CACHE } from "@/lib/other-insurance";
 import { loanDocChecklist } from "@/lib/loan-doc-checklist";
 
@@ -184,9 +184,7 @@ const BUSINESS_TYPE_LABEL: Record<string, string> = {
   llp:            "LLP",
 };
 
-// Lender keys are now DYNAMIC (backed by the `lenders` registry table),
-// so this is a plain string. The static ZIP/approval flow keeps its own
-// fixed `LenderKey` union (LenderPickerModal) — that path is unchanged.
+// Lender keys are DYNAMIC (the `lenders` registry — lib/lenders), so a plain string.
 type Lender = string;
 // "03 Jul 2026, 5:53 pm" — when the loan application was created.
 function fmtAddedOn(v: string | null | undefined): string {
@@ -691,15 +689,6 @@ function DateRange({ from, to, onFrom, onTo }: { from: string; to: string; onFro
   );
 }
 
-// Fallback list used until the `lenders` registry loads (and if it ever
-// returns empty). The live list comes from the DB, ordered by sort_order.
-const LENDERS: LenderInfo[] = [
-  { key: "aerem",      label: "Aerem",       sort_order: 10 },
-  { key: "creditfair", label: "Credit Fair", sort_order: 20 },
-  { key: "solfin",     label: "Solfin",      sort_order: 30 },
-];
-
-type LenderInfo = { key: string; label: string; sort_order?: number };
 type LenderState = { docs_given: boolean; approved: boolean; rejected: boolean };
 type LenderMap = Partial<Record<Lender, LenderState>>;
 
@@ -768,7 +757,8 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
   const [lenderState, setLenderState] = useState<Record<string, LenderMap>>({});
   const [loaded, setLoaded] = useState(false); // first read done (cache or query)
   // Live lender registry (falls back to the static list until it loads).
-  const [lenderList, setLenderList] = useState<LenderInfo[]>(LENDERS);
+  // The lender registry (lib/lenders) — every lender the portal works with.
+  const lenderList = useLenders();
   const [addOpen, setAddOpen] = useState(false);
   const [emailRow, setEmailRow] = useState<Row | null>(null); // EPC → send-to-lender email
   // Row highlighted after returning from View. sessionStorage-backed so
@@ -870,31 +860,12 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { void load(); }, []);
 
-  // Load the global lender registry (Aerem / Credit Fair / Solfin + any the
-  // admin has added). Ordered by sort_order; keeps the static fallback if the
-  // table is empty or unreachable.
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase()
-        .from("lenders")
-        .select("key,label,sort_order")
-        .eq("is_active", true)
-        .order("sort_order", { ascending: true });
-      if (data && data.length) setLenderList(data as LenderInfo[]);
-    })();
-  }, []);
-
-  // Add a lender to the registry (GLOBAL — appears on every EPC's dropdown).
+  // Add a lender to the registry (GLOBAL — every list in the portal shows it).
   async function addLender(name: string) {
-    const label = name.trim();
-    if (!label) return;
-    const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-    if (!key) { toast.error("Please enter a valid lender name."); return; }
-    if (lenderList.some((l) => l.key === key)) { toast.error("That lender already exists."); return; }
-    const sort_order = Math.max(100, ...lenderList.map((l) => l.sort_order ?? 100)) + 10;
-    const { error } = await supabase().from("lenders").insert({ key, label, sort_order });
-    if (error) { alert("Couldn't add lender: " + error.message); return; }
-    setLenderList((cur) => [...cur, { key, label, sort_order }]);
+    if (!name.trim()) return;
+    const r = await addRegistryLender(name);
+    if (r.error) toast.error(r.error);
+    else if (r.existed) toast.error("That lender already exists.");
   }
 
   // Single mutually-exclusive stage per EPC — highest rule wins (top→bottom).
@@ -1357,6 +1328,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
   const [statusFilter, setStatusFilter] = useState("");
   // Client-side filters over the already-loaded list.
   const [epcFilter, setEpcFilter]       = useState("");
+  const lenders = useLenders();
   const [lenderFilter, setLenderFilter] = useState("");
   // Created-date range (inclusive) via calendar pickers.
   const [dateFrom, setDateFrom] = useState("");
@@ -1501,7 +1473,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
   // admin, not just the one who sent it. Previously the list send recorded
   // nothing, so another admin had no way to know it had already gone out.
   async function recordDocsSentFromList(app: Row, lenderKey: string) {
-    const label = LENDER_LABEL[lenderKey] ?? lenderKey;
+    const label = lenderLabelIn(lenders, lenderKey);
     const now = new Date().toISOString();
     try {
       const { data: existing } = await supabase()
@@ -1589,7 +1561,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     // Finalized for disbursement — the approval by that lender (not the latest
     // event, which may be a different lender's later rejection).
     if (r.approved_lender) {
-      return { label: `Approved by ${LENDER_LABEL[String(r.approved_lender)] ?? String(r.approved_lender)}`, cls: "bg-[#e6f6ee] text-[#0f7a52]" };
+      return { label: `Approved by ${lenderLabelIn(lenders, String(r.approved_lender))}`, cls: "bg-[#e6f6ee] text-[#0f7a52]" };
     }
     // Latest status across all lenders: a rejection is red, other events indigo.
     const latest = lenderLatest[r.id];
@@ -1816,7 +1788,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         <Select
           label="Lender"
           placeholder="Lender"
-          options={Object.entries(LENDER_LABEL).map(([value, label]) => ({ value, label }))}
+          options={lenders.map((l) => ({ value: l.key, label: l.label }))}
           value={lenderFilter}
           onChange={(e) => setLenderFilter(e.target.value)}
         />

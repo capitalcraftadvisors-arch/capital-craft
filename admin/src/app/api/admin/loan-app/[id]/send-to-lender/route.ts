@@ -20,7 +20,8 @@ import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { uploadBuffer, downloadBuffer } from "@/lib/gcs";
 import { fileLinkUrl } from "@/lib/file-links";
 import { publicOrigin } from "@/lib/login-password-server";
-import { creditFairEmailRows, LENDER_LABEL, type LenderKey } from "@/lib/lender-summary";
+import { creditFairEmailRows } from "@/lib/lender-summary";
+import { fetchLenders, lenderLabelIn } from "@/lib/loan-lenders";
 import { logLoanActivityServer } from "@/lib/loan-activity-server";
 
 export const runtime = "nodejs";
@@ -37,7 +38,6 @@ const LOAN_CC_DEFAULT = ["malvikasaxena323@gmail.com"];
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const LENDER_KEYS: LenderKey[] = ["creditfair", "aerem", "solfin"];
 
 function err(message: string, status: number) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -134,13 +134,17 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // scope "completion" = email the 2nd-tranche completion documents (to the
     // lender who approved the loan); default = the full loan application.
     const scope = body.scope === "completion" ? "completion" : "application";
-    const lender = String(body.lender ?? "").toLowerCase() as LenderKey;
-    if (!LENDER_KEYS.includes(lender)) return err("Pick a lender.", 400);
+    const lender = String(body.lender ?? "").toLowerCase();
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
       global: { headers: { Authorization: `Bearer ${token}` } },
       auth: { persistSession: false, autoRefreshToken: false },
     });
+    // Any lender the portal works with (the registry) — not a fixed list.
+    const lenders = await fetchLenders(supabase);
+    const isLender = (k: string) => lenders.some((l) => l.key === k);
+    if (!isLender(lender)) return err("Pick a lender.", 400);
+    const lenderLabel = lenderLabelIn(lenders, lender);
 
     const [{ data: loan, error: loadErr }, { data: docs }] = await Promise.all([
       supabase.from("epc_applications").select("*, epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)").eq("id", appId).maybeSingle(),
@@ -173,13 +177,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           .eq("approved", true);
         allowedLenders = ((ls ?? []) as { lender: string }[])
           .map((r) => r.lender)
-          .filter((l): l is LenderKey => LENDER_KEYS.includes(l as LenderKey));
+          .filter(isLender);
       } catch { /* best effort — fall back to all lenders in the composer */ }
 
       // Completion docs go to the lender who APPROVED this loan — lock the picker
       // to that lender so the 2nd-tranche pack can't be sent to the wrong one.
       const approvedLender = String(loan.approved_lender ?? "").toLowerCase();
-      if (isCompletion && LENDER_KEYS.includes(approvedLender as LenderKey)) {
+      if (isCompletion && isLender(approvedLender)) {
         allowedLenders = [approvedLender];
       }
 
@@ -233,7 +237,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     await zipDone;
     const zipBuffer = Buffer.concat(chunks);
 
-    const zipName = `${safe(`${borrowerName}_${LENDER_LABEL[lender]}`)}.zip`;
+    const zipName = `${safe(`${borrowerName}_${lenderLabel}`)}.zip`;
     const zipPath = `lender-packs/${appId}/${Date.now()}_${zipName}`;
     await uploadBuffer(zipPath, zipBuffer, "application/zip");
     // Links go through the portal so they outlive Google's 7-day cap (lib/file-links).
@@ -271,7 +275,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     });
 
     await saveContacts(supabase, [to, ...cc, ...bcc]);
-    await logLoanActivityServer(supabase, appId, "email_sent", claims.business_id ?? null, { detail: `Emailed ${isCompletion ? "completion documents" : "to"} ${LENDER_LABEL[lender]} — ${to}` });
+    await logLoanActivityServer(supabase, appId, "email_sent", claims.business_id ?? null, { detail: `Emailed ${isCompletion ? "completion documents" : "to"} ${lenderLabel} — ${to}` });
 
     return NextResponse.json({ ok: true, sent_to: to, documents: links.length });
   } catch (e) {

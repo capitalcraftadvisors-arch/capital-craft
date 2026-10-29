@@ -228,6 +228,20 @@ export async function geminiExtractGeoStamp(images: GeminiImage[]): Promise<{ la
   return { lat, lng };
 }
 
+// ── Any document — a short name for what it is (EPC "Other documents") ───────
+export async function geminiNameDocument(images: GeminiImage[]): Promise<string | null> {
+  const g = await geminiExtract<{ name?: unknown }>({
+    images, label: "doc_name",
+    schema: obj({ name: STR }),
+    prompt:
+      "Identify this document from a solar-loan file. name = a short title (2–6 words) for WHAT the document is, " +
+      "from what is printed — e.g. 'ITR 2024-25', 'GST certificate', 'Salary slip — Aug 2026', 'Rent agreement', " +
+      "'Property tax receipt', 'Electricity bill'. No personal names, ID numbers or addresses. If it can't be identified, return null.",
+  });
+  const name = s(g?.name);
+  return name ? name.slice(0, 60) : null;
+}
+
 // ── Solar quotation details (one-photo auto-fill for the Quotation Builder) ───
 export type QuotationExtract = {
   customer_name: string | null; pincode: string | null; address: string | null;

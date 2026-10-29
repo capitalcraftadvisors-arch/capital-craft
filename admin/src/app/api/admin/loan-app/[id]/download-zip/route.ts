@@ -28,6 +28,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import archiver from "archiver";
 import { summaryRows } from "@/lib/lender-summary";
+import { fetchLenders, lenderLabelIn } from "@/lib/loan-lenders";
 import ExcelJS from "exceljs";
 import { Readable } from "node:stream";
 import { downloadBuffer } from "@/lib/gcs";
@@ -46,13 +47,7 @@ const SUPABASE_ANON =
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Same 3 lenders (and same labels) as the EPC ZIP route.
-const LENDER_KEYS = ["creditfair", "aerem", "solfin"] as const;
-type LenderKey = typeof LENDER_KEYS[number];
-const LENDER_LABEL: Record<LenderKey, string> = {
-  creditfair: "Credit Fair",
-  aerem:      "Aerem",
-  solfin:     "Solfin",
-};
+
 
 function err(message: string, status: number) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -78,16 +73,16 @@ export async function GET(
     if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);
 
     // Lender is required — the picker popup always supplies it.
-    const lenderParam = (new URL(req.url).searchParams.get("lender") ?? "").toLowerCase();
-    if (!LENDER_KEYS.includes(lenderParam as LenderKey)) {
-      return err("missing_or_invalid_lender", 400);
-    }
-    const lender = lenderParam as LenderKey;
+    const lender = (new URL(req.url).searchParams.get("lender") ?? "").toLowerCase();
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
       global: { headers: { Authorization: `Bearer ${token}` } },
       auth: { persistSession: false, autoRefreshToken: false },
     });
+    // Any lender the portal works with (the registry) — not a fixed list.
+    const lenders = await fetchLenders(supabase);
+    if (!lenders.some((l) => l.key === lender)) return err("missing_or_invalid_lender", 400);
+    const lenderLabel = lenderLabelIn(lenders, lender);
 
     const [{ data: loan, error: loadErr }, { data: docs }] = await Promise.all([
       supabase.from("epc_applications")
@@ -117,7 +112,7 @@ export async function GET(
     ws.addRow([]);
     // Rows come from the shared builder: Credit Fair gets its dedicated field
     // layout; Solfin / Aerem keep the general layout.
-    const rows = summaryRows(loan, { displayId, epcName, epcDisplayId: loan.epc_business?.epc_display_id }, lender);
+    const rows = summaryRows(loan, { displayId, epcName, epcDisplayId: loan.epc_business?.epc_display_id }, lenderLabel);
     for (const [k, v] of rows) {
       const r = ws.addRow([k, v]);
       r.getCell(1).font = { bold: true, color: { argb: "FF0F3D2E" } };
@@ -173,7 +168,7 @@ export async function GET(
 
     // Filename includes the lender so downloads for the same application
     // across multiple lenders don't collide (same as the EPC ZIP).
-    const safeName = `${displayId}_${borrowerName}_${LENDER_LABEL[lender]}`
+    const safeName = `${displayId}_${borrowerName}_${lenderLabel}`
       .replace(/[^\w-]+/g, "_")
       .slice(0, 80);
     const webStream = Readable.toWeb(archive) as unknown as ReadableStream;

@@ -27,7 +27,8 @@ import { toast } from "sonner";
 import { getDocumentUrl, deleteDocument } from "@/lib/storage";
 import { logAudit } from "@/lib/auditLog";
 import { Period, inPeriod } from "@/lib/period";
-import LenderCell, { LenderInfo, LenderMap } from "@/components/LenderCell";
+import LenderCell, { LenderMap } from "@/components/LenderCell";
+import { addLender as addRegistryLender, useLenders } from "@/lib/lenders";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import CommentsSection from "@/components/CommentsSection";
 import OwnershipCard from "@/components/OwnershipCard";
@@ -153,13 +154,8 @@ function Inner() {
   const [hPeriod, setHPeriod] = useState<Period | "all">("all");
   const [docs, setDocs] = useState<Doc[]>([]);
   const [lender, setLender] = useState<LenderRow[]>([]);
-  // Global lender registry (same dropdown the main table uses). Static fallback
-  // matches the admin dashboard's; overwritten by the `lenders` table if present.
-  const [lenderList, setLenderList] = useState<LenderInfo[]>([
-    { key: "aerem",      label: "Aerem",       sort_order: 10 },
-    { key: "creditfair", label: "Credit Fair", sort_order: 20 },
-    { key: "solfin",     label: "Solfin",      sort_order: 30 },
-  ]);
+  // The lender registry (lib/lenders) — every lender the portal works with.
+  const lenderList = useLenders();
   const [adminInfo, setAdminInfo] = useState<AdminInfo | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
@@ -190,18 +186,6 @@ function Inner() {
       setLoans((la ?? []) as typeof loans);
     })();
   }, [params.id]); // a comment only refreshes the Activity log, never the whole profile
-
-  // Global lender registry — same list/query the main table dropdown uses.
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase()
-        .from("lenders")
-        .select("key,label,sort_order")
-        .eq("is_active", true)
-        .order("sort_order", { ascending: true });
-      if (data && data.length) setLenderList(data as LenderInfo[]);
-    })();
-  }, []);
 
   // Bumped whenever the inline CommentsSection writes something — so the
   // Activity log modal (which reads from admin_edit_log) reflects the
@@ -391,15 +375,10 @@ function Inner() {
 
   // Add a lender to the global registry (GLOBAL — appears on every dropdown).
   async function addLender(name: string) {
-    const label = name.trim();
-    if (!label) return;
-    const key = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-    if (!key) { alert("Please enter a valid lender name."); return; }
-    if (lenderList.some((l) => l.key === key)) { alert("That lender already exists."); return; }
-    const sort_order = Math.max(100, ...lenderList.map((l) => l.sort_order ?? 100)) + 10;
-    const { error } = await supabase().from("lenders").insert({ key, label, sort_order });
-    if (error) { alert("Couldn't add lender: " + error.message); return; }
-    setLenderList((cur) => [...cur, { key, label, sort_order }]);
+    if (!name.trim()) return;
+    const r = await addRegistryLender(name);
+    if (r.error) alert(r.error);
+    else if (r.existed) alert("That lender already exists.");
   }
 
   async function downloadZip(lender: LenderKey) {
@@ -840,12 +819,11 @@ function Inner() {
               } />
             </SectionCard>
 
-            {/* Lenders — read-only summary of the three main lenders. The
-                settable dropdown lives in the action bar (after CC review). */}
+            {/* Lenders — read-only summary of every lender. The settable
+                dropdown lives in the action bar (after CC review). */}
             <SectionCard title="Lenders" tint icon={I.money} adminOnly>
-              {(["creditfair", "aerem", "solfin"] as const).map((key) => {
+              {lenderList.map(({ key, label }) => {
                 const l = lender.find((x) => x.lender === key);
-                const label = key === "creditfair" ? "Credit Fair" : key === "aerem" ? "Aerem" : "Solfin";
                 const state = l
                   ? ((l as { rejected?: boolean }).rejected ? "rejected" : l.approved ? "approved" : l.docs_given ? "docs" : "none")
                   : "none";

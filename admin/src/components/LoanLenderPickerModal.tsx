@@ -9,7 +9,7 @@ import { useState } from "react";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import DateField from "@/components/ui/DateField";
-import { slugifyLender } from "@/lib/loan-lenders";
+import { addLender } from "@/lib/lenders";
 
 export type PickerLender = { key: string; label: string };
 const CUSTOM = "__custom__";
@@ -67,9 +67,13 @@ export default function LoanLenderPickerModal({
     if (!canConfirm) return;
     setBusy(true);
     try {
-      const lender: PickerLender = isCustom
-        ? { key: slugifyLender(custom), label: custom.trim() }
-        : options.find((o) => o.key === sel) || { key: sel, label: sel };
+      // A typed lender joins the registry first, so it's in every list after.
+      let lender: PickerLender = options.find((o) => o.key === sel) || { key: sel, label: sel };
+      if (isCustom) {
+        const r = await addLender(custom);
+        if (!r.lender) { alert(r.error || "Couldn't add the lender."); return; }
+        lender = r.lender;
+      }
       await onConfirm(lender, needReason ? reason.trim() : undefined, needDate ? date : undefined);
       setSel(""); setCustom(""); setReason(""); setDate(todayLocal());
       onClose();

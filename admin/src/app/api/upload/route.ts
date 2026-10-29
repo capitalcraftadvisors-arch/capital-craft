@@ -12,6 +12,9 @@
 //
 // Audit: every successful epc_documents change writes one admin_edit_log
 // row (doc_upload or doc_replace).
+//
+// table=stakeholder_docs (0106, main admin): a team member's (team_id) or a
+// partner's (partner_id) document; `category` is the document's label.
 
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
@@ -37,7 +40,7 @@ const ACCEPTED = new Set([
   "application/pdf",
 ]);
 
-type AllowedTable = "epc_documents" | "user_application_docs";
+type AllowedTable = "epc_documents" | "user_application_docs" | "stakeholder_docs";
 
 function err(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -64,7 +67,7 @@ export async function POST(req: NextRequest) {
     const table = (form.get("table") as string) || "";
     const category = (form.get("category") as string) || "";
     if (!table || !category) return err("missing_table_or_category");
-    if (table !== "epc_documents" && table !== "user_application_docs") {
+    if (table !== "epc_documents" && table !== "user_application_docs" && table !== "stakeholder_docs") {
       return err("bad_table");
     }
     const allowedTable = table as AllowedTable;
@@ -99,6 +102,14 @@ export async function POST(req: NextRequest) {
     if (allowedTable === "user_application_docs" && !applicationId) {
       return err("missing_application_id");
     }
+    // Stakeholder documents (0106) belong to ONE team member or partner; the
+    // main admin's only (RLS enforces it too).
+    const teamId = (form.get("team_id") as string) || null;
+    const partnerId = (form.get("partner_id") as string) || null;
+    if (allowedTable === "stakeholder_docs") {
+      if (claims.business_type !== "admin") return err("admin_only", 403);
+      if (!teamId === !partnerId) return err("missing_owner");
+    }
 
     // ── replace=true: delete-existing-then-insert ────────────────────
     // Replacing an EPC BUSINESS document (epc_documents) stays admin-only. But
@@ -118,6 +129,8 @@ export async function POST(req: NextRequest) {
         q = stakeholderId
           ? q.eq("stakeholder_id", stakeholderId)
           : q.is("stakeholder_id", null);
+      } else if (allowedTable === "stakeholder_docs") {
+        q = teamId ? q.eq("team_id", teamId) : q.eq("partner_id", partnerId);
       } else {
         q = q.eq("application_id", applicationId);
       }
@@ -141,6 +154,8 @@ export async function POST(req: NextRequest) {
       finalPath = stakeholderId
         ? `${targetBusinessId}/${stakeholderId}/${category}/${docUuid}_${safeFileName}`
         : `${targetBusinessId}/${category}/${docUuid}_${safeFileName}`;
+    } else if (allowedTable === "stakeholder_docs") {
+      finalPath = `stakeholders/${teamId ? `team/${teamId}` : `partner/${partnerId}`}/${docUuid}_${safeFileName}`;
     } else {
       finalPath = `applications/${applicationId}/${category}/${docUuid}_${safeFileName}`;
     }
@@ -187,6 +202,8 @@ export async function POST(req: NextRequest) {
     if (allowedTable === "epc_documents") {
       row.business_id = targetBusinessId;
       if (stakeholderId) row.stakeholder_id = stakeholderId;
+    } else if (allowedTable === "stakeholder_docs") {
+      if (teamId) row.team_id = teamId; else row.partner_id = partnerId;
     } else {
       row.application_id = applicationId;
       row.uploaded_by =

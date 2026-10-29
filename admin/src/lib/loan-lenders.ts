@@ -21,8 +21,13 @@ export type LoanLenderRow = {
 export const LOAN_LENDER_COLS =
   "id, application_id, lender_key, lender_label, docs_sent_at, approved_at, rejected_at, rejection_reason, approval_details, approval_recorded_at";
 
-// The three default lenders; the picker also lets an admin type-to-add more.
-export const DEFAULT_LOAN_LENDERS: { key: string; label: string }[] = [
+// The lenders the portal works with live in ONE list — the lenders registry
+// (migration 0055, kept in step with Stakeholders → Partners by 0107). Every
+// screen and route reads it, so a lender added anywhere shows up everywhere.
+export type Lender = { key: string; label: string };
+// The original three: shown until the registry loads, or where it can't be
+// read (EPC side — the registry is admin-only).
+export const DEFAULT_LOAN_LENDERS: Lender[] = [
   { key: "aerem", label: "Aerem" },
   { key: "creditfair", label: "Credit Fair" },
   { key: "solfin", label: "Solfin" },
@@ -30,6 +35,21 @@ export const DEFAULT_LOAN_LENDERS: { key: string; label: string }[] = [
 
 export function slugifyLender(name: string): string {
   return name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+// Any Supabase client — the browser's or a route's (the caller's JWT).
+type Reader = { from: (t: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+/** The active lenders, in their set order (falls back to the original three). */
+export async function fetchLenders(client: Reader): Promise<Lender[]> {
+  const { data, error } = await client.from("lenders").select("key, label").eq("is_active", true).order("sort_order").order("label");
+  return !error && Array.isArray(data) && data.length ? (data as Lender[]) : DEFAULT_LOAN_LENDERS;
+}
+
+/** A lender key's name from a list, else the key itself. */
+export function lenderLabelIn(list: Lender[], key: string | null | undefined): string {
+  if (!key) return "";
+  return list.find((l) => l.key === key)?.label ?? DEFAULT_LOAN_LENDERS.find((l) => l.key === key)?.label ?? key;
 }
 
 export type LenderState = "none" | "docs" | "approved" | "rejected";

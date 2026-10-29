@@ -1,6 +1,9 @@
 // POST /api/ocr
 //
-// JSON body: { type: "pan" | "gst" | "gstr3b", imageBase64: string, mimeType: string }
+// JSON body: { type: "pan" | "gst" | "gstr3b" | "doc_name", imageBase64: string, mimeType: string }
+//
+// "doc_name" returns { ok, name } — a short title for any document (Gemini
+// only: with no name the caller keeps the file's own name).
 //
 // Unified server-side OCR for the client (EPC onboarding + loan apply flows)
 // that previously called the Deno Edge Functions directly. Gemini reads the
@@ -18,7 +21,7 @@ import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { parsePanFields } from "@/lib/pan-parser";
 import { parseGstAddress } from "@/lib/gst-address";
 import { isValidPan, isValidGstin } from "@/lib/doc-validation";
-import { geminiExtractPan, geminiExtractGst, geminiExtractGstR3b } from "@/lib/doc-extractors";
+import { geminiExtractPan, geminiExtractGst, geminiExtractGstR3b, geminiNameDocument } from "@/lib/doc-extractors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,7 +32,7 @@ const FUNCTIONS_URL =
   "https://hpebydmrpimyuxgsgtmu.supabase.co/functions/v1";
 
 const MAX_DIMENSION = 2000;
-const TYPES = new Set(["pan", "gst", "gstr3b"]);
+const TYPES = new Set(["pan", "gst", "gstr3b", "doc_name"]);
 const EDGE: Record<string, string> = {
   pan: "extract-pan",
   gst: "extract-gst-legalname",
@@ -71,6 +74,12 @@ export async function POST(req: NextRequest) {
       } catch {
         buffer = input; // fall back to the raw bytes if sharp can't decode
       }
+    }
+
+    // ── Document name — Gemini only (no Vision fallback to proxy to) ───────
+    if (type === "doc_name") {
+      const name = await geminiNameDocument([{ buffer, mime }]);
+      return NextResponse.json(name ? { ok: true, source: "gemini", name } : { ok: false, error: "unreadable" });
     }
 
     // ── PRIMARY: Gemini ────────────────────────────────────────────────────

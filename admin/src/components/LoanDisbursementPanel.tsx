@@ -18,7 +18,7 @@ import { logLoanActivity } from "@/lib/loanAudit";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import CompletionDocsSection from "@/components/CompletionDocsSection";
 import EmailComposerModal from "@/components/EmailComposerModal";
-import { LENDER_LABEL } from "@/lib/lender-summary";
+import { lenderName } from "@/lib/lenders";
 import DateField from "@/components/ui/DateField";
 import { KV, Section, StatusBtn } from "@/components/view/ViewKit";
 import {
@@ -284,7 +284,7 @@ export default function LoanDisbursementPanel({
                     className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[8px] text-[13px] font-semibold bg-[#178a5c] text-white hover:bg-[#12734c] disabled:opacity-50"
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>
-                    Email to {LENDER_LABEL[loan.approved_lender as "creditfair" | "aerem" | "solfin"] ?? "lender"}
+                    Email to {lenderName(loan.approved_lender) || "lender"}
                   </button>
                 )}
                 <StatusBtn kind="approve" busy={busy || !allDocsIn} onClick={() => void saveReview("approved")}>

@@ -6,6 +6,8 @@
 // charted with Recharts. Read-only.
 
 import { useEffect, useMemo, useState } from "react";
+import { useLenders } from "@/lib/lenders";
+import { lenderLabelIn } from "@/lib/loan-lenders";
 import {
   ResponsiveContainer, BarChart, Bar, ComposedChart, Line, XAxis, YAxis,
   Tooltip, Cell, PieChart, Pie, LabelList, Treemap, Sankey, Layer, Rectangle,
@@ -18,8 +20,9 @@ const C = {
   green: "#178a5c", greenDark: "#0f7a52", blue: "#185fa5", amber: "#d97706",
   red: "#dc2626", teal: "#0f766e", slate: "#64748b", ink: "#0f3d2e", grid: "#eef1f4",
 };
+// The original three keep their colours; any other lender takes the next of these.
 const LENDER_COLOR: Record<string, string> = { aerem: "#185fa5", creditfair: "#d97706", solfin: "#0f766e" };
-const LENDER_LABEL: Record<string, string> = { aerem: "Aerem", creditfair: "Credit Fair", solfin: "Solfin" };
+const MORE_COLORS = ["#7c3aed", "#db2777", "#0891b2", "#65a30d", "#ea580c", "#475569"];
 // One colour per pipeline stage (matches the console's stage legend).
 const STAGE = [
   { key: "ready", label: "Ready", color: "#94a3b8" },
@@ -53,6 +56,8 @@ export default function OverviewSection({ win, segment }: { win: { start: number
   const [epcNames, setEpcNames] = useState<Map<string, string>>(new Map());
   const [rmNames, setRmNames] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
+  // Every lender the portal works with (the registry).
+  const lenders = useLenders();
 
   useEffect(() => {
     let cancelled = false;
@@ -78,6 +83,7 @@ export default function OverviewSection({ win, segment }: { win: { start: number
     return () => { cancelled = true; };
   }, []);
 
+  const colorOf = (k: string) => LENDER_COLOR[k] ?? MORE_COLORS[Math.max(0, lenders.findIndex((l) => l.key === k)) % MORE_COLORS.length];
   const d = useMemo(() => {
     // Scope to a loan segment (Residential / C&I) when this section is segmented.
     const uni = segment ? loans.filter((l) => l.plant_use_type === segment) : loans;
@@ -116,7 +122,7 @@ export default function OverviewSection({ win, segment }: { win: { start: number
     // Lender split — disbursed ₹ by the approving lender.
     const lenderMap = new Map<string, number>();
     for (const r of cohort) if (r.first_disbursement_amount != null && r.approved_lender) lenderMap.set(r.approved_lender, (lenderMap.get(r.approved_lender) || 0) + num(r.first_disbursement_amount) + num(r.second_disbursement_amount));
-    const lenderSplit = [...lenderMap.entries()].map(([k, v]) => ({ name: LENDER_LABEL[k] ?? k, value: v, color: LENDER_COLOR[k] ?? C.slate })).sort((a, b) => b.value - a.value);
+    const lenderSplit = [...lenderMap.entries()].map(([k, v]) => ({ name: lenderLabelIn(lenders, k), value: v, color: colorOf(k) })).sort((a, b) => b.value - a.value);
 
     // Rejection reasons — Pareto (bar + cumulative %).
     const rejMap = new Map<string, number>();
@@ -179,7 +185,7 @@ export default function OverviewSection({ win, segment }: { win: { start: number
       cur.approved += 1; cur.disbursed += num(r.first_disbursement_amount) + num(r.second_disbursement_amount);
       lsMap.set(r.approved_lender, cur);
     }
-    const lenderScore = [...lsMap.entries()].map(([k, v]) => ({ name: LENDER_LABEL[k] ?? k, color: LENDER_COLOR[k] ?? C.slate, ...v })).sort((a, b) => b.disbursed - a.disbursed);
+    const lenderScore = [...lsMap.entries()].map(([k, v]) => ({ name: lenderLabelIn(lenders, k), color: colorOf(k), ...v })).sort((a, b) => b.disbursed - a.disbursed);
 
     // RM leaderboard — applications + disbursed ₹ per assigned owner.
     const rmMap = new Map<string, { apps: number; disbursed: number }>();
@@ -265,7 +271,7 @@ export default function OverviewSection({ win, segment }: { win: { start: number
     const epcTree = [...epcMap.entries()].map(([id, v]) => ({ name: epcNames.get(id) || "—", size: v })).filter((x) => x.size > 0).sort((a, b) => b.size - a.size).slice(0, 12);
 
     // Sankey — Application → Lender → Outcome.
-    const lkeys = ["aerem", "creditfair", "solfin"];
+    const lkeys = lenders.map((l) => l.key);
     const outcomeOf = (r: LoanRow) => (r.first_disbursement_amount != null || APPROVED.has(r.status) ? "approved" : r.status === "rejected" ? "rejected" : null);
     const flow: Record<string, { approved: number; rejected: number }> = {};
     for (const r of cohort) {
@@ -276,7 +282,7 @@ export default function OverviewSection({ win, segment }: { win: { start: number
     const activeLk = lkeys.filter((k) => flow[k] && (flow[k].approved + flow[k].rejected) > 0);
     let sankey: { nodes: { name: string }[]; links: { source: number; target: number; value: number }[] } | null = null;
     if (activeLk.length) {
-      const nodes = [{ name: "Applications" }, ...activeLk.map((k) => ({ name: LENDER_LABEL[k] })), { name: "Approved" }, { name: "Rejected" }];
+      const nodes = [{ name: "Applications" }, ...activeLk.map((k) => ({ name: lenderLabelIn(lenders, k) })), { name: "Approved" }, { name: "Rejected" }];
       const apIdx = 0, apprIdx = 1 + activeLk.length, rejIdx = apprIdx + 1;
       const links: { source: number; target: number; value: number }[] = [];
       activeLk.forEach((k, i) => {
@@ -301,7 +307,7 @@ export default function OverviewSection({ win, segment }: { win: { start: number
       tatHist, subsidy, cohortStages, cohortGrid, epcTree, sankey, dupGroups, dupApps,
       submitted: submitted.length,
     };
-  }, [loans, leads, epcNames, rmNames, win, segment]);
+  }, [loans, leads, epcNames, rmNames, win, segment, lenders]);
 
   if (loading) return <p className="text-[13px] text-text-muted">Loading…</p>;
 

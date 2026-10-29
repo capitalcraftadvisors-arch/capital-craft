@@ -5,11 +5,13 @@
 import { getToken } from "./auth";
 
 type UploadMeta = {
-  table: "epc_documents" | "user_application_docs";
+  table: "epc_documents" | "user_application_docs" | "stakeholder_docs";
   category: string;
   business_id?: string;       // EPC docs — admins may pass another business
   stakeholder_id?: string;    // EPC stakeholder docs
   application_id?: string;    // loan app docs
+  team_id?: string;           // stakeholder docs — a team member's …
+  partner_id?: string;        // … or a partner's (lender / insurance)
   uploaded_by?: "epc" | "admin";
   gps?: { lat: number; lng: number; captured_at: string } | null;
   // Generic metadata bag — server merges into row.metadata. Used by GST R3B
@@ -44,6 +46,8 @@ export async function uploadDocument(
   if (meta.business_id) form.append("business_id", meta.business_id);
   if (meta.stakeholder_id) form.append("stakeholder_id", meta.stakeholder_id);
   if (meta.application_id) form.append("application_id", meta.application_id);
+  if (meta.team_id) form.append("team_id", meta.team_id);
+  if (meta.partner_id) form.append("partner_id", meta.partner_id);
   if (meta.uploaded_by) form.append("uploaded_by", meta.uploaded_by);
   if (meta.gps) form.append("gps", JSON.stringify(meta.gps));
   if (meta.extraMetadata) form.append("extraMetadata", JSON.stringify(meta.extraMetadata));

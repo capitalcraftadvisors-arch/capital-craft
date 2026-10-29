@@ -8,14 +8,6 @@
 
 import { rupees } from "@/lib/money";
 
-export type LenderKey = "creditfair" | "aerem" | "solfin";
-
-export const LENDER_LABEL: Record<LenderKey, string> = {
-  creditfair: "Credit Fair",
-  aerem: "Aerem",
-  solfin: "Solfin",
-};
-
 const SYSTEM_LABEL: Record<string, string> = { on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" };
 
 // rupees imported from @/lib/money
@@ -46,7 +38,7 @@ function installAddress(loan: Record<string, any>): string {
 export function summaryRows(
   loan: Record<string, any>,
   ctx: { displayId: string; epcName: string; epcDisplayId?: string | null },
-  lender: LenderKey,
+  lenderLabel: string,
 ): Array<[string, string]> {
   // Verified KYC (Aadhaar) name first — matches the list + profile header so the
   // lender gets the same applicant name shown in the portal (borrower_name can be
@@ -58,7 +50,7 @@ export function summaryRows(
   // see creditFairEmailRows() below — not in this attached sheet.
   const rows: Array<[string, string]> = [
     ["Application ID", ctx.displayId],
-    ["Submitted to", LENDER_LABEL[lender]],
+    ["Submitted to", lenderLabel],
     ["Status", String(loan.status ?? "—")],
     ["Submitted", loan.submitted_at ? new Date(loan.submitted_at).toLocaleString("en-IN") : "—"],
     ["EPC Partner", `${ctx.epcName}${ctx.epcDisplayId ? ` (${ctx.epcDisplayId})` : ""}`],

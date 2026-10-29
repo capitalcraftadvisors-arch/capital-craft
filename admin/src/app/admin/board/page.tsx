@@ -23,7 +23,8 @@ import { getBusiness, getToken, greetingName, isMainAdmin as isMainAdminUser } f
 import { loadOpsCases, columnsFor, SOURCE_META, type OpsCase, type TeamUser, type CaseSource } from "@/lib/ops-board";
 import { waTel, waUrl, WA_LANGS, type WaLang } from "@/lib/wa-link";
 import { PERIOD_OPTIONS, inPeriod, type Period } from "@/lib/period";
-import { DEFAULT_LOAN_LENDERS, LOAN_LENDER_COLS, lendersWithDocs, type LoanLenderRow } from "@/lib/loan-lenders";
+import { LOAN_LENDER_COLS, lendersWithDocs, type LoanLenderRow } from "@/lib/loan-lenders";
+import { useLenders } from "@/lib/lenders";
 import { logLoanActivity } from "@/lib/loanAudit";
 
 // ── Loan pipeline: forward-only stage locking (no going back, no skipping —
@@ -753,6 +754,7 @@ function Inner() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ caseId: string; column: string } | null>(null);
   // Inline lender picker (change: loan lender/decision popups render ON the board).
+  const lenders = useLenders(); // the registry — every lender the portal works with
   const [picker, setPicker] = useState<{ c: OpsCase; mode: "docsent" | "approve" | "reject"; rows: LoanLenderRow[] } | null>(null);
   const [pickerBusy, setPickerBusy] = useState(false);
   // Side-panel comments + collapsible comment history.
@@ -1613,8 +1615,8 @@ function Inner() {
       {picker && (() => {
         const rows = picker.rows;
         const available: PickerLender[] = [
-          ...DEFAULT_LOAN_LENDERS,
-          ...rows.filter((r) => !DEFAULT_LOAN_LENDERS.some((d) => d.key === r.lender_key)).map((r) => ({ key: r.lender_key, label: r.lender_label })),
+          ...lenders,
+          ...rows.filter((r) => !lenders.some((d) => d.key === r.lender_key)).map((r) => ({ key: r.lender_key, label: r.lender_label })),
         ].filter((l) => !rows.some((r) => r.lender_key === l.key && r.docs_sent_at));
         const withDocsOpts: PickerLender[] = lendersWithDocs(rows).map((r) => ({ key: r.lender_key, label: r.lender_label }));
         const m = picker.mode;

@@ -36,7 +36,7 @@ export const ACCENTS: Record<SectionKey, { label: string; color: string; tint: s
   analytics: { label: "Analytics",         color: "#6d28d9", tint: "#efe9fb" },
   board:     { label: "Task Manager",      color: "#0f766e", tint: "#dcf3ef" },
   pendings:  { label: "Pendings",          color: "#b91c1c", tint: "#fdecec" },
-  team:      { label: "Team",              color: "#334155", tint: "#eef1f5" },
+  team:      { label: "Stakeholders",      color: "#334155", tint: "#eef1f5" },
   pri:       { label: "Pri",               color: "#7c2d12", tint: "#fbece4" },
 };
 
@@ -93,7 +93,7 @@ export function sidebarNavKeys(biz = getBusiness()): SectionKey[] {
     keys.splice(1, 0, "pendings");
     const at = keys.indexOf("insurance");
     keys.splice(at >= 0 ? at + 1 : keys.length, 0, "otherins");
-    keys.push("team"); // team logins (passwords)
+    keys.push("team"); // Stakeholders — team logins + profiles, partners
   }
   // Pri — the owner's own dashboard (0096), first in the owner's sidebar; no
   // one else sees it. The admin tabs below it stay separate.
@@ -103,7 +103,7 @@ export function sidebarNavKeys(biz = getBusiness()): SectionKey[] {
 
 // Where a section lives: console tabs are in-page state on /admin; the rest are routes.
 export const SECTION_ROUTE: Partial<Record<SectionKey, string>> = {
-  analytics: "/admin/analytics", board: "/admin/board", pendings: "/admin/pendings", team: "/admin/team", pri: "/admin/pri",
+  analytics: "/admin/analytics", board: "/admin/board", pendings: "/admin/pendings", team: "/admin/stakeholders", pri: "/admin/pri",
 };
 
 export default function AdminSidebar({

@@ -24,6 +24,7 @@ import ExcelJS from "exceljs";
 import { Readable } from "node:stream";
 import { downloadBuffer } from "@/lib/gcs";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { fetchLenders, lenderLabelIn } from "@/lib/loan-lenders";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,14 +36,7 @@ const SUPABASE_ANON =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
 
-const LENDER_KEYS = ["creditfair", "aerem", "solfin"] as const;
-type LenderKey = typeof LENDER_KEYS[number];
 
-const LENDER_LABEL: Record<LenderKey, string> = {
-  creditfair: "Credit Fair",
-  aerem:      "Aerem",
-  solfin:     "Solfin",
-};
 
 type Doc = {
   id: string;
@@ -87,16 +81,16 @@ export async function GET(
     if (claims.business_type !== "admin") return err("admin_only", 403);
 
     // ── Lender query param — required ──────────────────────────────────
-    const lenderParam = (new URL(req.url).searchParams.get("lender") ?? "").toLowerCase();
-    if (!LENDER_KEYS.includes(lenderParam as LenderKey)) {
-      return err("missing_or_invalid_lender", 400);
-    }
-    const lender = lenderParam as LenderKey;
+    const lender = (new URL(req.url).searchParams.get("lender") ?? "").toLowerCase();
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
       global: { headers: { Authorization: `Bearer ${token}` } },
       auth: { persistSession: false, autoRefreshToken: false },
     });
+    // Any lender the portal works with (the registry) — not a fixed list.
+    const lenders = await fetchLenders(supabase);
+    if (!lenders.some((l) => l.key === lender)) return err("missing_or_invalid_lender", 400);
+    const lenderLabel = lenderLabelIn(lenders, lender);
 
     // ── Profile ────────────────────────────────────────────────────────
     const { data: biz, error: bizErr } = await supabase
@@ -140,7 +134,7 @@ export async function GET(
       String(biz.id).slice(0, 8),
     );
     const dateStr = new Date().toISOString().slice(0, 10);
-    const filename = `EPC_${nameForFile}_${LENDER_LABEL[lender]}_${dateStr}.zip`;
+    const filename = `EPC_${nameForFile}_${lenderLabel}_${dateStr}.zip`;
 
     // ── Archive ───────────────────────────────────────────────────────
     const archive = archiver("zip", { zlib: { level: 3 } });
@@ -189,6 +183,7 @@ export async function GET(
           docs,
           stakeholders,
           lender,
+          lenderLabel,
         });
         archive.append(xlsx, { name: "4. Summary/summary.xlsx" });
 
@@ -312,9 +307,10 @@ async function buildAeremXlsx(data: {
   adminInfo: Record<string, unknown> | null;
   docs: Doc[];
   stakeholders: Stakeholder[];
-  lender: LenderKey;
+  lender: string;       // key — Credit Fair's sheet leaves out the references
+  lenderLabel: string;
 }): Promise<Buffer> {
-  const { biz, adminInfo, docs, stakeholders, lender } = data;
+  const { biz, adminInfo, docs, stakeholders, lender, lenderLabel } = data;
 
   // GST turnover — sum of total_taxable_value across all uploaded R3B docs.
   // Matches the total the View page already displays for the admin.
@@ -372,7 +368,7 @@ async function buildAeremXlsx(data: {
   }
 
   // ── Title: "For <LENDER>" ───────────────────────────────────────
-  const titleRow = ws.addRow([`For ${LENDER_LABEL[lender]}`]);
+  const titleRow = ws.addRow([`For ${lenderLabel}`]);
   ws.mergeCells(titleRow.number, 1, titleRow.number, totalCols);
   const titleCell = titleRow.getCell(1);
   titleCell.font = { bold: true, size: 18, color: { argb: "FFFFFFFF" } };

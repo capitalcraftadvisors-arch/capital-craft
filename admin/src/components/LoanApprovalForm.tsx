@@ -18,7 +18,9 @@ import { supabase } from "@/lib/supabase";
 import { getBusiness } from "@/lib/auth";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { invalidateLoanBoards } from "@/lib/ops-board";
-import ApprovalDetailsTable, { LENDER_LABEL, type ApprovalDetails } from "@/components/ApprovalDetailsTable";
+import ApprovalDetailsTable, { type ApprovalDetails } from "@/components/ApprovalDetailsTable";
+import { useLenders } from "@/lib/lenders";
+import { lenderLabelIn } from "@/lib/loan-lenders";
 import { rupeesInWords } from "@/lib/numberToWords";
 import { I, Section } from "@/components/view/ViewKit";
 import FileUpload from "@/components/FileUpload";
@@ -38,6 +40,7 @@ export default function LoanApprovalForm({
   onSaved: () => void;
   onCancel?: () => void;
 }) {
+  const lenders = useLenders();
   const [details, setDetails] = useState<ApprovalDetails>({});
   const [sanctionChoice, setSanctionChoice] = useState<"upload" | "unavailable" | null>(null);
   const [creditScore, setCreditScore] = useState<string>("");
@@ -133,7 +136,7 @@ export default function LoanApprovalForm({
       patch.approved_at = now;
       patch.rejected_lender = null;
       patch.rejected_at = null;
-      const entry = { from: loan.status ?? "", to: "approved", by, at: now, note: `Approved by ${LENDER_LABEL[String(details.approved_by)] ?? details.approved_by}` };
+      const entry = { from: loan.status ?? "", to: "approved", by, at: now, note: `Approved by ${lenderLabelIn(lenders, String(details.approved_by))}` };
       patch.status_history = Array.isArray(loan.status_history) ? [...loan.status_history, entry] : [entry];
     }
 
@@ -154,7 +157,7 @@ export default function LoanApprovalForm({
     // store ITS OWN approval details, so multiple lenders each keep a separate
     // record and the lender list shows the approval.
     if (lender) {
-      const label = lenderLabel || LENDER_LABEL[String(lender)] || String(lender);
+      const label = lenderLabel || lenderLabelIn(lenders, String(lender));
       const { data: existingLender } = await supabase()
         .from("loan_application_lenders")
         .select("id, approved_at")
@@ -185,7 +188,7 @@ export default function LoanApprovalForm({
     await logLoanActivity(loan.id, "approved", {
       detail: editMode === "approval"
         ? "Approval details edited"
-        : `Approved by ${LENDER_LABEL[String(details.approved_by)] ?? details.approved_by}`,
+        : `Approved by ${lenderLabelIn(lenders, String(details.approved_by))}`,
     });
 
     invalidateLoanBoards(); // approval reflects on the Task Manager / Loans list / KPIs
@@ -194,7 +197,7 @@ export default function LoanApprovalForm({
     onSaved();
   }
 
-  const lenderName = details.approved_by ? (lenderLabel || LENDER_LABEL[String(details.approved_by)] || String(details.approved_by)) : null;
+  const lenderName = details.approved_by ? (lenderLabel || lenderLabelIn(lenders, String(details.approved_by))) : null;
 
   return (
     <div>

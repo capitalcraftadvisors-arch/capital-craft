@@ -24,14 +24,15 @@ import CommentsSection from "@/components/CommentsSection";
 import OwnershipCard from "@/components/OwnershipCard";
 import { LoanActivityList } from "@/components/LoanActivityLogModal";
 import { COMPLETION_CATEGORIES, TRANCHE1_DOCS } from "@/components/CompletionDocsSection";
-import { LENDER_LABEL, type ApprovalDetails } from "@/components/ApprovalDetailsTable";
+import { type ApprovalDetails } from "@/components/ApprovalDetailsTable";
 import LoanLenderPickerModal, { type PickerLender } from "@/components/LoanLenderPickerModal";
 import LoanLenderStatusBox from "@/components/LoanLenderStatusBox";
 import {
-  LOAN_LENDER_COLS, DEFAULT_LOAN_LENDERS, type LoanLenderRow,
+  LOAN_LENDER_COLS, lenderLabelIn, type LoanLenderRow,
   latestLenderStatus, lendersWithDocs, approvedLenders,
 } from "@/lib/loan-lenders";
 import LenderPickerModal, { type LenderKey } from "@/components/LenderPickerModal";
+import { useLenders } from "@/lib/lenders";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import { DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
 import { logLoanActivity } from "@/lib/loanAudit";
@@ -227,10 +228,25 @@ function buildLoanDocGroups(loan: Loan, docsIn: Doc[]): LoanDocGroup[] {
     title: "Loan requirement (Step 3)",
     slots: [
       slot("quotation", "Quotation / Proforma invoice", ["quotation"],        loan.proforma_invoice_path),
-      slot("ebill",     "Electricity bill",             ["electricity_bill"], loan.ebill_path),
+      ...billSlots(),
       slot("rooftop",   "Rooftop photo",                ["borrower_photo"],   loan.rooftop_photo_path),
     ],
   });
+
+  // Electricity bills: the read bill (ebill_path) first, then every other
+  // electricity_bill row — a commercial customer may add more than one; the
+  // classic form stores its bills as rows only. A row holding the same file as
+  // the column is the same bill.
+  function billSlots(): LoanSlot[] {
+    const rows = docs.filter((d) => d.category === "electricity_bill" && !usedRowIds.has(d.id) && d.storage_path !== loan.ebill_path);
+    docs.forEach((d) => { if (d.category === "electricity_bill") usedRowIds.add(d.id); });
+    const out: LoanSlot[] = [];
+    if (loan.ebill_path) out.push(fromPath("ebill", "Electricity bill", loan.ebill_path));
+    rows.reverse().forEach((d) => out.push(fromRow(`ebill_${d.id}`, "Electricity bill", d)));
+    if (out.length === 0) out.push(fromPath("ebill", "Electricity bill", null));
+    if (out.length > 1) out.forEach((s, i) => { s.label = `Electricity bill ${i + 1}`; });
+    return out;
+  }
 
   const hasCoapp = loan.bill_on_applicant_name === false ||
     !!(loan.coapp_pan_path || loan.coapp_aadhaar_front_path || loan.coapp_aadhaar_back_path);
@@ -300,7 +316,13 @@ function buildLoanDocGroups(loan: Loan, docsIn: Doc[]): LoanDocGroup[] {
   if (others.length > 0) {
     groups.push({
       title: "Other documents",
-      slots: others.map((d) => fromRow(`other-${d.id}`, DOC_LABEL[d.category] ?? d.category.replace(/_/g, " "), d)),
+      // An "other" upload is shown by its file name — the EPC chatbot names it
+      // after what the document is ("ITR 2024-25").
+      slots: others.map((d) => fromRow(
+        `other-${d.id}`,
+        d.category === "other" && d.file_name ? d.file_name.replace(/\.[^.]+$/, "") : DOC_LABEL[d.category] ?? d.category.replace(/_/g, " "),
+        d,
+      )),
     });
   }
 
@@ -323,6 +345,7 @@ function Inner() {
   // Where "Back" should go. When you arrive from the Task Manager, we stash
   // "/admin/board" in sessionStorage so Back returns there, not the console.
   const [returnTo, setReturnTo] = useState<string | null>(null);
+  const lenders = useLenders();
   useEffect(() => { if (typeof window !== "undefined") setReturnTo(sessionStorage.getItem("ccReturnTo")); }, []);
   // Under xl the Submitted cards stack ABOVE Documents, so their details open
   // in place (pushing Documents down) instead of floating over it.
@@ -606,7 +629,7 @@ function Inner() {
         approved_lender: null, approved_at: null, rejection_reason: why || null,
         ...(creditScore !== undefined ? { credit_score: creditScore } : {}),
       },
-      `Rejected by ${LENDER_LABEL[lender] ?? lender}${why ? ` — ${why}` : ""}`,
+      `Rejected by ${lenderLabelIn(lenders, lender)}${why ? ` — ${why}` : ""}`,
     );
   }
 
@@ -692,7 +715,7 @@ function Inner() {
   const approvalFilled = loan.approval_details_filled === true;
 
   const decidedLender = approvedPlus ? loan.approved_lender : rejected ? loan.rejected_lender : null;
-  const decidedByLabel = decidedLender ? (LENDER_LABEL[String(decidedLender)] ?? String(decidedLender)) : null;
+  const decidedByLabel = decidedLender ? lenderLabelIn(lenders, String(decidedLender)) : null;
   const approvalDetails = (loan.approval_details ?? null) as ApprovalDetails | null;
 
   const dl = deadlineState(loan.first_disbursement_date, loan.second_disbursement_amount != null);
@@ -722,23 +745,19 @@ function Inner() {
   const approvedRows = approvedLenders(lenderRows);
   const anyApprovedLender = approvedRows.length > 0;
   const anyLenderActivity = lenderRows.some((r) => r.docs_sent_at || r.approved_at || r.rejected_at);
-  // Lenders that can still be sent docs (defaults + any custom already added, minus already-sent).
-  const availableForDocSent: PickerLender[] = [
-    ...DEFAULT_LOAN_LENDERS,
-    ...lenderRows
-      .filter((r) => !DEFAULT_LOAN_LENDERS.some((d) => d.key === r.lender_key))
-      .map((r) => ({ key: r.lender_key, label: r.lender_label })),
-  ].filter((l) => !lenderRows.some((r) => r.lender_key === l.key && r.docs_sent_at));
-  const withDocsOptions: PickerLender[] = withDocs.map((r) => ({ key: r.lender_key, label: r.lender_label }));
-  // ALL lenders (defaults + any custom already on the app) — used by "Change
-  // lender" so the admin can finalize a DIFFERENT lender (e.g. CF rejected,
-  // Solfin approved) even one that had no docs sent yet.
+  // Every lender the portal works with (the registry) + any on this file that
+  // isn't active any more.
   const allLenderOptions: PickerLender[] = [
-    ...DEFAULT_LOAN_LENDERS,
+    ...lenders,
     ...lenderRows
-      .filter((r) => !DEFAULT_LOAN_LENDERS.some((d) => d.key === r.lender_key))
+      .filter((r) => !lenders.some((d) => d.key === r.lender_key))
       .map((r) => ({ key: r.lender_key, label: r.lender_label })),
   ];
+  // Lenders that can still be sent docs (minus already-sent).
+  const availableForDocSent = allLenderOptions.filter((l) => !lenderRows.some((r) => r.lender_key === l.key && r.docs_sent_at));
+  const withDocsOptions: PickerLender[] = withDocs.map((r) => ({ key: r.lender_key, label: r.lender_label }));
+  // "Change lender" offers ALL of them, so the admin can finalize a DIFFERENT
+  // lender (e.g. CF rejected, Solfin approved) even one with no docs sent yet.
 
   // Tracker reads an "effective" status so a held case still shows where it
   // was parked (Resume returns it there).
@@ -1083,7 +1102,7 @@ function Inner() {
   const savedLender: PickerLender | null = approvedPlus && loan.approved_lender
     ? {
         key: String(loan.approved_lender),
-        label: lenderRows.find((r) => r.lender_key === loan.approved_lender)?.lender_label ?? LENDER_LABEL[String(loan.approved_lender)] ?? String(loan.approved_lender),
+        label: lenderRows.find((r) => r.lender_key === loan.approved_lender)?.lender_label ?? lenderLabelIn(lenders, String(loan.approved_lender)),
       }
     : null;
   const formFor: PickerLender | null =
@@ -1511,7 +1530,7 @@ function Inner() {
         endpoint={`/api/admin/loan-app/${loan.id}/send-to-lender`}
         title="Email to lender"
         defaultLender={loan.approved_lender}
-        onSent={(lenderKey) => { void sendDocsToLender({ key: lenderKey, label: LENDER_LABEL[lenderKey] ?? lenderKey }); }}
+        onSent={(lenderKey) => { void sendDocsToLender({ key: lenderKey, label: lenderLabelIn(lenders, lenderKey) }); }}
       />
       <LoanLenderPickerModal
         open={docSentPickerOpen}
