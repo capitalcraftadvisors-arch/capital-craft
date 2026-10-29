@@ -41,3 +41,12 @@ export function epcPassword(name: string, mobile: string): string {
   return `${base || "epc"}@${mobile.replace(/\D/g, "").slice(-4)}$`;
 }
 
+/** The rule set_login_password enforces (migration 0103): 8+ characters with a
+ *  letter, a digit and a symbol. Checked before the email goes out, so a mail
+ *  never carries a password the database would refuse. */
+export function issuedPasswordOk(pw: string): boolean {
+  return pw.length >= 8 && /[A-Za-z]/.test(pw) && /[0-9]/.test(pw) && /[^A-Za-z0-9]/.test(pw) && !/\s/.test(pw);
+}
+
+export const ISSUED_PASSWORD_RULE = "Password needs 8+ characters with a letter, a number and a symbol.";
+

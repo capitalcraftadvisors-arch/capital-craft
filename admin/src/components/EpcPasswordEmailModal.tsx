@@ -3,13 +3,14 @@
 // EPC login password — a DRAFTED email the main admin checks before sending.
 // Opening it makes the EPC's password ("<name>@<last 4 mobile digits>$", which
 // the EPC must change at first login) and drafts the mail (login link, login
-// mobile, password). The admin can edit To / Subject / the message and
+// mobile, password). The admin can edit To / Subject / the message — the
+// password too: whatever the "Password:" line says is what gets saved — and
 // writes any CC; it always goes from the Capital Craft Gmail. Only after the
 // mail is sent is the password saved — so sending again (a resend) gives the
 // EPC a new password and the old one stops working.
 
 import { useEffect, useState } from "react";
-import { epcPassword } from "@/lib/password-gen";
+import { epcPassword, issuedPasswordOk, ISSUED_PASSWORD_RULE } from "@/lib/password-gen";
 import { loginPasswordStatus, sendPasswordDraft } from "@/lib/passwords";
 import { DEFAULT_MAIL_SENDER } from "@/lib/mail-sender";
 import { fmtDate } from "@/lib/dates";
@@ -34,8 +35,10 @@ function draftBody(epc: Epc, password: string): string {
   ].join("\n");
 }
 
+/** The password as written on the message's "Password:" line. */
+const passwordIn = (body: string) => body.match(/^[ \t]*Password:[ \t]*(\S+)/m)?.[1] ?? "";
+
 export default function EpcPasswordEmailModal({ open, epc, onClose }: { open: boolean; epc: Epc; onClose: () => void }) {
-  const [password, setPassword] = useState("");
   const [to, setTo] = useState("");
   const [cc, setCc] = useState("");
   const [subject, setSubject] = useState("");
@@ -48,11 +51,9 @@ export default function EpcPasswordEmailModal({ open, epc, onClose }: { open: bo
   // A fresh password + draft every time it opens.
   useEffect(() => {
     if (!open) return;
-    const pw = epcPassword(epc.tradeName, epc.mobile ?? "");
-    setPassword(pw);
     setTo(epc.email ?? ""); setCc("");
     setSubject("Your Capital Craft partner portal login");
-    setBody(draftBody(epc, pw));
+    setBody(draftBody(epc, epcPassword(epc.tradeName, epc.mobile ?? "")));
     setSentTo(null); setError(null); setSetAt(null);
     void loginPasswordStatus([epc.id]).then((m) => setSetAt(m.get(epc.id) ?? null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -66,7 +67,9 @@ export default function EpcPasswordEmailModal({ open, epc, onClose }: { open: bo
     if (!EMAIL_RE.test(to.trim())) { setError("Enter a valid To email."); return; }
     const bad = ccList.find((x) => !EMAIL_RE.test(x));
     if (bad) { setError(`"${bad}" isn't a valid CC email.`); return; }
-    if (!body.includes(password)) { setError("Keep the password in the message."); return; }
+    const password = passwordIn(body);
+    if (!password) { setError("Keep the password in the message."); return; }
+    if (!issuedPasswordOk(password)) { setError(ISSUED_PASSWORD_RULE); return; }
     if (setAt && !window.confirm(`Send a new password to ${epc.tradeName}? The current password will stop working.`)) return;
     setBusy(true); setError(null);
     const r = await sendPasswordDraft(epc.id, { to: to.trim(), cc: ccList, subject, body, password });

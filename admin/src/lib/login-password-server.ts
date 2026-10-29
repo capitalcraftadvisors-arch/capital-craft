@@ -3,8 +3,9 @@
 //   emailLoginPassword — CC team: the server generates the password and sends
 //                        a fixed email to the address the main admin typed.
 //   sendPasswordDraft  — EPCs: the main admin reviewed / edited a drafted email
-//                        that already carries the generated password, and
-//                        wrote any CC; we send exactly that.
+//                        that carries the password (the issued one, or one the
+//                        admin typed instead), and wrote any CC; we send
+//                        exactly that.
 //
 // Order matters: the mail goes out FIRST and the password is saved only after
 // it was sent — a failed email never leaves the account with a password nobody
@@ -12,7 +13,7 @@
 // database enforces that only the main admin can set one.
 
 import { insuranceClient as callerClient } from "./insurance-server";
-import { generateStrongPassword, epcPassword } from "./password-gen";
+import { generateStrongPassword, issuedPasswordOk, ISSUED_PASSWORD_RULE } from "./password-gen";
 import { sendMail, mailConfigured } from "./mailer";
 import { EMAIL_RE } from "./validators";
 
@@ -92,17 +93,13 @@ export async function sendPasswordDraft(
   const badCc = cc.find((x) => !EMAIL_RE.test(x));
   if (badCc) return { ok: false, error: `"${badCc}" isn't a valid CC email.`, status: 400 };
   if (!d.subject.trim()) return { ok: false, error: "Subject is required.", status: 400 };
-  if (!d.body.includes(d.password)) return { ok: false, error: "The email must still contain the password.", status: 400 };
+  if (!d.password || !d.body.includes(d.password)) return { ok: false, error: "The email must still contain the password.", status: 400 };
+  if (!issuedPasswordOk(d.password)) return { ok: false, error: ISSUED_PASSWORD_RULE, status: 400 };
   if (!mailConfigured()) return { ok: false, error: "Email isn't configured yet (app password missing).", status: 500 };
 
   const db = callerClient(token);
-  const { data: acc } = await db.from("epc_business")
-    .select("id, trade_name, legal_name, contact_name, contact_mobile").eq("id", accountId).maybeSingle();
+  const { data: acc } = await db.from("epc_business").select("id").eq("id", accountId).maybeSingle();
   if (!acc) return { ok: false, error: "Account not found.", status: 404 };
-  // Only the EPC's own issued format (same name order as the email modal).
-  if (d.password !== epcPassword(acc.trade_name || acc.legal_name || acc.contact_name || "EPC", acc.contact_mobile ?? "")) {
-    return { ok: false, error: "The password doesn't match this EPC — reopen the draft.", status: 400 };
-  }
 
   const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
   try {
