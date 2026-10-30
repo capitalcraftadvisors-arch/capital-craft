@@ -1060,11 +1060,12 @@ function Inner() {
   // When each finished step happened (date + time). Disbursements carry only
   // the disbursement date the admin enters, so those show the date alone.
   const sentAt = lenderRows.find((r) => r.docs_sent_at)?.docs_sent_at ?? null;
-  const decidedAt = tApproved
-    ? lenderRows.find((r) => r.lender_key === loan.approved_lender)?.approved_at ?? loan.approved_at ?? null
-    : tRejected ? loan.rejected_at ?? null : null;
-  const withWhen = (what: ReactNode, at: string | null | undefined) =>
-    at ? <>{what}<br />{fmtDateTime(at)}</> : what;
+  // Approved: the Date of Approval entered on the approval form (a date — the
+  // lender row's approved_at is only when it was recorded in the portal).
+  const decidedWhen = tApproved
+    ? (approvalDetails?.approval_date ? fmtDateShort(approvalDetails.approval_date) : loan.approved_at ? fmtDateTime(loan.approved_at) : null)
+    : tRejected && loan.rejected_at ? fmtDateTime(loan.rejected_at) : null;
+  const withWhen = (what: ReactNode, when: string | null) => (when ? <>{what}<br />{when}</> : what);
   const stages: Array<{ key: Stage; label: string; sub?: ReactNode; icon: ReactNode; state: StageState }> = [
     {
       key: "submitted", label: "Submitted", icon: I.send,
@@ -1079,7 +1080,7 @@ function Inner() {
     {
       key: "approved", label: tRejected ? "Rejected" : "Approved", icon: I.circleCheck,
       state: held("approved", tApproved ? "done" : tRejected ? "failed" : tDocsSent ? "current" : "pending"),
-      sub: decidedByLabel ? withWhen(decidedByLabel, decidedAt) : tDocsSent ? "Awaiting decision" : "Pending",
+      sub: decidedByLabel ? withWhen(decidedByLabel, decidedWhen) : tDocsSent ? "Awaiting decision" : "Pending",
     },
     {
       key: "first", label: "1st Disbursement", icon: I.money,

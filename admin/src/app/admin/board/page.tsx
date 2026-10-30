@@ -741,6 +741,8 @@ function Inner() {
   const [touches, setTouches] = useState(0);
   const sla = 1; // fixed at ≤1 day (backend only — no UI control, per spec)
   const [target, setTarget] = useState<number>(() => (typeof window !== "undefined" ? Number(localStorage.getItem("opsboard.target")) : 0) || 65);
+  // The EPC tab's own target — a NUMBER of EPCs onboarded (approved) in the period.
+  const [epcTarget, setEpcTarget] = useState<number>(() => (typeof window !== "undefined" ? Number(localStorage.getItem("opsboard.epcTarget")) : 0) || 10);
   const [q, setQ] = useState("");
   // Period filter (by the case's boardDate — active cases carry into the current
   // month automatically). Default "Current Month"; persisted; "custom" uses
@@ -853,6 +855,7 @@ function Inner() {
   }, []);
 
   useEffect(() => { if (typeof window !== "undefined") localStorage.setItem("opsboard.target", String(target)); }, [target]);
+  useEffect(() => { if (typeof window !== "undefined") localStorage.setItem("opsboard.epcTarget", String(epcTarget)); }, [epcTarget]);
   // Restore + persist the period choice (sticks until changed).
   useEffect(() => {
     try {
@@ -959,7 +962,13 @@ function Inner() {
     : boardPeriod === "custom" ? inPeriod(d, "custom", boardFrom ? `${boardFrom}-01` : "", boardTo ? monthEnd(boardTo) : "")
     : inPeriod(d, boardPeriod);
   const mtd = cases.reduce((sum, c) => sum + c.tranches.reduce((s, t) => s + (t.phase === 1 && inSelPeriod(t.date) ? t.amount : 0), 0), 0);
-  const pct = Math.min(100, Math.round(mtd / (target * 1e5) * 100));
+  // EPC tab: EPCs onboarded (approved) in the period — the board's own Approved
+  // column, dated the way the board files them (no extra request).
+  const epcTab = srcFilter === "epc";
+  const onboarded = cases.filter((c) => c.source === "epc" && c.column === "approved" && inSelPeriod(c.boardDate)).length;
+  const pct = epcTab
+    ? Math.min(100, Math.round(onboarded / Math.max(1, epcTarget) * 100))
+    : Math.min(100, Math.round(mtd / (target * 1e5) * 100));
   const periodLabel = boardPeriod === "custom"
     ? (boardFrom || boardTo ? `${boardFrom || "…"} → ${boardTo || "…"}` : "Custom")
     : (PERIOD_OPTIONS.find((o) => o.value === boardPeriod)?.label ?? "This month");
@@ -1201,8 +1210,14 @@ function Inner() {
               <NotificationBell />
               {isMainAdmin && (
                 <label className="text-[12px] text-text-muted flex items-center gap-1.5">Target
-                  <input type="number" min={1} max={999} value={target} onChange={(e) => setTarget(Math.max(1, Number(e.target.value) || 65))}
-                    className="w-16 border border-line rounded-md px-2 py-1 text-[13px]" /> L</label>
+                  {epcTab ? (
+                    <input type="number" min={1} max={999} value={epcTarget} onChange={(e) => setEpcTarget(Math.max(1, Number(e.target.value) || 10))}
+                      className="w-16 border border-line rounded-md px-2 py-1 text-[13px]" />
+                  ) : (
+                    <input type="number" min={1} max={999} value={target} onChange={(e) => setTarget(Math.max(1, Number(e.target.value) || 65))}
+                      className="w-16 border border-line rounded-md px-2 py-1 text-[13px]" />
+                  )}
+                  {epcTab ? "EPCs" : "L"}</label>
               )}
             </div>
           </div>
@@ -1572,7 +1587,9 @@ function Inner() {
             <span className="flex items-center gap-1"><i className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: "#dc2626" }} />overdue</span>
           </span>
           <div className="flex items-center gap-2.5 ml-auto min-w-[300px]">
-            <span className="whitespace-nowrap">{periodLabel} <strong>{fmt(mtd)}</strong> of ₹{target} L</span>
+            {epcTab
+              ? <span className="whitespace-nowrap">{periodLabel} <strong>{onboarded}</strong> of {epcTarget} EPCs onboarded</span>
+              : <span className="whitespace-nowrap">{periodLabel} <strong>{fmt(mtd)}</strong> of ₹{target} L</span>}
             <div className="flex-1 h-3 rounded-full bg-neutral-200"><div className="h-3 rounded-full" style={{ width: pct + "%", backgroundColor: "#178a5c" }} /></div>
           </div>
         </footer>

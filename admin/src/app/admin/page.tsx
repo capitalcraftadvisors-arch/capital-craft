@@ -30,7 +30,8 @@ import {
   deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort, remainingAmount,
   displayAmount as amountFor,
 } from "@/lib/disbursement";
-import { fmtDate, fmtDateTime } from "@/lib/dates";
+import { fmtDate, fmtDateTime, localIsoDate } from "@/lib/dates";
+import { DownloadMenu } from "@/components/ProfileTabBar";
 import { policyValidityParts, VALIDITY_TEXT } from "@/lib/insurance-validity";
 import LenderCell from "@/components/LenderCell";
 import AdminPendingPill from "@/components/AdminPendingPill";
@@ -1741,19 +1742,71 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     downloadCsv("loan-applications", header, rows);
   }
 
+  // The Excel reports (api/admin/loan-reports): lender-wise disbursements of a
+  // month, and the 2nd tranche still pending. One request per download.
+  const [reportBusy, setReportBusy] = useState<string | null>(null);
+  const [monthPick, setMonthPick] = useState<string | null>(null); // YYYY-MM while the month popup is open
+  async function downloadLoanReport(type: "monthly" | "pending", month?: string) {
+    setReportBusy("Preparing…");
+    try {
+      const qs = type === "monthly" ? `type=monthly&month=${month}` : "type=pending";
+      const res = await fetch(`/api/admin/loan-reports?${qs}`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); toast.error(j?.error || "Couldn't build the report."); return; }
+      const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? "report.xlsx";
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setReportBusy(null);
+    }
+  }
+
 
   return (
     <>
       <SummaryCards accent={ACCENTS.apps.color} cards={cards} active={categoryFilter} onPick={pickCategory} />
+
+      {/* Report → "Lender-wise disbursements": which month. */}
+      {monthPick !== null && (
+        <div className="fixed inset-0 z-50 bg-black/40 grid place-items-center px-4" onClick={() => setMonthPick(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-white rounded-xl shadow-lg p-6 space-y-4">
+            <h3 className="text-[17px] font-semibold text-[#0f3d2e]">Lender-wise disbursements</h3>
+            <label className="block">
+              <span className="block mb-1 text-[12.5px] text-[#5a8a76]">Month</span>
+              <input type="month" value={monthPick} max={localIsoDate(new Date()).slice(0, 7)} onChange={(e) => setMonthPick(e.target.value)}
+                className="w-full border border-line rounded-input px-3 py-2 text-[14px] focus:outline-none focus:border-[#178a5c]" />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setMonthPick(null)} className="px-4 py-2 rounded-[8px] border border-line text-[13px] text-text-mid hover:bg-bg-soft">Cancel</button>
+              <button type="button" disabled={!monthPick}
+                onClick={() => { const m = monthPick; setMonthPick(null); void downloadLoanReport("monthly", m); }}
+                className="px-4 py-2 rounded-[8px] bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">
+                Download
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-3 mb-3">
         <div className="flex-1 min-w-[220px]">
           <Input placeholder="Search by borrower or mobile…" value={q} onChange={(e) => setQ(capPhone(e.target.value))} />
         </div>
         <FiltersButton count={activeCount} open={filtersOpen} accent={ACCENTS.apps.color} onClick={() => setFiltersOpen((o) => !o)} />
-        <Button variant="outline" onClick={exportReport} className="whitespace-nowrap inline-flex items-center gap-1.5">
-          {IconDownload} Report
-        </Button>
+        <DownloadMenu
+          outline
+          label="Report"
+          icon={IconDownload}
+          busyLabel={reportBusy}
+          disabled={!!reportBusy}
+          items={[
+            { label: "Loan list", onClick: exportReport },
+            { label: "Lender-wise disbursements (monthly)", onClick: () => setMonthPick(localIsoDate(new Date()).slice(0, 7)) },
+            { label: "2nd tranche pending", onClick: () => void downloadLoanReport("pending") },
+          ]}
+        />
         <Button variant="primary" onClick={() => setAddOpen(true)} style={{ backgroundColor: ACCENTS.apps.color }} className="whitespace-nowrap">
           + New Applicant
         </Button>

@@ -85,6 +85,7 @@ export const MSG_TEMPLATES: MsgTemplate[] = [
   { label: "Co-applicant docs needed", body: "Co-applicant Aadhaar and PAN are required for this file — please add them.", doc: "coapp_aadhaar" },
   { label: "Loan amount exceeds cost", body: "The loan amount is higher than the project cost — please correct the loan amount.", doc: "loan_amount" },
   { label: "Address / pincode mismatch", body: "The installation address / pincode doesn't match the documents — please correct it.", doc: "install_pincode" },
+  { label: "Pendency for login", body: "Please send pendency for login process.", doc: undefined },
   { label: "Docs received, under review", body: "We've received the documents and are reviewing the file — we'll update you shortly.", doc: undefined },
   { label: "Please re-check & resubmit", body: "Please re-check the details and documents, then resubmit the application.", doc: undefined },
 ];
