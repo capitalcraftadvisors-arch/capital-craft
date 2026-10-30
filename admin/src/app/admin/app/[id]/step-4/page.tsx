@@ -30,23 +30,9 @@ import FileUpload from "@/components/FileUpload";
 import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
 import { IFSC_RE, MOBILE_RE, EMAIL_RE } from "@/lib/validators";
+import { professionsFor } from "@/lib/loan-form";
 
 // ── Static option lists ──────────────────────────────────────────────
-
-const SALARIED_PROFESSIONS = [
-  "Government",
-  "Private Sector",
-  "PSU",
-  "Other",
-];
-
-const SELF_EMPLOYED_PROFESSIONS = [
-  "Business Owner",
-  "Professional (Doctor / CA / Lawyer)",
-  "Service Provider",
-  "Trader",
-  "Other",
-];
 
 const ACCOUNT_TYPES = [
   "Savings", "Current", "Salary", "NRE", "NRO", "Overdraft", "Fixed Deposit",
@@ -188,11 +174,7 @@ function Inner() {
     })();
   }, [params.id]);
 
-  const professionOptions = useMemo(() => {
-    if (employment === "salaried")      return SALARIED_PROFESSIONS;
-    if (employment === "self_employed") return SELF_EMPLOYED_PROFESSIONS;
-    return [];
-  }, [employment]);
+  const professionOptions = useMemo(() => professionsFor(employment), [employment]);
 
   // ── Bank statement upload ──────────────────────────────────────────
 

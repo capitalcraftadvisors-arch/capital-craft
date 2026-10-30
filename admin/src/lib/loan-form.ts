@@ -12,6 +12,16 @@ export type LoanForm = Record<string, string>;
 // The electricity connection's category (0109) — asked by the EPC chatbot.
 export const CATEGORY_LABEL: Record<string, string> = { domestic: "Domestic", non_domestic: "Non-domestic" };
 
+// Profession options by employment type — the classic Step 4 dropdown and the
+// admin chatbot offer the same list.
+export const SALARIED_PROFESSIONS = ["Government", "Private Sector", "PSU", "Other"];
+export const SELF_EMPLOYED_PROFESSIONS = ["Business Owner", "Professional (Doctor / CA / Lawyer)", "Service Provider", "Trader", "Other"];
+export function professionsFor(employment: string | null | undefined): string[] {
+  if (employment === "salaried") return SALARIED_PROFESSIONS;
+  if (employment === "self_employed") return SELF_EMPLOYED_PROFESSIONS;
+  return [];
+}
+
 export type LoanDocRow = { id: string; category: string; storage_path: string | null; file_name?: string | null };
 
 export type HydratedLoan = {

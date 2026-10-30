@@ -1196,7 +1196,6 @@ function Inner() {
     { k: "Father's name", v: loan.coapp_father_name },
     { k: "DOB", v: loan.coapp_dob },
     { k: "Relation", v: loan.coapp_relation },
-    { k: "Reason", v: loan.coapp_role_reason, wrap: true, optional: true },
     { k: "PAN", v: loan.coapp_pan, copy: loan.coapp_pan },
     { k: "Mobile", v: loan.coapp_mobile ? `+91 ${loan.coapp_mobile}` : null, copy: loan.coapp_mobile },
     { k: "Email", v: loan.coapp_email, copy: loan.coapp_email, optional: true },

@@ -31,6 +31,7 @@ import { getToken, getBusiness } from "@/lib/auth";
 import { computeCentralSubsidy, computeEmi, formatRupees, DEFAULT_INDICATIVE_ROI, TENURES } from "@/lib/emi";
 import { numberToWordsIndian } from "@/lib/numberToWords";
 import { invalidateLoanBoards } from "@/lib/ops-board";
+import { professionsFor } from "@/lib/loan-form";
 
 export default function IntakePage() {
   return (
@@ -52,7 +53,7 @@ type Turn = {
   field?: string;
   placeholder?: string;
   optional?: boolean;
-  choices?: Choice[];
+  choices?: Choice[] | ((f: Form) => Choice[]); // a function when the options depend on an earlier answer
   validate?: (v: string) => string | null;
   when?: (f: Form) => boolean;
   // docs turn:
@@ -69,6 +70,8 @@ type Turn = {
   payload?: (f: Form) => Record<string, unknown>;
 };
 
+const choicesOf = (t: Turn, f: Form): Choice[] => (typeof t.choices === "function" ? t.choices(f) : t.choices ?? []);
+
 const MOBILE_RE = /^[6-9]\d{9}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // A co-applicant is present when the name-check / paste set the flag, OR the RM
@@ -78,6 +81,9 @@ const hasCoapp = (f: Form) => f._has_coapp === "1" || f.coapp_needed === "yes";
 // The co-applicant Yes / No answer is the decision (a "No" also drops one read earlier).
 const coappDecision = (turnId: string | undefined, value: string): Form =>
   (turnId === "coapp_needed" && value ? { _has_coapp: value === "yes" ? "1" : "" } : {});
+// Changing the employment type clears a profession picked from the other list.
+const employmentReset = (turnId: string | undefined, value: string, f: Form): Form =>
+  (turnId === "employment_type" && value !== (f.employment_type || "") ? { profession: "", profession_other: "" } : {});
 // Is this doc turn's file already on the profile? Drives the standalone doc
 // turns' `when` gate (e.g. the bank statement self-skips once uploaded).
 function docProvided(turnId: string, f: Form): boolean {
@@ -162,7 +168,9 @@ const SCRIPT: Turn[] = [
   { id: "employment_type", bot: "Employment type?", kind: "choice", field: "employment_type", choices: [
     { value: "salaried", label: "Salaried" }, { value: "self_employed", label: "Self-employed" },
   ] },
-  { id: "profession", bot: "Profession? (optional)", kind: "text", field: "profession", placeholder: "e.g. Engineer", optional: true },
+  { id: "profession", bot: "Profession? (optional)", kind: "choice", field: "profession", optional: true, when: (f) => !!f.employment_type,
+    choices: (f) => professionsFor(f.employment_type).map((p) => ({ value: p, label: p })) },
+  { id: "profession_other", bot: "Please specify the profession.", kind: "text", field: "profession_other", placeholder: "e.g. Engineer", optional: true, when: (f) => f.profession === "Other" },
   // Employer / business name may already be filled from the sheet — skip when so.
   { id: "organization_name", bot: "Organization / business name? (optional)", kind: "text", field: "organization_name", placeholder: "Organization", optional: true, when: (f) => !(f.organization_name && f.organization_name.trim()) },
   { id: "annual_income", bot: "Annual income (₹)? (optional)", kind: "text", field: "annual_income", placeholder: "e.g. 600000", optional: true },
@@ -677,7 +685,8 @@ function Inner() {
       setEditTargets((s) => { const n = new Set(s); ["doc_table", "coapp_relation", "coapp_mobile", "coapp_email"].forEach((t) => n.add(t)); return n; });
       setEditUnits((s) => { const n = new Set(s); n.add("coapp_aadhaar"); n.add("coapp_pan"); return n; });
     }
-    const nextForm = { ...form, ...(turn.field ? { [turn.field]: value } : {}), ...coappDecision(turn.id, value), ...(opts.extra ?? {}) };
+    if (editMode && editStage === "selected" && turn.id === "profession" && value === "Other") setEditTargets((s) => new Set(s).add("profession_other"));
+    const nextForm = { ...form, ...(turn.field ? { [turn.field]: value } : {}), ...coappDecision(turn.id, value), ...employmentReset(turn.id, value, form), ...(opts.extra ?? {}) };
     setForm(nextForm);
     void persistForm(nextForm); // silent background save so nothing is lost
     advance();
@@ -760,7 +769,7 @@ function Inner() {
     const field = t?.field;
     // Changing the EPC partner re-points this application (epc_business_id) —
     // it never creates a new one.
-    const nextForm: Form = { ...form, ...(field ? { [field]: value } : {}), ...coappDecision(turnId, value), ...(t?.kind === "epc" ? { epc_business_id: value } : {}), ...(extra ?? {}) };
+    const nextForm: Form = { ...form, ...(field ? { [field]: value } : {}), ...coappDecision(turnId, value), ...employmentReset(turnId, value, form), ...(t?.kind === "epc" ? { epc_business_id: value } : {}), ...(extra ?? {}) };
     setForm(nextForm);
     setMsgs((m) => m.map((x, i) => (i === index ? { ...x, text: label, edited: true } : x)));
     setEditing(null); setInput("");
@@ -1336,7 +1345,7 @@ function Inner() {
             {active.kind === "choice" && (
               <div className="flex flex-col gap-2">
                 <div className="grid sm:grid-cols-2 gap-2">
-                  {active.choices!.map((c) => (
+                  {choicesOf(active, form).map((c) => (
                     <button key={c.value} onClick={() => void answer(c.value, c.label, { editable: true })} className="text-left px-4 py-3 rounded-xl border border-line bg-white hover:border-[#178a5c] hover:bg-[#f7fcf9] transition">
                       <div className="text-[14px] font-semibold text-text">{c.label}</div>{c.sub && <div className="text-[12px] text-text-muted">{c.sub}</div>}
                     </button>
