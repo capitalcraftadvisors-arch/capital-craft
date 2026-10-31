@@ -3,8 +3,8 @@
 // Left navigation for the admin console (replaces the old top tab bar).
 //
 // Solfin-style fixed sidebar: brand at the top, a vertical icon+label list,
-// Log out pinned to the bottom. The active section is highlighted with its
-// per-console accent (soft tint background + accent text/icon).
+// Log out pinned to the bottom, on the rail's own petrol. The active section is
+// a white pill in its dashboard's green.
 //
 // Responsive:
 //   - lg+  : icons-only rail; expands with labels on hover or keyboard focus.
@@ -17,7 +17,7 @@
 // onSelectTab, so a list section navigates back to /admin (seeding the tab via
 // sessionStorage, the same key the console already restores from).
 
-import { ReactNode, useEffect, useState } from "react";
+import { CSSProperties, ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { logout, getBusiness, allowedModules, canAccessModule, isMainAdmin, type ModuleKey } from "@/lib/auth";
 import { pendingCount } from "@/lib/review";
@@ -25,20 +25,43 @@ import { pendingCount } from "@/lib/review";
 export type ConsoleTab = "epcs" | "apps" | "loanleads" | "insurance" | "otherins" | "leads";
 export type SectionKey = ConsoleTab | "analytics" | "board" | "pendings" | "team" | "pri";
 
-// Per-console accent colors (C). Soft professional tints — accents only.
-export const ACCENTS: Record<SectionKey, { label: string; color: string; tint: string }> = {
-  epcs:      { label: "EPCs",              color: "#185fa5", tint: "#e8f1fb" },
-  apps:      { label: "Loan applications", color: "#178a5c", tint: "#e7f5ee" },
-  loanleads: { label: "Leads",             color: "#4338ca", tint: "#e8e7fb" },
-  insurance: { label: "Solar Insurance",   color: "#0e7490", tint: "#e0f2f4" },
-  otherins:  { label: "Other Insurance",   color: "#be185d", tint: "#fce7f3" },
-  leads:     { label: "Leads (Non-EPC)",   color: "#b45309", tint: "#fbf0e0" },
-  analytics: { label: "Analytics",         color: "#6d28d9", tint: "#efe9fb" },
-  board:     { label: "Task Manager",      color: "#0f766e", tint: "#dcf3ef" },
-  pendings:  { label: "Pendings",          color: "#b91c1c", tint: "#fdecec" },
-  team:      { label: "Stakeholders",      color: "#334155", tint: "#eef1f5" },
-  pri:       { label: "Pri",               color: "#7c2d12", tint: "#fbece4" },
+// Per-dashboard theme — every dashboard is green, each in its own shade, so the
+// page itself says where you are. color = accent (buttons, active nav, table
+// header text), tint = soft fill (chips, table header), page = page background.
+export const ACCENTS: Record<SectionKey, { label: string; color: string; tint: string; page: string }> = {
+  epcs:      { label: "EPCs",              color: "#1b5e3a", tint: "#d3e0d4", page: "#e2e9e0" }, // deep forest on grey-sage
+  apps:      { label: "Loan applications", color: "#0c8f5e", tint: "#c4efda", page: "#d9f5e8" }, // fresh mint emerald
+  loanleads: { label: "Leads",             color: "#3d7a2a", tint: "#dcedd3", page: "#edf5e8" }, // fern
+  insurance: { label: "Solar Insurance",   color: "#0e766f", tint: "#cfeae7", page: "#e4f2f0" }, // teal green
+  otherins:  { label: "Other Insurance",   color: "#3f7468", tint: "#d7e8e3", page: "#e9f2ee" }, // eucalyptus
+  leads:     { label: "Leads (Non-EPC)",   color: "#5b6e1c", tint: "#e4ebcd", page: "#f1f4e3" }, // olive
+  analytics: { label: "Analytics",         color: "#4f7560", tint: "#dbe8df", page: "#ecf3ee" }, // sage
+  board:     { label: "Task Manager",      color: "#0b7d68", tint: "#cdece3", page: "#e3f4ee" }, // jade
+  pendings:  { label: "Pendings",          color: "#14533d", tint: "#d1e3da", page: "#e5eee9" }, // pine
+  team:      { label: "Stakeholders",      color: "#5a7a2e", tint: "#dfebd2", page: "#eef4e6" }, // moss
+  pri:       { label: "Pri",               color: "#2f5d3a", tint: "#d7e6da", page: "#eaf2eb" }, // hunter
 };
+
+// The sidebar's own petrol (blue-green) — a shade no dashboard uses.
+const RAIL_BG = "linear-gradient(180deg, #0a4554 0%, #0c5361 55%, #0d5f6c 100%)";
+
+// The page shell's background + the CSS variables its tables, cards and
+// buttons read (--acc / --acc-tint / --acc-page).
+export function themeStyle(key: SectionKey): CSSProperties {
+  const a = ACCENTS[key];
+  return { backgroundColor: a.page, "--acc": a.color, "--acc-tint": a.tint, "--acc-page": a.page } as CSSProperties;
+}
+
+// The dashboard's mark beside its title: its icon on its own green.
+export function SectionMark({ k }: { k: SectionKey }) {
+  const a = ACCENTS[k];
+  return (
+    <span className="w-10 h-10 rounded-xl grid place-items-center text-white shrink-0 shadow-md"
+      style={{ background: `linear-gradient(140deg, ${a.color}, color-mix(in srgb, ${a.color} 70%, #000))` }}>
+      {ICONS[k]}
+    </span>
+  );
+}
 
 const ICONS: Record<SectionKey, ReactNode> = {
   epcs: (
@@ -168,7 +191,7 @@ export default function AdminSidebar({
       <>
         {/* Brand — real logo. Collapsed rail shows just the swirl mark; the
             expanded panel / drawer shows the full wordmark. */}
-        <div className={"flex items-center gap-2.5 px-1 h-12 mb-2 shrink-0 " + rowJustify}>
+        <div className={"flex items-center gap-2.5 px-1.5 h-12 mb-3 shrink-0 rounded-xl bg-white shadow-md " + rowJustify}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/brand/capital-craft-mark.png"
@@ -200,9 +223,9 @@ export default function AdminSidebar({
                 className={[
                   "flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-semibold transition-colors",
                   rowJustify,
-                  on ? "" : "text-text-mid hover:bg-bg-tint hover:text-text",
+                  on ? "shadow-md" : "text-white/75 hover:bg-white/10 hover:text-white",
                 ].join(" ")}
-                style={on ? { backgroundColor: a.tint, color: a.color } : undefined}
+                style={on ? { backgroundColor: "#fff", color: a.color } : undefined}
               >
                 <span className="shrink-0 relative">
                   {ICONS[key]}
@@ -223,7 +246,7 @@ export default function AdminSidebar({
           type="button"
           onClick={() => { logout(); router.replace("/login"); }}
           aria-label="Log out"
-          className={"mt-auto flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-semibold text-text-mid hover:bg-bg-tint hover:text-text transition-colors " + rowJustify}
+          className={"mt-auto flex items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] font-semibold text-white/75 hover:bg-white/10 hover:text-white transition-colors " + rowJustify}
         >
           <span className="shrink-0">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="M16 17l5-5-5-5M21 12H9" /></svg>
@@ -252,7 +275,8 @@ export default function AdminSidebar({
           <div className="absolute inset-0 bg-black/40" />
           <aside
             onClick={(e) => e.stopPropagation()}
-            className="absolute left-0 top-0 h-full w-64 bg-white border-r border-line p-3 flex flex-col"
+            className="absolute left-0 top-0 h-full w-64 p-3 flex flex-col"
+            style={{ background: RAIL_BG }}
           >
             {content(true)}
           </aside>
@@ -263,7 +287,7 @@ export default function AdminSidebar({
           width. On hover (or keyboard focus inside it), the fixed panel expands
           to 248px as an OVERLAY, so the content area never reflows. */}
       <div className="hidden lg:block shrink-0 w-[68px]">
-        <div className="group fixed top-0 left-0 z-40 h-screen w-[68px] hover:w-[248px] has-[:focus-visible]:w-[248px] transition-[width] duration-200 ease-out overflow-hidden flex flex-col border-r border-line bg-white p-3">
+        <div className="group fixed top-0 left-0 z-40 h-screen w-[68px] hover:w-[248px] has-[:focus-visible]:w-[248px] transition-[width] duration-200 ease-out overflow-hidden flex flex-col p-3 shadow-lg" style={{ background: RAIL_BG }}>
           {content(false)}
         </div>
       </div>

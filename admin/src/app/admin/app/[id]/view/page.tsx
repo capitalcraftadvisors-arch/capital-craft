@@ -47,7 +47,7 @@ import { CATEGORY_LABEL } from "@/lib/loan-form";
 import { initialsOf } from "@/lib/names";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import {
-  I, DocGrid, DocViewer, FieldCol, FillCount, fieldFill, fillText, fillTone, ProgressTabs, ChecksPanel, CopyButton, Section, StatCards, StepBlock,
+  I, DocGrid, DocViewer, FieldCol, FillCount, fillOf, fillText, fillTone, HAction, ProgressTabs, ChecksPanel, CopyButton, Section, StatCards, StepBlock,
   type FieldRow, type ViewDocSlot, type ViewerItem, type StageState,
 } from "@/components/view/ViewKit";
 import LoanApprovalForm from "@/components/LoanApprovalForm";
@@ -1250,7 +1250,6 @@ function Inner() {
     { k: "IFSC code", v: loan.bank_ifsc, copy: loan.bank_ifsc },
     { k: "Type", v: loan.bank_account_type },
   ];
-  const fillOf = (...cols: FieldRow[][]) => { const f = fieldFill(...cols); return <FillCount have={f.have} total={f.total} />; };
   const checksCounted = checks.filter((c) => c.status !== "na");
   const checksOk = checksCounted.filter((c) => c.status === "pass").length;
 
@@ -1643,39 +1642,6 @@ function Inner() {
         mobile={loan.borrower_mobile ?? null}
       />
     </main>
-  );
-}
-
-// ── Header action button — green-primary theme, soft shades. ─────────
-function HAction({
-  children, onClick, variant = "ghost", icon, disabled, title,
-}: {
-  children: ReactNode;
-  onClick: () => void;
-  variant?: "approve" | "reject" | "primary" | "blue" | "amber" | "outline" | "ghost";
-  icon?: ReactNode;
-  disabled?: boolean;
-  title?: string;
-}) {
-  const cls =
-    variant === "approve" ? "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd] hover:bg-[#d6efe3]" :
-    variant === "reject"  ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100" :
-    variant === "primary" ? "bg-[#178a5c] text-white border-[#178a5c] hover:bg-[#12734c]" :
-    variant === "blue"    ? "bg-[#dceffb] text-[#185fa5] border-[#bfe0f5] hover:bg-[#cde6f8]" :
-    variant === "amber"   ? "bg-[#fef8ee] text-[#854f0b] border-[#854f0b]/30 hover:bg-[#fef0d6]" :
-    variant === "outline" ? "bg-white text-[#178a5c] border-[#cdeadd] hover:bg-[#f0faf5]" :
-                            "bg-white text-[#0f3d2e] border-[#cdeadd] hover:bg-[#f0faf5]";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className={["text-[13px] font-semibold px-3 py-2 rounded-[8px] border transition-colors disabled:opacity-60 inline-flex items-center gap-1.5", cls].join(" ")}
-    >
-      {icon && <span className="shrink-0" style={{ display: "inline-flex" }}>{icon}</span>}
-      {children}
-    </button>
   );
 }
 

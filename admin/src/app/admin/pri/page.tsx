@@ -8,7 +8,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
-import AdminSidebar from "@/components/AdminSidebar";
+import AdminSidebar, { ACCENTS, SectionMark, themeStyle } from "@/components/AdminSidebar";
 import LoginWelcome from "@/components/LoginWelcome";
 import ClaudeConnectorCard from "@/components/ClaudeConnectorCard";
 import Input from "@/components/ui/Input";
@@ -33,14 +33,14 @@ function Inner() {
   if (!allowed || !me) return null;
 
   return (
-    <div className="min-h-screen bg-bg-soft lg:flex">
+    <div className="min-h-screen lg:flex" style={themeStyle("pri")}>
       <LoginWelcome />
       <AdminSidebar active="pri" />
       <div className="flex-1 min-w-0">
-        <header className="px-4 sm:px-6 py-5 border-b border-line bg-white">
-          <div className="flex items-center gap-2.5">
-            <span className="inline-block w-1.5 h-7 rounded-full" style={{ backgroundColor: "#7c2d12" }} />
-            <h1 className="font-display text-[22px] sm:text-[26px] font-bold text-text">Pri</h1>
+        <header className="px-4 sm:px-6 py-5 border-b border-line">
+          <div className="flex items-center gap-3">
+            <SectionMark k="pri" />
+            <h1 className="font-display text-[22px] sm:text-[26px] font-bold" style={{ color: ACCENTS.pri.color }}>Pri</h1>
           </div>
         </header>
         <main className="px-4 sm:px-6 py-5">

@@ -100,6 +100,32 @@ textarea.focus\:border-blue:focus {
 .cc-rise { animation: cc-rise 700ms cubic-bezier(0.2, 0.7, 0.2, 1) both; }
 @media (prefers-reduced-motion: reduce) { .cc-rise { animation: none; } }
 
+/* ── Console tables — themed by the dashboard's green ──────────────────────
+   The page shell sets --acc / --acc-tint / --acc-page (AdminSidebar themeStyle),
+   so each dashboard's tables wear its own shade. */
+.cc-table-card {
+  border-color: color-mix(in srgb, var(--acc, #178a5c) 22%, white);
+  box-shadow: 0 14px 34px -18px color-mix(in srgb, var(--acc, #178a5c) 45%, transparent), 0 2px 6px rgba(10, 31, 46, 0.04);
+}
+.cc-table thead {
+  background: linear-gradient(180deg, var(--acc-tint, #d1eedf), color-mix(in srgb, var(--acc-tint, #d1eedf) 55%, white));
+  border-bottom: 2px solid color-mix(in srgb, var(--acc, #178a5c) 30%, white);
+}
+.cc-table thead th {
+  color: var(--acc, #178a5c);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.cc-table tbody tr { border-bottom: 1px solid color-mix(in srgb, var(--acc, #178a5c) 10%, white); }
+.cc-table tbody tr:last-child { border-bottom: 0; }
+.cc-table tbody tr:nth-child(even) { background-color: color-mix(in srgb, var(--acc-page, #e6f5ed) 45%, white); }
+.cc-table tbody tr:hover {
+  background-color: color-mix(in srgb, var(--acc-tint, #d1eedf) 60%, white);
+  box-shadow: inset 3px 0 0 var(--acc, #178a5c);
+}
+
 /* Brand text-selection color. */
 ::selection {
   background: rgba(23, 138, 92, 0.18);

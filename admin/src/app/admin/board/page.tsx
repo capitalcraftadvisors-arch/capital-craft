@@ -11,7 +11,7 @@ import { fmtDate } from "@/lib/dates";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
-import AdminSidebar from "@/components/AdminSidebar";
+import AdminSidebar, { ACCENTS, SectionMark, themeStyle } from "@/components/AdminSidebar";
 import NotificationBell from "@/components/NotificationBell";
 import LoanLenderPickerModal, { type PickerLender } from "@/components/LoanLenderPickerModal";
 import Select from "@/components/ui/Select";
@@ -481,9 +481,9 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
               Nothing in {MYDAY_SRC_TABS.find((t) => t.key === src)?.label} needs action right now. 🎉
             </div>
           ) : (
-            <div className="rounded-lg border border-line bg-white overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead className="text-[10.5px] uppercase tracking-wide text-text-muted border-b border-line bg-bg-tint/40">
+            <div className="rounded-xl border bg-white overflow-x-auto cc-table-card">
+              <table className="w-full text-[13px] cc-table">
+                <thead>
                   <tr>
                     <th className="text-left font-medium px-2.5 py-2 w-7">#</th>
                     <th className="text-left font-medium px-2.5 py-2">Case</th>
@@ -1180,20 +1180,20 @@ function Inner() {
   }), [workloadPeople, cases, thisMonthKey, srcFilter]);
 
   return (
-    <div className="min-h-screen bg-bg-soft lg:flex">
+    <div className="min-h-screen lg:flex" style={themeStyle("board")}>
       <AdminSidebar active="board" />
       {/* Fixed-height app shell: the page itself doesn't scroll — the board and
           the side panel each scroll in their own container (no scroll bleed). */}
       <div className="flex-1 min-w-0 flex flex-col md:h-[calc(100vh-3.5rem)] lg:h-screen md:overflow-hidden">
         {/* Header */}
-        <header className="px-4 sm:px-6 py-5 border-b border-line bg-white shrink-0">
+        <header className="px-4 sm:px-6 py-5 border-b border-line shrink-0">
           <p className="text-[15px] font-semibold text-text mb-2">
             Hi <span className="font-bold text-[#178a5c]">{greetingName(me)}</span>
           </p>
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2.5">
-              <span className="inline-block w-1.5 h-7 rounded-full" style={{ backgroundColor: "#0f766e" }} />
-              <h1 className="font-display text-[22px] sm:text-[26px] font-bold text-text">
+            <div className="flex items-center gap-3">
+              <SectionMark k="board" />
+              <h1 className="font-display text-[22px] sm:text-[26px] font-bold" style={{ color: ACCENTS.board.color }}>
                 Task Manager <span className="text-text-muted font-medium text-[15px]">· {visible.length} active</span>
               </h1>
             </div>

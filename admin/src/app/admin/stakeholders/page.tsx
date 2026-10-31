@@ -76,13 +76,13 @@ function TeamTab() {
   }
 
   return (
-    <section className="bg-white border border-line rounded-xl overflow-x-auto">
+    <section className="bg-white border rounded-card overflow-x-auto cc-table-card">
       {!members ? (
         <p className="px-4 py-6 text-[13px] text-text-muted">Loading…</p>
       ) : (
-        <table className="w-full text-[13px]">
+        <table className="w-full text-[13px] cc-table">
           <thead>
-            <tr className="text-text-muted">
+            <tr>
               <th className={th}>Name</th><th className={th}>Mobile</th><th className={th}>Email</th><th className={th}>Role</th><th className={th}>Password</th><th className={th} />
             </tr>
           </thead>
@@ -133,11 +133,11 @@ function PartnersTab() {
   const table = (kind: PartnerKind, title: string) => {
     const rows = (partners ?? []).filter((p) => p.kind === kind);
     return (
-      <section className="bg-white border border-line rounded-xl overflow-x-auto">
+      <section className="bg-white border rounded-card overflow-x-auto cc-table-card">
         <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-line">
-          <h2 className="text-[15px] font-semibold text-[#178a5c]">{title}</h2>
+          <h2 className="text-[15px] font-semibold text-[var(--acc)]">{title}</h2>
           <button type="button" onClick={() => setAdding(kind)}
-            className="text-[12.5px] font-semibold px-3 py-1.5 rounded-[8px] bg-[#178a5c] text-white hover:bg-[#12734c]">
+            className="text-[12.5px] font-semibold px-3 py-1.5 rounded-[8px] bg-[var(--acc)] text-white hover:brightness-110">
             ＋ Add {PARTNER_SPEC[kind].label.toLowerCase()}
           </button>
         </div>
@@ -146,9 +146,9 @@ function PartnersTab() {
         ) : rows.length === 0 ? (
           <p className="px-4 py-6 text-[13px] text-text-muted">None yet</p>
         ) : (
-          <table className="w-full text-[13px]">
+          <table className="w-full text-[13px] cc-table">
             <thead>
-              <tr className="text-text-muted">
+              <tr>
                 <th className={th}>Name</th><th className={th}>Contact person</th><th className={th}>Phone</th><th className={th}>Email</th>
               </tr>
             </thead>

@@ -11,7 +11,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
-import AdminSidebar from "@/components/AdminSidebar";
+import AdminSidebar, { ACCENTS, SectionMark, themeStyle } from "@/components/AdminSidebar";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { fmtRupeesExact } from "@/lib/money";
@@ -114,13 +114,13 @@ function Inner() {
   );
 
   return (
-    <div className="min-h-screen bg-bg-soft lg:flex">
+    <div className="min-h-screen lg:flex" style={themeStyle("pendings")}>
       <AdminSidebar active="pendings" pendings={loaded ? count : undefined} onPendingsClick={() => setReload((n) => n + 1)} />
       <div className="flex-1 min-w-0">
-        <header className="px-4 sm:px-6 py-5 border-b border-line bg-white">
-          <div className="flex items-center gap-2.5">
-            <span className="inline-block w-1.5 h-7 rounded-full" style={{ backgroundColor: "#b91c1c" }} />
-            <h1 className="font-display text-[22px] sm:text-[26px] font-bold text-text">
+        <header className="px-4 sm:px-6 py-5 border-b border-line">
+          <div className="flex items-center gap-3">
+            <SectionMark k="pendings" />
+            <h1 className="font-display text-[22px] sm:text-[26px] font-bold" style={{ color: ACCENTS.pendings.color }}>
               Pendings <span className="text-text-muted font-medium text-[15px]">· {count}</span>
             </h1>
           </div>
@@ -208,9 +208,9 @@ function Inner() {
 
 function Section({ title, n, loading, children }: { title: string; n: number; loading: boolean; children: ReactNode }) {
   return (
-    <section className="bg-white border border-line rounded-xl">
+    <section className="bg-white border rounded-card overflow-hidden cc-table-card">
       <div className="px-4 py-3 border-b border-line flex items-center gap-2">
-        <h2 className="text-[15px] font-bold text-text">{title}</h2>
+        <h2 className="text-[15px] font-bold" style={{ color: ACCENTS.pendings.color }}>{title}</h2>
         {n > 0 && <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-600 text-white text-[11px] font-bold leading-5 text-center">{n}</span>}
       </div>
       {loading ? (
@@ -226,9 +226,9 @@ function Section({ title, n, loading, children }: { title: string; n: number; lo
 
 function Table({ head, children }: { head: string[]; children: ReactNode }) {
   return (
-    <table className="w-full text-[13px]">
+    <table className="w-full text-[13px] cc-table">
       <thead>
-        <tr className="text-left text-text-muted">
+        <tr className="text-left">
           {head.map((h, i) => <th key={i} className="px-4 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}
         </tr>
       </thead>

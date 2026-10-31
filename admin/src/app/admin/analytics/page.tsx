@@ -36,14 +36,14 @@ import {
   Tooltip, Cell, PieChart, Pie, CartesianGrid, LabelList,
 } from "recharts";
 import AuthGuard from "@/components/AuthGuard";
-import AdminSidebar from "@/components/AdminSidebar";
+import AdminSidebar, { ACCENTS, SectionMark, themeStyle } from "@/components/AdminSidebar";
 import Card from "@/components/ui/Card";
 import { supabase } from "@/lib/supabase";
 import { lenderOutcome } from "@/lib/loan-status";
 import OverviewSection from "@/components/analytics/OverviewSection";
 import EpcHealthPanel from "@/components/analytics/EpcHealthPanel";
 
-const ACCENT = "#178a5c"; // brand green — analytics chrome/charts match the rest of the console
+const ACCENT = ACCENTS.analytics.color; // the Analytics green — chrome + charts
 const SLATE = "#94a3b8"; // neutral slice colour (kept distinct from the green "good" slice)
 
 // Thresholds (deterministic intelligence).
@@ -625,15 +625,15 @@ function Inner() {
   const epc = useMemo(() => computeEpcSection(biz, lenders, w), [biz, lenders, w]);
 
   return (
-    <div className="min-h-screen bg-bg-soft lg:flex">
+    <div className="min-h-screen lg:flex" style={themeStyle("analytics")}>
       <AdminSidebar active="analytics" />
       <div className="flex-1 min-w-0">
         {/* Sticky top bar: title + section switcher + period filter */}
-        <div className="sticky top-14 lg:top-0 z-20 bg-bg-soft/90 backdrop-blur border-b border-line">
+        <div className="sticky top-14 lg:top-0 z-20 bg-[var(--acc-page)] backdrop-blur border-b border-line">
           <div className="w-full px-4 sm:px-6 py-4">
-            <div className="flex items-center gap-2.5 mb-3">
-              <span className="inline-block w-1.5 h-7 rounded-full" style={{ backgroundColor: ACCENT }} />
-              <h1 className="font-display text-[24px] sm:text-[28px] font-bold">Analytics</h1>
+            <div className="flex items-center gap-3 mb-3">
+              <SectionMark k="analytics" />
+              <h1 className="font-display text-[24px] sm:text-[28px] font-bold" style={{ color: ACCENT }}>Analytics</h1>
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <div className="inline-flex rounded-input border border-line bg-white p-1">

@@ -1,8 +1,10 @@
 "use client";
 
-// Full-page dense 3-column EPC dashboard.
-// Read-only summary — for editing, admin clicks "Edit profile" to jump to
-// /admin/epc/[id] (the existing editable detail flow).
+// EPC View — the same layout as the Loan Application View: a header, key
+// numbers, the progress bar that IS the tabs (Submitted → Review by CC → Docs
+// Sent → Lender approval → Active; click a stage to open it), the stage body on
+// the left two columns and Assigned / Comments / Activity on the right.
+// For editing, Edit → chat or the form (/admin/epc/[id]).
 //
 // Colors (brand palette from the approved reference):
 //   #178a5c  primary green
@@ -16,7 +18,7 @@
 //   #fef0d6  amber pill bg
 //   #854f0b  amber pill text
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
@@ -32,17 +34,20 @@ import { addLender as addRegistryLender, useLenders } from "@/lib/lenders";
 import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import CommentsSection from "@/components/CommentsSection";
 import OwnershipCard from "@/components/OwnershipCard";
-import ActivityLogModal from "@/components/ActivityLogModal";
+import ActivityLog from "@/components/ActivityLog";
 import DeleteEpcModal from "@/components/DeleteEpcModal";
 import EpcPasswordEmailModal from "@/components/EpcPasswordEmailModal";
+import EmailComposerModal from "@/components/EmailComposerModal";
 import { invalidate } from "@/lib/list-cache";
-import { TabButton, DownloadMenu, KebabMenu, ProfileRail } from "@/components/ProfileTabBar";
+import { DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
 import { computeEpcHealth, scoreTone, type TatBands, type HealthBucket } from "@/lib/epc-score";
+import { fmtDateTime } from "@/lib/dates";
 // Shared view chrome — the SAME kit the Loan Application View imports, so the
 // two dashboards can't drift apart. EPC-specific pieces stay in this file.
 import {
-  I, StatusBtn, Pill, BigProgressStep, BigConnector, SectionCard, KV, formatGstAddress,
-  StepBlock, DocGrid, type ViewDocSlot,
+  I, StatusBtn, KV, formatGstAddress, StepBlock, DocGrid, CopyButton, FieldCol, FillCount, fillOf, fillText, fillTone,
+  HAction, ProgressTabs, Section, StatCards,
+  type FieldRow, type StageState, type ViewDocSlot,
 } from "@/components/view/ViewKit";
 
 export default function AdminEpcViewPage() {
@@ -62,7 +67,12 @@ type Doc = {
   stakeholder_id: string | null;
   metadata: Record<string, unknown> | null;
 };
-type LenderRow = { lender: string; docs_given: boolean; approved: boolean; rejected?: boolean };
+type LenderRow = {
+  lender: string; docs_given: boolean; approved: boolean; rejected?: boolean;
+  docs_given_at?: string | null; approved_at?: string | null; rejected_at?: string | null;
+};
+// The progress bar's stages — each one a tab.
+type EpcStage = "submitted" | "review" | "docs" | "lender" | "active";
 type AdminInfo = {
   team_size: string | null;
   team_technical: number | null;
@@ -161,8 +171,20 @@ function Inner() {
   const [statusBusy, setStatusBusy] = useState(false);
   const [serviceBusy, setServiceBusy] = useState(false);
   const [zipPickerOpen, setZipPickerOpen] = useState(false);
-  const [activityOpen, setActivityOpen] = useState(false);
+  const [emailOpen, setEmailOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // The open stage (null = wherever the profile stands now).
+  const [tab, setTab] = useState<EpcStage | null>(null);
+  // Under xl the Submitted cards stack ABOVE Documents, so their details open
+  // in place (pushing Documents down) instead of floating over it.
+  const [stacked, setStacked] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1279px)");
+    const on = () => setStacked(mq.matches);
+    on();
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
   const [pwOpen, setPwOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState<string>("");
@@ -175,7 +197,7 @@ function Inner() {
       const [{ data: b }, { data: d }, { data: l }, { data: ai }, { data: la }] = await Promise.all([
         supabase().from("epc_business").select("*").eq("id", params.id).maybeSingle(),
         supabase().from("epc_documents").select("id, category, file_name, mime_type, stakeholder_id, metadata").eq("business_id", params.id),
-        supabase().from("epc_lender_status").select("lender, docs_given, approved, rejected").eq("business_id", params.id),
+        supabase().from("epc_lender_status").select("lender, docs_given, approved, rejected, docs_given_at, approved_at, rejected_at").eq("business_id", params.id),
         supabase().from("epc_admin_info").select("*").eq("business_id", params.id).maybeSingle(),
         supabase().from("epc_applications").select("status, aborted_at, plant_use_type, loan_display_id, sanctioned_amount, first_disbursement_amount, second_disbursement_amount, created_at, borrower_pan, borrower_mobile").eq("epc_business_id", params.id),
       ]);
@@ -235,9 +257,6 @@ function Inner() {
     const other = (biz?.referral_source_other as string | undefined) || "";
     return src === "others" && other ? `Others — ${other}` : label;
   })();
-
-  const docsGivenCount = lender.filter((l) => l.docs_given).length;
-  const anyApproved = lender.some((l) => l.approved);
 
   // Shape the loaded lender rows into the LenderMap the shared dropdown expects.
   const lenderMap: LenderMap = useMemo(() => {
@@ -411,480 +430,484 @@ function Inner() {
 
   const trade = biz.trade_name || biz.legal_name || biz.contact_name || "—";
   const btLabel = BUSINESS_TYPE_LABEL[biz.business_type ?? ""] ?? biz.business_type;
+  const mainAdmin = isMainAdmin(getBusiness());
+  const locked = epcLocked(biz);
 
-  const proprietorLabel = biz.business_type === "proprietorship" ? "Proprietorship" : btLabel;
+  // ── Where the profile stands ─────────────────────────────────────────
+  const docSlots = expectedEpcSlots(nonR3bDocs, stakeholders, (biz.business_type as string | null) ?? null);
+  const docsHave = docSlots.filter((s) => s.doc).length;
+  const docsComplete = missingDocs.length === 0;
+  const draft = biz.status === "draft";
+  const ccApproved = biz.status === "approved";
+  const ccRejected = biz.status === "rejected";
+  const onHold = biz.status === "on_hold";
+  const checkPending = ccApproved && biz.admin_review_status === "pending";
+  const reviewDone = ccApproved && !checkPending;
+  const lenderLabel = (k: string) => lenderList.find((l) => l.key === k)?.label ?? k;
+  const sentRows = lender.filter((l) => l.docs_given || l.approved || l.rejected);
+  const approvedRows = lender.filter((l) => l.approved);
+  const rejectedRows = lender.filter((l) => l.rejected);
+  const allRejected = sentRows.length > 0 && rejectedRows.length === sentRows.length;
+  const names = (rows: LenderRow[]) => rows.map((r) => lenderLabel(r.lender)).join(", ");
+  const firstAt = (rows: LenderRow[], k: "docs_given_at" | "approved_at") =>
+    rows.map((r) => r[k]).filter((v): v is string => !!v).sort()[0] ?? null;
+  const withWhen = (what: ReactNode, when: string | null) => (when ? <>{what}<br />{fmtDateTime(when)}</> : what);
+  const liveApps = loans.filter((l) => !l.aborted_at).length;
+
+  const stages: Array<{ key: EpcStage; label: string; sub?: ReactNode; icon: ReactNode; state: StageState }> = [
+    {
+      key: "submitted", label: "Submitted", icon: I.send,
+      state: docsComplete && !draft ? "done" : "current",
+      sub: docsComplete ? (draft ? "Draft" : "Complete") : <><FillCount have={docsHave} total={docSlots.length} /> documents</>,
+    },
+    {
+      key: "review", label: ccRejected ? "Rejected by CC" : "Review by CC", icon: I.circleCheck,
+      state: ccRejected ? "failed" : onHold ? "hold" : reviewDone ? "done" : ccApproved || (docsComplete && !draft) ? "current" : "pending",
+      sub: reviewDone ? "Approved by Manish" : checkPending ? "Admin check pending" : ccRejected ? "Rejected" : onHold ? "On hold" : docsComplete && !draft ? "Awaiting review" : "Pending",
+    },
+    {
+      key: "docs", label: "Docs Sent", icon: I.files,
+      state: sentRows.length ? "done" : reviewDone ? "current" : "pending",
+      sub: sentRows.length ? withWhen(`${sentRows.length} lender${sentRows.length === 1 ? "" : "s"}`, firstAt(sentRows, "docs_given_at")) : reviewDone ? "Ready to send" : "Pending",
+    },
+    {
+      key: "lender", label: allRejected ? "Rejected by lender" : "Lender approval", icon: I.bank,
+      state: approvedRows.length ? "done" : allRejected ? "failed" : sentRows.length ? "current" : "pending",
+      sub: approvedRows.length ? withWhen(names(approvedRows), firstAt(approvedRows, "approved_at")) : allRejected ? names(rejectedRows) : sentRows.length ? "Awaiting decision" : "Pending",
+    },
+    {
+      key: "active", label: "Active", icon: I.activity,
+      state: approvedRows.length ? "done" : "pending",
+      sub: approvedRows.length ? `${liveApps} application${liveApps === 1 ? "" : "s"}` : "Pending",
+    },
+  ];
+  const stageNow: EpcStage = stages.find((s) => s.state !== "done")?.key ?? "active";
+  const activeTab: EpcStage = tab ?? stageNow;
+
+  // ── Submitted — every field, per card (optional ones don't count) ──
+  const contactRows: FieldRow[] = [
+    { k: "POC", v: biz.contact_name },
+    { k: "Mobile", v: biz.contact_mobile ? `+91 ${biz.contact_mobile}` : null, copy: biz.contact_mobile },
+    { k: "Email", v: biz.contact_email, copy: biz.contact_email },
+    { k: "PAN", v: biz.pan_number, copy: biz.pan_number },
+    { k: "PM Surya Ghar", v: biz.pm_surya_ghar === "other" ? `Other · ${biz.pm_surya_ghar_other || "—"}` : biz.pm_surya_ghar ? cap(biz.pm_surya_ghar) : null },
+    ...(biz.pm_surya_ghar === "yes" ? [{ k: "Surya Ghar installs", v: biz.pm_surya_ghar_capacity }] : []),
+  ];
+  const businessRows: FieldRow[] = [
+    { k: "Trade Name", v: biz.trade_name },
+    { k: "GSTIN", v: biz.gstin_number, copy: biz.gstin_number },
+    { k: "GST Address", v: formatGstAddress(biz.gst_address), wrap: true },
+    { k: "Constitution Type", v: btLabel },
+  ];
+  const memberRows: FieldRow[][] = stakeholders.map((s) => {
+    const sx = s as Record<string, any>;
+    return [
+      { k: "Name", v: s.name },
+      { k: "Father's Name", v: sx.father_name },
+      { k: "Mobile No.", v: s.mobile ? `+91 ${s.mobile}` : null, copy: s.mobile },
+      { k: "Email ID", v: s.email, copy: s.email },
+      { k: "DOB", v: sx.dob },
+      { k: "Aadhaar No.", v: sx.aadhaar_number },
+      { k: "Address", v: sx.aadhaar_address, wrap: true },
+    ];
+  });
+  const bankRows: FieldRow[] = [
+    { k: "Account", v: biz.bank_account_number ? maskAcct(biz.bank_account_number) : null, copy: biz.bank_account_number },
+    { k: "IFSC", v: biz.bank_ifsc, copy: biz.bank_ifsc },
+    { k: "Bank", v: biz.bank_name },
+    { k: "GST username", v: biz.gst_username, copy: biz.gst_username },
+  ];
+  const referenceRows: FieldRow[] = [
+    { k: "How did you know about us?", v: referral, wrap: true },
+    { k: "Customers", v: customers.map((c) => c.name).join(" · "), wrap: true, optional: true },
+    { k: "Suppliers", v: suppliers.map((s) => s.name).join(" · "), wrap: true, optional: true },
+  ];
+  const infoRows: FieldRow[] = [
+    { k: "Team size", v: fmtTeam(adminInfo) },
+    { k: "Resi cap.", v: fmtCapacity(adminInfo?.capacity_residential, adminInfo?.capacity_residential_unit) },
+    { k: "Comm cap.", v: fmtCapacity(adminInfo?.capacity_commercial, adminInfo?.capacity_commercial_unit) },
+    { k: "Turnover", v: fmtTurnover(adminInfo) },
+    { k: "Expectation", v: biz.business_expectation_value != null
+        ? `${biz.business_expectation_value}${biz.business_expectation ? " " + cap(biz.business_expectation) : ""}`
+        : (biz.business_expectation ? cap(biz.business_expectation) : null) },
+  ];
+
+  // ── Lenders — one row each: name, when, state ──
+  const lenderStateOf = (key: string) => {
+    const l = lender.find((x) => x.lender === key);
+    return l ? (l.rejected ? "rejected" : l.approved ? "approved" : l.docs_given ? "docs" : "none") : "none";
+  };
+  const lenderLines = (keys: string[]) => (
+    <ul className="divide-y divide-[#f1f5f3] max-w-[640px]">
+      {keys.map((key) => {
+        const l = lender.find((x) => x.lender === key);
+        const when = l?.approved ? l.approved_at : l?.rejected ? l.rejected_at : l?.docs_given ? l.docs_given_at : null;
+        return (
+          <li key={key} className="py-2.5 flex items-center gap-3 text-[14px]">
+            <span className="flex-1 min-w-0 font-semibold text-[#0f3d2e] truncate">{lenderLabel(key)}</span>
+            {when && <span className="text-[12px] text-[#7a958a] whitespace-nowrap">{fmtDateTime(when)}</span>}
+            <LenderStatePill state={lenderStateOf(key)} />
+          </li>
+        );
+      })}
+    </ul>
+  );
+  const lenderControl = locked ? <AdminPendingPill /> : !draft ? (
+    <LenderCell state={lenderMap} lenders={lenderList} onSet={(l, target) => void setLenderExclusive(l, target)} onAddLender={addLender} />
+  ) : null;
+
+  const statusLabel = approvedRows.length ? "Approved by lender"
+    : checkPending ? "Admin check pending"
+    : ccApproved ? "Approved by Manish"
+    : ccRejected ? "Rejected by CC"
+    : INTERNAL_STATUS_LABEL[biz.status] ?? biz.status;
+  const statusCls = approvedRows.length || reviewDone ? "bg-[#e6f6ee] text-[#0f7a52] border-[#bfe6d5]"
+    : ccRejected ? "bg-red-50 text-red-700 border-red-200"
+    : "bg-[#fef8ee] text-[#854f0b] border-[#f3dcb4]";
+  const editItems = [
+    { label: "Continue in chat", onClick: () => router.push(`/admin/epc/intake?epc=${biz.id}&edit=1` as any) },
+    { label: "Edit in form", onClick: () => router.push(`/admin/epc/${biz.id}` as any) },
+  ];
+  const kebabItems = [
+    { label: "Download ZIP", icon: I.download, onClick: () => setZipPickerOpen(true) },
+    ...(biz.business_type !== "admin" ? [{
+      label: "Delete",
+      icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>),
+      onClick: () => setDeleteOpen(true),
+      danger: true,
+    }] : []),
+  ];
 
   return (
     <main className="min-h-screen bg-white">
-      <header className="border-b border-[#cdeadd] bg-white sticky top-0 z-30">
-        <div className="w-full px-5 sm:px-8 h-14 flex items-center justify-between">
-          <button
-            onClick={() => router.push("/admin")}
-            className="text-[14px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1"
-          >
-            ← Back to console
-          </button>
+      {/* ── HEADER — who it is, one quiet info line · plain buttons ── */}
+      <header className="border-b border-[#eef3f1] bg-white/95 backdrop-blur sticky top-0 z-30">
+        <div className="w-full px-5 sm:px-8 py-4 flex items-center justify-between gap-4 flex-wrap">
+          <div className="flex items-center gap-3.5 min-w-0">
+            <button
+              onClick={() => router.push("/admin")}
+              title="Back to console"
+              aria-label="Back to console"
+              className="w-9 h-9 -ml-2 rounded-full grid place-items-center text-[#5a8a76] hover:bg-[#eef6f1] hover:text-[#0f3d2e] shrink-0"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
+            </button>
+            <div className="w-12 h-12 rounded-full bg-[#e6f6ee] text-[#178a5c] grid place-items-center shrink-0">
+              {I.building}
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <h1 className="text-[22px] font-semibold text-[#0f3d2e] truncate leading-tight">{trade}</h1>
+                <span className={"shrink-0 inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] font-semibold border whitespace-nowrap " + statusCls}>{statusLabel}</span>
+              </div>
+              <div className="flex items-center gap-2 mt-1 text-[13px] text-[#7a958a] min-w-0">
+                {biz.epc_display_id && (
+                  <span className="group inline-flex items-center gap-1 font-medium text-[#185fa5] shrink-0">
+                    {biz.epc_display_id}
+                    <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex"><CopyButton value={biz.epc_display_id} label="Copy EPC ID" /></span>
+                  </span>
+                )}
+                <span className="truncate">
+                  {[btLabel, biz.service_type ? SERVICE_LABEL[biz.service_type] ?? biz.service_type : null].filter(Boolean).join("  ·  ")}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {mainAdmin && biz.business_type !== "admin" && ccApproved && (
+              <HAction variant="outline" icon={<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-10 6L2 7" /></svg>} onClick={() => setPwOpen(true)}>
+                Email password
+              </HAction>
+            )}
+            <DownloadMenu label="Edit" icon={I.edit} items={editItems} />
+            <KebabMenu items={kebabItems} ghost />
+          </div>
         </div>
+        {/* Status lines: the CC rejection reason, lenders that said no. */}
+        {(ccRejected && biz.rejection_reason) || (rejectedRows.length > 0 && !approvedRows.length) ? (
+          <div className="w-full px-5 sm:px-8 pb-3 -mt-1 space-y-0.5">
+            {ccRejected && biz.rejection_reason && <div className="text-[12.5px] font-medium text-red-700">Rejection reason: {biz.rejection_reason}</div>}
+            {rejectedRows.length > 0 && !approvedRows.length && <div className="text-[12.5px] font-medium text-red-700">Rejected by lender: {names(rejectedRows)}</div>}
+          </div>
+        ) : null}
       </header>
 
-      <div className="w-full px-5 sm:px-8 py-6 lg:flex lg:gap-6" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
-
-        {/* ── LEFT NAV RAIL — a slim icon strip that expands on hover, so the
-             profile uses the whole window until you reach for an action
-             (mirrors the main-console sidebar). ── */}
-        <ProfileRail>
-          <TabButton label="Profile" icon={I.building} active rail />
-          <TabButton label="Edit" icon={I.edit} rail onClick={() => router.push(`/admin/epc/${biz.id}` as any)} />
-          <TabButton label="Continue in chat" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>} rail onClick={() => router.push(`/admin/epc/intake?epc=${biz.id}&edit=1` as any)} />
-          {/* Login password — once CC has approved the EPC, a drafted email the
-              main admin checks, then sends. */}
-          {isMainAdmin(getBusiness()) && biz.business_type !== "admin" && biz.status === "approved" && (
-            <TabButton label="Email password" icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-10 6L2 7" /></svg>} rail onClick={() => setPwOpen(true)} />
-          )}
-          <TabButton label="Activity Log" icon={I.eye} rail onClick={() => setActivityOpen(true)} />
-          <TabButton label="Download ZIP" icon={I.download} rail disabled={downloading} onClick={() => setZipPickerOpen(true)} />
-        </ProfileRail>
-        <EpcPasswordEmailModal
-          open={pwOpen}
-          epc={{ id: biz.id, tradeName: biz.trade_name || biz.legal_name || biz.contact_name || "EPC", contactName: biz.contact_name, mobile: biz.contact_mobile, email: biz.contact_email }}
-          onClose={() => setPwOpen(false)}
-        />
-
-        {/* ── CONTENT COLUMN ─────────────────────────────────────────── */}
-        <div className="flex-1 min-w-0">
-
-        {/* ── HEADER CARD ─────────────────────────────────────────── */}
-        <div className="rounded-[12px] border border-[#cdeadd] bg-[#f0faf5] p-5 sm:p-6 mb-4">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-center gap-4 min-w-0">
-              <div className="w-14 h-14 rounded-[12px] bg-[#d6efe3] text-[#178a5c] grid place-items-center shrink-0" style={{ transform: "scale(1.3)", transformOrigin: "left center" }}>
-                {I.building}
-              </div>
-              <div className="min-w-0">
-                {/* Header bar shows trade name + EPC id only — legal name removed. */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">{trade}</div>
-                </div>
-                {biz.epc_display_id && <div className="text-[14px] font-medium text-[#0f7a52] truncate mt-0.5">{biz.epc_display_id}</div>}
-              </div>
-            </div>
-            {/* Top-right — selected Service (chips removed), plus a Rejected-by-
-                Lender flag when applicable. */}
-            <div className="text-right shrink-0">
-              <div className="text-[11px] uppercase tracking-wide text-[#5a8a76]">Service</div>
-              <div className="text-[15px] font-bold text-[#0f3d2e]">
-                {biz.service_type ? (SERVICE_LABEL[biz.service_type] ?? biz.service_type) : "Not set"}
-              </div>
-              {lender.some((l) => l.rejected) && (
-                <div className="mt-1 inline-block px-2.5 py-0.5 rounded-full text-[12px] font-semibold bg-red-50 text-red-700 border border-red-200">
-                  Rejected by Lender
-                </div>
-              )}
-            </div>
-          </div>
-          {biz.status === "rejected" && biz.rejection_reason && (
-            <div className="mt-3 pt-3 border-t border-[#cdeadd] text-[13px] font-medium text-red-700">
-              Rejection reason: {biz.rejection_reason}
-            </div>
-          )}
+      <div className="w-full px-5 sm:px-8" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
+        {/* ── Key numbers ── */}
+        <div className="pt-6 pb-2">
+          <StatCards
+            items={[
+              { label: "Documents", value: fillText(docsHave, docSlots.length), tone: fillTone(docsHave, docSlots.length) },
+              { label: "Sent to lenders", value: String(sentRows.length), sub: sentRows.length ? names(sentRows) : undefined, tone: sentRows.length ? "text-[#185fa5]" : "text-[#c3cbc7]" },
+              { label: "Approved by lenders", value: String(approvedRows.length), sub: approvedRows.length ? names(approvedRows) : undefined, tone: approvedRows.length ? "text-[#178a5c]" : "text-[#c3cbc7]" },
+              { label: "Loan applications", value: String(liveApps), tone: liveApps ? undefined : "text-[#c3cbc7]" },
+            ]}
+          />
         </div>
 
-        {/* ── ACTION STRIP — Review-by-CC → status + lender dropdown → ⋯ menu. ── */}
-        <div className="flex items-center gap-2 flex-wrap justify-end mb-4">
-          {/* Before a CC decision: the Review-by-CC dropdown to set Approved /
-              Rejected — drafts too (a profile can have its docs uploaded and
-              still be a draft, e.g. never submitted, or added by the team). */}
-          {biz.status !== "approved" && biz.status !== "rejected" && (
-            <DownloadMenu
-              label="Review by CC"
-              items={[
-                {
-                  label: missingDocs.length ? `Approved — ${missingDocs.length} document${missingDocs.length === 1 ? "" : "s"} missing` : "Approved",
-                  disabled: missingDocs.length > 0,
-                  onClick: () => void changeStatus("approved"),
-                },
-                { label: "Rejected", onClick: () => { setRejectReason(""); setRejectOther(""); setRejectOpen(true); } },
-              ]}
-            />
-          )}
-          {/* After the CC decision: a status box (Approved/Rejected by CC). */}
-          {(biz.status === "approved" || biz.status === "rejected") && (
-            <span
-              className={
-                "inline-flex items-center px-3 py-1.5 rounded-[8px] text-[13px] font-semibold border whitespace-nowrap " +
-                (biz.status === "approved"
-                  ? "bg-[#e6f6ee] text-[#0f7a52] border-[#bfe6d5]"
-                  : "bg-red-50 text-red-700 border-red-200")
-              }
-            >
-              {biz.status === "approved" ? "Approved by Manish" : "Rejected by CC"}
-            </span>
-          )}
-          {/* Waiting for the main admin's check: he approves here (or on
-              Pendings); the team sees it's pending and can't touch lenders. */}
-          {biz.status === "approved" && biz.admin_review_status === "pending" && (
-            isMainAdmin(getBusiness()) ? (
-              <button type="button" onClick={() => void approveAdminCheck()} disabled={statusBusy}
-                className="inline-flex items-center px-3 py-1.5 rounded-[8px] text-[13px] font-semibold bg-[#178a5c] text-white hover:bg-[#12734c] disabled:opacity-60 whitespace-nowrap">
-                Admin approve
-              </button>
-            ) : <AdminPendingPill />
-          )}
-          {/* Lender-status dropdown — available once the EPC has submitted
-              (not draft), even before CC review. Sending docs (or approving)
-              before CC approval prompts to approve the profile in the same
-              step (see setLenderExclusive). */}
-          {biz.status !== "draft" && !epcLocked(biz) && (
-            <LenderCell
-              state={lenderMap}
-              lenders={lenderList}
-              onSet={(l, target) => void setLenderExclusive(l, target)}
-              onAddLender={addLender}
-            />
-          )}
-          {biz.business_type !== "admin" && (
-            <KebabMenu
-              items={[
-                ...((biz.status === "approved" || biz.status === "rejected")
-                  ? [{
-                      label: "Change review",
-                      icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></svg>),
-                      onClick: () => { if (window.confirm("Revert the CC review back to Under Review?")) void changeStatus("under_review"); },
-                    }]
-                  : []),
-                {
-                  label: "Delete",
-                  icon: (<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>),
-                  onClick: () => setDeleteOpen(true),
-                  danger: true,
-                },
-              ]}
-            />
-          )}
+        {/* ── PROGRESS BAR = TABS ── */}
+        <div className="pt-7 pb-2 border-b border-[#eef3f1]">
+          <ProgressTabs items={stages} value={activeTab} onChange={(k) => setTab(k as EpcStage)} />
         </div>
 
-        {/* ── PROGRESS TRACKER — hidden once a lender approves (diminishes) ── */}
-        {!anyApproved && (
-        <div className="rounded-[12px] border border-[#cdeadd] bg-white p-6 sm:p-8 mb-4">
-          <div className="flex items-center gap-3 sm:gap-6">
-            <BigProgressStep
-              icon={I.check}
-              done={!missingDocs.length}
-              label="Docs uploaded"
-              sub={!missingDocs.length ? "Complete" : `${missingDocs.length} missing`}
-            />
-            <BigConnector active={!missingDocs.length} />
-            <BigProgressStep
-              icon={I.circleCheck}
-              done={biz.status === "approved" || biz.status === "rejected"}
-              failed={biz.status === "rejected"}
-              inProgress={!missingDocs.length && biz.status !== "approved" && biz.status !== "rejected"}
-              label="Review by CC"
-              sub={biz.status === "approved" ? "Completed — Approved" : biz.status === "rejected" ? "Completed — Rejected" : !missingDocs.length ? "Incomplete" : "Pending"}
-              mutedIfPending
-            />
-            <BigConnector active={biz.status === "approved" || biz.status === "rejected"} />
-            <BigProgressStep
-              icon={I.send}
-              done={docsGivenCount === 3}
-              inProgress={docsGivenCount > 0 && docsGivenCount < 3}
-              label="Sent to lenders"
-              sub={`${docsGivenCount}/3 sent`}
-            />
-            <BigConnector active={docsGivenCount > 0} />
-            <BigProgressStep
-              icon={I.circleCheck}
-              done={anyApproved}
-              label={anyApproved ? "Approved" : "Approval pending"}
-              sub={anyApproved ? "Loan-app unlocked" : "Awaiting a lender"}
-              mutedIfPending
-            />
-          </div>
-        </div>
-        )}
+        {/* Three equal columns: the stage body spans two, the side one. */}
+        <div className="grid gap-x-6 lg:grid-cols-3 items-start pb-12">
+          <div className="min-w-0 lg:col-span-2">
 
-        {/* ── EPC HEALTH + SCORE — merged; only once internally approved ─ */}
-        {biz.status === "approved" && (
-          <div className="rounded-[14px] border border-[#cdeadd] bg-[#eefaf3] p-5 sm:p-6 mb-4">
-            {/* Header — title (left) · EPC score + period (right). */}
-            <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
-              <div>
-                <div className="text-[24px] font-bold text-[#0f3d2e] leading-tight">EPC Health</div>
-                <div className="text-[12px] text-[#5a8a76] mt-0.5">admin only</div>
-              </div>
-              <div className="flex items-center gap-2.5 flex-wrap justify-end">
-                {health && <HeaderScore score={health.score} />}
-                <select
-                  value={hPeriod}
-                  onChange={(e) => setHPeriod(e.target.value as Period | "all")}
-                  className="rounded-input border border-[#cdeadd] bg-white px-3 py-2 text-[13px] font-medium text-[#0f3d2e] outline-none focus:border-[#178a5c] cursor-pointer shrink-0"
-                >
-                  <option value="all">All time</option>
-                  <option value="today">Today</option>
-                  <option value="week">This Week</option>
-                  <option value="month">This Month</option>
-                  <option value="quarter">This Quarter</option>
-                  <option value="year">This Year</option>
-                </select>
-              </div>
-            </div>
-
-            {!health ? (
-              <div className="rounded-[12px] border border-[#e0f0e8] bg-white p-6 text-center text-[14px] text-[#5a8a76]">
-                No applications in this period yet.
-              </div>
-            ) : (() => {
-              const TABS = [
-                { key: "res" as const, label: "RESI" },
-                { key: "com" as const, label: "C&I" },
-                { key: "total" as const, label: "Total" },
-              ];
-              const b = health[healthTab];
-              return (
-                <>
-                  {/* Segment tabs */}
-                  <div className="inline-flex rounded-[10px] border border-[#cdeadd] overflow-hidden bg-white mb-3">
-                    {TABS.map((t) => (
-                      <button
-                        key={t.key}
-                        type="button"
-                        onClick={() => setHealthTab(t.key)}
-                        className={
-                          "px-4 py-1.5 text-[13px] font-semibold border-r border-[#cdeadd] last:border-r-0 transition-colors " +
-                          (healthTab === t.key ? "bg-[#178a5c] text-white" : "text-[#0f3d2e] bg-white hover:bg-[#f0faf5]")
-                        }
-                      >
-                        {t.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Total tab → paired metrics (left) + portfolio signals (right
-                      column) + Installation TAT below. Other tabs: metrics full-width. */}
-                  {healthTab === "total" ? (
-                    <>
-                      <div className="grid gap-3 lg:grid-cols-3 items-stretch">
-                        <div className="lg:col-span-2"><MetricsCard b={b} /></div>
-                        <div className="flex flex-col gap-3">
-                          <MiniStat className="flex-1" label="Transaction volume" value={numFmt(health.volume)} />
-                          <MiniStat className="flex-1" label="Repeat customers" value={numFmt(health.repeat)} />
-                        </div>
+            {/* ── SUBMITTED — details open on hover on the left, documents
+                always open on the right ── */}
+            {activeTab === "submitted" && (
+              <div className="grid gap-x-6 gap-y-4 pt-6 xl:grid-cols-2 items-start">
+                <div className="flex flex-col gap-4 min-w-0">
+                  <Section card dropdown inline={stacked} icon={I.user} title="Contact" summary={fillOf(contactRows)}>
+                    <FieldCol title="Contact" rows={contactRows} />
+                  </Section>
+                  <Section card dropdown inline={stacked} icon={I.building} title="Business details" summary={fillOf(businessRows)}>
+                    <FieldCol title="Business details" rows={businessRows} />
+                  </Section>
+                  <Section card dropdown inline={stacked} icon={I.users} title={peopleHeading(biz.business_type)} summary={stakeholders.length ? fillOf(...memberRows) : undefined}>
+                    {stakeholders.length === 0 ? (
+                      <p className="text-[14px] text-[#9aa5a0] py-[5px]">No members recorded</p>
+                    ) : (
+                      <div className="grid gap-x-12 gap-y-6 md:grid-cols-2 xl:grid-cols-1">
+                        {stakeholders.map((s, i) => (
+                          <FieldCol
+                            key={s.id ?? i}
+                            title={`${s.designation || roleLabel(biz.business_type)}${stakeholders.length > 1 ? ` ${i + 1}` : ""}`}
+                            rows={memberRows[i]}
+                          />
+                        ))}
                       </div>
-                      <TatCard tat={health.tat} className="mt-3" />
-                    </>
-                  ) : (
-                    <MetricsCard b={b} />
-                  )}
-                </>
-              );
-            })()}
-          </div>
-        )}
+                    )}
+                  </Section>
+                  <Section card dropdown inline={stacked} icon={I.bank} title="Bank details" summary={fillOf(bankRows)}>
+                    <FieldCol title="Bank details" rows={bankRows} />
+                  </Section>
+                  <Section card dropdown inline={stacked} icon={I.star} title="References" summary={fillOf(referenceRows)}>
+                    <FieldCol title="References" rows={referenceRows} />
+                  </Section>
+                  <Section card dropdown inline={stacked} icon={I.lock} title="Business info" summary={fillOf(infoRows)}>
+                    <FieldCol title="Business info" rows={infoRows} />
+                  </Section>
+                </div>
 
-        {/* ── 3-COLUMN GRID ──────────────────────────────────────────── */}
-        <div className="grid gap-4 lg:grid-cols-3">
-
-          {/* COL 1 */}
-          <div className="flex flex-col gap-2.5">
-            <OwnershipCard
-              module="epcs"
-              recordId={biz.id}
-              createdByUserId={biz.created_by_user_id ?? null}
-              assignedToUserId={biz.assigned_to_user_id ?? null}
-            />
-            <SectionCard title="Contact & business" accent="blue" icon={I.user}>
-              <KV k="POC" v={biz.contact_name} />
-              <KV k="Mobile" v={biz.contact_mobile ? `+91 ${biz.contact_mobile}` : "—"} />
-              <KV k="Email" v={biz.contact_email} valueClass="text-[#185fa5]" />
-              <KV k="PAN" v={biz.pan_number} />
-              <KV k="PM Surya Ghar" v={
-                biz.pm_surya_ghar === "other"
-                  ? `Other · ${biz.pm_surya_ghar_other || "—"}`
-                  : biz.pm_surya_ghar ? cap(biz.pm_surya_ghar) : "—"
-              } />
-              {biz.pm_surya_ghar === "yes" && (
-                <KV k="Surya Ghar installs" v={biz.pm_surya_ghar_capacity} />
-              )}
-            </SectionCard>
-
-            {/* Business details first (swapped above Proprietor details) —
-                Trade Name / GSTIN / GST Address / Constitution. */}
-            <SectionCard title="Business details" accent="blue" icon={I.building}>
-              <KV k="Trade Name" v={biz.trade_name} />
-              <KV k="GSTIN" v={biz.gstin_number} />
-              <KV k="GST Address" v={formatGstAddress(biz.gst_address)} wrap />
-              <KV k="Constitution Type" v={btLabel} />
-            </SectionCard>
-
-            <SectionCard title={peopleHeading(biz.business_type)} accent="green" icon={I.users}>
-              {stakeholders.length === 0 ? (
-                <p className="text-[13px] text-[#5a8a76]">No members recorded.</p>
-              ) : (
-                <div className="space-y-3">
-                  {stakeholders.map((s, i) => {
-                    const sx = s as Record<string, any>;
-                    return (
-                      <div key={s.id ?? i} className="rounded-[8px] bg-[#f0faf5] p-3">
-                        {stakeholders.length > 1 && (
-                          <div className="text-[12px] font-semibold text-[#178a5c] mb-1">
-                            {s.designation || roleLabel(biz.business_type)} {i + 1}
+                <div className="flex flex-col gap-4 min-w-0">
+                  <Section card white icon={I.files} title="Documents" summary={<FillCount have={docsHave} total={docSlots.length} />}>
+                    <div className="space-y-4">
+                      <DocumentsBySteps
+                        docs={nonR3bDocs}
+                        stakeholders={stakeholders}
+                        businessType={biz.business_type as string | null}
+                        openDoc={openDoc}
+                        removeDoc={removeDoc}
+                        downloadDoc={downloadDoc}
+                        eyeIcon={I.eye}
+                      />
+                      <StepBlock title="GSTR-3B">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-[20px] font-semibold text-[#0f3d2e]">₹{r3bTotal.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</div>
+                            <div className="text-[12px] text-[#5a8a76]">{r3bDocs.length} file{r3bDocs.length === 1 ? "" : "s"} · Grand total taxable</div>
                           </div>
-                        )}
-                        <KV k="Name" v={s.name} />
-                        <KV k="Father's Name" v={sx.father_name} />
-                        <KV k="Mobile No." v={s.mobile ? `+91 ${s.mobile}` : "—"} />
-                        <KV k="Email ID" v={s.email} valueClass="text-[#185fa5]" />
-                        <KV k="DOB" v={sx.dob} />
-                        <KV k="Aadhaar No." v={sx.aadhaar_number} />
-                        <KV k="Address" v={sx.aadhaar_address} />
-                      </div>
-                    );
-                  })}
+                          {r3bDocs.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => void openDoc(r3bDocs[0].id)}
+                              title="View GSTR-3B"
+                              aria-label="View GSTR-3B"
+                              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#cdeadd] bg-white text-[#178a5c] text-[14px] font-semibold hover:bg-[#f0faf5]"
+                            >
+                              {I.eye} View
+                            </button>
+                          )}
+                        </div>
+                      </StepBlock>
+                    </div>
+                  </Section>
                 </div>
-              )}
-            </SectionCard>
+              </div>
+            )}
 
-            <SectionCard title="Bank" accent="blue" icon={I.bank}>
-              <KV k="Account" v={maskAcct(biz.bank_account_number)} />
-              <KV k="IFSC" v={biz.bank_ifsc} />
-              <KV k="Bank" v={biz.bank_name} />
-              <KV k="GST username" v={biz.gst_username} />
-            </SectionCard>
-          </div>
+            {/* ── REVIEW BY CC — approve / reject, the admin's check ── */}
+            {activeTab === "review" && (
+              <Section
+                title="Review by CC"
+                right={
+                  <>
+                    {!ccApproved && !ccRejected && (
+                      <>
+                        <HAction variant="primary" icon={I.check} disabled={statusBusy || !docsComplete} title={docsComplete ? undefined : "Upload all documents first"} onClick={() => void changeStatus("approved")}>Approved</HAction>
+                        <HAction variant="reject" disabled={statusBusy} onClick={() => { setRejectReason(""); setRejectOther(""); setRejectOpen(true); }}>Rejected</HAction>
+                      </>
+                    )}
+                    {checkPending && (mainAdmin
+                      ? <HAction variant="primary" disabled={statusBusy} onClick={() => void approveAdminCheck()}>Admin approve</HAction>
+                      : <AdminPendingPill />)}
+                    {(ccApproved || ccRejected) && biz.business_type !== "admin" && (
+                      <HAction variant="outline" disabled={statusBusy} onClick={() => { if (window.confirm("Revert the CC review back to Under Review?")) void changeStatus("under_review"); }}>Change review</HAction>
+                    )}
+                  </>
+                }
+              >
+                <div className="max-w-[640px]">
+                  <KV k="Status" v={statusLabel} />
+                  {ccRejected && <KV k="Rejection reason" v={biz.rejection_reason} wrap valueClass="text-red-700" />}
+                  {!docsComplete && <KV k="Missing documents" v={missingDocs.join(", ")} wrap valueClass="text-[#d4900f]" />}
+                </div>
+              </Section>
+            )}
 
-          {/* COL 2 */}
-          <div className="flex flex-col gap-2.5">
-            <SectionCard
-              title={`Documents (${nonR3bDocs.length})`}
-              accent="green"
-              icon={I.files}
-            >
-              {nonR3bDocs.length === 0 ? (
-                <p className="text-[13px] text-[#5a8a76]">No documents uploaded.</p>
-              ) : (
-                <DocumentsBySteps
-                  docs={nonR3bDocs}
-                  stakeholders={stakeholders}
-                  businessType={biz.business_type as string | null}
-                  openDoc={openDoc}
-                  removeDoc={removeDoc}
-                  downloadDoc={downloadDoc}
-                  eyeIcon={I.eye}
-                />
-              )}
-            </SectionCard>
+            {/* ── DOCS SENT — every lender, email the documents ── */}
+            {activeTab === "docs" && (
+              <Section
+                title="Lenders"
+                right={
+                  <>
+                    {!locked && !draft && (
+                      <HAction variant={sentRows.length ? "outline" : "primary"} icon={I.send} onClick={() => setEmailOpen(true)}>Email to lender</HAction>
+                    )}
+                    {lenderControl}
+                  </>
+                }
+              >
+                {lenderLines(lenderList.map((l) => l.key))}
+              </Section>
+            )}
 
-            <SectionCard title="References" accent="green" icon={I.star}>
-              {/* How did you know about us? (referral source) */}
-              <div className="text-[12px] font-semibold text-[#5a8a76] uppercase tracking-wide mt-0.5">How did you know about us?</div>
-              <div className="text-[14px] text-[#0f3d2e] mt-1 mb-2 leading-snug">{referral || "—"}</div>
-              {refs.length === 0 ? (
-                <p className="text-[13px] text-[#5a8a76]">No customer / supplier references.</p>
-              ) : (
-                <>
-                  {customers.length > 0 && (
-                    <>
-                      <div className="text-[12px] font-semibold text-[#5a8a76] uppercase tracking-wide mt-0.5">Customers</div>
-                      <div className="text-[14px] text-[#0f3d2e] mb-2 mt-1 leading-snug">
-                        {customers.map((c) => c.name).join(" · ") || "—"}
-                      </div>
-                    </>
-                  )}
-                  {suppliers.length > 0 && (
-                    <>
-                      <div className="text-[12px] font-semibold text-[#5a8a76] uppercase tracking-wide">Suppliers</div>
-                      <div className="text-[14px] text-[#0f3d2e] mt-1 leading-snug">
-                        {suppliers.map((s) => s.name).join(" · ") || "—"}
-                      </div>
-                    </>
-                  )}
-                </>
-              )}
-            </SectionCard>
-          </div>
+            {/* ── LENDER APPROVAL — the lenders that have the documents ── */}
+            {activeTab === "lender" && (
+              <Section title="Lender decision" right={lenderControl}>
+                {sentRows.length
+                  ? lenderLines(sentRows.map((r) => r.lender))
+                  : <p className="text-[14px] text-[#9aa5a0] py-1">Pending</p>}
+              </Section>
+            )}
 
-          {/* COL 3 — admin only */}
-          <div className="flex flex-col gap-2.5">
-            {/* Col 3 order: Business info → Lenders → GST R3B → Comments. */}
-
-            <SectionCard title="Business info" tint icon={I.lock} adminOnly>
-              <KV k="Team size" v={fmtTeam(adminInfo)} />
-              <KV k="Resi cap." v={fmtCapacity(adminInfo?.capacity_residential, adminInfo?.capacity_residential_unit)} />
-              <KV k="Comm cap." v={fmtCapacity(adminInfo?.capacity_commercial, adminInfo?.capacity_commercial_unit)} />
-              <KV k="Turnover" v={fmtTurnover(adminInfo)} />
-              <KV k="Expectation" v={
-                biz.business_expectation_value != null
-                  ? `${biz.business_expectation_value}${biz.business_expectation ? " " + cap(biz.business_expectation) : ""}`
-                  : (biz.business_expectation ? cap(biz.business_expectation) : "—")
-              } />
-            </SectionCard>
-
-            {/* Lenders — read-only summary of every lender. The settable
-                dropdown lives in the action bar (after CC review). */}
-            <SectionCard title="Lenders" tint icon={I.money} adminOnly>
-              {lenderList.map(({ key, label }) => {
-                const l = lender.find((x) => x.lender === key);
-                const state = l
-                  ? ((l as { rejected?: boolean }).rejected ? "rejected" : l.approved ? "approved" : l.docs_given ? "docs" : "none")
-                  : "none";
-                return (
-                  <div key={key} className="flex items-center justify-between text-[14px] py-1">
-                    <span className="text-[#0f3d2e] font-medium">{label}</span>
-                    <LenderStatePill state={state} />
+            {/* ── ACTIVE — EPC Health + Score over this EPC's own applications ── */}
+            {activeTab === "active" && (
+              <div className="pt-6">
+                <div className="rounded-[14px] border border-[#cdeadd] bg-[#f4fbf7] p-5 sm:p-6">
+                  {/* Header — title (left) · EPC score + period (right). */}
+                  <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+                    <div className="text-[20px] font-bold text-[#0f3d2e] leading-tight">EPC Health</div>
+                    <div className="flex items-center gap-2.5 flex-wrap justify-end">
+                      {health && <HeaderScore score={health.score} />}
+                      <select
+                        value={hPeriod}
+                        onChange={(e) => setHPeriod(e.target.value as Period | "all")}
+                        className="rounded-input border border-[#cdeadd] bg-white px-3 py-2 text-[13px] font-medium text-[#0f3d2e] outline-none focus:border-[#178a5c] cursor-pointer shrink-0"
+                      >
+                        <option value="all">All time</option>
+                        <option value="today">Today</option>
+                        <option value="week">This Week</option>
+                        <option value="month">This Month</option>
+                        <option value="quarter">This Quarter</option>
+                        <option value="year">This Year</option>
+                      </select>
+                    </div>
                   </div>
-                );
-              })}
-            </SectionCard>
 
-            <SectionCard title="GSTR-3B" tint icon={I.invoice} adminOnly>
-              <div className="text-[12px] text-[#5a8a76]">
-                {r3bDocs.length} file{r3bDocs.length === 1 ? "" : "s"} · Grand total taxable
-              </div>
-              <div className="mt-1 flex items-center justify-between gap-3">
-                <div className="text-[20px] font-semibold text-[#0f3d2e]">
-                  ₹{r3bTotal.toLocaleString("en-IN", { maximumFractionDigits: 2 })}
+                  {!health ? (
+                    <div className="rounded-[12px] border border-[#e0f0e8] bg-white p-6 text-center text-[14px] text-[#5a8a76]">
+                      No applications in this period yet.
+                    </div>
+                  ) : (() => {
+                    const TABS = [
+                      { key: "res" as const, label: "RESI" },
+                      { key: "com" as const, label: "C&I" },
+                      { key: "total" as const, label: "Total" },
+                    ];
+                    const b = health[healthTab];
+                    return (
+                      <>
+                        {/* Segment tabs */}
+                        <div className="inline-flex rounded-[10px] border border-[#cdeadd] overflow-hidden bg-white mb-3">
+                          {TABS.map((t) => (
+                            <button
+                              key={t.key}
+                              type="button"
+                              onClick={() => setHealthTab(t.key)}
+                              className={
+                                "px-4 py-1.5 text-[13px] font-semibold border-r border-[#cdeadd] last:border-r-0 transition-colors " +
+                                (healthTab === t.key ? "bg-[#178a5c] text-white" : "text-[#0f3d2e] bg-white hover:bg-[#f0faf5]")
+                              }
+                            >
+                              {t.label}
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Total tab → paired metrics (left) + portfolio signals (right
+                            column) + Installation TAT below. Other tabs: metrics full-width. */}
+                        {healthTab === "total" ? (
+                          <>
+                            <div className="grid gap-3 lg:grid-cols-3 items-stretch">
+                              <div className="lg:col-span-2"><MetricsCard b={b} /></div>
+                              <div className="flex flex-col gap-3">
+                                <MiniStat className="flex-1" label="Transaction volume" value={numFmt(health.volume)} />
+                                <MiniStat className="flex-1" label="Repeat customers" value={numFmt(health.repeat)} />
+                              </div>
+                            </div>
+                            <TatCard tat={health.tat} className="mt-3" />
+                          </>
+                        ) : (
+                          <MetricsCard b={b} />
+                        )}
+                      </>
+                    );
+                  })()}
                 </div>
-                {r3bDocs.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => void openDoc(r3bDocs[0].id)}
-                    title="View GSTR-3B"
-                    aria-label="View GSTR-3B"
-                    className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#cdeadd] bg-white text-[#178a5c] text-[14px] font-semibold hover:bg-[#f0faf5]"
-                  >
-                    {I.eye} View
-                  </button>
-                )}
               </div>
-            </SectionCard>
+            )}
+          </div>
 
-            {/* Inline chat-box comments — LAST in Col 3 per spec. */}
-            <SectionCard title="Comments" tint icon={I.lock} adminOnly>
+          {/* ── SIDE — assigned, comments, activity, on every stage ── */}
+          <aside className="min-w-0 flex flex-col gap-4 pt-6">
+            <Section card icon={I.users} title="Assigned">
+              <OwnershipCard
+                bare
+                module="epcs"
+                recordId={biz.id}
+                createdByUserId={biz.created_by_user_id ?? null}
+                assignedToUserId={biz.assigned_to_user_id ?? null}
+              />
+            </Section>
+            <Section card icon={I.lock} title="Comments">
               <CommentsSection
                 businessId={biz.id}
                 epcName={trade}
                 onChanged={onCommentsChanged}
                 maxListHeight={360}
               />
-            </SectionCard>
-          </div>
+            </Section>
+            {/* Loads on first open (once per visit, again after a comment). */}
+            <Section card dropdown icon={I.activity} title="Activity">
+              <div className="pt-1">
+                <ActivityLog businessId={biz.id} refreshKey={activityRefresh} />
+              </div>
+            </Section>
+          </aside>
         </div>
-
-        </div>{/* /content column */}
       </div>
 
+      <EpcPasswordEmailModal
+        open={pwOpen}
+        epc={{ id: biz.id, tradeName: biz.trade_name || biz.legal_name || biz.contact_name || "EPC", contactName: biz.contact_name, mobile: biz.contact_mobile, email: biz.contact_email }}
+        onClose={() => setPwOpen(false)}
+      />
+      <EmailComposerModal
+        open={emailOpen}
+        onClose={() => setEmailOpen(false)}
+        endpoint={`/api/admin/epc/${biz.id}/send-to-lender`}
+        title="Send EPC to lender"
+        // Emailing the documents marks that lender "Docs sent" (once CC approved).
+        onSent={(k) => { if (reviewDone && lenderStateOf(k) === "none") void setLenderExclusive(k, "docs"); }}
+      />
       <LenderPickerModal
         open={zipPickerOpen}
         onClose={() => setZipPickerOpen(false)}
         epcName={trade}
         onConfirm={(lender) => downloadZip(lender)}
-      />
-      <ActivityLogModal
-        open={activityOpen}
-        onClose={() => setActivityOpen(false)}
-        businessId={biz.id}
-        epcName={trade}
-        refreshKey={activityRefresh}
       />
       <DeleteEpcModal
         open={deleteOpen}
@@ -1296,16 +1319,20 @@ function epcDocGroups(docs: Doc[], stakeholders: Stakeholder[], businessType: st
   return { bizSlots, stakeholderSlots, orphanStakeholderDocs, bankSlots, officeSlots, otherDocs };
 }
 
-// Labels of the expected documents not uploaded yet.
-function missingEpcDocs(docs: Doc[], stakeholders: Stakeholder[], businessType: string | null): string[] {
+// Every document slot the profile counts (uploaded or not).
+function expectedEpcSlots(docs: Doc[], stakeholders: Stakeholder[], businessType: string | null): DocSlot[] {
   const g = epcDocGroups(docs, stakeholders, businessType);
   // An older single-file Aadhaar (both sides in one) covers front + back.
   const stk = g.stakeholderSlots.flatMap((x) => {
     const combined = x.slots.some((s) => s.doc?.category === "stakeholder_aadhaar");
     return x.slots.filter((s) => !(combined && /^stakeholder_aadhaar_(front|back)-/.test(s.key)));
   });
-  return [...g.bizSlots, ...stk, ...g.bankSlots, ...g.officeSlots]
-    .filter((x) => !x.doc).map((x) => x.label);
+  return [...g.bizSlots, ...stk, ...g.bankSlots, ...g.officeSlots];
+}
+
+// Labels of the expected documents not uploaded yet.
+function missingEpcDocs(docs: Doc[], stakeholders: Stakeholder[], businessType: string | null): string[] {
+  return expectedEpcSlots(docs, stakeholders, businessType).filter((x) => !x.doc).map((x) => x.label);
 }
 
 function DocumentsBySteps({

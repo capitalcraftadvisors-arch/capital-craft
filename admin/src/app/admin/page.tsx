@@ -11,7 +11,7 @@ import AddNewEpcModal from "@/components/AddNewEpcModal";
 import AddNewLoanAppModal from "@/components/AddNewLoanAppModal";
 import AddNewInsuranceModal from "@/components/AddNewInsuranceModal";
 import DeleteLeadModal from "@/components/DeleteLeadModal";
-import AdminSidebar, { ACCENTS } from "@/components/AdminSidebar";
+import AdminSidebar, { ACCENTS, SectionMark, themeStyle } from "@/components/AdminSidebar";
 import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness, allowedModules, greetingName, isMainAdmin as isMainAdminUser } from "@/lib/auth";
 import NotificationBell from "@/components/NotificationBell";
@@ -140,17 +140,17 @@ function Inner() {
   const periodProps: TabPeriodProps = { period, pFrom, pTo };
 
   return (
-    <div className="min-h-screen bg-bg-soft lg:flex">
+    <div className="min-h-screen lg:flex transition-colors duration-300" style={themeStyle(tab)}>
       <LoginWelcome />
       <AdminSidebar active={tab} onSelectTab={setTab} />
       <div className="flex-1 min-w-0">
         <section className="w-full px-4 sm:px-6 py-8">
-          {/* One header row: the section (accent bar + title) on the left; the
+          {/* One header row: the section (its mark + title) on the left; the
               period picker, who is signed in and notifications on the right. */}
           <div className="mb-5 flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2.5">
-              <span className="inline-block w-1.5 h-7 rounded-full" style={{ backgroundColor: section.color }} />
-              <h1 className="font-display text-[24px] sm:text-[28px] font-bold">{section.label}</h1>
+            <div className="flex items-center gap-3">
+              <SectionMark k={tab} />
+              <h1 className="font-display text-[24px] sm:text-[28px] font-bold" style={{ color: section.color }}>{section.label}</h1>
             </div>
             <div className="ml-auto flex items-center justify-end gap-3 flex-wrap">
               {showPeriod && (
@@ -403,81 +403,8 @@ const LOAN_PILL: Record<string, { label: string; cls: string }> = {
   tranche1:        { label: "1st Disbursement Done", cls: "bg-[#dceffb] text-[#185fa5]" },
 };
 
-// One consistent colour per pipeline stage — shared across EVERY dashboard tab,
-// so a colour always means the same thing. This is the single source of truth
-// the StageBar legend teaches (green = approved/good, red = rejected, amber =
-// waiting, blue = in-flight to lender, slate = inactive).
-const STAGE_COLOR: Record<string, string> = {
-  unseen: "#94a3b8",
-  under_review: "#d97706",
-  updated: "#ca8a04",
-  approved: "#178a5c",
-  hold: "#3b5a76",
-  rejected: "#dc2626",
-  docs_sent: "#185fa5",
-  lender_approved: "#0f7a52",
-  rejected_by_lender: "#9f1239",
-  rfd: "#7c3aed",
-  disbursed: "#0f766e",
-  docs_pending: "#d97706",
-  awaiting_policy: "#185fa5",
-  policy_issued: "#178a5c",
-  new: "#6366f1",
-  contacted: "#d97706",
-  converted: "#178a5c",
-  closed: "#94a3b8",
-};
-
-// A thin stacked "where is everything stuck" bar built from the stage cards,
-// with a colour legend + a "Breakdown" toggle that slides the detail cards open.
-// Segment + legend click filters the list.
-function StageBar({ cards, active, onPick, open, onToggle }: { cards: SummaryCard[]; active: string; onPick: (key: string) => void; open?: boolean; onToggle?: () => void }) {
-  const segs = cards.filter((c) => c.key && c.value > 0 && STAGE_COLOR[c.key]);
-  const total = segs.reduce((s, c) => s + c.value, 0);
-  if (total === 0) return null;
-  return (
-    <div>
-      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-[#eef1f4]">
-        {segs.map((c) => (
-          <button
-            key={c.key}
-            type="button"
-            onClick={() => onPick(c.key)}
-            title={`${c.label}: ${c.value}`}
-            aria-label={`${c.label}: ${c.value}`}
-            className="h-full transition-opacity hover:opacity-80"
-            style={{ width: `${(c.value / total) * 100}%`, backgroundColor: STAGE_COLOR[c.key], opacity: active && active !== c.key ? 0.35 : 1 }}
-          />
-        ))}
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-        {segs.map((c) => {
-          const on = active === c.key;
-          return (
-            <button
-              key={c.key}
-              type="button"
-              onClick={() => onPick(c.key)}
-              className={"inline-flex items-center gap-1.5 text-[11px] " + (on ? "font-bold text-text" : "text-text-muted hover:text-text")}
-            >
-              <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: STAGE_COLOR[c.key] }} />
-              {c.label}
-            </button>
-          );
-        })}
-        {onToggle && (
-          <button type="button" onClick={onToggle} className="ml-auto inline-flex items-center gap-1 text-[11px] font-semibold text-[#178a5c] hover:underline">
-            {open ? "Hide breakdown" : "Breakdown"}
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={"transition-transform " + (open ? "rotate-180" : "")}><path d="m6 9 6 6 6-6" /></svg>
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Stage bar is always shown; the detailed count cards stay collapsed until the
-// admin opens the breakdown (or a stage filter is active). Cards are compact.
+// The detailed count cards stay collapsed until the admin opens the
+// breakdown (or a stage filter is active). Cards are compact.
 function SummaryCards({ accent, cards, active, onPick, caption }: {
   accent: string; cards: SummaryCard[]; active: string; onPick: (key: string) => void; caption?: string;
 }) {
@@ -485,8 +412,15 @@ function SummaryCards({ accent, cards, active, onPick, caption }: {
   const show = open || !!active;
   return (
     <div className="mb-5">
-      {caption && <p className="text-[11px] text-text-muted mb-2 font-medium">{caption}</p>}
-      <StageBar cards={cards} active={active} onPick={onPick} open={show} onToggle={() => setOpen((o) => !o)} />
+      <div className="flex items-center gap-3">
+        {caption && <p className="text-[11px] text-text-muted font-medium">{caption}</p>}
+        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={show}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-full border bg-white px-3.5 py-1.5 text-[12px] font-semibold shadow-sm hover:shadow-md transition-shadow"
+          style={{ color: accent, borderColor: `color-mix(in srgb, ${accent} 35%, white)` }}>
+          {show ? "Hide breakdown" : "Breakdown"}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={"transition-transform " + (show ? "rotate-180" : "")}><path d="m6 9 6 6 6-6" /></svg>
+        </button>
+      </div>
       <div className={"grid gap-2 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 overflow-hidden transition-all duration-300 " + (show ? "mt-3 max-h-[900px] opacity-100" : "max-h-0 opacity-0")}>
         {cards.map((c) => {
           const on = active === c.key;
@@ -496,8 +430,8 @@ function SummaryCards({ accent, cards, active, onPick, caption }: {
               type="button"
               onClick={() => onPick(c.key)}
               aria-pressed={on}
-              className="flex items-center gap-2.5 rounded-lg border border-line bg-white px-3 py-2 text-left shadow-sm transition-colors"
-              style={on ? { borderColor: accent, boxShadow: `inset 0 0 0 1px ${accent}` } : undefined}
+              className="flex items-center gap-2.5 rounded-xl border bg-white px-3 py-2 text-left shadow-sm hover:shadow-md transition-shadow"
+              style={on ? { borderColor: accent, boxShadow: `inset 0 0 0 1px ${accent}` } : { borderColor: `color-mix(in srgb, ${accent} 18%, white)` }}
             >
               <span className="w-7 h-7 rounded-md grid place-items-center shrink-0" style={{ backgroundColor: accent + "1a", color: accent }}>
                 {SUMMARY_ICON[c.key] ?? SUMMARY_ICON[""]}
@@ -1124,9 +1058,9 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
         <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
       </FiltersPanel>
 
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden cc-table-card">
         <div className="overflow-x-auto">
-        <table className="w-full min-w-[820px] text-[14px] table-fixed">
+        <table className="w-full min-w-[820px] text-[14px] table-fixed cc-table">
           {/* Percentage widths — the table fills the page evenly and scrolls sideways
               only on small screens (matches the loan table). Internal
               status keeps room for the status + UPDATED pills side by side. */}
@@ -1139,7 +1073,7 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
             <col style={{ width: "14%" }} />
           </colgroup>
           {/* Everything centred except EPC details, which stays left. */}
-          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-[#5a8a76]">
+          <thead>
             <tr>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-left">EPC details</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">
@@ -1170,14 +1104,14 @@ function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps & { onKpis?: (k:
                 data-highlighted={isHighlighted ? "yes" : undefined}
                 style={{
                   transition: "background-color 2s ease-out",
-                  backgroundColor: isHighlighted ? "#dceffb" : undefined,
+                  backgroundColor: isHighlighted ? "var(--acc-tint)" : undefined,
                 }}
                 onClick={() => navigateToView(r)}
                 className="border-b border-[#eaf3ee] cursor-pointer hover:bg-[#f7fcfa] align-top"
               >
                 <td className="px-3 py-3">
                   <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 rounded-md bg-[#d6efe3] text-[#178a5c] grid place-items-center shrink-0">
+                    <div className="w-9 h-9 rounded-lg bg-[var(--acc-tint)] text-[var(--acc)] grid place-items-center shrink-0">
                       {IconBuilding}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -1848,9 +1782,9 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
       </FiltersPanel>
 
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden cc-table-card">
         <div className="overflow-x-auto">
-        <table className="w-full min-w-[920px] text-[14px] table-fixed">
+        <table className="w-full min-w-[920px] text-[14px] table-fixed cc-table">
           {/* Percentage widths — the table fills the page evenly and scrolls sideways
               only on small screens. */}
           <colgroup>
@@ -1863,7 +1797,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
             <col style={{ width: "10%" }} />
           </colgroup>
           {/* Everything centred except Borrower, which stays left. */}
-          <thead className="border-b border-[#e3eee8] text-[#7a958a]">
+          <thead>
             <tr>
               <th className="px-4 py-3 font-medium text-[11.5px] uppercase tracking-wide text-left">Borrower</th>
               <th className="px-3 py-3 font-medium text-[11.5px] uppercase tracking-wide text-center">EPC partner</th>
@@ -1892,7 +1826,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                 data-highlighted={isHighlighted ? "yes" : undefined}
                 style={{
                   transition: "background-color 2s ease-out",
-                  backgroundColor: isHighlighted ? "#dceffb" : undefined,
+                  backgroundColor: isHighlighted ? "var(--acc-tint)" : undefined,
                 }}
                 onClick={() => navigateToView(r)}
                 className="border-b border-[#eef3f1] last:border-b-0 cursor-pointer hover:bg-[#f7fcfa] transition-colors"
@@ -1900,7 +1834,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                 {/* Borrower: initials + name + loan ID · documents */}
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
-                    <span className="w-9 h-9 rounded-full bg-[#e6f6ee] text-[#178a5c] grid place-items-center shrink-0 text-[12.5px] font-semibold">
+                    <span className="w-9 h-9 rounded-full bg-[var(--acc-tint)] text-[var(--acc)] grid place-items-center shrink-0 text-[12.5px] font-semibold">
                       {initialsOf(displayBorrower(r))}
                     </span>
                     <div className="min-w-0">
@@ -2360,9 +2294,9 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
         />
         <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
       </FiltersPanel>
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden cc-table-card">
         <div className="overflow-x-auto">
-        <table className="w-full min-w-[960px] text-[14px] table-fixed">
+        <table className="w-full min-w-[960px] text-[14px] table-fixed cc-table">
           {/* Percentage widths — fills the page evenly, scrolls sideways only on small screens. */}
           <colgroup>
             <col style={{ width: "15%" }} />
@@ -2376,7 +2310,7 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
             <col style={{ width: "15%" }} />
           </colgroup>
           {/* Everything centred except Insured name, which stays left. */}
-          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-[#5a8a76]">
+          <thead>
             <tr>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-left">Insured name</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">EPC partner</th>
@@ -2396,14 +2330,14 @@ function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
               const hl = highlightId === r.id;
               return (
               <tr key={r.id}
-                  style={{ transition: "background-color 2s ease-out", backgroundColor: hl ? "#dceffb" : undefined }}
+                  style={{ transition: "background-color 2s ease-out", backgroundColor: hl ? "var(--acc-tint)" : undefined }}
                   onClick={() => navigateToView(r)}
                   className="border-b border-[#eaf3ee] cursor-pointer hover:bg-[#f7fcfa] align-top">
                 {/* Insured name with the INS id beneath — same shape as the
                     EPC name/ID cell on the EPCs tab. */}
                 <td className="px-3 py-3">
                   <div className="flex items-start gap-3">
-                    <span className="w-9 h-9 rounded-md bg-[#e0f2f4] text-[#0e7490] grid place-items-center shrink-0">
+                    <span className="w-9 h-9 rounded-lg bg-[var(--acc-tint)] text-[var(--acc)] grid place-items-center shrink-0">
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M9 13h6M9 17h6" /></svg>
                     </span>
                     <div className="min-w-0">
@@ -2671,9 +2605,9 @@ function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
         />
         <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
       </FiltersPanel>
-      <Card className="overflow-hidden">
+      <Card className="overflow-hidden cc-table-card">
         <div className="overflow-x-auto">
-        <table className="w-full min-w-[900px] text-[14px] table-fixed">
+        <table className="w-full min-w-[900px] text-[14px] table-fixed cc-table">
           <colgroup>
             <col style={{ width: "22%" }} />
             <col style={{ width: "11%" }} />
@@ -2684,7 +2618,7 @@ function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
             <col style={{ width: "9%" }} />
             <col style={{ width: "9%" }} />
           </colgroup>
-          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-[#5a8a76]">
+          <thead>
             <tr>
               <th className={th + " text-left"}>Insured name</th>
               <th className={th + " text-center"}>Sum insured</th>
@@ -2877,9 +2811,9 @@ function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
         <Select placeholder="Status" options={[{ value: "new", label: "New" }, { value: "contacted", label: "Contacted" }, { value: "converted", label: "Converted" }, { value: "closed", label: "Closed" }]} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} />
         <DateRange from={dateFrom} to={dateTo} onFrom={setDateFrom} onTo={setDateTo} />
       </FiltersPanel>
-      <Card className="overflow-x-auto">
-        <table className="w-full text-[14px]">
-          <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-left text-[#5a8a76]">
+      <Card className="overflow-x-auto cc-table-card">
+        <table className="w-full text-[14px] cc-table">
+          <thead className="text-left">
             <tr>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide">Customer</th>
               <th className="px-3 py-3 font-medium text-[12px] uppercase tracking-wide text-center">Type</th>

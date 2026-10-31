@@ -106,6 +106,39 @@ export function KpiTile({ label, value, sub, accent }: { label: string; value: s
   );
 }
 
+// ── Header / stage action button — green-primary theme, soft shades. ─
+export function HAction({
+  children, onClick, variant = "ghost", icon, disabled, title,
+}: {
+  children: React.ReactNode;
+  onClick: () => void;
+  variant?: "approve" | "reject" | "primary" | "blue" | "amber" | "outline" | "ghost";
+  icon?: React.ReactNode;
+  disabled?: boolean;
+  title?: string;
+}) {
+  const cls =
+    variant === "approve" ? "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd] hover:bg-[#d6efe3]" :
+    variant === "reject"  ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100" :
+    variant === "primary" ? "bg-[#178a5c] text-white border-[#178a5c] hover:bg-[#12734c]" :
+    variant === "blue"    ? "bg-[#dceffb] text-[#185fa5] border-[#bfe0f5] hover:bg-[#cde6f8]" :
+    variant === "amber"   ? "bg-[#fef8ee] text-[#854f0b] border-[#854f0b]/30 hover:bg-[#fef0d6]" :
+    variant === "outline" ? "bg-white text-[#178a5c] border-[#cdeadd] hover:bg-[#f0faf5]" :
+                            "bg-white text-[#0f3d2e] border-[#cdeadd] hover:bg-[#f0faf5]";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className={["text-[13px] font-semibold px-3 py-2 rounded-[8px] border transition-colors disabled:opacity-60 inline-flex items-center gap-1.5", cls].join(" ")}
+    >
+      {icon && <span className="shrink-0" style={{ display: "inline-flex" }}>{icon}</span>}
+      {children}
+    </button>
+  );
+}
+
 // ── Progress bar that IS the tabs ───────────────────────────────────
 // The familiar stage circles (done green, in progress amber, failed red, not
 // reached pale blue). Click a stage to open it; the open stage gets a ring and
@@ -559,6 +592,11 @@ const isBlank = (v: unknown) => v === null || v === undefined || v === "" || v =
 export function fieldFill(...cols: FieldRow[][]): { have: number; total: number } {
   const counted = cols.flat().filter((r) => !r.optional);
   return { have: counted.filter((r) => !isBlank(r.v)).length, total: counted.length };
+}
+/** A section's "filled / total" summary over one or more field columns. */
+export function fillOf(...cols: FieldRow[][]) {
+  const f = fieldFill(...cols);
+  return <FillCount have={f.have} total={f.total} />;
 }
 export function FieldCol({ title, rows, children }: { title: string; rows: FieldRow[]; children?: React.ReactNode }) {
   const fill = fieldFill(rows);

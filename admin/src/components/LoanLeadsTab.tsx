@@ -160,11 +160,11 @@ export default function LoanLeadsTab() {
 
   return (
     <div className="w-full">
-      <div className="inline-flex rounded-[8px] border border-[#dcd9f5] bg-white p-0.5 mb-3">
+      <div className="inline-flex rounded-[8px] border bg-white p-0.5 mb-3" style={{ borderColor: ACCENTS.loanleads.tint }}>
         {([["active", "Active", rows.length - deadCount], ["dead", "Dead", deadCount]] as const).map(([key, label, n]) => (
           <button key={key} type="button" onClick={() => setView(key)}
-            className={"px-3.5 py-1.5 rounded-[6px] text-[13px] font-semibold " + (view === key ? "text-white" : "text-[#4338ca] hover:bg-[#eef0fb]")}
-            style={view === key ? { backgroundColor: key === "dead" ? "#b42318" : "#4338ca" } : undefined}>
+            className={"px-3.5 py-1.5 rounded-[6px] text-[13px] font-semibold " + (view === key ? "text-white" : "text-[var(--acc)] hover:bg-[var(--acc-tint)]")}
+            style={view === key ? { backgroundColor: key === "dead" ? "#b42318" : ACCENTS.loanleads.color } : undefined}>
             {label} · {n}
           </button>
         ))}
@@ -180,10 +180,10 @@ export default function LoanLeadsTab() {
         </Button>
       </div>
 
-      <div className="rounded-[12px] border border-[#e0f0e8] bg-white overflow-hidden">
+      <div className="rounded-card border bg-white overflow-hidden cc-table-card">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[860px] text-[14px]">
-            <thead className="bg-[#f0faf5] border-b border-[#cdeadd] text-[#5a8a76]">
+          <table className="w-full min-w-[860px] text-[14px] cc-table">
+            <thead>
               <tr>
                 <th className={TH + " text-left"}>Borrower name</th>
                 <th className={TH + " text-left"}>EPC · Lead owner</th>
@@ -204,7 +204,7 @@ export default function LoanLeadsTab() {
                   <tr
                     key={r.id}
                     onClick={() => openLead(r.id)}
-                    style={{ transition: "background-color 2s ease-out", backgroundColor: highlightId === r.id ? "#dceffb" : undefined }}
+                    style={{ transition: "background-color 2s ease-out", backgroundColor: highlightId === r.id ? "var(--acc-tint)" : undefined }}
                     className={"border-b border-[#f0f4f2] last:border-0 cursor-pointer " + (r.dead_at ? "bg-[#fdf0f0] hover:bg-[#fbe6e6]" : "hover:bg-[#f7f7fd]")}
                   >
                     <td className="px-4 py-3">
