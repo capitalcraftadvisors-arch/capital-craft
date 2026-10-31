@@ -52,6 +52,8 @@ type Props = {
   // Notifies the caller when the stored file count changes (for required-count
   // gating, e.g. "exactly 12 bank statements").
   onCountChange?: (n: number) => void;
+  // Stored files this list leaves out (the caller shows them elsewhere).
+  hideIds?: string[];
 };
 
 type DocRow = {
@@ -75,7 +77,7 @@ export default function FileUpload(props: Props) {
     businessId, stakeholderId, applicationId,
     category, table, maxFiles = 1, uploadedBy,
     onUploaded, captureGps = false, extraMetadata, label, hint, uploadHint,
-    dedupe = false, onCountChange,
+    dedupe = false, onCountChange, hideIds,
   } = props;
   const inputRef = useRef<HTMLInputElement>(null);
   const [docs, setDocs] = useState<DocRow[]>([]);
@@ -225,14 +227,15 @@ export default function FileUpload(props: Props) {
   }
 
   const canUploadMore = docs.length < maxFiles;
+  const listed = hideIds?.length ? docs.filter((d) => !hideIds.includes(d.id)) : docs;
 
   return (
     <div>
       {label && <p className="text-[13px] font-medium text-text-mid mb-2">{label}</p>}
 
-      {docs.length > 0 && (
+      {listed.length > 0 && (
         <ul className="space-y-2 mb-3">
-          {docs.map((d) => (
+          {listed.map((d) => (
             <li
               key={d.id}
               className="flex items-center gap-3 bg-white border border-line rounded-input px-3 py-2"

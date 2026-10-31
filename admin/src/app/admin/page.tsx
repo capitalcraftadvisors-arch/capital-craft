@@ -1233,6 +1233,8 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     customer_photo_path: string | null;
     // false = a co-applicant was added (its docs then become required).
     bill_on_applicant_name: boolean | null;
+    // off_grid → the electricity bill isn't required (lib/loan-doc-checklist).
+    system_type: string | null;
     aadhaar_face_path: string | null;
     // user_application_docs categories (embedded in the list query) — a document
     // uploaded as a row counts the same as its *_path column.
@@ -1259,6 +1261,8 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
   // Latest docs-sent (email-to-lender) timestamp per application — drives the
   // "Sent <date>" line under the status pill so the team can track it at a glance.
   const [lenderSentAt, setLenderSentAt] = useState<Record<string, string>>({});
+  // Every lender each application went to (loan_application_lenders) — for the Lender filter.
+  const [lenderKeys, setLenderKeys] = useState<Record<string, string[]>>({});
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   // Client-side filters over the already-loaded list.
@@ -1347,8 +1351,8 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     // reuses the last result instead of re-querying — cuts Supabase egress.
     const CK = "dash.apps";
     if (!force) {
-      const cached = getCached<{ rows: Row[]; lenderLatest: Record<string, string>; lenderSentAt?: Record<string, string> }>(CK, 45000);
-      if (cached) { setRows(cached.rows); setLenderLatest(cached.lenderLatest); setLenderSentAt(cached.lenderSentAt ?? {}); setLoaded(true); return; }
+      const cached = getCached<{ rows: Row[]; lenderLatest: Record<string, string>; lenderSentAt?: Record<string, string>; lenderKeys?: Record<string, string[]> }>(CK, 45000);
+      if (cached) { setRows(cached.rows); setLenderLatest(cached.lenderLatest); setLenderSentAt(cached.lenderSentAt ?? {}); setLenderKeys(cached.lenderKeys ?? {}); setLoaded(true); return; }
     }
     const { data } = await supabase()
       .from("epc_applications")
@@ -1362,7 +1366,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         // RFD rows carry status='rfd'; disbursed rows are detected by amount).
         "status, created_at, created_by, created_by_user_id, reviewed_at, aborted_at, approved_lender, rejected_lender, " +
         "aadhaar_front_path, aadhaar_back_path, ebill_path, proforma_invoice_path, " +
-        "rooftop_photo_path, bank_statement_path, customer_photo_path, aadhaar_face_path, bill_on_applicant_name, " +
+        "rooftop_photo_path, bank_statement_path, customer_photo_path, aadhaar_face_path, bill_on_applicant_name, system_type, " +
         // Doc categories in the SAME request (no extra query) for the docs badge.
         "docs:user_application_docs(category), " +
         "coapp_pan_path, coapp_aadhaar_front_path, coapp_aadhaar_back_path, " +
@@ -1385,16 +1389,19 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     for (const lr of ((ll ?? []) as unknown as LoanLenderRow[])) (byApp[lr.application_id] ??= []).push(lr);
     const map: Record<string, string> = {};
     const sentMap: Record<string, string> = {};
+    const keyMap: Record<string, string[]> = {};
     for (const [appId, appRows] of Object.entries(byApp)) {
       const label = latestStatusLabel(latestLenderStatus(appRows));
       if (label) map[appId] = label;
       const latestSent = appRows.reduce<string | null>(
         (acc, r) => (r.docs_sent_at && (!acc || r.docs_sent_at > acc) ? r.docs_sent_at : acc), null);
       if (latestSent) sentMap[appId] = latestSent;
+      keyMap[appId] = appRows.map((r) => r.lender_key);
     }
     setLenderLatest(map);
     setLenderSentAt(sentMap);
-    setCached("dash.apps", { rows, lenderLatest: map, lenderSentAt: sentMap });
+    setLenderKeys(keyMap);
+    setCached("dash.apps", { rows, lenderLatest: map, lenderSentAt: sentMap, lenderKeys: keyMap });
   }, []);
 
   // Loads on open only (cached). No reload on tab focus — it re-downloaded the
@@ -1600,7 +1607,11 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
             (r.loan_display_id ?? "").toLowerCase().includes(needle) ||
             displayEpc(r).toLowerCase().includes(needle))) return false;
       if (epcFilter && displayEpc(r) !== epcFilter) return false;
-      if (lenderFilter && String(r.approved_lender ?? r.rejected_lender ?? "") !== lenderFilter) return false;
+      // Lender: the final lender once approved; before that, every lender the
+      // file went to — so "Docs Sent + Credit Fair" finds the files sent there.
+      if (lenderFilter && !(r.approved_lender
+        ? r.approved_lender === lenderFilter
+        : r.rejected_lender === lenderFilter || (lenderKeys[r.id] ?? []).includes(lenderFilter))) return false;
       const t = Date.parse(r.created_at);
       if (fromT != null && !(t >= fromT)) return false;
       if (toT != null && !(t <= toT)) return false;
@@ -1629,7 +1640,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
       return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, q, categoryFilter, statusFilter, epcFilter, lenderFilter, dateFrom, dateTo, sortKey, period, pFrom, pTo, loanCounts]);
+  }, [rows, q, categoryFilter, statusFilter, epcFilter, lenderFilter, lenderKeys, dateFrom, dateTo, sortKey, period, pFrom, pTo, loanCounts]);
 
   const fyRows = useMemo(() => rows.filter((r) => inPeriod(r.created_at, period, pFrom, pTo)), [rows, period, pFrom, pTo]);
   const cards: SummaryCard[] = [

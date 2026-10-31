@@ -11,15 +11,13 @@ import { isAcceptedFileType, ACCEPTED_FILE_TYPES } from "@/lib/validators";
 import { uploadOtherInsDoc, otherInsDoc, type KycDoc } from "@/lib/other-insurance";
 
 export default function OtherInsDocs({
-  kind, docs, ensureId, onChanged, editable,
+  kind, docs, ensureId, onChanged,
 }: {
   kind: "kyc" | "policy";
   docs: KycDoc[];
   /** The file's id — creating the file first when it's a new one. */
   ensureId: () => Promise<string | null>;
   onChanged: (id: string) => void;
-  /** The file form (not the View profile) — delete isn't owner-only there. */
-  editable?: boolean;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -60,7 +58,7 @@ export default function OtherInsDocs({
     <div>
       {docs.length > 0 && (
         <div className="mb-3">
-          <DocGrid eyeIcon={I.eye} editable={editable} slots={docs.map((d) => ({
+          <DocGrid eyeIcon={I.eye} slots={docs.map((d) => ({
             key: d.path,
             label: d.name,
             title: d.name,

@@ -147,6 +147,8 @@ function Inner() {
   // every document (with View / Remove) and every reading, exactly as the chat
   // read them. Without this the edit form opened empty.
   const [panDocId, setPanDocId] = useState<string | null>(null);
+  // Off-grid → no electricity bill needed.
+  const [offGrid, setOffGrid] = useState(false);
   useEffect(() => {
     void (async () => {
       const [{ data: la }, { data: docs }] = await Promise.all([
@@ -154,6 +156,7 @@ function Inner() {
         supabase().from("user_application_docs").select("id, category").eq("application_id", appId),
       ]);
       const a = (la ?? {}) as Record<string, any>;
+      setOffGrid(a.system_type === "off_grid");
       setApplicantMobile(String(a.borrower_mobile ?? "").trim());
       setApplicantEmail(String(a.borrower_email ?? "").trim());
       // PAN — number + card image (its user_application_docs row).
@@ -355,7 +358,7 @@ function Inner() {
   const docItems = [
     { key: "pan", label: "PAN card", done: panUploaded || !!panNumber || !!panDocId },
     { key: "aadhaar", label: "Aadhaar", done: !!aPaths },
-    { key: "ebill", label: "Electricity bill", done: !!ebill },
+    ...(offGrid ? [] : [{ key: "ebill", label: "Electricity bill", done: !!ebill }]),
     { key: "quotation", label: "Quotation", done: !!quotePath },
     { key: "rooftop", label: "Rooftop photo", done: !!rooftopPath },
     ...(hasCoapp ? [

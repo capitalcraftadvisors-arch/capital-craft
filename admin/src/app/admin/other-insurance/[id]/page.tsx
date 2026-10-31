@@ -137,11 +137,11 @@ function Inner() {
         </div>
 
         <SectionCard title="KYC documents" accent="green" icon={I.id}>
-          <OtherInsDocs kind="kyc" docs={docs.kyc} ensureId={ensureId} onChanged={docsChanged} editable />
+          <OtherInsDocs kind="kyc" docs={docs.kyc} ensureId={ensureId} onChanged={docsChanged} />
         </SectionCard>
 
         <SectionCard title="Insurance policy" accent="green" icon={I.files}>
-          <OtherInsDocs kind="policy" docs={docs.policy} ensureId={ensureId} onChanged={docsChanged} editable />
+          <OtherInsDocs kind="policy" docs={docs.policy} ensureId={ensureId} onChanged={docsChanged} />
         </SectionCard>
 
         <SectionCard title="Validity period" accent="green" icon={I.invoice}>

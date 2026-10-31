@@ -1180,7 +1180,7 @@ function Inner() {
   }), [workloadPeople, cases, thisMonthKey, srcFilter]);
 
   return (
-    <div className="min-h-screen lg:flex" style={themeStyle("board")}>
+    <div className="min-h-screen lg:flex" style={{ ...themeStyle("board"), backgroundColor: "#fff" }}>
       <AdminSidebar active="board" />
       {/* Fixed-height app shell: the page itself doesn't scroll — the board and
           the side panel each scroll in their own container (no scroll bleed). */}

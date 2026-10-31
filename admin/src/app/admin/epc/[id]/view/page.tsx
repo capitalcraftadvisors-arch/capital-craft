@@ -41,7 +41,8 @@ import EmailComposerModal from "@/components/EmailComposerModal";
 import { invalidate } from "@/lib/list-cache";
 import { DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
 import { computeEpcHealth, scoreTone, type TatBands, type HealthBucket } from "@/lib/epc-score";
-import { fmtDateTime } from "@/lib/dates";
+import { fmtDate, fmtDateTime, localIsoDate } from "@/lib/dates";
+import DateField from "@/components/ui/DateField";
 // Shared view chrome — the SAME kit the Loan Application View imports, so the
 // two dashboards can't drift apart. EPC-specific pieces stay in this file.
 import {
@@ -172,6 +173,9 @@ function Inner() {
   const [serviceBusy, setServiceBusy] = useState(false);
   const [zipPickerOpen, setZipPickerOpen] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
+  // Marking a lender Approved asks for the date the lender approved.
+  const [approveFor, setApproveFor] = useState<string | null>(null);
+  const [approveDate, setApproveDate] = useState("");
   const [deleteOpen, setDeleteOpen] = useState(false);
   // The open stage (null = wherever the profile stands now).
   const [tab, setTab] = useState<EpcStage | null>(null);
@@ -364,7 +368,7 @@ function Inner() {
   // Set ONE exclusive lender state (none / docs / approved / rejected) from the
   // profile — same epc_lender_status upsert the main table's Lender status uses.
   // Approved / Rejected are gated behind Docs Sent in the UI below.
-  async function setLenderExclusive(lenderKey: string, target: "none" | "docs" | "approved" | "rejected") {
+  async function setLenderExclusive(lenderKey: string, target: "none" | "docs" | "approved" | "rejected", approvedOn?: string) {
     if (!biz) return;
     if (epcLocked(biz)) { alert("This profile is waiting for admin approval."); return; }
     // Gate: docs can't go to a lender until the EPC profile is approved. The main
@@ -381,8 +385,15 @@ function Inner() {
     }
     const flags = { docs_given: target === "docs", approved: target === "approved", rejected: target === "rejected" };
     const dbPatch: Record<string, unknown> = { ...flags, rejected_at: target === "rejected" ? new Date().toISOString() : null };
+    // The lender's approval date as entered (a date — stored at IST midnight).
+    if (target === "approved" && approvedOn) dbPatch.approved_at = `${approvedOn}T00:00:00+05:30`;
     const prev = lender;
-    setLender((arr) => [...arr.filter((x) => x.lender !== lenderKey), { lender: lenderKey, ...flags }]);
+    const was = lender.find((x) => x.lender === lenderKey);
+    setLender((arr) => [...arr.filter((x) => x.lender !== lenderKey), {
+      ...was, lender: lenderKey, ...flags,
+      rejected_at: dbPatch.rejected_at as string | null,
+      ...(dbPatch.approved_at ? { approved_at: dbPatch.approved_at as string } : {}),
+    }]);
     try {
       await saveEpcLenderState(biz.id, lenderKey, dbPatch);
       await logAudit(biz.id, "field_edit", `lender_${lenderKey}`, null, target);
@@ -451,7 +462,10 @@ function Inner() {
   const names = (rows: LenderRow[]) => rows.map((r) => lenderLabel(r.lender)).join(", ");
   const firstAt = (rows: LenderRow[], k: "docs_given_at" | "approved_at") =>
     rows.map((r) => r[k]).filter((v): v is string => !!v).sort()[0] ?? null;
-  const withWhen = (what: ReactNode, when: string | null) => (when ? <>{what}<br />{fmtDateTime(when)}</> : what);
+  // Done steps show when: date + time, or the date alone for a lender's
+  // approval (a date entered by hand).
+  const withWhen = (what: ReactNode, when: string | null | undefined, dateOnly = false) =>
+    (when ? <>{what}<br />{dateOnly ? fmtDate(when) : fmtDateTime(when)}</> : what);
   const liveApps = loans.filter((l) => !l.aborted_at).length;
 
   const stages: Array<{ key: EpcStage; label: string; sub?: ReactNode; icon: ReactNode; state: StageState }> = [
@@ -463,7 +477,9 @@ function Inner() {
     {
       key: "review", label: ccRejected ? "Rejected by CC" : "Review by CC", icon: I.circleCheck,
       state: ccRejected ? "failed" : onHold ? "hold" : reviewDone ? "done" : ccApproved || (docsComplete && !draft) ? "current" : "pending",
-      sub: reviewDone ? "Approved by Manish" : checkPending ? "Admin check pending" : ccRejected ? "Rejected" : onHold ? "On hold" : docsComplete && !draft ? "Awaiting review" : "Pending",
+      // When the main admin approved (admin_reviewed_at); older profiles, approved
+      // before that was recorded, fall back to the first review.
+      sub: reviewDone ? withWhen("Approved by Manish", biz.admin_reviewed_at ?? biz.reviewed_at ?? null) : checkPending ? "Admin check pending" : ccRejected ? "Rejected" : onHold ? "On hold" : docsComplete && !draft ? "Awaiting review" : "Pending",
     },
     {
       key: "docs", label: "Docs Sent", icon: I.files,
@@ -473,7 +489,7 @@ function Inner() {
     {
       key: "lender", label: allRejected ? "Rejected by lender" : "Lender approval", icon: I.bank,
       state: approvedRows.length ? "done" : allRejected ? "failed" : sentRows.length ? "current" : "pending",
-      sub: approvedRows.length ? withWhen(names(approvedRows), firstAt(approvedRows, "approved_at")) : allRejected ? names(rejectedRows) : sentRows.length ? "Awaiting decision" : "Pending",
+      sub: approvedRows.length ? withWhen(names(approvedRows), firstAt(approvedRows, "approved_at"), true) : allRejected ? names(rejectedRows) : sentRows.length ? "Awaiting decision" : "Pending",
     },
     {
       key: "active", label: "Active", icon: I.activity,
@@ -541,11 +557,13 @@ function Inner() {
     <ul className="divide-y divide-[#f1f5f3] max-w-[640px]">
       {keys.map((key) => {
         const l = lender.find((x) => x.lender === key);
-        const when = l?.approved ? l.approved_at : l?.rejected ? l.rejected_at : l?.docs_given ? l.docs_given_at : null;
+        const when = l?.approved ? (l.approved_at ? fmtDate(l.approved_at) : null)
+          : l?.rejected ? (l.rejected_at ? fmtDateTime(l.rejected_at) : null)
+          : l?.docs_given && l.docs_given_at ? fmtDateTime(l.docs_given_at) : null;
         return (
           <li key={key} className="py-2.5 flex items-center gap-3 text-[14px]">
             <span className="flex-1 min-w-0 font-semibold text-[#0f3d2e] truncate">{lenderLabel(key)}</span>
-            {when && <span className="text-[12px] text-[#7a958a] whitespace-nowrap">{fmtDateTime(when)}</span>}
+            {when && <span className="text-[12px] text-[#7a958a] whitespace-nowrap">{when}</span>}
             <LenderStatePill state={lenderStateOf(key)} />
           </li>
         );
@@ -553,7 +571,15 @@ function Inner() {
     </ul>
   );
   const lenderControl = locked ? <AdminPendingPill /> : !draft ? (
-    <LenderCell state={lenderMap} lenders={lenderList} onSet={(l, target) => void setLenderExclusive(l, target)} onAddLender={addLender} />
+    <LenderCell
+      state={lenderMap}
+      lenders={lenderList}
+      onSet={(l, target) => {
+        if (target === "approved") { setApproveDate(localIsoDate(new Date())); setApproveFor(l); }
+        else void setLenderExclusive(l, target);
+      }}
+      onAddLender={addLender}
+    />
   ) : null;
 
   const statusLabel = approvedRows.length ? "Approved by lender"
@@ -751,7 +777,8 @@ function Inner() {
               >
                 <div className="max-w-[640px]">
                   <KV k="Status" v={statusLabel} />
-                  {ccRejected && <KV k="Rejection reason" v={biz.rejection_reason} wrap valueClass="text-red-700" />}
+                  {reviewDone && <KV k="Approved on" v={fmtDateTime(biz.admin_reviewed_at ?? biz.reviewed_at ?? null)} />}
+                  {ccRejected &&<KV k="Rejection reason" v={biz.rejection_reason} wrap valueClass="text-red-700" />}
                   {!docsComplete && <KV k="Missing documents" v={missingDocs.join(", ")} wrap valueClass="text-[#d4900f]" />}
                 </div>
               </Section>
@@ -895,13 +922,32 @@ function Inner() {
         epc={{ id: biz.id, tradeName: biz.trade_name || biz.legal_name || biz.contact_name || "EPC", contactName: biz.contact_name, mobile: biz.contact_mobile, email: biz.contact_email }}
         onClose={() => setPwOpen(false)}
       />
+      {/* Lender approved — the date the lender approved. */}
+      {approveFor && (
+        <div className="fixed inset-0 z-50 bg-black/40 grid place-items-center px-4" onClick={() => setApproveFor(null)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-white rounded-xl shadow-lg p-6 space-y-4">
+            <h3 className="text-[17px] font-semibold text-[#0f3d2e]">Approved by {lenderLabel(approveFor)}</h3>
+            <label className="block">
+              <span className="block mb-1 text-[12.5px] text-[#5a8a76]">Date of approval</span>
+              <DateField value={approveDate} onChange={setApproveDate} max={localIsoDate(new Date())}
+                className="border border-line rounded-input px-3 py-2 text-[14px] focus:outline-none focus:border-[#178a5c]" />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setApproveFor(null)} className="px-4 py-2 rounded-[8px] border border-line text-[13px] text-text-mid hover:bg-bg-soft">Cancel</button>
+              <button type="button" disabled={!approveDate}
+                onClick={() => { const l = approveFor; setApproveFor(null); void setLenderExclusive(l, "approved", approveDate); }}
+                className="px-4 py-2 rounded-[8px] bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <EmailComposerModal
         open={emailOpen}
         onClose={() => setEmailOpen(false)}
         endpoint={`/api/admin/epc/${biz.id}/send-to-lender`}
         title="Send EPC to lender"
-        // Emailing the documents marks that lender "Docs sent" (once CC approved).
-        onSent={(k) => { if (reviewDone && lenderStateOf(k) === "none") void setLenderExclusive(k, "docs"); }}
       />
       <LenderPickerModal
         open={zipPickerOpen}

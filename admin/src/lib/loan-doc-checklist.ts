@@ -9,6 +9,7 @@ import { aadhaarFaceCountsAsPhoto } from "./applicant-photo";
 
 export type LoanDocCols = {
   created_at?: string | null;
+  system_type?: string | null;
   bill_on_applicant_name?: boolean | null;
   aadhaar_front_path?: string | null;
   aadhaar_back_path?: string | null;
@@ -59,7 +60,8 @@ export function loanDocChecklist(l: LoanDocCols, categories: Iterable<string>): 
     { key: "aadhaar_front", ok: !!l.aadhaar_front_path },
     { key: "aadhaar_back", ok: !!l.aadhaar_back_path },
     { key: "quotation", ok: row("quotation") || !!l.proforma_invoice_path },
-    { key: "ebill", ok: row("ebill") || !!l.ebill_path },
+    // An off-grid system has no grid connection — the bill isn't needed.
+    ...(l.system_type === "off_grid" ? [] : [{ key: "ebill", ok: row("ebill") || !!l.ebill_path }]),
     { key: "rooftop", ok: row("rooftop") || !!l.rooftop_photo_path },
     { key: "bank", ok: row("bank") || !!l.bank_statement_path },
     // Co-applicant KYC only when there is a co-applicant.

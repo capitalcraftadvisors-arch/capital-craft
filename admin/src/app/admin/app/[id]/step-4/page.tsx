@@ -29,6 +29,7 @@ import LoanAppStepTracker from "@/components/LoanAppStepTracker";
 import FileUpload from "@/components/FileUpload";
 import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
+import { getDocumentUrl } from "@/lib/storage";
 import { IFSC_RE, MOBILE_RE, EMAIL_RE } from "@/lib/validators";
 import { professionsFor } from "@/lib/loan-form";
 
@@ -72,6 +73,7 @@ type BankDoc = {
   signed_url: string | null;
   file_name: string;
   method: "manual_epdf" | "scanned_pdf";
+  docId?: string; // set → it's a document row (the EPC flow), not the column
 } | null;
 
 // ── Page ─────────────────────────────────────────────────────────────
@@ -159,6 +161,23 @@ function Inner() {
             file_name: String(row.bank_statement_path).split("/").pop() ?? "Bank statement",
             method: row.bank_statement_method ?? "manual_epdf",
           });
+        } else {
+          // The EPC's chatbot files the bank statement / cheque / passbook as a
+          // document row only — show its latest one as THE bank statement, not
+          // under "Additional bank statements".
+          const { data: bd } = await supabase()
+            .from("user_application_docs")
+            .select("id, storage_path, file_name, created_at")
+            .eq("application_id", params.id)
+            .eq("category", "bank_statement")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (bd) {
+            const m = row.bank_statement_method ?? "scanned_pdf";
+            setMethod(m);
+            setBankDoc({ path: bd.storage_path, uploaded_at: bd.created_at, signed_url: null, file_name: bd.file_name ?? "Bank statement", method: m, docId: bd.id });
+          }
         }
         if (row.bank_account_holder) setAccountHolder(row.bank_account_holder);
         if (row.bank_name)           setBankName(row.bank_name);
@@ -288,8 +307,9 @@ function Inner() {
         organization_name: organization.trim() || null,
         annual_income:     Number(annualIncome) || null,
         bank_statement_method:      bankDoc?.method ?? null,
-        bank_statement_path:        bankDoc?.path ?? null,
-        bank_statement_uploaded_at: bankDoc?.uploaded_at ?? null,
+        // A document-row statement stays a row (the column would show it twice).
+        bank_statement_path:        bankDoc?.docId ? null : bankDoc?.path ?? null,
+        bank_statement_uploaded_at: bankDoc?.docId ? null : bankDoc?.uploaded_at ?? null,
         bank_account_holder: accountHolder.trim(),
         bank_name:           bankName.trim(),
         bank_account_no:     accountNo.trim(),
@@ -502,6 +522,7 @@ function Inner() {
                   // to the sign-doc route (whitelisted on the persisted *_path)
                   // for a reloaded doc where no signed_url is in hand.
                   if (bankDoc.signed_url) window.open(bankDoc.signed_url, "_blank", "noopener");
+                  else if (bankDoc.docId) void getDocumentUrl(bankDoc.docId).then((u) => (u ? window.open(u, "_blank", "noopener") : alert("Couldn't open the document.")));
                   else void signAndOpen(bankDoc.path);
                 } : undefined}
               />
@@ -531,6 +552,7 @@ function Inner() {
               uploadedBy="admin"
               maxFiles={6}
               uploadHint="PDF or image — up to 6 files"
+              hideIds={bankDoc?.docId ? [bankDoc.docId] : undefined}
             />
           </div>
         </Card>

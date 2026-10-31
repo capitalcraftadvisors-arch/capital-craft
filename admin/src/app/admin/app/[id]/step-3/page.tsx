@@ -52,6 +52,7 @@ type Loan = {
   borrower_mobile: string | null;
   borrower_email:  string | null;
   rooftop_photo_path: string | null;
+  system_type: string | null;
   epc_business: {
     contact_name: string | null;
     trade_name: string | null;
@@ -192,7 +193,7 @@ function Inner() {
         .select(
           "id, current_step, created_at, " +
           "install_pincode, install_state, install_city, step3_completed_at, " +
-          "borrower_mobile, borrower_email, rooftop_photo_path, " +
+          "borrower_mobile, borrower_email, rooftop_photo_path, system_type, " +
           "proforma_invoice_path, proforma_uploaded_at, ebill_path, ebill_uploaded_at, " +
           "project_size, project_size_unit, total_project_cost, loan_amount_required, " +
           "monthly_bill_amount, discom_name, ca_number, ebill_address_line, ebill_name, " +
@@ -516,8 +517,9 @@ function Inner() {
 
   const canNext =
     // Rooftop photo is NOT required to proceed — requiring it blocked editing
-    // (incl. saving the e-bill name) on applications without one.
-    !!proforma && !!ebill &&
+    // (incl. saving the e-bill name) on applications without one. Off-grid
+    // needs no electricity bill.
+    !!proforma && (!!ebill || loan?.system_type === "off_grid") &&
     validSize && validCost && validLoan && !loanExceedsCost &&
     addressComplete &&
     ownership !== null &&

@@ -25,7 +25,6 @@
 // offers) stays in its page. Only layout/chrome lives here.
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { getBusiness } from "@/lib/auth";
 
 // Layout effect in the browser (measure before paint), plain effect on the server.
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
@@ -637,23 +636,21 @@ export type ViewDocSlot = {
   title?: string;          // tooltip — usually the file name
   onView?: () => void;     // undefined = not uploaded
   onDownload?: () => void; // set → show a download button beside the eye
-  onDelete?: () => void;   // set → show a trash button beside the eye (owner only)
+  onDelete?: () => void;   // set → show a trash button beside the eye
 };
 
-// Deleting a document from a View profile is the owner's (Pri) only; an edit
-// form (`editable`) leaves it to the caller. Either way it always asks first.
-// One place, so every profile follows the same rule.
-function deleteHandler(s: ViewDocSlot, editable?: boolean): (() => void) | undefined {
-  if (!s.onDelete || (!editable && !getBusiness()?.is_owner)) return undefined;
+// Deleting a document always asks first. One place, so every profile follows
+// the same rule.
+function deleteHandler(s: ViewDocSlot): (() => void) | undefined {
+  if (!s.onDelete) return undefined;
   return () => { if (window.confirm(`Delete "${s.label}"? This can't be undone.`)) s.onDelete!(); };
 }
 
 export function DocGrid({
-  slots, eyeIcon, editable,
+  slots, eyeIcon,
 }: {
   slots: ViewDocSlot[];
   eyeIcon: React.ReactNode;
-  editable?: boolean; // an edit form, not a View profile
 }) {
   return (
     <div className="grid grid-cols-2 gap-2">
@@ -691,10 +688,10 @@ export function DocGrid({
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
                 </button>
               )}
-              {deleteHandler(s, editable) && (
+              {deleteHandler(s) && (
                 <button
                   type="button"
-                  onClick={deleteHandler(s, editable)}
+                  onClick={deleteHandler(s)}
                   title="Remove document" aria-label="Remove document"
                   className="text-red-600 hover:text-red-700"
                 >

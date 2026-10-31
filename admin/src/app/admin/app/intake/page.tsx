@@ -868,6 +868,8 @@ function Inner() {
   }
   // Record / clear a table row in the pending list (draft at submit; never blocks).
   function docSkipChange(label: string, skipped: boolean) {
+    // Off-grid: no e-bill is fine — not pending.
+    if (skipped && billOptional(form) && label === DOC_TABLE_ROWS.find((r) => r.slot === "ebill")?.label) return;
     setMissing((s) => (skipped ? (s.includes(label) ? s : [...s, label]) : s.filter((x) => x !== label)));
   }
   // "Done with documents" → drop a receipt of what was uploaded now, then advance.
@@ -1622,9 +1624,13 @@ const UNIT_LABEL: Record<DocUnit, string> = {
 // Applicable rows / units for the current form (co-app rows only with a co-app).
 function docTableRowsFor(f: Form): DocRow[] { return DOC_TABLE_ROWS.filter((r) => !r.coappOnly || hasCoapp(f)); }
 function docTableUnitsFor(f: Form): DocUnit[] { return Array.from(new Set(docTableRowsFor(f).map((r) => r.unit))); }
+// An off-grid system has no grid connection — its e-bill is optional.
+const billOptional = (f: Form) => f.system_type === "off_grid";
 // Every applicable unit is on the profile → the doc_table turn is "filled".
 function docTableComplete(f: Form): boolean {
-  return docTableUnitsFor(f).every((u) => DOC_UNIT_PATHS[u].every((k) => !!(f[k] && String(f[k]).trim())));
+  return docTableUnitsFor(f)
+    .filter((u) => !(u === "ebill" && billOptional(f)))
+    .every((u) => DOC_UNIT_PATHS[u].every((k) => !!(f[k] && String(f[k]).trim())));
 }
 
 type DocSlotFile = { file: File; thumb: string | null };
