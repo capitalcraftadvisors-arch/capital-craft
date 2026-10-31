@@ -37,6 +37,7 @@ import OwnershipCard from "@/components/OwnershipCard";
 import ActivityLog from "@/components/ActivityLog";
 import DeleteEpcModal from "@/components/DeleteEpcModal";
 import EpcPasswordEmailModal from "@/components/EpcPasswordEmailModal";
+import { epcLoginPassword } from "@/lib/passwords";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import { invalidate } from "@/lib/list-cache";
 import { DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
@@ -686,7 +687,9 @@ function Inner() {
               <div className="grid gap-x-6 gap-y-4 pt-6 xl:grid-cols-2 items-start">
                 <div className="flex flex-col gap-4 min-w-0">
                   <Section card dropdown inline={stacked} icon={I.user} title="Contact" summary={fillOf(contactRows)}>
-                    <FieldCol title="Contact" rows={contactRows} />
+                    <FieldCol title="Contact" rows={contactRows}>
+                      {mainAdmin && biz.business_type !== "admin" && <PasswordKV key={String(pwOpen)} businessId={biz.id} />}
+                    </FieldCol>
                   </Section>
                   <Section card dropdown inline={stacked} icon={I.building} title="Business details" summary={fillOf(businessRows)}>
                     <FieldCol title="Business details" rows={businessRows} />
@@ -1185,6 +1188,32 @@ function MiniStat({ label, value, className }: { label: string; value: string; c
     <div className={"rounded-[12px] border border-[#e0f0e8] bg-white p-4 flex flex-col justify-center " + (className ?? "")}>
       <div className="text-[12px] font-semibold uppercase tracking-wide text-[#5a8a76]">{label}</div>
       <div className="text-[26px] font-bold text-[#0f3d2e] mt-1 leading-none">{value}</div>
+    </div>
+  );
+}
+
+// Main admin only: the EPC's login password (0110), hidden until the eye is
+// clicked — read once then, never on page load.
+function PasswordKV({ businessId }: { businessId: string }) {
+  const [pw, setPw] = useState<string | null | undefined>(undefined); // undefined = not read yet
+  const [shown, setShown] = useState(false);
+  async function toggle() {
+    if (!shown && pw === undefined) {
+      try { setPw(await epcLoginPassword(businessId)); } catch { toast.error("Couldn't load the password"); return; }
+    }
+    setShown((s) => !s);
+  }
+  return (
+    <div className="flex justify-between text-[14px] py-[5px] gap-3">
+      <span className="text-[#5a8a76] shrink-0">Password</span>
+      <span className="flex items-center gap-1.5 min-w-0">
+        <span className="text-right min-w-0 truncate font-medium text-[#0f3d2e]">{shown ? pw ?? "—" : "••••••••"}</span>
+        {shown && pw && <CopyButton value={pw} />}
+        <button type="button" onClick={toggle} aria-label={shown ? "Hide password" : "Show password"} title={shown ? "Hide password" : "Show password"}
+          className="p-1 rounded text-[#5a8a76] hover:text-[#0f3d2e]">
+          {I.eye}
+        </button>
+      </span>
     </div>
   );
 }

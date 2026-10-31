@@ -1,6 +1,7 @@
 // Login passwords (migration 0094) — client side. The password is generated
-// and emailed by the server (/api/admin/login-password/[id]); the database
-// keeps only a bcrypt hash, so nobody can read a password back.
+// and emailed by the server (/api/admin/login-password/[id]); logins check a
+// bcrypt hash. An EPC's current password (issued, or the one they set) is also
+// kept for the main admin to read back (0110); team passwords never are.
 
 import { supabase } from "./supabase";
 import { getToken } from "./auth";
@@ -10,6 +11,13 @@ export async function loginPasswordStatus(businessIds: string[]): Promise<Map<st
   if (!businessIds.length) return new Map();
   const { data } = await supabase().rpc("login_password_status", { p_business_ids: businessIds });
   return new Map(((data ?? []) as { business_id: string; updated_at: string }[]).map((r) => [r.business_id, r.updated_at]));
+}
+
+/** Main admin: the EPC's current login password, or null when none is kept. */
+export async function epcLoginPassword(businessId: string): Promise<string | null> {
+  const { data, error } = await supabase().rpc("epc_login_password", { p_business_id: businessId });
+  if (error) throw error;
+  return (data as string | null) ?? null;
 }
 
 export type PasswordEmailResult = { ok: boolean; sentTo?: string; error?: string };
