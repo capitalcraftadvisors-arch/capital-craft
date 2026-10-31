@@ -325,10 +325,8 @@ function Inner() {
   useEffect(() => {
     if (resuming || !turn) return;
     if (turn.when && !turn.when(form)) { setIdx((i) => i + 1); return; }
-    if (editMode && turn.id !== "submit" && isTurnFilled(turn)) { setIdx((i) => i + 1); return; }
-    let text = turn.bot;
-    if (turn.id === "extra_doc") text = `Upload the ${extraDocLabel(form.business_type) ?? "entity document"}.`;
-    pushBot(text, turn.id);
+    if (editMode && turn.id !== "submit" && isTurnFilled(turn)) { replay(turn); setIdx((i) => i + 1); return; }
+    pushBot(botText(turn), turn.id);
     if (turn.id === "office") pushBot("Geo-tagged on-site photos can be redone later from the classic form — plain images are fine here.", "office_note");
     setInput(""); setError(null); setFiles({}); setThumbs({}); setConfirm(null); setEditing(null);
     if (turn.id === "mobile") { const p = new URLSearchParams(window.location.search).get("mobile"); if (p) setInput(p.replace(/\D/g, "").slice(0, 10)); }
@@ -369,6 +367,51 @@ function Inner() {
       case "submit": return false;
     }
     return false;
+  }
+
+  function botText(t: Turn): string {
+    return t.id === "extra_doc" ? `Upload the ${extraDocLabel(form.business_type) ?? "entity document"}.` : t.bot;
+  }
+
+  // Edit / resume: an already-answered turn is shown as it was answered — the
+  // question, then the answer from the saved profile (editable like a live one,
+  // plus the "Read from the document" card for PAN / GST / cheque) — so the
+  // earlier chat is there instead of a blank screen.
+  function replay(t: Turn) {
+    const f = (label: string, field: string): Fetched => ({ label, value: form[field] ?? "", ok: !!form[field], field });
+    let answer: Partial<Msg> | null = null;
+    let fetched: Fetched[] | null = null;
+    switch (t.kind) {
+      case "text":
+        answer = { text: form[t.field ?? ""] ?? "", editable: true };
+        break;
+      case "choice": {
+        const v = form[t.filledBy ?? t.field ?? ""] ?? "";
+        answer = { text: t.choices?.find((c) => c.value === v)?.label ?? v, editable: true };
+        break;
+      }
+      case "docs":
+        answer = { files: (t.uploads ?? []).filter((u) => docCats.has(u.category)).map((u) => ({ name: u.label, thumb: null })), editable: true };
+        if (t.ocr === "pan") fetched = [f("PAN", "pan_number")];
+        else if (t.ocr === "gst") fetched = [f("Legal name", "legal_name"), f("Trade name", "trade_name"), f("GSTIN", "gstin_number"), f("GST address", "gst_address")];
+        else if (t.ocr === "cheque") fetched = [f("Account no.", "bank_account_number"), f("IFSC", "bank_ifsc"), f("Bank", "bank_name")];
+        break;
+      case "confirmacct": answer = { text: "Account number confirmed ✓" }; break;
+      case "bankstatements": answer = { text: `${bankStmtCount} bank statements uploaded` }; break;
+      case "stakeholders": answer = { text: stakeholders.map((s) => s.name).filter(Boolean).join(", ") }; break;
+      case "references": answer = { text: `Saved ${initCustomers.length + initSuppliers.length} references` }; break;
+    }
+    if (!answer) return;
+    const a = answer;
+    setMsgs((m) => {
+      if (m.some((x) => x.turnId === t.id)) return m;
+      const out: Msg[] = [...m,
+        { id: uid(), from: "bot", text: botText(t), time: "", turnId: t.id },
+        { id: uid(), from: "user", time: "", turnId: t.id, field: t.field, ...a },
+      ];
+      if (fetched) out.push({ id: uid(), from: "bot", time: "", fetched });
+      return out;
+    });
   }
 
   // ── Files ──
@@ -902,7 +945,7 @@ function MessageRow({ m, rmName, onEdit, editingId }: { m: Msg; rmName: string; 
       </div>
       <div className={["flex items-center gap-1.5 mt-0.5 px-1 text-[10.5px]", isUser ? "text-[#0f3a66]/60 flex-row-reverse" : "text-text-muted"].join(" ")}>
         <span className="font-medium">{isUser ? rmName : "Capital Craft"}</span>
-        <span>· {m.time}</span>
+        {m.time && <span>· {m.time}</span>}
         {m.edited && <span>· edited</span>}
         {isUser && !m.files && <span className="text-[#185fa5]">✓✓</span>}
         {isUser && m.editable && (
@@ -1009,6 +1052,28 @@ function StakeholdersDock({ epcId, businessType, initial, busy, onContinue }: {
   const cfg = configFor(businessType);
   const [list, setList] = useState<Stakeholder[]>(() => (initial.length ? initial : [emptyMember(cfg.defDesig)]));
   const [stkError, setStkError] = useState<string | null>(null);
+  const [panKey, setPanKey] = useState(0); // remounts the proprietor's PAN slot once it's filed
+
+  // Proprietorship: the business PAN IS the proprietor's PAN — file it for them
+  // (and read it) instead of asking for the same card again.
+  useEffect(() => {
+    const id = list[0]?.id;
+    if (businessType !== "proprietorship" || !id) return;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/admin/epc/${epcId}/proprietor-pan`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+          body: JSON.stringify({ stakeholder_id: id }),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!j?.ok || !j.copied) return;
+        setPanKey((k) => k + 1);
+        fillMember(id, "pan", (j.fields ?? {}) as Record<string, string>);
+      } catch { /* the PAN slot stays a normal upload */ }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function update(id: string, key: keyof Omit<Stakeholder, "id">, value: string) {
     setList((arr) => arr.map((s) => (s.id === id ? { ...s, [key]: value } : s)));
@@ -1025,24 +1090,28 @@ function StakeholdersDock({ epcId, businessType, initial, busy, onContinue }: {
       const res = await fetch(`/api/admin/epc/${epcId}/extract-stakeholder`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
       const j = await res.json().catch(() => ({}));
       if (!j?.ok || !j.fields) return;
-      const fx = j.fields as Record<string, string>;
-      setList((arr) => arr.map((s) => {
-        if (s.id !== id) return s;
-        const n = { ...s };
-        if (kind === "pan") {
-          if (!n.name && fx.name) n.name = fx.name;
-          if (!n.father_name && fx.father_name) n.father_name = fx.father_name;
-          if (!n.dob && fx.dob) n.dob = toIsoDate(fx.dob) || fx.dob;
-        } else if (kind === "aadhaar_front") {
-          if (!n.name && fx.name) n.name = fx.name;
-          if (!n.dob && fx.dob) n.dob = toIsoDate(fx.dob) || fx.dob;
-          if (!n.aadhaar_number && fx.aadhaar_number) n.aadhaar_number = fx.aadhaar_number;
-        } else if (kind === "aadhaar_back") {
-          if (!n.aadhaar_address && fx.address) n.aadhaar_address = fx.address;
-        }
-        return n;
-      }));
+      fillMember(id, kind, j.fields as Record<string, string>);
     } catch { /* silent — the RM can type the fields */ }
+  }
+
+  // Fill a member's EMPTY fields from what a PAN / Aadhaar read returned.
+  function fillMember(id: string, kind: "pan" | "aadhaar_front" | "aadhaar_back", fx: Record<string, string>) {
+    setList((arr) => arr.map((s) => {
+      if (s.id !== id) return s;
+      const n = { ...s };
+      if (kind === "pan") {
+        if (!n.name && fx.name) n.name = fx.name;
+        if (!n.father_name && fx.father_name) n.father_name = fx.father_name;
+        if (!n.dob && fx.dob) n.dob = toIsoDate(fx.dob) || fx.dob;
+      } else if (kind === "aadhaar_front") {
+        if (!n.name && fx.name) n.name = fx.name;
+        if (!n.dob && fx.dob) n.dob = toIsoDate(fx.dob) || fx.dob;
+        if (!n.aadhaar_number && fx.aadhaar_number) n.aadhaar_number = fx.aadhaar_number;
+      } else if (kind === "aadhaar_back") {
+        if (!n.aadhaar_address && fx.address) n.aadhaar_address = fx.address;
+      }
+      return n;
+    }));
   }
 
   function cont() {
@@ -1081,7 +1150,7 @@ function StakeholdersDock({ epcId, businessType, initial, busy, onContinue }: {
           </div>
           <div className="grid grid-cols-3 gap-2 mt-2">
             <div className="rounded-lg border border-line p-2">
-              <FileUpload businessId={epcId} stakeholderId={s.id} table="epc_documents" category="stakeholder_pan" maxFiles={1} uploadedBy="admin" label="PAN" onUploaded={({ file }) => void ocrMember(s.id, "pan", file)} />
+              <FileUpload key={`pan-${s.id}-${panKey}`} businessId={epcId} stakeholderId={s.id} table="epc_documents" category="stakeholder_pan" maxFiles={1} uploadedBy="admin" label="PAN" onUploaded={({ file }) => void ocrMember(s.id, "pan", file)} />
             </div>
             <div className="rounded-lg border border-line p-2">
               <FileUpload businessId={epcId} stakeholderId={s.id} table="epc_documents" category={"stakeholder_aadhaar_front" as any} maxFiles={1} uploadedBy="admin" label="Aadhaar front" onUploaded={({ file }) => void ocrMember(s.id, "aadhaar_front", file)} />

@@ -16,7 +16,8 @@ import OtherInsDocs, { otherInsDocLists } from "@/components/OtherInsDocs";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { invalidate } from "@/lib/list-cache";
-import { OTHER_INS_LIST_CACHE } from "@/lib/other-insurance";
+import { OTHER_INS_LIST_CACHE, otherInsCompanies } from "@/lib/other-insurance";
+import SearchableSelect from "@/components/quotation/SearchableSelect";
 
 export default function OtherInsuranceFormPage() {
   return (
@@ -38,6 +39,7 @@ function Inner() {
   const [name, setName] = useState("");
   const [sumInsured, setSumInsured] = useState("");
   const [company, setCompany] = useState("");
+  const [companies, setCompanies] = useState<string[]>([]);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [loading, setLoading] = useState(params.id !== "new");
@@ -68,6 +70,8 @@ function Inner() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowed, params.id]);
+
+  useEffect(() => { if (allowed) void otherInsCompanies().then(setCompanies); }, [allowed]);
 
   const fields = () => ({
     customer_name: name.trim() || null,
@@ -171,7 +175,8 @@ function Inner() {
               </div>
               <div>
                 <p className="text-[12px] text-[#5a8a76] mb-1">Insurance company (optional)</p>
-                <input className={inputCls} value={company} onChange={(e) => setCompany(e.target.value)} />
+                <SearchableSelect label="" value={company} options={companies} onChange={setCompany} clearable
+                  triggerClass={inputCls + " hover:border-[#185fa5]"} />
               </div>
             </div>
           </div>

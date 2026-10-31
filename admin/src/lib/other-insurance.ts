@@ -2,11 +2,30 @@
 // main admin only. Client wrappers around /api/admin/other-insurance/[id]/*.
 
 import { getToken } from "./auth";
+import { supabase } from "./supabase";
+import { getCached } from "./list-cache";
 
 export type KycDoc = { path: string; name: string; mime: string };
 
 /** list-cache key of the console's Other Insurance table. */
 export const OTHER_INS_LIST_CACHE = "dash.otherins";
+
+/** Insurance companies already used on Other Insurance files (A–Z, no repeats) —
+ *  from the console list's cache when it's there, else one small read. */
+export async function otherInsCompanies(): Promise<string[]> {
+  type R = { insurance_company: string | null };
+  let rows = getCached<R[]>(OTHER_INS_LIST_CACHE, 30 * 60_000);
+  if (!rows) {
+    const { data } = await supabase().from("other_insurance").select("insurance_company").not("insurance_company", "is", null);
+    rows = (data ?? []) as R[];
+  }
+  const byKey = new Map<string, string>();
+  for (const r of rows) {
+    const v = r.insurance_company?.trim();
+    if (v && !byKey.has(v.toLowerCase())) byKey.set(v.toLowerCase(), v);
+  }
+  return [...byKey.values()].sort((a, b) => a.localeCompare(b));
+}
 
 const auth = () => ({ Authorization: `Bearer ${getToken() ?? ""}` });
 

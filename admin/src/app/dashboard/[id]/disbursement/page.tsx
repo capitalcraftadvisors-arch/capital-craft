@@ -18,7 +18,7 @@ import { supabase } from "@/lib/supabase";
 import CompletionDocsSection from "@/components/CompletionDocsSection";
 import { I, SectionCard, KV, Pill } from "@/components/view/ViewKit";
 import {
-  deadlineState, DEADLINE_PILL, remainingAmount, fmtRupeesExact, fmtDateShort,
+  deadlineState, DEADLINE_PILL, remainingAmount, firstCharges, fmtRupeesExact, fmtDateShort,
   DISBURSEMENT_WINDOW_DAYS,
 } from "@/lib/disbursement";
 
@@ -65,7 +65,7 @@ function Inner() {
   const dl = deadlineState(loan.first_disbursement_date, loan.second_disbursement_amount != null);
   const sanctioned = loan.sanctioned_amount != null ? Number(loan.sanctioned_amount) : null;
   const firstSaved = loan.first_disbursement_amount != null;
-  const remaining = remainingAmount(sanctioned, loan.first_disbursement_amount);
+  const remaining = remainingAmount(sanctioned, loan.first_disbursement_amount, firstCharges(loan));
   const allDocsIn = docsUploaded >= docsTotal;
 
   return (

@@ -27,7 +27,7 @@ import RowLink from "@/components/RowLink";
 import { toast } from "sonner";
 import { nameCase, initialsOf } from "@/lib/names";
 import {
-  deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort, remainingAmount,
+  deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort, remainingAmount, firstCharges, FIRST_CHARGE_COLS,
   displayAmount as amountFor,
 } from "@/lib/disbursement";
 import { fmtDate, fmtDateTime, localIsoDate } from "@/lib/dates";
@@ -463,6 +463,7 @@ type KpiRow = {
   loan_amount_required: number | null; loan_amount: number | null; sanctioned_amount: number | null;
   first_disbursement_amount: number | null; second_disbursement_amount: number | null;
   first_disbursement_date: string | null;
+  first_processing_fee: number | null; first_legal_charges: number | null; first_cersai_charges: number | null;
   created_at: string | null; aborted_at: string | null;
 };
 // Each KPI = total amount + number of files.
@@ -481,7 +482,7 @@ function DashboardKpis({ tab, period, pFrom, pTo, epc }: { tab: string; period: 
     void (async () => {
       const { data } = await supabase()
         .from("epc_applications")
-        .select("status, loan_amount_required, loan_amount, sanctioned_amount, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, created_at, aborted_at");
+        .select(`status, loan_amount_required, loan_amount, sanctioned_amount, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, ${FIRST_CHARGE_COLS}, created_at, aborted_at`);
       if (cancelled) return;
       const r = (data ?? []) as unknown as KpiRow[];
       setCached("dashkpis", r);
@@ -510,7 +511,7 @@ function DashboardKpis({ tab, period, pFrom, pTo, epc }: { tab: string; period: 
       pipeline: fig(inProgress, applied),
       approved: fig(approvedRows, (r) => num(r.sanctioned_amount) || applied(r)),
       firstTranche: fig(rows.filter((r) => r.first_disbursement_amount != null && inP(r.first_disbursement_date)), (r) => num(r.first_disbursement_amount)),
-      secondPending: fig(secondPending, (r) => remainingAmount(r.sanctioned_amount, r.first_disbursement_amount) ?? 0),
+      secondPending: fig(secondPending, (r) => remainingAmount(r.sanctioned_amount, r.first_disbursement_amount, firstCharges(r)) ?? 0),
     };
   }, [rows, period, pFrom, pTo]);
 

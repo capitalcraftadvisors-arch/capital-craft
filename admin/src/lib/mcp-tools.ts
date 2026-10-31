@@ -8,7 +8,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fmtDateIST as dt } from "./dates";
-import { remainingAmount } from "./disbursement";
+import { remainingAmount, firstCharges, FIRST_CHARGE_COLS } from "./disbursement";
 import { PENDING_FILTER } from "./review";
 import { DEFAULT_LOAN_LENDERS, lenderLabelIn } from "./loan-lenders";
 
@@ -152,7 +152,7 @@ export const MCP_TOOLS: McpTool[] = [
       const r = range(args);
       const { data, error } = await db.from("epc_applications").select(
         "status, loan_amount_required, loan_amount, sanctioned_amount, approved_lender, created_at, aborted_at, " +
-        "first_disbursement_amount, first_disbursement_date, second_disbursement_amount, second_disbursement_date");
+        "first_disbursement_amount, first_disbursement_date, second_disbursement_amount, second_disbursement_date, " + FIRST_CHARGE_COLS);
       fail(error);
       const all = (data ?? []) as Row[];
       const created = all.filter((x) => !r.from && !r.to ? true : inRange(r, x.created_at));
@@ -173,7 +173,7 @@ export const MCP_TOOLS: McpTool[] = [
         approved_by_lender: byLender,
         first_tranche_disbursed: { files: t1.length, amount: sum(t1, (x) => Number(x.first_disbursement_amount) || 0) },
         second_tranche_disbursed: { files: t2.length, amount: sum(t2, (x) => Number(x.second_disbursement_amount) || 0) },
-        second_tranche_pending: { files: pending2.length, amount: sum(pending2, (x) => remainingAmount(x.sanctioned_amount, x.first_disbursement_amount) ?? 0) },
+        second_tranche_pending: { files: pending2.length, amount: sum(pending2, (x) => remainingAmount(x.sanctioned_amount, x.first_disbursement_amount, firstCharges(x)) ?? 0) },
       };
     },
   },
@@ -214,7 +214,8 @@ export const MCP_TOOLS: McpTool[] = [
     async run(db, args) {
       const r = await findLoan(db, str(args.loan_id), LOAN_COLS + ", borrower_email, borrower_city, borrower_state, install_city, install_district, install_state, install_pincode, " +
         "project_size, project_size_unit, total_project_cost, selected_tenure_years, selected_monthly_emi, coapp_name, coapp_aadhaar_name, coapp_relation, " +
-        "lead_owner_name, approval_details, rejection_reason, abort_reason, status_history, approval_review_status, disb1_review_status, disb2_review_status, credit_score");
+        "lead_owner_name, approval_details, rejection_reason, abort_reason, status_history, approval_review_status, disb1_review_status, disb2_review_status, credit_score, " +
+        FIRST_CHARGE_COLS);
       return {
         ...loanRow(r),
         email: r.borrower_email,
@@ -229,7 +230,10 @@ export const MCP_TOOLS: McpTool[] = [
           approval_date: r.approval_details.approval_date ? dt(r.approval_details.approval_date) : null, credit_score: r.credit_score,
         } : null,
         review: { approval: r.approval_review_status, disbursement_1: r.disb1_review_status, disbursement_2: r.disb2_review_status },
-        second_tranche_pending: r.first_disbursement_amount != null && r.second_disbursement_amount == null ? remainingAmount(r.sanctioned_amount, r.first_disbursement_amount) : null,
+        first_disbursement_charges: r.first_disbursement_amount != null ? {
+          processing_fee_incl_gst: num(r.first_processing_fee), legal_charges: num(r.first_legal_charges), cersai_charges: num(r.first_cersai_charges),
+        } : null,
+        second_tranche_pending: r.first_disbursement_amount != null && r.second_disbursement_amount == null ? remainingAmount(r.sanctioned_amount, r.first_disbursement_amount, firstCharges(r)) : null,
         rejection_reason: r.rejection_reason, abort_reason: r.abort_reason,
         history: Array.isArray(r.status_history) ? r.status_history.map((h: Row) => ({ from: h.from, to: h.to, on: dt(h.at), note: h.note ?? null })) : [],
       };

@@ -9,9 +9,9 @@ import { getToken } from "@/lib/auth";
 import { rememberBrandOption } from "./form-kit";
 
 export default function SearchableSelect({
-  label, value, options, onChange, field, placeholder = "Search or type…", required, clearable,
+  label, value, options, onChange, field, placeholder = "Search or type…", required, clearable, triggerClass,
 }: {
-  label: string;
+  label: string;             // "" → no label (the page draws its own)
   value: string;
   options: string[];
   onChange: (v: string) => void;
@@ -19,6 +19,7 @@ export default function SearchableSelect({
   placeholder?: string;
   required?: boolean;
   clearable?: boolean;       // × to empty an optional field
+  triggerClass?: string;     // the closed box's look, to match the page's inputs
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -62,11 +63,11 @@ export default function SearchableSelect({
 
   return (
     <div className="flex flex-col gap-1" ref={boxRef}>
-      <label className="text-[12.5px] font-medium text-text-mid">{label}{required && <span className="text-red-500"> *</span>}</label>
+      {label && <label className="text-[12.5px] font-medium text-text-mid">{label}{required && <span className="text-red-500"> *</span>}</label>}
       <div className="relative">
         <button type="button" ref={btnRef} data-qnav onClick={() => setOpen((o) => !o)}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") { e.preventDefault(); setOpen(true); } }}
-          className="w-full text-left border border-line rounded-xl px-3 py-2 text-[13.5px] bg-white hover:border-[#1e3a8a] focus:outline-none focus:border-[#1e3a8a] flex items-center justify-between gap-2">
+          className={(triggerClass ?? "border border-line rounded-xl px-3 py-2 text-[13.5px] bg-white hover:border-[#1e3a8a] focus:outline-none focus:border-[#1e3a8a]") + " w-full text-left flex items-center justify-between gap-2"}>
           <span className={value ? "text-text" : "text-text-muted"}>{value || placeholder}</span>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5a8a76" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
         </button>

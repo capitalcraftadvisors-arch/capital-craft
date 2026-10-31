@@ -15,7 +15,7 @@ import { createClient } from "@supabase/supabase-js";
 import ExcelJS from "exceljs";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { fetchLenders, lenderLabelIn, type Lender } from "@/lib/loan-lenders";
-import { deadlineState, remainingAmount } from "@/lib/disbursement";
+import { deadlineState, remainingAmount, firstCharges, FIRST_CHARGE_COLS } from "@/lib/disbursement";
 import { fmtDate } from "@/lib/dates";
 
 export const runtime = "nodejs";
@@ -40,6 +40,7 @@ type Loan = {
   approval_details: { applied_loan_amount?: number | null; approved_loan_amount?: number | null; roi?: number | string | null; approved_tenure_years?: number | null; applied_tenure_years?: number | null } | null;
   first_disbursement_amount: number | null; first_disbursement_date: string | null;
   second_disbursement_amount: number | null; second_disbursement_date: string | null;
+  first_processing_fee: number | null; first_legal_charges: number | null; first_cersai_charges: number | null;
   epc_business: { trade_name: string | null; legal_name: string | null; contact_name: string | null } | null;
 };
 
@@ -76,7 +77,7 @@ export async function GET(req: NextRequest) {
           "loan_display_id, borrower_name, aadhaar_name, total_project_cost, loan_amount_required, loan_amount, " +
           "sanctioned_amount, approved_lender, aborted_at, approval_details, " +
           "first_disbursement_amount, first_disbursement_date, second_disbursement_amount, second_disbursement_date, " +
-          "epc_business:epc_business_id(trade_name, legal_name, contact_name)",
+          FIRST_CHARGE_COLS + ", epc_business:epc_business_id(trade_name, legal_name, contact_name)",
         )
         .not("first_disbursement_date", "is", null),
       fetchLenders(supabase),
@@ -227,7 +228,7 @@ async function pending(wb: ExcelJS.Workbook, loans: Loan[], lenders: Lender[]) {
   let sum = 0;
   for (const { l, days } of rows) {
     const due = deadlineState(l.first_disbursement_date, false).deadline;
-    const left = remainingAmount(approvedOf(l), l.first_disbursement_amount);
+    const left = remainingAmount(approvedOf(l), l.first_disbursement_amount, firstCharges(l));
     if (left) sum += left;
     const row = ws.addRow([
       epcOf(l), borrowerOf(l), l.approved_lender ? lenderLabelIn(lenders, l.approved_lender) : "—",

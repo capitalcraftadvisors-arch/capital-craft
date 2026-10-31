@@ -78,10 +78,16 @@ export default function OtherInsDocs({
   );
 }
 
+// The uploaded policy's file name, read back from its stored path
+// (".../policy/<ms>_<safe name>", see the upload route).
+function policyFileName(path: string): string {
+  return (path.split("/").pop() ?? "").replace(/^\d+_/, "").replace(/_/g, " ").trim() || "Insurance policy";
+}
+
 /** The file's documents as OtherInsDocs lists. */
 export function otherInsDocLists(row: Record<string, any> | null): { kyc: KycDoc[]; policy: KycDoc[] } {
   return {
     kyc: Array.isArray(row?.kyc_docs) ? row!.kyc_docs : [],
-    policy: row?.policy_path ? [{ path: row.policy_path, name: "Insurance policy", mime: "" }] : [],
+    policy: row?.policy_path ? [{ path: row.policy_path, name: policyFileName(row.policy_path), mime: "" }] : [],
   };
 }

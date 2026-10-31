@@ -101,15 +101,32 @@ export const DEADLINE_PILL: Record<DeadlineTone, string> = {
   red:   "bg-red-50 text-red-700 border border-red-200",
 };
 
-/** Sanctioned − first disbursement. Null when we don't know the sanctioned amount. */
+// The lender's deductions entered with the 1st disbursement (migration 0111).
+// The 2nd disbursement must equal sanctioned − (1st + these).
+export const FIRST_CHARGES = [
+  { key: "first_processing_fee", label: "Processing Fees Charged (including GST)" },
+  { key: "first_legal_charges",  label: "Legal document charges" },
+  { key: "first_cersai_charges", label: "CERSAI Hypothecation charges" },
+] as const;
+export type FirstChargeKey = typeof FIRST_CHARGES[number]["key"];
+/** The SELECT list for the three charge columns. */
+export const FIRST_CHARGE_COLS = FIRST_CHARGES.map((c) => c.key).join(", ");
+
+/** Sum of the 1st-disbursement charges (missing = 0, e.g. entries from before 0111). */
+export function firstCharges(l: Partial<Record<FirstChargeKey, number | string | null>>): number {
+  return FIRST_CHARGES.reduce((s, c) => s + (Number.isFinite(Number(l[c.key])) ? Number(l[c.key]) : 0), 0);
+}
+
+/** Sanctioned − (first disbursement + its charges). Null when we don't know the sanctioned amount. */
 export function remainingAmount(
   sanctioned: number | null | undefined,
   first: number | null | undefined,
+  charges = 0,
 ): number | null {
   const s = Number(sanctioned);
   if (!Number.isFinite(s)) return null;
   const f = Number.isFinite(Number(first)) ? Number(first) : 0;
-  return Math.max(0, s - f);
+  return Math.max(0, s - f - charges);
 }
 
 /** The amount shown in the Amount column: sanctioned once approved, else applied. */
