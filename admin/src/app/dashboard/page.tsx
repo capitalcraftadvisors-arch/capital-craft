@@ -182,7 +182,7 @@ function DashboardInner() {
       const res = await fetch("/api/epc/insurance/create", { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) { alert("Couldn't start the insurance application: " + (data?.error || `HTTP ${res.status}`)); return; }
-      router.push(`/dashboard/insurance/${data.application.id}/step-1` as any);
+      router.push(`/dashboard/insurance/${data.application.id}/chat` as any);
     } catch (e) { alert("Network error: " + (e as Error).message); } finally { setInsBusy(false); }
   }
 
@@ -298,7 +298,8 @@ function DashboardInner() {
           )}
           {section === "insurance" && (
             <InsuranceSection insRows={insRows} loading={loading} onApply={() => void startInsurance()} applying={insBusy}
-              onOpen={(id) => router.push(`/dashboard/insurance/${id}/step-1` as any)} />
+              // A draft continues in the chat; a sent one opens its form to view / change.
+              onOpen={(id) => router.push(`/dashboard/insurance/${id}/${insRows.find((r) => r.id === id)?.status === "draft" ? "chat" : "step-1"}` as any)} />
           )}
           {section === "emi" && <EmiSection />}
           {section === "customers" && customers && <CustomerApplications serialNext={quoteTpl.serial_next}
