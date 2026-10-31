@@ -54,7 +54,13 @@ type Props = {
   onCountChange?: (n: number) => void;
   // Stored files this list leaves out (the caller shows them elsewhere).
   hideIds?: string[];
+  // Small fixed-height box (UPLOAD_BOX_COMPACT), so a grid of slots lines up.
+  compact?: boolean;
 };
+
+/** The compact upload box's height — shared with GeoOfficeUpload and the
+ *  tranche document slots so every box in a grid is the same size. */
+export const UPLOAD_BOX_COMPACT = "h-[84px]";
 
 type DocRow = {
   id: string;
@@ -77,7 +83,7 @@ export default function FileUpload(props: Props) {
     businessId, stakeholderId, applicationId,
     category, table, maxFiles = 1, uploadedBy,
     onUploaded, captureGps = false, extraMetadata, label, hint, uploadHint,
-    dedupe = false, onCountChange, hideIds,
+    dedupe = false, onCountChange, hideIds, compact = false,
   } = props;
   const inputRef = useRef<HTMLInputElement>(null);
   const [docs, setDocs] = useState<DocRow[]>([]);
@@ -284,8 +290,9 @@ export default function FileUpload(props: Props) {
       {canUploadMore && (
         <label
           className={[
-            "flex flex-col items-center justify-center min-h-[96px] border-2 border-dashed border-[#185fa5] rounded-input bg-white",
-            "px-4 py-4 text-center cursor-pointer hover:bg-[#f2f7fc] transition-colors",
+            "flex flex-col items-center justify-center border-2 border-dashed border-[#185fa5] rounded-input bg-white",
+            compact ? `${UPLOAD_BOX_COMPACT} px-3` : "min-h-[96px] px-4 py-4",
+            "text-center cursor-pointer hover:bg-[#f2f7fc] transition-colors",
           ].join(" ")}
         >
           <input
@@ -300,15 +307,15 @@ export default function FileUpload(props: Props) {
             multiple={maxFiles > 1}
             onChange={(e) => handleFiles(e.target.files)}
           />
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="mb-2">
+          <svg width={compact ? 20 : 28} height={compact ? 20 : 28} viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={compact ? "mb-1" : "mb-2"}>
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
             <polyline points="17 8 12 3 7 8" />
             <line x1="12" y1="3" x2="12" y2="15" />
           </svg>
-          <p className="text-[14px] font-semibold text-[#185fa5]">
+          <p className={(compact ? "text-[13px]" : "text-[14px]") + " font-semibold text-[#185fa5]"}>
             {uploading ? "Uploading…" : "Click to upload"}
           </p>
-          <p className="text-[12px] text-[#5a86b3] mt-0.5">{uploadHint ?? "Photo, scan, or PDF"}</p>
+          <p className={(compact ? "text-[11px]" : "text-[12px] mt-0.5") + " text-[#5a86b3]"}>{uploadHint ?? "Photo, scan, or PDF"}</p>
         </label>
       )}
 

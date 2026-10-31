@@ -21,7 +21,7 @@
 // read-only if present, so nothing already uploaded is orphaned.
 
 import { useEffect, useState } from "react";
-import FileUpload from "@/components/FileUpload";
+import FileUpload, { UPLOAD_BOX_COMPACT } from "@/components/FileUpload";
 import GeoOfficeUpload from "@/components/GeoOfficeUpload";
 import { supabase } from "@/lib/supabase";
 import { getDocumentUrl, deleteDocument } from "@/lib/storage";
@@ -119,6 +119,10 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
     if (u) window.open(u, "_blank", "noopener");
   }
 
+  // Every slot is a one-line title over the same small box, in one grid —
+  // side by side for the admin; the EPC page keeps them stacked.
+  const grid = uploadedBy === "admin" ? "grid gap-4 sm:grid-cols-2 xl:grid-cols-3" : "space-y-4";
+
   return (
     <div className="space-y-5">
       {/* 1st Tranche Docs — admin-only (feasibility report, MMR/receipt). Kept
@@ -126,10 +130,9 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
       {mode !== "tranche2" && uploadedBy === "admin" && (
         <>
           <p className="text-[12px] font-bold uppercase tracking-wide text-[#5a8a76]">1st Tranche Docs</p>
-          {/* The two tranche-1 slots side by side. */}
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className={grid}>
             {TRANCHE1_DOCS.map((d) => (
-              <DocSlot key={d.category} title={d.category === "mmr_advance_receipt" && advanceReceiptOptional ? `${d.title} (optional)` : d.title} hint="Image or PDF." doc={byCat(d.category)} onOpen={open} onRemove={removeDoc}>
+              <DocSlot key={d.category} title={d.category === "mmr_advance_receipt" && advanceReceiptOptional ? `${d.title} (optional)` : d.title} doc={byCat(d.category)} onOpen={open} onRemove={removeDoc}>
                 <FileUpload
                   applicationId={applicationId}
                   table="user_application_docs"
@@ -137,6 +140,7 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
                   uploadedBy={uploadedBy}
                   maxFiles={1}
                   label=""
+                  compact
                   onUploaded={() => setTick((n) => n + 1)}
                 />
               </DocSlot>
@@ -149,16 +153,9 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
       {uploadedBy === "admin" && (
         <p className="text-[12px] font-bold uppercase tracking-wide text-[#5a8a76] pt-2 border-t border-[#eaf3ee]">2nd Tranche Docs</p>
       )}
-      {/* The five slots — side by side for the admin; the EPC page keeps them stacked. */}
-      <div className={uploadedBy === "admin" ? "grid gap-4 sm:grid-cols-2" : "space-y-5"}>
+      <div className={grid}>
       {/* 1 — Invoice / tax invoice */}
-      <DocSlot
-        title="Invoice / tax invoice"
-        hint="Image or PDF."
-        doc={byCat("completion_invoice")}
-        onOpen={open}
-        onRemove={removeDoc}
-      >
+      <DocSlot title="Invoice / tax invoice" doc={byCat("completion_invoice")} onOpen={open} onRemove={removeDoc}>
         <FileUpload
           applicationId={applicationId}
           table="user_application_docs"
@@ -166,7 +163,7 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
           uploadedBy={uploadedBy}
           maxFiles={1}
           label=""
-          hint="JPG, PNG, WEBP or PDF."
+          compact
           onUploaded={() => setTick((n) => n + 1)}
         />
       </DocSlot>
@@ -174,26 +171,20 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
       {/* 2-4 — Three geo-tagged site photos (upload only). */}
       {GEO_PHOTOS.map((p) => (
         <div key={p.category}>
-          <p className="text-[13px] font-semibold text-[#0f3d2e] mb-1">{p.title} (geo-tagged)</p>
+          <SlotTitle title={`${p.title} (geo-tagged)`} />
           <GeoOfficeUpload
             applicationId={applicationId}
             uploadedBy={uploadedBy}
             category={p.category}
             label=""
             uploadOnly
-            hint="Must carry a location — upload a photo with GPS / a GPS-camera stamp."
+            compact
           />
         </div>
       ))}
 
       {/* 5 — Work completion / commission report */}
-      <DocSlot
-        title="Work Completion Report / Commission Report"
-        hint="Image or PDF."
-        doc={byCat("completion_report")}
-        onOpen={open}
-        onRemove={removeDoc}
-      >
+      <DocSlot title="Work Completion Report / Commission Report" doc={byCat("completion_report")} onOpen={open} onRemove={removeDoc}>
         <FileUpload
           applicationId={applicationId}
           table="user_application_docs"
@@ -201,10 +192,27 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
           uploadedBy={uploadedBy}
           maxFiles={1}
           label=""
-          hint="JPG, PNG, WEBP or PDF."
+          compact
           onUploaded={() => setTick((n) => n + 1)}
         />
       </DocSlot>
+
+      {/* Optional extra / supporting documents. Stored under "other", so they are
+          NEVER part of the required completion set and can't affect the
+          upload-count gate (docsUploaded/docsTotal count only COMPLETION_CATEGORIES). */}
+      <div>
+        <SlotTitle title="Additional documents (optional)" />
+        <FileUpload
+          applicationId={applicationId}
+          table="user_application_docs"
+          category="other"
+          uploadedBy={uploadedBy}
+          maxFiles={10}
+          label=""
+          compact
+          onUploaded={() => setTick((n) => n + 1)}
+        />
+      </div>
 
       {/* Legacy single plant photo from the earlier build — read-only. */}
       {legacyPlant && (
@@ -213,37 +221,22 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
         </DocSlot>
       )}
       </div>
-
-      {/* Optional extra / supporting documents. Stored under "other", so they are
-          NEVER part of the required completion set and can't affect the
-          upload-count gate (docsUploaded/docsTotal count only COMPLETION_CATEGORIES). */}
-      <div className="pt-2 border-t border-[#eaf3ee]">
-        <p className="text-[13px] font-semibold text-[#0f3d2e] mb-1">Additional documents (optional)</p>
-        <p className="text-[12px] text-[#5a8a76] mb-2">Add any extra supporting documents for this tranche.</p>
-        <FileUpload
-          applicationId={applicationId}
-          table="user_application_docs"
-          category="other"
-          uploadedBy={uploadedBy}
-          maxFiles={10}
-          label=""
-          hint="JPG, PNG, WEBP or PDF."
-          onUploaded={() => setTick((n) => n + 1)}
-        />
-      </div>
       </>
       )}
     </div>
   );
 }
 
+function SlotTitle({ title }: { title: string }) {
+  return <p className="text-[13px] font-semibold text-[#0f3d2e] mb-1.5 truncate" title={title}>{title}</p>;
+}
+
 // Shows the existing upload (with an eye-View) when present, otherwise the
-// uploader. Keeps the two file slots visually level with the geo slot.
+// uploader — both in the same compact box height, so the grid stays level.
 function DocSlot({
-  title, hint, doc, onOpen, onRemove, children,
+  title, doc, onOpen, onRemove, children,
 }: {
   title: string;
-  hint?: string;
   doc: DocRow | null;
   onOpen: (id: string) => void;
   onRemove?: (id: string) => void;
@@ -251,9 +244,9 @@ function DocSlot({
 }) {
   return (
     <div>
-      <p className="text-[13px] font-semibold text-[#0f3d2e] mb-1">{title}</p>
+      <SlotTitle title={title} />
       {doc ? (
-        <div className="flex items-center justify-between gap-3 px-3 py-2.5 bg-[#f7fcfa] border border-[#e0f0e8] rounded-input">
+        <div className={`${UPLOAD_BOX_COMPACT} flex items-center justify-between gap-3 px-3 bg-[#f7fcfa] border border-[#e0f0e8] rounded-input`}>
           <span className="text-[13px] text-[#0f3d2e] truncate">{doc.file_name || "Uploaded"}</span>
           <div className="flex items-center gap-2 shrink-0">
             <button
@@ -276,12 +269,7 @@ function DocSlot({
             )}
           </div>
         </div>
-      ) : (
-        <>
-          {hint && <p className="text-[11px] text-text-muted mb-1.5">{hint}</p>}
-          {children}
-        </>
-      )}
+      ) : children}
     </div>
   );
 }

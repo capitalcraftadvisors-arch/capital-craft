@@ -32,6 +32,7 @@ import { uploadDocument, getDocumentUrl, deleteDocument } from "@/lib/storage";
 import { getToken } from "@/lib/auth";
 import { isAcceptedFileType } from "@/lib/validators";
 import { I } from "@/components/view/ViewKit";
+import { UPLOAD_BOX_COMPACT } from "@/components/FileUpload";
 
 // EPC office photos (epc_documents) or loan completion photos
 // (user_application_docs) — the geo rules are identical, so one component
@@ -57,6 +58,9 @@ type Props = {
   // Hide the live-camera tile and offer upload only (insurance photos are
   // taken on the customer's site beforehand, then uploaded).
   uploadOnly?: boolean;
+  // Small fixed-height box like FileUpload's compact one (the caller shows the
+  // title), so it lines up in a grid of document slots.
+  compact?: boolean;
 };
 
 type DocRow = {
@@ -310,7 +314,7 @@ export const LOCATION_OFF_MSG = "Turn on location (GPS) and allow location acces
 
 export default function GeoOfficeUpload({
   category, label, businessId, applicationId, uploadedBy, hint,
-  uploadFn, initialGps, onUploaded, uploadOnly,
+  uploadFn, initialGps, onUploaded, uploadOnly, compact = false,
 }: Props) {
   // Which table this slot lives in. Loan completion photos hang off the
   // application; EPC office photos off the business.
@@ -556,11 +560,39 @@ export default function GeoOfficeUpload({
 
   return (
     <div>
-      <p className="text-[13px] font-medium text-text-mid mb-0.5 min-h-[2.4em] leading-snug">{label}</p>
-      {hint && <p className="text-[11px] text-text-muted mb-2">{hint}</p>}
-      {!hint && <div className="mb-2" />}
+      {!compact && (
+        <>
+          <p className="text-[13px] font-medium text-text-mid mb-0.5 min-h-[2.4em] leading-snug">{label}</p>
+          {hint && <p className="text-[11px] text-text-muted mb-2">{hint}</p>}
+          {!hint && <div className="mb-2" />}
+        </>
+      )}
 
-      {doc ? (
+      {doc && compact ? (
+        // One fixed-height card: thumbnail, name, the GPS point, eye + delete.
+        <div className={`${UPLOAD_BOX_COMPACT} flex items-center gap-3 bg-white border border-line rounded-input px-3`}>
+          {thumb ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={thumb} alt="" className="w-10 h-10 object-cover rounded-md shrink-0" />
+          ) : (
+            <div className="w-10 h-10 bg-bg-tint rounded-md grid place-items-center text-blue text-xs font-bold shrink-0">PDF</div>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-[13px] text-text truncate">{doc.file_name || "Document"}</p>
+            <p className="text-[11px] text-text-muted truncate">{gps ? `📍 ${gps.lat.toFixed(6)}, ${gps.lng.toFixed(6)}` : "Geo-tagged · Uploaded"}</p>
+          </div>
+          {canView && (
+            <button type="button" onClick={() => void view()} title="View uploaded document" aria-label="View uploaded document"
+              className="p-1.5 rounded hover:bg-bg-tint text-[#185fa5] transition-colors">
+              {I.eye}
+            </button>
+          )}
+          <button type="button" onClick={() => void remove()} title="Remove" aria-label="Remove"
+            className="p-1.5 rounded hover:bg-red-50 text-red-600 transition-colors">
+            {I.trash}
+          </button>
+        </div>
+      ) : doc ? (
         <>
           <div className="flex items-center gap-3 bg-white border border-line rounded-input px-3 py-2 mb-2">
             {thumb ? (
@@ -626,7 +658,8 @@ export default function GeoOfficeUpload({
           )}
           <label
             className={[
-              "flex flex-col items-center justify-center min-h-[120px] border-2 border-dashed border-[#185fa5] rounded-input bg-white text-[#185fa5]",
+              "flex flex-col items-center justify-center border-2 border-dashed border-[#185fa5] rounded-input bg-white text-[#185fa5]",
+              compact ? UPLOAD_BOX_COMPACT : "min-h-[120px]",
               "px-3 text-center cursor-pointer hover:bg-[#f2f7fc] transition-colors",
             ].join(" ")}
           >
@@ -638,13 +671,13 @@ export default function GeoOfficeUpload({
               onChange={(e) => handleUploadFile(e.target.files)}
               disabled={uploading}
             />
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="mb-1.5">
+            <svg width={compact ? 20 : 26} height={compact ? 20 : 26} viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={compact ? "mb-1" : "mb-1.5"}>
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
               <polyline points="17 8 12 3 7 8" />
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
-            <p className="text-[14px] font-semibold">Upload photo</p>
-            <p className="text-[12px] text-[#5a86b3] mt-0.5">Must be geo-tagged</p>
+            <p className={(compact ? "text-[13px]" : "text-[14px]") + " font-semibold"}>Upload photo</p>
+            <p className={(compact ? "text-[11px]" : "text-[12px] mt-0.5") + " text-[#5a86b3]"}>Must be geo-tagged</p>
           </label>
         </div>
       )}
