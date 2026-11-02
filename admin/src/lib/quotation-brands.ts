@@ -116,6 +116,70 @@ export function sarvatraTerms(v: Record<string, unknown>) {
   };
 }
 
+// Sarvatra Energy (template bundled:sarvatra-energy) — their offer letter: the
+// customer table, the bill of quantities and the commercial summary. Quote no.
+// as in their sample (SE2025-26 1579).
+export const SARVATRA_ENERGY = {
+  key: "bundled:sarvatra-energy",
+  gst: 8.9, // % — the total project cost is printed as supply + GST
+  categories: ["Domestic", "Non-Domestic"],
+  dcrTypes: ["DCR", "NDCR"],
+  serial: (n: number) => `SE2025-26 ${n}`,
+  serialNo: (s: string) => Number(/(\d+)\D*$/.exec(s)?.[1]),
+};
+
+// Bill of quantities: every cell is a dropdown whose first option is the default
+// (as in their sample); custom values are saved under boqField(row, column).
+export const BOQ_COLUMNS = ["make", "spec", "qty"] as const;
+export type BoqColumn = (typeof BOQ_COLUMNS)[number];
+export type BoqRow = { key: string; product: string } & Record<BoqColumn, string[]>;
+export const boqField = (row: string, col: BoqColumn) => `boq_${row}_${col}`;
+
+export const SARVATRA_ENERGY_BOQ: BoqRow[] = [
+  { key: "module", product: "Solar PV Modules",
+    make: ["ADANI", "WAAREE", "RAYZON", "PREMIER", "GOLDI", "VIKRAM", "TATA POWER", "RENEWSYS", "SAATVIK", "EMMVEE"],
+    spec: ["625 WP Topcon Bifacial", "620 WP Topcon Bifacial", "610 WP Topcon Bifacial", "600 WP Topcon Bifacial", "590 WP Topcon Bifacial",
+      "585 WP Topcon Bifacial", "575 WP Topcon Bifacial", "550 WP Mono PERC Bifacial", "545 WP Mono PERC Bifacial", "540 WP Mono PERC Bifacial"],
+    qty: [] }, // from the kW and the module's watts
+  { key: "inverter", product: "Solar On-Grid String Inverter",
+    make: ["POLYCAB/ MICROTEK", "POLYCAB", "MICROTEK", "HAVELLS", "SUNGROW", "GROWATT", "SOLIS", "GOODWE", "DELTA", "LUMINOUS"],
+    spec: [], // the system kW
+    qty: ["1 Nos.", "2 Nos."] },
+  { key: "meter", product: "Solar + Net Meter", make: ["L&T / HPL / Secure", "L&T", "HPL", "Secure", "Genus"], spec: ["1 PH", "3 PH"], qty: ["1+1 Nos."] },
+  { key: "structure", product: "Module Mounting Structure",
+    make: ["APOLLO APL", "TATA STRUCTURA", "JINDAL", "Customized"],
+    spec: ["Customized galvanized GP pipe", "Hot-dip galvanized (HDGI)", "Galvanized iron (GI)", "Aluminium", "Magnelis"],
+    qty: ["As per Site"] },
+  { key: "cable", product: "DC/AC Cables", make: ["POLYCAB", "HAVELLS", "KEI", "RR KABEL", "FINOLEX"],
+    spec: ["4 sq.mm / 4C", "4 sq.mm / 2C", "6 sq.mm / 4C", "6 sq.mm / 2C", "10 sq.mm / 4C"], qty: ["As per Site"] },
+  { key: "earthing", product: "Earthing Strip / Wire", make: ["POLYCAB", "HAVELLS", "KEI"],
+    spec: ["4 sq.mm copper bonded rod & wire", "Copper bonded rod & GI strip", "Chemical earthing"], qty: ["3 Nos.", "2 Nos.", "4 Nos."] },
+  { key: "arrester", product: "Lightning Arrester", make: ["—"], spec: ["Conventional type, 1 meter", "ESE type"], qty: ["1 Nos.", "2 Nos."] },
+  { key: "acdb", product: "ACDB & DCDB", make: ["Schneider / Havells / Sibass / Elemax", "Schneider", "Havells", "Elemax"], spec: ["As per site"], qty: ["1+1 Nos."] },
+  { key: "pedestal", product: "Pedestal for MMS", make: ["Customized"], spec: ["300×300×300 mm", "400×400×400 mm"], qty: ["As per Design"] },
+  { key: "protection", product: "MCB / SPD / MC4 / Conduit", make: ["Havells / Sibass / Reputed / Polycab"], spec: ["As per site / requirement"], qty: ["As per Site"] },
+];
+
+/** The printed BOQ: each cell as picked (`<row>_<column>`), else its default —
+ *  the module quantity from the kW and the module's watts, the inverter = the system kW. */
+export function sarvatraEnergyBoq(picked: Record<string, unknown>, kw: number): Record<string, Record<BoqColumn, string>> {
+  const out: Record<string, Record<BoqColumn, string>> = {};
+  for (const r of SARVATRA_ENERGY_BOQ) {
+    const get = (col: BoqColumn) => String(picked[`${r.key}_${col}`] ?? "").trim();
+    const spec = get("spec") || (r.key === "inverter" ? (kw > 0 ? `${+kw.toFixed(2)}KW` : "") : r.spec[0] ?? "");
+    const watts = SARVATRA.wattsOf(spec);
+    const qty = get("qty") || (r.key === "module" ? (kw > 0 && watts ? `${Math.ceil((kw * 1000) / watts)} Nos.` : "") : r.qty[0] ?? "");
+    out[r.key] = { make: get("make") || r.make[0], spec, qty };
+  }
+  return out;
+}
+
+/** Total project cost → supply + GST (₹2,38,000 → ₹2,18,549 + ₹19,451). */
+export function sarvatraEnergyTotals(total: number) {
+  const base = Math.round(total / (1 + SARVATRA_ENERGY.gst / 100));
+  return { base, gst: total - base };
+}
+
 // Field keys used for persisting custom options (quotation_brand_options.field).
 export const BRAND_FIELDS = {
   module: "module_brand",

@@ -200,11 +200,17 @@ type AmountEdit = { kind: "amount"; rupee: At; at: At; to?: number; text: string
 // Line: one original line replaced by parts drawn one after another, each in the
 // colour of the original text at `like` (default: the line's first glyph).
 type LineEdit = { kind: "line"; at: At; to: number; parts: { text: string; like?: At; bold?: boolean }[]; fit?: number };
-type AddEdit = { kind: "add"; x: number; y: number; text: string; bold?: boolean; like: At };
+type AddEdit = { kind: "add"; x: number; y: number; text: string; bold?: boolean; like: At; fit?: number };
+// Cell: a table cell's value — its original lines (each line's first glyph; runs up
+// to `to`) — replaced by `text` word-wrapped onto up to `rows` lines `width` wide,
+// centred where the original was. A last line still too long shrinks to fit.
+type CellEdit = { kind: "cell"; lines: At[]; to: number; text: string; width: number; rows?: number; bold?: boolean };
 type HideEdit = { kind: "hide"; image: At };
+// Box: a filled rectangle — e.g. to cover a drawn underline — painted in order with the new text.
+type BoxEdit = { kind: "box"; x: number; y: number; width: number; height: number; color: [number, number, number] };
 // Check: a printed HTML-form checkbox (`at` = its bottom-left corner) redrawn ticked or empty.
 type CheckEdit = { kind: "check"; at: At; on: boolean };
-export type Edit = TextEdit | AmountEdit | LineEdit | AddEdit | HideEdit | CheckEdit;
+export type Edit = TextEdit | AmountEdit | LineEdit | AddEdit | CellEdit | HideEdit | BoxEdit | CheckEdit;
 
 const BOX = 9.75, BOX_BLUE = rgb(27 / 255, 62 / 255, 200 / 255), BOX_GREY = rgb(118 / 255, 118 / 255, 118 / 255);
 const BOX_PATH = `M 1.6 0 H 8.15 Q 9.75 0 9.75 1.6 V 8.15 Q 9.75 9.75 8.15 9.75 H 1.6 Q 0 9.75 0 8.15 V 1.6 Q 0 0 1.6 0 Z`;
@@ -229,6 +235,17 @@ function findSpan(runs: Run[], at: At, to?: number): Span {
   return { runs: part, x: first.x, y: first.y, width: end - first.x, pt: first.pt, color: first.color };
 }
 
+// Word-wrap onto at most `rows` lines of `max` width (the last line takes the rest).
+function wrap(text: string, width: (s: string) => number, max: number, rows: number): string[] {
+  const out: string[] = [];
+  let line = "";
+  for (const word of text.split(" ").filter(Boolean)) {
+    const next = line ? `${line} ${word}` : word;
+    if (line && width(next) > max && out.length < rows - 1) { out.push(line); line = word; } else line = next;
+  }
+  return line ? [...out, line] : out;
+}
+
 // Show glyph codes (hex) in the font of `like` (an original run), at x on its baseline, scaled by s.
 function drawNative(page: PDFPage, like: Run, hex: string, x: number, s = 1) {
   const m = like.lin.map((v) => (v / like.size) * s) as [number, number, number, number];
@@ -250,6 +267,7 @@ export function editPage(doc: PDFDocument, page: PDFPage, edits: Edit[], fonts: 
 
   for (const e of edits) {
     if (e.kind === "check") { draws.push(() => drawCheck(page, e.at, e.on)); continue; }
+    if (e.kind === "box") { draws.push(() => page.drawRectangle({ x: e.x, y: e.y, width: e.width, height: e.height, color: rgb(...e.color) })); continue; }
     if (e.kind === "hide") {
       const img = images.find((q) => Math.abs(q.x - e.image[0]) < 1.5 && Math.abs(q.y - e.image[1]) < 1.5);
       if (!img) throw new Error(`Quotation template changed: no image at ${e.image.join(",")}`);
@@ -258,7 +276,21 @@ export function editPage(doc: PDFDocument, page: PDFPage, edits: Edit[], fonts: 
     }
     if (e.kind === "add") {
       const ref = findSpan(runs, e.like);
-      draw(clean(e.text), e.x, e.y, ref.pt, ref.color, e.bold);
+      const text = clean(e.text), w = textWidth(e.bold ? fonts.bold : fonts.reg, text, ref.pt);
+      draw(text, e.x, e.y, e.fit && w > e.fit ? (ref.pt * e.fit) / w : ref.pt, ref.color, e.bold);
+      continue;
+    }
+    if (e.kind === "cell") {
+      const spans = e.lines.map((at) => findSpan(runs, at, e.to));
+      for (const s of spans) for (const q of s.runs) cut.push([q.start, q.end]);
+      const { x, pt, color } = spans[0];
+      const f = e.bold ? fonts.bold : fonts.reg;
+      const lines = wrap(clean(e.text), (t) => textWidth(f, t, pt), e.width, e.rows ?? 1);
+      const mid = spans.reduce((s, q) => s + q.y, 0) / spans.length, lead = pt * 1.16;
+      lines.forEach((l, n) => {
+        const w = textWidth(f, l, pt);
+        draw(l, x, mid + ((lines.length - 1) / 2 - n) * lead, w > e.width ? (pt * e.width) / w : pt, color, e.bold);
+      });
       continue;
     }
     const r = findSpan(runs, e.at, e.to);
@@ -295,16 +327,19 @@ export function editPage(doc: PDFDocument, page: PDFPage, edits: Edit[], fonts: 
       continue;
     }
     // Amount: the template's own ₹ glyph + the new number, aligned like the original group.
+    // `rupee` = `at` when the ₹ is the value's own first glyph.
     const rr = findSpan(runs, e.rupee).runs[0];
     cut.push([rr.start, rr.end]);
-    const gap = r.x - (rr.x + rr.width);
-    const groupW = rr.width + gap + w;
+    const fm = own[rr.font], joined = rr === r.runs[0];
+    const hex = joined ? literalOrHexToHex(rr.operand).slice(0, fm.width) : literalOrHexToHex(rr.operand);
+    const rw = joined ? fm.advance(parseInt(hex, 16)) * fm.fm * Math.hypot(rr.lin[0], rr.lin[1]) : rr.width;
+    const gap = joined ? 0 : r.x - (rr.x + rr.width);
+    const groupW = rw + gap + w;
     const left = e.align === "right" ? r.x + r.width - groupW
       : e.align === "center" ? (rr.x + r.x + r.width) / 2 - groupW / 2
       : rr.x;
-    const hex = literalOrHexToHex(rr.operand);
     draws.push(() => drawNative(page, rr, hex, left));
-    draw(text, left + rr.width + gap, r.y, r.pt, r.color, e.bold);
+    draw(text, left + rw + gap, r.y, r.pt, r.color, e.bold);
   }
 
   // Remove the original value operators, write the page back as one stream —

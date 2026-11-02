@@ -3,8 +3,9 @@
 // EPC Quotation Builder — fill a short form, download a quotation in the EPC's
 // own format (PDF on prod, .docx fallback). The heavy content/format lives in
 // the stored template; this page only collects the ~dozen variable values.
-// Bijlee Solar's template (their own PDF) has its own form; gozerobils
-// (Sustera Ventures) builds its quotations in the portal's Customer applications.
+// Bijlee Solar's and Sarvatra Energy's templates (their own PDFs) have their own
+// forms; gozerobils (Sustera Ventures) builds its quotations in the portal's
+// Customer applications.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -18,6 +19,7 @@ import {
 import {
   MODULE_BRANDS, INVERTER_BRANDS, ROOF_TYPES, MOUNTS_BY_ROOF,
   ACDB_DCDB_OPTIONS, CABLE_OPTIONS, BATTERY_OPTIONS, SYSTEM_TYPES, BRAND_FIELDS, BIJLEE, SARVATRA,
+  SARVATRA_ENERGY, SARVATRA_ENERGY_BOQ, BOQ_COLUMNS, boqField, sarvatraEnergyBoq, sarvatraEnergyTotals,
 } from "@/lib/quotation-brands";
 
 function stateSubsidyFor(kw: number): number { if (!kw || kw <= 0) return 0; return kw >= 3 ? 78000 : Math.round(kw * 30000); }
@@ -65,6 +67,7 @@ function Builder() {
   }
   if (tpl === undefined || customers) return null;
   if (tpl?.storage_path === BIJLEE.key) return <BijleeForm serialNext={tpl.serial_next} />;
+  if (tpl?.storage_path === SARVATRA_ENERGY.key) return <SarvatraEnergyForm serialNext={tpl.serial_next} />;
   return <Inner />;
 }
 
@@ -364,6 +367,98 @@ function BijleeForm({ serialNext }: { serialNext: number | null }) {
         <Section title="Cost">
           <Field l="Price per kW ₹" req><input className={input} inputMode="numeric" value={f.rate_per_kw} onChange={(e) => set("rate_per_kw", digits(e.target.value))} placeholder="e.g. 38000" /></Field>
           <Field l="Structure price per kW ₹"><input className={input} inputMode="numeric" value={f.structure_rate_per_kw} onChange={(e) => set("structure_rate_per_kw", digits(e.target.value))} placeholder="0" /></Field>
+        </Section>
+
+        <DownloadBar busy={busy} error={error} onClick={() => void download()} />
+      </div>
+    </div>
+  );
+}
+
+// Sarvatra Energy — their offer letter: the customer table, the bill of
+// quantities (every cell a dropdown, prefilled as in their sample) and the total
+// project cost (printed as supply + GST). Date automatic, quotation no. auto-numbered.
+type SarvatraEnergyFields = {
+  serial: string; customer_name: string; mobile: string; email: string; application_no: string;
+  discom: string; kw: string; category: string; dcr: string; k_number: string; address: string; total: string;
+};
+const BOQ_HEAD = { make: "Make", spec: "Specification", qty: "Qty." } as const;
+const BOQ_GRID = "sm:grid-cols-[1fr_1fr_1.3fr_0.8fr]";
+
+function SarvatraEnergyForm({ serialNext }: { serialNext: number | null }) {
+  const [f, setF] = useState<SarvatraEnergyFields>({
+    serial: serialNext ? SARVATRA_ENERGY.serial(serialNext) : "", customer_name: "", mobile: "", email: "", application_no: "",
+    discom: "", kw: "", category: SARVATRA_ENERGY.categories[0], dcr: SARVATRA_ENERGY.dcrTypes[0], k_number: "", address: "", total: "",
+  });
+  const [boq, setBoq] = useState<Record<string, string>>({}); // picked cells, `<row>_<column>`
+  const merge = useBrandOptions();
+  const { formRef, onFormKey } = useKeyNav();
+  const { busy, error, setError, run } = useQuotationDownload();
+  const set = (k: keyof SarvatraEnergyFields, v: string) => setF((p) => ({ ...p, [k]: v }));
+  const kw = Number(f.kw) || 0;
+  const total = Number(f.total) || 0;
+  const cells = sarvatraEnergyBoq(boq, kw);
+  const split = sarvatraEnergyTotals(total);
+
+  async function download() {
+    if (!f.customer_name.trim()) { setError("Customer name is required."); return; }
+    if (!(kw > 0)) { setError("Enter the system size (kW)."); return; }
+    if (!(total > 0)) { setError("Enter the total project cost."); return; }
+    const next = await run({ ...f, kw, total, boq });
+    if (next) set("serial", next);
+  }
+
+  return (
+    <div className="min-h-screen bg-bg-soft">
+      <BackHeader />
+      <div className="max-w-[900px] mx-auto px-5 sm:px-7 py-8" ref={formRef} onKeyDown={onFormKey}>
+        <h1 className="font-display text-[24px] sm:text-[28px] font-bold text-text">Quotation builder</h1>
+
+        <Section title="Customer">
+          <Field l="Quotation no."><input className={input} value={f.serial} onChange={(e) => set("serial", e.target.value)} placeholder={SARVATRA_ENERGY.serial(1)} /></Field>
+          <Field l="Customer name" req><input className={input} value={f.customer_name} onChange={(e) => set("customer_name", e.target.value)} placeholder="Full name" /></Field>
+          <Field l="Mobile"><input className={input} inputMode="numeric" value={f.mobile} onChange={(e) => set("mobile", digits(e.target.value).slice(0, 10))} placeholder="10-digit mobile" /></Field>
+          <Field l="Mail ID"><input className={input} type="email" value={f.email} onChange={(e) => set("email", e.target.value.trim())} /></Field>
+          <Field l="Application no."><input className={input} value={f.application_no} onChange={(e) => set("application_no", e.target.value)} /></Field>
+          <Field l="DISCOM"><input className={input} value={f.discom} onChange={(e) => set("discom", e.target.value)} placeholder="e.g. AEN_OM_BASSI" /></Field>
+          <Field l="System size (kW)" req><input className={input} inputMode="decimal" value={f.kw} onChange={(e) => set("kw", decimal(e.target.value))} placeholder="e.g. 5" /></Field>
+          <Field l="System">
+            <div className="flex gap-2">
+              <select className={input} value={f.category} onChange={(e) => set("category", e.target.value)}>
+                {SARVATRA_ENERGY.categories.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <select className={input + " max-w-[110px]"} value={f.dcr} onChange={(e) => set("dcr", e.target.value)}>
+                {SARVATRA_ENERGY.dcrTypes.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+            </div>
+          </Field>
+          <Field l="K.No"><input className={input} value={f.k_number} onChange={(e) => set("k_number", e.target.value)} /></Field>
+          <Field l="Installation address"><input className={input} value={f.address} onChange={(e) => set("address", e.target.value)} /></Field>
+        </Section>
+
+        <div className="bg-white rounded-2xl border border-line p-5 mt-5">
+          <div className="text-[13px] font-semibold text-[#0f3d2e] mb-3">Bill of quantities</div>
+          <div className={`hidden sm:grid ${BOQ_GRID} gap-2 mb-1.5 text-[12px] font-medium text-text-muted`}>
+            <span>Product</span>{BOQ_COLUMNS.map((c) => <span key={c}>{BOQ_HEAD[c]}</span>)}
+          </div>
+          <div className="flex flex-col gap-4 sm:gap-2">
+            {SARVATRA_ENERGY_BOQ.map((r) => (
+              <div key={r.key} className={`grid ${BOQ_GRID} gap-2 sm:items-center`}>
+                <span className="text-[13px] font-medium text-text">{r.product}</span>
+                {BOQ_COLUMNS.map((c) => (
+                  <SearchableSelect key={c} label="" placeholder={BOQ_HEAD[c]} value={cells[r.key][c]}
+                    options={merge([cells[r.key][c], ...r[c]].filter(Boolean), boqField(r.key, c))} field={boqField(r.key, c)}
+                    onChange={(v) => setBoq((p) => ({ ...p, [`${r.key}_${c}`]: v }))} />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <Section title="Commercial summary">
+          <Field l="Total project cost ₹" req><input className={input} inputMode="decimal" value={f.total} onChange={(e) => set("total", decimal(e.target.value))} placeholder="e.g. 238000" /></Field>
+          <Field l="Supply, installation & commissioning ₹"><input className={input + " bg-bg-soft"} readOnly value={inr(split.base)} /></Field>
+          <Field l={`GST @ ${SARVATRA_ENERGY.gst}% ₹`}><input className={input + " bg-bg-soft"} readOnly value={inr(split.gst)} /></Field>
         </Section>
 
         <DownloadBar busy={busy} error={error} onClick={() => void download()} />

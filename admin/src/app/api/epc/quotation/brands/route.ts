@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
-import { BRAND_FIELDS } from "@/lib/quotation-brands";
+import { BRAND_FIELDS, BOQ_COLUMNS, SARVATRA_ENERGY_BOQ, boqField } from "@/lib/quotation-brands";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +18,10 @@ const SUPABASE_ANON =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
 
-const ALLOWED = new Set<string>(Object.values(BRAND_FIELDS));
+const ALLOWED = new Set<string>([
+  ...Object.values(BRAND_FIELDS),
+  ...SARVATRA_ENERGY_BOQ.flatMap((r) => BOQ_COLUMNS.map((c) => boqField(r.key, c))),
+]);
 
 function client(token: string) {
   return createClient(SUPABASE_URL, SUPABASE_ANON, {

@@ -62,6 +62,7 @@ const PRIVATE_TEMPLATES: Record<string, string> = {
   "bundled:sarvatra": "sarvatra-template.pdf",
   "bundled:sarvatra-pcr": "sarvatra-pcr.pdf",
   "bundled:sarvatra-agreement": "sarvatra-agreement.pdf",
+  "bundled:sarvatra-energy": "sarvatra-energy.pdf",
 };
 const loaded = new Map<string, Buffer>();
 

@@ -9,8 +9,9 @@
 // business → "bundled:…" reads the app-shipped template, else a GCS object.
 // When no row exists yet it falls back to the bundled GHANPRIYA template.
 //
-// Bijlee Solar (bundled:bijlee) and gozerobils (bundled:sarvatra) are their own
-// PDFs filled directly — always a PDF. Bijlee's serial no. auto-advances here
+// Bijlee Solar (bundled:bijlee), Sarvatra Energy (bundled:sarvatra-energy) and
+// gozerobils (bundled:sarvatra) are their own PDFs filled directly — always a
+// PDF. Bijlee's and Sarvatra Energy's serial no. auto-advances here
 // (X-Next-Serial tells the form the next one). gozerobils is the Customer
 // applications flow: `doc` picks the quotation, PCR or agreement, `date` is when
 // that document was made (the saved customer_quotations row; its insert trigger
@@ -26,7 +27,8 @@ import { buildQuotationData, fillTemplate, readBundledTemplate, epcQuoteTemplate
 import { docxToPdf } from "@/lib/docx-to-pdf";
 import { buildBijleeQuotation } from "@/lib/quotation-bijlee";
 import { buildSarvatraFile, safeFileName as safeName } from "@/lib/quotation-sarvatra";
-import { BIJLEE, SARVATRA } from "@/lib/quotation-brands";
+import { buildSarvatraEnergyQuotation, sarvatraEnergyInput } from "@/lib/quotation-sarvatra-energy";
+import { BIJLEE, SARVATRA, SARVATRA_ENERGY } from "@/lib/quotation-brands";
 import { fmtDateIST } from "@/lib/dates";
 
 export const runtime = "nodejs";
@@ -66,37 +68,41 @@ export async function POST(req: NextRequest) {
     if (!tpl) return err("No quotation template is set up for your account yet.", 403);
     const { storage_path: storagePath, id: templateId } = tpl;
 
-    if (storagePath === BIJLEE.key || storagePath === SARVATRA.key) {
+    if (storagePath === BIJLEE.key || storagePath === SARVATRA.key || storagePath === SARVATRA_ENERGY.key) {
       const b = body as unknown as Record<string, unknown>;
       const s = (k: string) => String(b[k] ?? "").trim();
       const n = (k: string) => Number(b[k]) || 0;
       const name = safeName(s("customer_name"));
+      const today = fmtDateIST(new Date()); // DD/MM/YYYY, India time
       let file: { name: string; pdf: Uint8Array };
       let next = "";
+      // Auto-numbered (Bijlee, Sarvatra Energy): the next suggested serial moves past the one just used.
+      const numbered = storagePath === BIJLEE.key ? BIJLEE : storagePath === SARVATRA_ENERGY.key ? SARVATRA_ENERGY : null;
       if (storagePath === BIJLEE.key) {
         if (n("rate_per_kw") <= 0) return err("Price per kW is required.", 400);
-        const today = fmtDateIST(new Date()); // DD/MM/YYYY, India time
-        const serial = s("serial");
         const pdf = await buildBijleeQuotation({
-          customer_name: s("customer_name"), location: s("location"), kw: n("kw"), serial, date: today,
+          customer_name: s("customer_name"), location: s("location"), kw: n("kw"), serial: s("serial"), date: today,
           project_location: s("project_location"), client_name: s("client_name"),
           msedcl_division: s("msedcl_division"), contracted_demand: s("contracted_demand"),
           module_brand: s("module_brand") || BIJLEE.module, inverter_brand: s("inverter_brand") || BIJLEE.inverter,
           cable_brand: s("cable_brand") || BIJLEE.cable,
           rate_per_kw: n("rate_per_kw"), structure_rate_per_kw: n("structure_rate_per_kw"),
         }, await readBundledTemplate(storagePath));
-        file = { name: `Quotation_${name}_${safeName(serial)}.pdf`, pdf };
-        // Auto-number: the next suggested serial moves past the one just used.
-        const used = BIJLEE.serialNo(serial);
-        if (used > 0) {
-          const { data } = await supabase.rpc("quotation_serial_used", { p_template: templateId, p_used: used });
-          if (typeof data === "number") next = BIJLEE.serial(data);
-        }
+        file = { name: `Quotation_${name}_${safeName(s("serial"))}.pdf`, pdf };
+      } else if (storagePath === SARVATRA_ENERGY.key) {
+        if (n("total") <= 0) return err("Total project cost is required.", 400);
+        const pdf = await buildSarvatraEnergyQuotation(sarvatraEnergyInput(b, today), await readBundledTemplate(storagePath));
+        file = { name: `Quotation_${name}_${safeName(s("serial"))}.pdf`, pdf };
       } else {
         if (n("price") <= 0) return err("System price is required.", 400);
         const built = await buildSarvatraFile(s("doc"), b, s("date") || new Date());
         if (!built) return err("Unknown document.", 400);
         file = built;
+      }
+      const used = numbered ? numbered.serialNo(s("serial")) : 0;
+      if (numbered && used > 0) {
+        const { data } = await supabase.rpc("quotation_serial_used", { p_template: templateId, p_used: used });
+        if (typeof data === "number") next = numbered.serial(data);
       }
       return new NextResponse(new Uint8Array(file.pdf), {
         status: 200,
