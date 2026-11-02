@@ -19,6 +19,12 @@ export const embedHelvetica = async (doc: PDFDocument): Promise<Fonts> =>
 export const textWidth = (font: PDFFont, text: string, size: number) =>
   Array.from(text).reduce((w, ch) => w + font.widthOfTextAtSize(ch, size), 0);
 
+// Keep only what Helvetica can print (’ é – stay; other scripts would make drawText throw).
+export function printable(font: PDFFont, s: string): string {
+  const set = new Set(font.getCharacterSet());
+  return Array.from(s.replace(/\s+/g, " ")).filter((c) => set.has(c.codePointAt(0) ?? 0)).join("").trim();
+}
+
 export const inr = (n: number) => Math.round(n).toLocaleString("en-IN");
 export const num = (n: number) => (Number.isInteger(n) ? String(n) : String(+n.toFixed(2)));
 
@@ -236,7 +242,7 @@ function findSpan(runs: Run[], at: At, to?: number): Span {
 }
 
 // Word-wrap onto at most `rows` lines of `max` width (the last line takes the rest).
-function wrap(text: string, width: (s: string) => number, max: number, rows: number): string[] {
+export function wrap(text: string, width: (s: string) => number, max: number, rows: number): string[] {
   const out: string[] = [];
   let line = "";
   for (const word of text.split(" ").filter(Boolean)) {
@@ -257,9 +263,7 @@ function drawNative(page: PDFPage, like: Run, hex: string, x: number, s = 1) {
 
 export function editPage(doc: PDFDocument, page: PDFPage, edits: Edit[], fonts: Fonts, em = 1000) {
   const { content, runs, images, fonts: own } = readPage(doc, page, em);
-  // Keep only what Helvetica can print (’ é – stay; other scripts would make drawText throw).
-  const printable = new Set(fonts.reg.getCharacterSet());
-  const clean = (s: string) => Array.from(s.replace(/\s+/g, " ")).filter((c) => printable.has(c.codePointAt(0) ?? 0)).join("").trim();
+  const clean = (s: string) => printable(fonts.reg, s);
   const cut: [number, number][] = [];
   const draws: (() => void)[] = [];
   const draw = (text: string, x: number, y: number, pt: number, color: [number, number, number], bold?: boolean) =>

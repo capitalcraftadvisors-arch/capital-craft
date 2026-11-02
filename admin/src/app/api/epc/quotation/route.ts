@@ -9,9 +9,9 @@
 // business → "bundled:…" reads the app-shipped template, else a GCS object.
 // When no row exists yet it falls back to the bundled GHANPRIYA template.
 //
-// Bijlee Solar (bundled:bijlee), Sarvatra Energy (bundled:sarvatra-energy) and
-// gozerobils (bundled:sarvatra) are their own PDFs filled directly — always a
-// PDF. Bijlee's and Sarvatra Energy's serial no. auto-advances here
+// Bijlee Solar (bundled:bijlee), Sarvatra Energy (bundled:sarvatra-energy), RVS
+// Technologies (bundled:rvs) and gozerobils (bundled:sarvatra) are their own PDFs
+// filled directly — always a PDF. Bijlee's and Sarvatra Energy's serial no. auto-advances here
 // (X-Next-Serial tells the form the next one). gozerobils is the Customer
 // applications flow: `doc` picks the quotation, PCR or agreement, `date` is when
 // that document was made (the saved customer_quotations row; its insert trigger
@@ -28,7 +28,9 @@ import { docxToPdf } from "@/lib/docx-to-pdf";
 import { buildBijleeQuotation } from "@/lib/quotation-bijlee";
 import { buildSarvatraFile, safeFileName as safeName } from "@/lib/quotation-sarvatra";
 import { buildSarvatraEnergyQuotation, sarvatraEnergyInput } from "@/lib/quotation-sarvatra-energy";
-import { BIJLEE, SARVATRA, SARVATRA_ENERGY } from "@/lib/quotation-brands";
+import { buildRvsQuotation, rvsInput } from "@/lib/quotation-rvs";
+import { num } from "@/lib/pdf-template";
+import { BIJLEE, SARVATRA, SARVATRA_ENERGY, RVS } from "@/lib/quotation-brands";
 import { fmtDateIST } from "@/lib/dates";
 
 export const runtime = "nodejs";
@@ -68,7 +70,7 @@ export async function POST(req: NextRequest) {
     if (!tpl) return err("No quotation template is set up for your account yet.", 403);
     const { storage_path: storagePath, id: templateId } = tpl;
 
-    if (storagePath === BIJLEE.key || storagePath === SARVATRA.key || storagePath === SARVATRA_ENERGY.key) {
+    if ([BIJLEE.key, SARVATRA.key, SARVATRA_ENERGY.key, RVS.key].includes(storagePath)) {
       const b = body as unknown as Record<string, unknown>;
       const s = (k: string) => String(b[k] ?? "").trim();
       const n = (k: string) => Number(b[k]) || 0;
@@ -93,6 +95,11 @@ export async function POST(req: NextRequest) {
         if (n("total") <= 0) return err("Total project cost is required.", 400);
         const pdf = await buildSarvatraEnergyQuotation(sarvatraEnergyInput(b, today), await readBundledTemplate(storagePath));
         file = { name: `Quotation_${name}_${safeName(s("serial"))}.pdf`, pdf };
+      } else if (storagePath === RVS.key) {
+        if (n("price") <= 0) return err("System price is required.", 400);
+        const input = rvsInput(b);
+        const pdf = await buildRvsQuotation(input, await readBundledTemplate(storagePath));
+        file = { name: `Proposal_${name}_${safeName(`${num(input.kw)}kW`)}.pdf`, pdf };
       } else {
         if (n("price") <= 0) return err("System price is required.", 400);
         const built = await buildSarvatraFile(s("doc"), b, s("date") || new Date());

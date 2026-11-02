@@ -19,7 +19,8 @@ import {
 import {
   MODULE_BRANDS, INVERTER_BRANDS, ROOF_TYPES, MOUNTS_BY_ROOF,
   ACDB_DCDB_OPTIONS, CABLE_OPTIONS, BATTERY_OPTIONS, SYSTEM_TYPES, BRAND_FIELDS, BIJLEE, SARVATRA,
-  SARVATRA_ENERGY, SARVATRA_ENERGY_BOQ, BOQ_COLUMNS, boqField, sarvatraEnergyBoq, sarvatraEnergyTotals,
+  SARVATRA_ENERGY, SARVATRA_ENERGY_BOQ, boqField, sarvatraEnergyBoq, sarvatraEnergyTotals, RVS, RVS_BOM, rvsBom, rvsFigures,
+  type BoqRow, type BoqCells, type BoqColumn,
 } from "@/lib/quotation-brands";
 
 function stateSubsidyFor(kw: number): number { if (!kw || kw <= 0) return 0; return kw >= 3 ? 78000 : Math.round(kw * 30000); }
@@ -68,6 +69,7 @@ function Builder() {
   if (tpl === undefined || customers) return null;
   if (tpl?.storage_path === BIJLEE.key) return <BijleeForm serialNext={tpl.serial_next} />;
   if (tpl?.storage_path === SARVATRA_ENERGY.key) return <SarvatraEnergyForm serialNext={tpl.serial_next} />;
+  if (tpl?.storage_path === RVS.key) return <RvsForm />;
   return <Inner />;
 }
 
@@ -382,8 +384,34 @@ type SarvatraEnergyFields = {
   serial: string; customer_name: string; mobile: string; email: string; application_no: string;
   discom: string; kw: string; category: string; dcr: string; k_number: string; address: string; total: string;
 };
-const BOQ_HEAD = { make: "Make", spec: "Specification", qty: "Qty." } as const;
-const BOQ_GRID = "sm:grid-cols-[1fr_1fr_1.3fr_0.8fr]";
+// A bill of quantities whose every cell is a dropdown (custom values saved per row and column).
+function BoqTable({ title, rows, cells, columns, grid, onPick }: {
+  title: string; rows: BoqRow[]; cells: BoqCells; columns: [BoqColumn, string][];
+  grid: string; // the sm: grid columns — product + `columns`
+  onPick: (cell: string, value: string) => void; // cell = `<row>_<column>`
+}) {
+  const merge = useBrandOptions();
+  return (
+    <div className="bg-white rounded-2xl border border-line p-5 mt-5">
+      <div className="text-[13px] font-semibold text-[#0f3d2e] mb-3">{title}</div>
+      <div className={`hidden sm:grid ${grid} gap-2 mb-1.5 text-[12px] font-medium text-text-muted`}>
+        <span>Product</span>{columns.map(([c, head]) => <span key={c}>{head}</span>)}
+      </div>
+      <div className="flex flex-col gap-4 sm:gap-2">
+        {rows.map((r) => (
+          <div key={r.key} className={`grid ${grid} gap-2 sm:items-center`}>
+            <span className="text-[13px] font-medium text-text">{r.product}</span>
+            {columns.map(([c, head]) => (
+              <SearchableSelect key={c} label="" placeholder={head} value={cells[r.key][c]}
+                options={merge([cells[r.key][c], ...r[c]].filter(Boolean), boqField(r.key, c))} field={boqField(r.key, c)}
+                onChange={(v) => onPick(`${r.key}_${c}`, v)} />
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function SarvatraEnergyForm({ serialNext }: { serialNext: number | null }) {
   const [f, setF] = useState<SarvatraEnergyFields>({
@@ -391,7 +419,6 @@ function SarvatraEnergyForm({ serialNext }: { serialNext: number | null }) {
     discom: "", kw: "", category: SARVATRA_ENERGY.categories[0], dcr: SARVATRA_ENERGY.dcrTypes[0], k_number: "", address: "", total: "",
   });
   const [boq, setBoq] = useState<Record<string, string>>({}); // picked cells, `<row>_<column>`
-  const merge = useBrandOptions();
   const { formRef, onFormKey } = useKeyNav();
   const { busy, error, setError, run } = useQuotationDownload();
   const set = (k: keyof SarvatraEnergyFields, v: string) => setF((p) => ({ ...p, [k]: v }));
@@ -436,29 +463,69 @@ function SarvatraEnergyForm({ serialNext }: { serialNext: number | null }) {
           <Field l="Installation address"><input className={input} value={f.address} onChange={(e) => set("address", e.target.value)} /></Field>
         </Section>
 
-        <div className="bg-white rounded-2xl border border-line p-5 mt-5">
-          <div className="text-[13px] font-semibold text-[#0f3d2e] mb-3">Bill of quantities</div>
-          <div className={`hidden sm:grid ${BOQ_GRID} gap-2 mb-1.5 text-[12px] font-medium text-text-muted`}>
-            <span>Product</span>{BOQ_COLUMNS.map((c) => <span key={c}>{BOQ_HEAD[c]}</span>)}
-          </div>
-          <div className="flex flex-col gap-4 sm:gap-2">
-            {SARVATRA_ENERGY_BOQ.map((r) => (
-              <div key={r.key} className={`grid ${BOQ_GRID} gap-2 sm:items-center`}>
-                <span className="text-[13px] font-medium text-text">{r.product}</span>
-                {BOQ_COLUMNS.map((c) => (
-                  <SearchableSelect key={c} label="" placeholder={BOQ_HEAD[c]} value={cells[r.key][c]}
-                    options={merge([cells[r.key][c], ...r[c]].filter(Boolean), boqField(r.key, c))} field={boqField(r.key, c)}
-                    onChange={(v) => setBoq((p) => ({ ...p, [`${r.key}_${c}`]: v }))} />
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
+        <BoqTable title="Bill of quantities" rows={SARVATRA_ENERGY_BOQ} cells={cells}
+          columns={[["make", "Make"], ["spec", "Specification"], ["qty", "Qty."]]} grid="sm:grid-cols-[1fr_1fr_1.3fr_0.8fr]"
+          onPick={(cell, v) => setBoq((p) => ({ ...p, [cell]: v }))} />
 
         <Section title="Commercial summary">
           <Field l="Total project cost ₹" req><input className={input} inputMode="decimal" value={f.total} onChange={(e) => set("total", decimal(e.target.value))} placeholder="e.g. 238000" /></Field>
           <Field l="Supply, installation & commissioning ₹"><input className={input + " bg-bg-soft"} readOnly value={inr(split.base)} /></Field>
           <Field l={`GST @ ${SARVATRA_ENERGY.gst}% ₹`}><input className={input + " bg-bg-soft"} readOnly value={inr(split.gst)} /></Field>
+        </Section>
+
+        <DownloadBar busy={busy} error={error} onClick={() => void download()} />
+      </div>
+    </div>
+  );
+}
+
+// RVS Technologies — their solar proposal: the customer (cover + welcome letter),
+// the bill of material (every cell a dropdown, prefilled as in their sample) and
+// the price; GST, savings, payback and the chart are worked out.
+type RvsFields = { customer_name: string; mobile: string; address: string; city: string; kw: string; price: string; subsidy: string };
+
+function RvsForm() {
+  const [f, setF] = useState<RvsFields>({ customer_name: "", mobile: "", address: "", city: "", kw: "", price: "", subsidy: "" });
+  const [bom, setBom] = useState<Record<string, string>>({}); // picked cells, `<row>_<column>`
+  const { formRef, onFormKey } = useKeyNav();
+  const { busy, error, setError, run } = useQuotationDownload();
+  const set = (k: keyof RvsFields, v: string) => setF((p) => ({ ...p, [k]: v }));
+  const kw = Number(f.kw) || 0;
+  const price = Number(f.price) || 0;
+  const fig = rvsFigures(kw, price, f.subsidy === "" ? null : Number(f.subsidy) || 0);
+  const cells = rvsBom(bom, kw);
+
+  async function download() {
+    if (!f.customer_name.trim()) { setError("Customer name is required."); return; }
+    if (!(kw > 0)) { setError("Enter the system size (kW)."); return; }
+    if (!(price > 0)) { setError("Enter the system price."); return; }
+    await run({ ...f, kw, price, bom });
+  }
+
+  return (
+    <div className="min-h-screen bg-bg-soft">
+      <BackHeader />
+      <div className="max-w-[900px] mx-auto px-5 sm:px-7 py-8" ref={formRef} onKeyDown={onFormKey}>
+        <h1 className="font-display text-[24px] sm:text-[28px] font-bold text-text">Quotation builder</h1>
+
+        <Section title="Customer">
+          <Field l="Customer name" req><input className={input} value={f.customer_name} onChange={(e) => set("customer_name", e.target.value)} placeholder="Full name" /></Field>
+          <Field l="Mobile"><input className={input} inputMode="numeric" value={f.mobile} onChange={(e) => set("mobile", digits(e.target.value).slice(0, 10))} placeholder="10-digit mobile" /></Field>
+          <Field l="Address"><input className={input} value={f.address} onChange={(e) => set("address", e.target.value)} /></Field>
+          <Field l="City & state"><input className={input} value={f.city} onChange={(e) => set("city", e.target.value)} placeholder="e.g. Jaipur Rajasthan" /></Field>
+          <Field l="System size (kW)" req><input className={input} inputMode="decimal" value={f.kw} onChange={(e) => set("kw", decimal(e.target.value))} placeholder="e.g. 10" /></Field>
+        </Section>
+
+        <BoqTable title="Bill of material" rows={RVS_BOM} cells={cells}
+          columns={[["spec", "Item description"], ["qty", "QTY"], ["make", "Make"]]} grid="sm:grid-cols-[0.8fr_2fr_0.5fr_1fr]"
+          onPick={(cell, v) => setBom((p) => ({ ...p, [cell]: v }))} />
+
+        <Section title="Commercial offer">
+          <Field l="System price (without GST) ₹" req><input className={input} inputMode="decimal" value={f.price} onChange={(e) => set("price", decimal(e.target.value))} placeholder="e.g. 414000" /></Field>
+          <Field l={`Tax GST (${RVS.gst} %) ₹`}><input className={input + " bg-bg-soft"} readOnly value={inr(fig.gst)} /></Field>
+          <Field l="Total cost ₹"><input className={input + " bg-bg-soft"} readOnly value={inr(fig.total)} /></Field>
+          <Field l="MNRE subsidy ₹"><input className={input} inputMode="decimal" value={f.subsidy} onChange={(e) => set("subsidy", decimal(e.target.value))} placeholder={inr(rvsFigures(kw, price, null).subsidy)} /></Field>
+          <Field l="Effective cost after subsidy ₹"><input className={input + " bg-bg-soft font-semibold"} readOnly value={inr(fig.effective)} /></Field>
         </Section>
 
         <DownloadBar busy={busy} error={error} onClick={() => void download()} />

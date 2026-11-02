@@ -160,24 +160,101 @@ export const SARVATRA_ENERGY_BOQ: BoqRow[] = [
   { key: "protection", product: "MCB / SPD / MC4 / Conduit", make: ["Havells / Sibass / Reputed / Polycab"], spec: ["As per site / requirement"], qty: ["As per Site"] },
 ];
 
-/** The printed BOQ: each cell as picked (`<row>_<column>`), else its default —
- *  the module quantity from the kW and the module's watts, the inverter = the system kW. */
-export function sarvatraEnergyBoq(picked: Record<string, unknown>, kw: number): Record<string, Record<BoqColumn, string>> {
-  const out: Record<string, Record<BoqColumn, string>> = {};
-  for (const r of SARVATRA_ENERGY_BOQ) {
-    const get = (col: BoqColumn) => String(picked[`${r.key}_${col}`] ?? "").trim();
-    const spec = get("spec") || (r.key === "inverter" ? (kw > 0 ? `${+kw.toFixed(2)}KW` : "") : r.spec[0] ?? "");
-    const watts = SARVATRA.wattsOf(spec);
-    const qty = get("qty") || (r.key === "module" ? (kw > 0 && watts ? `${Math.ceil((kw * 1000) / watts)} Nos.` : "") : r.qty[0] ?? "");
-    out[r.key] = { make: get("make") || r.make[0], spec, qty };
+export type BoqCells = Record<string, Record<BoqColumn, string>>;
+
+/** The printed table: each cell as picked (`<row>_<column>`), else `auto` (when it
+ *  gives one), else the cell's first option. Columns fill in BOQ_COLUMNS order. */
+export function boqCells(rows: BoqRow[], picked: Record<string, unknown>,
+  auto: (row: string, col: BoqColumn, cells: Record<BoqColumn, string>) => string | undefined): BoqCells {
+  const out: BoqCells = {};
+  for (const r of rows) {
+    const cells = {} as Record<BoqColumn, string>;
+    for (const col of BOQ_COLUMNS) cells[col] = String(picked[`${r.key}_${col}`] ?? "").trim() || (auto(r.key, col, cells) ?? r[col][0] ?? "");
+    out[r.key] = cells;
   }
   return out;
+}
+
+// Panels for a plant: kW ÷ the module's watts (its highest rating in the text), rounded up.
+const panelsFor = (kw: number, spec: string) => {
+  const watts = SARVATRA.wattsOf(spec);
+  return kw > 0 && watts ? Math.ceil((kw * 1000) / watts) : 0;
+};
+const kwText = (kw: number) => String(+kw.toFixed(2));
+
+/** Sarvatra Energy's BOQ — the module quantity from the kW and the module's watts, the inverter = the system kW. */
+export function sarvatraEnergyBoq(picked: Record<string, unknown>, kw: number): BoqCells {
+  return boqCells(SARVATRA_ENERGY_BOQ, picked, (row, col, c) =>
+    row === "inverter" && col === "spec" ? (kw > 0 ? `${kwText(kw)}KW` : "")
+    : row === "module" && col === "qty" ? (panelsFor(kw, c.spec) ? `${panelsFor(kw, c.spec)} Nos.` : "")
+    : undefined);
 }
 
 /** Total project cost → supply + GST (₹2,38,000 → ₹2,18,549 + ₹19,451). */
 export function sarvatraEnergyTotals(total: number) {
   const base = Math.round(total / (1 + SARVATRA_ENERGY.gst / 100));
   return { base, gst: total - base };
+}
+
+// RVS Technologies (template bundled:rvs) — their solar proposal. Savings as in
+// their sample: 1,460 units per kW a year at ₹8 a unit, rising 5 % a year less
+// 0.5 % panel ageing; trees = units × 0.5 kg CO₂ ÷ 22 kg a tree; CO₂ (tonnes,
+// 25 years) at 0.575 kg a unit. These reproduce the 10 kW / ₹4,14,000 sample.
+export const RVS = {
+  key: "bundled:rvs",
+  gst: 8.9, // % on the system price
+  unitsPerKw: 1460,
+  tariff: 8,
+  growth: 1.05 * 0.995,
+};
+
+// Bill of material: description / QTY / make (UOM stays as printed). The sample's
+// module and inverter makes are logos — kept while those makes are chosen.
+const MMS = "Module mounting structure: HDG with appropriate analysis for Load/wind speed(As per MNRE/Indian Standard) -";
+export const RVS_BOM: BoqRow[] = [
+  { key: "rvs_module", product: "Solar modules",
+    spec: ["Solar Topcon Bifacial Modules of 540 - 600 Wp", "Solar Topcon Bifacial Modules of 580 - 620 Wp",
+      "Solar Topcon Bifacial Modules of 600 - 625 Wp", "Solar Mono PERC Bifacial Modules of 540 - 550 Wp"],
+    qty: [], // from the kW and the module's watts
+    make: ["Adani", "Waaree", "Rayzon", "Premier", "Goldi", "Vikram", "Tata Power", "Renewsys", "Saatvik", "Emmvee"] },
+  { key: "rvs_inverter", product: "Inverter", spec: [], // String Inverter - <kW> KW
+    qty: ["1", "2"], make: ["VSOLE", "Polycab", "Havells", "Sungrow", "Growatt", "Solis", "GoodWe", "Deye", "Microtek", "Luminous"] },
+  { key: "rvs_structure", product: "Mounting structure", spec: [`${MMS} 3*5 ft -Height`, `${MMS} 6*8 ft -Height`, `${MMS} 8*10 ft -Height`],
+    qty: ["1"], make: ["G.I. / Hot-Dip Galvanised", "Hot-Dip Galvanised", "G.I.", "Aluminium", "Magnelis"] },
+  { key: "rvs_earthing_points", product: "Structure earthing", spec: ["Mounting Structure earthing points"], qty: ["1", "2", "3"], make: ["True Power", "As per standard"] },
+  { key: "rvs_arrestor", product: "Lightning arrestor", spec: ["Lightning Arrestor  and earthing kits"], qty: ["1", "2"], make: ["True Power", "As per standard"] },
+  { key: "rvs_spike", product: "Spike rod", spec: ["Spike rod with base plate –GI"], qty: ["1", "2", "3"], make: ["As per standard"] },
+  { key: "rvs_earthing_kit", product: "Earthing kit", spec: ["Earthing kit"], qty: ["1", "2", "3"], make: ["As per standard"] },
+  { key: "rvs_dc_cable", product: "DC cables", spec: ["DC Cables - As per required"], qty: ["1"], make: ["Polycab", "Havells", "KEI", "RR Kabel", "Finolex"] },
+  { key: "rvs_ac_cable", product: "AC cables", spec: ["AC Cables - As per required"], qty: ["1"], make: ["Polycab", "Havells", "KEI", "RR Kabel", "Finolex"] },
+  { key: "rvs_armoured", product: "Armoured cable", spec: ["Cu & Al Armoured cable - As per required"], qty: ["Lot"], make: ["As per standard", "Polycab", "Havells"] },
+  { key: "rvs_dcdb", product: "DCDB", spec: ["DCDB"], qty: ["1", "2"], make: ["Havells / Elmex", "Havells", "Elmex", "Schneider", "L&T"] },
+  { key: "rvs_acdb", product: "ACDB", spec: ["ACDB"], qty: ["1", "2"], make: ["Havells / Elmex", "Havells", "Elmex", "Schneider", "L&T"] },
+  { key: "rvs_conduit", product: "Conduit & accessories", spec: ["Conduit, Cables ties & accessories - As per required"], qty: ["-"], make: ["As per standard"] },
+];
+
+/** RVS's bill of material — the module QTY from the kW and the module's watts; the inverter line = the plant kW. */
+export function rvsBom(picked: Record<string, unknown>, kw: number): BoqCells {
+  return boqCells(RVS_BOM, picked, (row, col, c) =>
+    row === "rvs_inverter" && col === "spec" ? (kw > 0 ? `String Inverter - ${kwText(kw)} KW` : "")
+    : row === "rvs_module" && col === "qty" ? (panelsFor(kw, c.spec) ? String(panelsFor(kw, c.spec)) : "")
+    : undefined);
+}
+
+/** RVS proposal figures: the system price is before GST; the MNRE subsidy blank (null) = by kW. */
+export function rvsFigures(kw: number, price: number, subsidy: number | null) {
+  const gst = Math.round((price * RVS.gst) / 100);
+  const total = price + gst;
+  const mnre = subsidy ?? centralSubsidyFor(kw, false);
+  const units = Math.round(kw * RVS.unitsPerKw);
+  const savings = units * RVS.tariff;
+  return {
+    gst, total, subsidy: mnre, effective: Math.max(0, total - mnre), units, savings,
+    payback: savings > 0 ? (total / savings).toFixed(2) : "-",
+    trees: Math.round((units * 0.5) / 22),
+    co2: Math.round((units * 25 * 0.575) / 1000),
+    years: Array.from({ length: 25 }, (_, n) => savings * RVS.growth ** n),
+  };
 }
 
 // Field keys used for persisting custom options (quotation_brand_options.field).
