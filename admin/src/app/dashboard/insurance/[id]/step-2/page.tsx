@@ -171,7 +171,7 @@ function Inner() {
           <Card className="p-6">
             <InsuranceUpload
               endpoint={`/api/epc/insurance/${params.id}/extract-invoice`}
-              label="Final Invoice"
+              label="Tax invoice / Quotation"
               hint="We'll read the final invoice amount — please confirm it below. This becomes the sum insured."
               initiallyDone={invoiceDone}
               onDone={(d) => { setOcrAmount((d.amount as number) ?? null); setInvoiceDone(true); }}

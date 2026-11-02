@@ -22,6 +22,15 @@ export function pctOf(part: unknown, whole: unknown): string | null {
   return `${Number(((p / w) * 100).toFixed(1))}%`;
 }
 
+/** What an amount box keeps while typing: digits and ONE decimal point with up
+ *  to 2 places — so "174999.50" can be typed (a box that turns each keystroke
+ *  into a number drops the "."). */
+export function amountInput(v: string): string {
+  const s = v.replace(/[^\d.]/g, "");
+  const i = s.indexOf(".");
+  return i < 0 ? s : s.slice(0, i + 1) + s.slice(i + 1).replace(/\./g, "").slice(0, 2);
+}
+
 /** Like fmtRupees but ALSO shows "—" for 0 (lender summaries / ZIP routes). */
 export function rupees(n: unknown): string {
   const v = Number(n);

@@ -64,12 +64,12 @@ type Props = {
    *  the 1st disbursement, to satisfy the RFD gate); "tranche2" = the
    *  completion set only; "all" (default) = both. */
   mode?: "all" | "tranche1" | "tranche2";
-  /** When the approving lender is Solfin, the MMR / Advance Receipt is NOT
-   *  mandatory — it drops out of the tranche-1 required count (still uploadable). */
-  advanceReceiptOptional?: boolean;
+  /** The approving lender is Solfin: no MMR / Advance Receipt — no upload slot
+   *  and not counted (one uploaded earlier still shows, to view or remove). */
+  noAdvanceReceipt?: boolean;
 };
 
-export default function CompletionDocsSection({ applicationId, uploadedBy, refreshKey, onCountChange, mode = "all", advanceReceiptOptional }: Props) {
+export default function CompletionDocsSection({ applicationId, uploadedBy, refreshKey, onCountChange, mode = "all", noAdvanceReceipt }: Props) {
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [tick, setTick] = useState(0);
 
@@ -89,9 +89,8 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
       // tranche-1 mode report the Tranche-1 docs; otherwise the completion set.
       const have = new Set(rows.map((r) => r.category));
       if (mode === "tranche1") {
-        // Solfin: the MMR / Advance Receipt is optional, so it isn't counted
-        // toward the required tranche-1 total (it can still be uploaded).
-        const required = TRANCHE1_DOCS.filter((d) => !(advanceReceiptOptional && d.category === "mmr_advance_receipt"));
+        // Solfin: no MMR / Advance Receipt, so it isn't counted.
+        const required = TRANCHE1_DOCS.filter((d) => !(noAdvanceReceipt && d.category === "mmr_advance_receipt"));
         onCountChange?.(required.filter((d) => have.has(d.category)).length, required.length);
       } else {
         onCountChange?.(COMPLETION_CATEGORIES.filter((c) => have.has(c)).length, COMPLETION_CATEGORIES.length);
@@ -99,7 +98,7 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [applicationId, refreshKey, tick, advanceReceiptOptional]);
+  }, [applicationId, refreshKey, tick, noAdvanceReceipt]);
 
   const byCat = (c: string) => docs.find((d) => d.category === c) ?? null;
   const legacyPlant = byCat("completion_plant_photo");
@@ -131,8 +130,8 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
         <>
           <p className="text-[12px] font-bold uppercase tracking-wide text-[#5a8a76]">1st Tranche Docs</p>
           <div className={grid}>
-            {TRANCHE1_DOCS.map((d) => (
-              <DocSlot key={d.category} title={d.category === "mmr_advance_receipt" && advanceReceiptOptional ? `${d.title} (optional)` : d.title} doc={byCat(d.category)} onOpen={open} onRemove={removeDoc}>
+            {TRANCHE1_DOCS.filter((d) => !(noAdvanceReceipt && d.category === "mmr_advance_receipt" && !byCat(d.category))).map((d) => (
+              <DocSlot key={d.category} title={d.title} doc={byCat(d.category)} onOpen={open} onRemove={removeDoc}>
                 <FileUpload
                   applicationId={applicationId}
                   table="user_application_docs"

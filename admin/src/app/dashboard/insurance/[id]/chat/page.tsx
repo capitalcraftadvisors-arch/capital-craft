@@ -41,8 +41,8 @@ const QUESTION: Record<Stage, string> = {
   plant: "A geo-tagged photo of the installed plant — taken with location on, or with a GPS-camera stamp.",
   ebill: "Upload the site's electricity bill — I'll read the plant address from it.",
   address: "Plant address — check it and correct it if needed.",
-  invoice: "Upload the final invoice — I'll read the amount.",
-  amount: "Re-enter the invoice amount to confirm. It becomes the sum insured.",
+  invoice: "Upload the tax invoice — or the quotation if there's no tax invoice yet. I'll read the amount.",
+  amount: "Re-enter the amount to confirm. It becomes the sum insured.",
   mismatch: "",
   review: "Here's everything. Check it, then submit.",
   done: "",
@@ -151,7 +151,7 @@ function Inner() {
       case "plant": return [user(s, { text: "Plant photo · geo-tagged ✓", redo: true })];
       case "ebill": return [user(s, { files: [{ name: "Electricity bill", thumb: null }], redo: true })];
       case "address": return [user(s, { text: r.plant_address, redo: true })];
-      case "invoice": return [user(s, { files: [{ name: "Final invoice", thumb: null }], redo: true }), bot(s, `Invoice amount read: ${fmtRupeesExact(r.invoice_amount)}`)];
+      case "invoice": return [user(s, { files: [{ name: "Tax invoice / Quotation", thumb: null }], redo: true }), bot(s, `Amount read: ${fmtRupeesExact(r.invoice_amount)}`)];
       case "amount": return [user(s, { text: fmtRupeesExact(r.invoice_confirmed_amount), redo: true })];
       default: return [];
     }
@@ -215,7 +215,7 @@ function Inner() {
       const amt = d.amount == null ? null : Number(d.amount);
       setOcrAmount(amt);
       merge({ invoice_path: "x", invoice_amount: amt });
-      answer(s, [sent, bot(s, amt != null ? `Invoice amount read: ${fmtRupeesExact(amt)}` : "I couldn't read the amount — you'll type it next.")]);
+      answer(s, [sent, bot(s, amt != null ? `Amount read: ${fmtRupeesExact(amt)}` : "I couldn't read the amount — you'll type it next.")]);
     }
     finished(s);
   }
@@ -388,7 +388,7 @@ function Inner() {
 
             {(active === "pan" || active === "gst" || active === "ebill" || active === "invoice") && (
               <div className="flex flex-col gap-2">
-                <FileSlot label={{ pan: "PAN card", gst: "GST certificate", ebill: "Electricity bill", invoice: "Final invoice" }[active]} file={files.file} onPick={(f) => pick("file", f)} />
+                <FileSlot label={{ pan: "PAN card", gst: "GST certificate", ebill: "Electricity bill", invoice: "Tax invoice / Quotation" }[active]} file={files.file} onPick={(f) => pick("file", f)} />
                 <div className="flex items-center gap-2">
                   <button onClick={() => void sendDoc(active)} disabled={!files.file} className="px-4 py-2 rounded-xl bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-40">Upload &amp; read →</button>
                   {active === "gst" && !editing && <button onClick={skipGst} className="px-3 py-2 rounded-xl text-[13px] text-text-muted hover:text-text hover:bg-bg-soft">Don&apos;t have it</button>}
@@ -531,7 +531,7 @@ function Summary({ app }: { app: App }) {
         <div className="h-px bg-line my-1.5" />
         <Row k="Plant address" v={app.plant_address} />
         <Row k="Plant photo" v={app.plant_photo_path ? "Geo-tagged ✓" : null} />
-        <Row k="Final invoice" v={app.invoice_confirmed_amount != null ? fmtRupeesExact(app.invoice_confirmed_amount) : null} />
+        <Row k="Tax invoice / Quotation" v={app.invoice_confirmed_amount != null ? fmtRupeesExact(app.invoice_confirmed_amount) : null} />
         <Row k="Sum insured" v={app.invoice_confirmed_amount != null ? fmtRupeesExact(app.sum_insured ?? app.invoice_confirmed_amount) : null} />
       </div>
     </div>

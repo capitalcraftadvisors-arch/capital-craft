@@ -162,8 +162,8 @@ function Inner() {
         address: x.address || p.address,
         kw: x.kw ? String(x.kw).replace(/[^\d.]/g, "") : p.kw,
         system_type: normType(x.system_type) || p.system_type,
-        total: x.total ? String(x.total).replace(/[^\d]/g, "") : p.total,
-        central_subsidy: x.central_subsidy ? String(x.central_subsidy).replace(/[^\d]/g, "") : p.central_subsidy,
+        total: x.total ? decimal(String(x.total)) : p.total,
+        central_subsidy: x.central_subsidy ? decimal(String(x.central_subsidy)) : p.central_subsidy,
         make_panel: x.module_brand || p.make_panel,
         make_inverter: x.inverter_brand || p.make_inverter,
         battery: x.battery ? String(x.battery).replace(/[^\d.]/g, "") : p.battery,
@@ -271,11 +271,11 @@ function Inner() {
 
         {/* Pricing + subsidy */}
         <Section title="Pricing & subsidy">
-          <Field l="Total price (GST incl.) ₹" req><input className={input} inputMode="numeric" value={f.total} onChange={(e) => set("total", e.target.value.replace(/[^\d]/g, ""))} placeholder="e.g. 237000" /></Field>
+          <Field l="Total price (GST incl.) ₹" req><input className={input} inputMode="numeric" value={f.total} onChange={(e) => set("total", decimal(e.target.value))} placeholder="e.g. 237000" /></Field>
           <Field l="Subsidised plan?"><YesNo value={f.subsidised} onChange={(v) => set("subsidised", v)} /></Field>
           {f.subsidised && (
             <>
-              <Field l="Central subsidy ₹ (you enter)"><input className={input} inputMode="numeric" value={f.central_subsidy} onChange={(e) => set("central_subsidy", e.target.value.replace(/[^\d]/g, ""))} placeholder="e.g. 60000" /></Field>
+              <Field l="Central subsidy ₹ (you enter)"><input className={input} inputMode="numeric" value={f.central_subsidy} onChange={(e) => set("central_subsidy", decimal(e.target.value))} placeholder="e.g. 60000" /></Field>
               <Field l="State subsidy ₹ (auto by kW)"><input className={input + " bg-bg-soft"} readOnly value={inr(stateNum)} /></Field>
             </>
           )}

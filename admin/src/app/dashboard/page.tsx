@@ -23,6 +23,7 @@ import { numberToWordsIndian } from "@/lib/numberToWords";
 import { fmtDateTime as fmtDateTimeLib } from "@/lib/dates";
 import { policyValidityParts, VALIDITY_TEXT } from "@/lib/insurance-validity";
 import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES, formatRupees } from "@/lib/emi";
+import { amountInput } from "@/lib/money";
 
 // Capital Craft regional managers shown on the EPC portal (tap to Call). Numbers
 // are in international format, digits only. TODO: confirm these are the correct
@@ -763,12 +764,12 @@ function EmiSection() {
             </div>
             <div>
               <label className={labelCls}>Project cost (₹)</label>
-              <input value={cost} inputMode="numeric" placeholder="e.g. 3,00,000" onChange={(e) => setCost(e.target.value.replace(/[^\d]/g, ""))} className={inputCls} />
+              <input value={cost} inputMode="numeric" placeholder="e.g. 3,00,000" onChange={(e) => setCost(amountInput(e.target.value))} className={inputCls} />
               {wordsBar(costN)}
             </div>
             <div>
               <label className={labelCls}>Loan amount (₹)</label>
-              <input value={loan} inputMode="numeric" placeholder="e.g. 2,50,000" onChange={(e) => setLoan(e.target.value.replace(/[^\d]/g, ""))} className={inputCls} />
+              <input value={loan} inputMode="numeric" placeholder="e.g. 2,50,000" onChange={(e) => setLoan(amountInput(e.target.value))} className={inputCls} />
               {wordsBar(loanN)}
             </div>
           </div>

@@ -126,6 +126,12 @@ const PAUSE = (
     <path d="M10 5v14M14 5v14" />
   </svg>
 );
+// "Insurance" — a shield.
+const SHIELD = (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+  </svg>
+);
 // "Message EPC" — a chat bubble with text lines.
 const MSG_EPC = (
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
@@ -302,11 +308,13 @@ function buildLoanDocGroups(loan: Loan, docsIn: Doc[]): LoanDocGroup[] {
     ],
   });
 
+  // Solfin takes no advance receipt — its slot shows only if one was uploaded anyway.
+  const receiptSlot = loan.approved_lender !== "solfin" || docs.some((d) => d.category === "mmr_advance_receipt");
   groups.push({
     title: "1st Tranche Docs",
     slots: [
       slot("feasibility_report",  "Feasibility Approval Report", ["feasibility_report"],  null),
-      slot("mmr_advance_receipt", "MMR / Advance Receipt",       ["mmr_advance_receipt"], null),
+      ...(receiptSlot ? [slot("mmr_advance_receipt", "MMR / Advance Receipt", ["mmr_advance_receipt"], null)] : []),
     ],
   });
 
@@ -378,6 +386,7 @@ function Inner() {
   const [docs, setDocs] = useState<Doc[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [insBusy, setInsBusy] = useState(false);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [delOpen, setDelOpen] = useState(false);
@@ -643,6 +652,22 @@ function Inner() {
       },
       `Rejected by ${lenderLabelIn(lenders, lender)}${why ? ` — ${why}` : ""}`,
     );
+  }
+
+  // Insurance — makes this loan's insurance profile from its data the first
+  // time; afterwards fills only what that profile is still missing, then opens it.
+  async function openInsurance() {
+    if (!loan || insBusy) return;
+    if (!loan.insurance_application_id && !window.confirm("Make the insurance profile from this application?")) return;
+    setInsBusy(true);
+    try {
+      const res = await fetch(`/api/admin/loan-app/${loan.id}/insurance`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || !d?.ok) { alert("Couldn't open the insurance profile — " + (d?.error || `HTTP ${res.status}`)); return; }
+      router.push(`/admin/insurance/${d.id}/view` as any);
+    } finally {
+      setInsBusy(false);
+    }
   }
 
   async function downloadZip(lender: LenderKey) {
@@ -1308,6 +1333,11 @@ function Inner() {
                 <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-600" />
               ) : null}
             </a>
+            {tApproved && !aborted && (
+              <HAction variant="outline" icon={SHIELD} disabled={insBusy} onClick={() => void openInsurance()}>
+                {insBusy ? "Opening…" : "Insurance"}
+              </HAction>
+            )}
             {editItems.length > 0 && <DownloadMenu label="Edit" icon={I.edit} items={editItems} />}
             <KebabMenu items={kebabItems} ghost />
           </div>
@@ -1453,7 +1483,7 @@ function Inner() {
                         return (
                           <li key={r.id} className="py-2 flex items-center gap-3 text-[13px]">
                             <span className="flex-1 min-w-0 font-semibold text-[#0f3d2e] truncate">{r.lender_label}</span>
-                            <span className="text-[#5a8a76]">{fmtApproval(d?.approved_loan_amount, true)}</span>
+                            <span className="text-[#5a8a76]">{fmtApproval(d?.approved_loan_amount == null ? null : Number(d.approved_loan_amount), true)}</span>
                             {finalized ? (
                               <span className="text-[12px] font-semibold px-2 py-0.5 rounded-[6px] bg-[#e6f6ee] text-[#178a5c]">Finalized</span>
                             ) : canAct ? (

@@ -211,14 +211,14 @@ export default function LoanDisbursementPanel({
           <Section title="1st tranche documents">
             <p className="text-[13px] text-[#5a8a76] mb-3">
               {loan.approved_lender === "solfin"
-                ? "Upload the Feasibility Report. The MMR / Advance Receipt is optional for Solfin. Once the required document is in, the 1st-disbursement entry below opens."
+                ? "Upload the Feasibility Report. Once it's in, the 1st-disbursement entry below opens."
                 : "Upload the Feasibility Report and MMR / Advance Receipt. Once both are in, the 1st-disbursement entry below opens."}
             </p>
             <CompletionDocsSection
               applicationId={loan.id}
               uploadedBy="admin"
               mode="tranche1"
-              advanceReceiptOptional={loan.approved_lender === "solfin"}
+              noAdvanceReceipt={loan.approved_lender === "solfin"}
               onCountChange={(u, t) => { setT1Uploaded(u); setT1Total(t); }}
             />
           </Section>
@@ -230,6 +230,8 @@ export default function LoanDisbursementPanel({
                   ? "Waiting for the admin to approve the approval details."
                   : !isApproved
                   ? "The application must be approved by a lender before the 1st disbursement can be entered."
+                  : loan.approved_lender === "solfin"
+                  ? "Upload the Feasibility Report above to open the 1st disbursement."
                   : "Upload both Tranche-1 documents above to open the 1st disbursement."}
               </p>
             ) : (

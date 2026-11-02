@@ -39,6 +39,7 @@ import EditTable from "@/components/EditTable";
 import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES, formatRupees } from "@/lib/emi";
 import { pctOf } from "@/lib/money";
 import { CATEGORY_LABEL } from "@/lib/loan-form";
+import { amountInput } from "@/lib/money";
 
 const MOBILE_RE = /^[6-9]\d{9}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -887,7 +888,7 @@ function ChatInner() {
           <div className="max-w-xl mx-auto px-3 sm:px-4 py-3">
             {(turn.kind === "text" || turn.kind === "pincode" || turn.kind === "number") && (() => {
               const send = () => void (turn.kind === "pincode" ? submitPincode() : turn.kind === "number" ? submitNumber() : submitText());
-              const amt = turn.field && AMOUNT_FIELDS.has(turn.field) ? Number(input.replace(/[^\d]/g, "")) : 0;
+              const amt = turn.field && AMOUNT_FIELDS.has(turn.field) ? Number(amountInput(input)) : 0;
               return (
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center gap-2">
@@ -1600,9 +1601,9 @@ function LoanConfigDock({ loanAmt, subsidyCase, setSubsidyCase, centralSub, setC
       {subsidyCase === "subsidy" && (
         <div className="grid grid-cols-2 gap-2">
           <label className="text-[12px] text-text-muted">Central subsidy (₹)
-            <input value={centralSub} inputMode="numeric" onChange={(e) => setCentralSub(e.target.value.replace(/[^\d]/g, ""))} className="mt-1 w-full border border-line rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus:border-[#1e3a8a]" /></label>
+            <input value={centralSub} inputMode="numeric" onChange={(e) => setCentralSub(amountInput(e.target.value))} className="mt-1 w-full border border-line rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus:border-[#1e3a8a]" /></label>
           <label className="text-[12px] text-text-muted">State subsidy (₹)
-            <input value={stateSub} inputMode="numeric" onChange={(e) => setStateSub(e.target.value.replace(/[^\d]/g, ""))} placeholder="0" className="mt-1 w-full border border-line rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus:border-[#1e3a8a]" /></label>
+            <input value={stateSub} inputMode="numeric" onChange={(e) => setStateSub(amountInput(e.target.value))} placeholder="0" className="mt-1 w-full border border-line rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus:border-[#1e3a8a]" /></label>
         </div>
       )}
       <div>

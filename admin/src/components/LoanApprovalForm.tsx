@@ -18,7 +18,7 @@ import { supabase } from "@/lib/supabase";
 import { getBusiness } from "@/lib/auth";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { invalidateLoanBoards } from "@/lib/ops-board";
-import ApprovalDetailsTable, { type ApprovalDetails } from "@/components/ApprovalDetailsTable";
+import ApprovalDetailsTable, { type ApprovalDetails, roiFromEmi, reducingRoiFromEmi, withAutoRoi, asNumbers } from "@/components/ApprovalDetailsTable";
 import { useLenders } from "@/lib/lenders";
 import { lenderLabelIn } from "@/lib/loan-lenders";
 import { rupeesInWords } from "@/lib/numberToWords";
@@ -103,6 +103,11 @@ export default function LoanApprovalForm({
     }
     if (!(approvedTen > 0)) { setError("Approved tenure (years) is required."); return; }
     if (!(approvedEmi > 0)) { setError("Approved EMI is required."); return; }
+    // Solfin: the ROI comes from the EMI, so the EMI must cover the amount over the tenure.
+    if (roiFromEmi(String(details.approved_by)) && reducingRoiFromEmi(details) == null) {
+      setError("The EMI is too low for this amount and tenure — check the EMI.");
+      return;
+    }
 
     // Credit score is OPTIONAL — if it isn't available yet, leave it blank (or
     // tick "None") and fill it in later.
@@ -110,14 +115,16 @@ export default function LoanApprovalForm({
     setSaving(true);
     setError(null);
 
+    // Typed amounts back to numbers; Solfin's ROI is the one worked out from the EMI.
+    const saved = withAutoRoi(asNumbers(details));
     const patch: Record<string, any> = {
       approved_lender:  details.approved_by,
-      approval_details: details,
+      approval_details: saved,
       // The approval-complete gate — unlocks the Disbursement action + RFD.
       approval_details_filled: true,
       // Denormalised out of approval_details so disbursement math / lists / sort
       // key off a real column.
-      sanctioned_amount: details.approved_loan_amount ?? null,
+      sanctioned_amount: saved.approved_loan_amount ?? null,
       // Sanction letter is part of approval details — record its state here.
       sanction_letter_unavailable: sanctionChoice === "unavailable",
       // Credit score — a positive integer, or null when "None" is chosen.
@@ -168,7 +175,7 @@ export default function LoanApprovalForm({
         approval_recorded_at: now,
         // Store credit score inside the per-lender details so each lender's card
         // shows its own score when comparing/finalizing.
-        approval_details: { ...details, credit_score: creditNone ? null : (Number(creditScore) > 0 ? Number(creditScore) : null) },
+        approval_details: { ...saved, credit_score: creditNone ? null : (Number(creditScore) > 0 ? Number(creditScore) : null) },
         rejected_at: null,
         rejection_reason: null,
       };

@@ -27,6 +27,7 @@ import type { LenderKey } from "@/components/LenderPickerModal";
 import { rupeesInWords, yearsInWords } from "@/lib/numberToWords";
 import { useLenders } from "@/lib/lenders";
 import { lenderLabelIn } from "@/lib/loan-lenders";
+import { amountInput } from "@/lib/money";
 
 // Persisted shape → epc_applications.approval_details (jsonb).
 export type ApprovalDetails = {
@@ -34,12 +35,14 @@ export type ApprovalDetails = {
   // "Applied" columns are snapshots of what the applicant asked for, captured
   // at approval time so the record stays true even if the application is
   // edited later.
+  // The approved_* values are strings while typing (so "174999.50" keeps its
+  // "."); asNumbers() turns them back into numbers when saving.
   applied_loan_amount?: number | null;
-  approved_loan_amount?: number | null;
+  approved_loan_amount?: number | string | null;
   applied_tenure_years?: number | null;
-  approved_tenure_years?: number | null;
+  approved_tenure_years?: number | string | null;
   tentative_emi?: number | null;
-  approved_emi?: number | null;
+  approved_emi?: number | string | null;
   // Captured at approval: the date the lender approved, and the ROI. ROI is a
   // FLAT rate for Credit Fair and a REDUCING rate for Solfin (label switches by
   // lender). jsonb — no migration.
@@ -82,6 +85,35 @@ function reducingToFlat(reducingAnnual: number, P: number, years: number): numbe
   const emi = r === 0 ? P / n : (P * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
   return ((emi * n - P) / (P * years)) * 100;
 }
+// Solfin: no ROI is typed — its reducing-balance ROI is worked out from the
+// approved amount, tenure and the EMI Solfin gives (the flat ROI from that).
+export const roiFromEmi = (lender: string | null | undefined) => lender === "solfin";
+export function reducingRoiFromEmi(value: ApprovalDetails): number | null {
+  const P = Number(value.approved_loan_amount) || 0;
+  const n = Math.round((Number(value.approved_tenure_years) || 0) * 12);
+  const emi = Number(value.approved_emi) || 0;
+  if (!(P > 0) || !(n > 0) || !(emi * n > P)) return null;
+  let lo = 0, hi = 1; // monthly rate bounds
+  for (let i = 0; i < 100; i++) {
+    const r = (lo + hi) / 2;
+    const emiR = (P * r * Math.pow(1 + r, n)) / (Math.pow(1 + r, n) - 1);
+    if (emiR > emi) hi = r; else lo = r;
+  }
+  return ((lo + hi) / 2) * 12 * 100;
+}
+/** The typed approved amount / tenure / EMI as numbers (they're strings while typing). */
+export function asNumbers(value: ApprovalDetails): ApprovalDetails {
+  const n = (v: unknown) => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+  return { ...value, approved_loan_amount: n(value.approved_loan_amount), approved_tenure_years: n(value.approved_tenure_years), approved_emi: n(value.approved_emi) };
+}
+
+/** The details as saved: for Solfin the ROI is the one worked out from the EMI. */
+export function withAutoRoi(value: ApprovalDetails): ApprovalDetails {
+  if (!roiFromEmi(value.approved_by as string)) return value;
+  const r = reducingRoiFromEmi(value);
+  return r != null ? { ...value, roi: r.toFixed(2) } : value;
+}
+
 // The counterpart rate to show on the right, from the entered ROI + lender +
 // approved amount/tenure. Null until those are present.
 export function roiCounterpart(value: ApprovalDetails): number | null {
@@ -145,14 +177,19 @@ type Props = {
 
 export default function ApprovalDetailsTable({ value, onChange, readOnly }: Props) {
   const ro = readOnly || !onChange;
+  // Solfin: no ROI box — the ROI shown (and saved) is worked out from the EMI;
+  // a saved one shows only while the EMI can't give it.
+  const solfinRoi = roiFromEmi(value.approved_by as string) ? reducingRoiFromEmi(value) : null;
+  const auto = roiFromEmi(value.approved_by as string)
+    ? { ...value, roi: solfinRoi != null ? solfinRoi.toFixed(2) : ro ? value.roi : null }
+    : null;
   const lenders = useLenders();
   const lender = value.approved_by ? lenderLabelIn(lenders, String(value.approved_by)) : "—";
 
   function set(key: keyof ApprovalDetails, raw: string) {
     if (!onChange) return;
-    const cleaned = raw.replace(/[^\d.]/g, "");
-    const n = cleaned.trim() === "" ? null : Number(cleaned);
-    onChange({ ...value, [key]: n !== null && Number.isFinite(n) ? n : null });
+    const cleaned = amountInput(raw);
+    onChange({ ...value, [key]: cleaned === "" ? null : cleaned });
   }
 
   const inputCls =
@@ -239,9 +276,12 @@ export default function ApprovalDetailsTable({ value, onChange, readOnly }: Prop
           <tr className="border-b border-[#e0f0e8]">
             <td className="py-5 pr-4 text-[14px] text-[#5a8a76] font-medium w-[26%]">
               {roiKind(value.approved_by as string) === "flat" ? "Flat ROI (%)" : "Reducing Balance ROI (%)"}
+              {auto && <span className="block text-[11px] text-[#93a7b8] font-normal">auto-calculated from the EMI</span>}
             </td>
             <td className="py-5 px-3 w-[24%]">
-              {ro ? (
+              {auto ? (
+                <div className="text-right font-semibold text-[#178a5c]">{auto.roi != null && auto.roi !== "" ? `${auto.roi}%` : "—"}</div>
+              ) : ro ? (
                 <div className="text-right font-semibold text-[#0f3d2e]">{value.roi != null && value.roi !== "" ? `${value.roi}%` : "—"}</div>
               ) : (
                 <div className="flex items-center justify-end gap-1.5">
@@ -263,7 +303,7 @@ export default function ApprovalDetailsTable({ value, onChange, readOnly }: Prop
             </td>
             <td className="py-5 px-3 w-[24%]">
               <div className="text-right font-semibold text-[#178a5c]">
-                {(() => { const c = roiCounterpart(value); return c != null ? `${c.toFixed(2)}%` : "—"; })()}
+                {(() => { const c = roiCounterpart(auto ?? value); return c != null ? `${c.toFixed(2)}%` : "—"; })()}
               </div>
             </td>
           </tr>

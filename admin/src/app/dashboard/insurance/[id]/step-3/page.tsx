@@ -109,7 +109,7 @@ function Inner() {
           <p className="text-[13px] font-semibold text-[#178a5c] mb-2">Plant &amp; invoice</p>
           <KV k="Plant address" v={app.plant_address} />
           <KV k="Plant photo" v={app.plant_photo_path ? "Geo-tagged · uploaded" : "—"} />
-          <KV k="Final invoice amount" v={fmtRupees(app.invoice_confirmed_amount ?? app.invoice_amount)} />
+          <KV k="Tax invoice / Quotation amount" v={fmtRupees(app.invoice_confirmed_amount ?? app.invoice_amount)} />
           <KV k="Sum insured" v={fmtRupees(app.sum_insured ?? app.invoice_confirmed_amount)} />
         </Card>
 

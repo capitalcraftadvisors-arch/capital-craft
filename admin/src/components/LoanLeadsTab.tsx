@@ -36,6 +36,8 @@ type LeadRow = {
   epc_name_custom: string | null;
   status: string;
   dead_at: string | null;
+  aborted_at: string | null;
+  abort_reason: string | null;
   created_at: string;
   epc_business: { trade_name: string | null; legal_name: string | null; contact_name: string | null; epc_display_id: string | null } | null;
 };
@@ -52,6 +54,14 @@ function epcName(r: LeadRow): string {
   if (b) return b.trade_name || b.legal_name || b.contact_name || "—";
   return r.epc_name_custom || "—";
 }
+// Which tab a lead sits in — an aborted lead is never shown as active or dead.
+type LeadView = "active" | "dead" | "aborted";
+const viewOf = (r: LeadRow): LeadView => (r.aborted_at ? "aborted" : r.dead_at ? "dead" : "active");
+const VIEW_TABS: { key: LeadView; label: string; color?: string; empty: string }[] = [
+  { key: "active", label: "Active", empty: "No leads yet." },
+  { key: "dead", label: "Dead", color: "#b42318", empty: "No dead leads." },
+  { key: "aborted", label: "Aborted", color: "#475467", empty: "No aborted leads." },
+];
 function createdByLabel(v: string | null): string {
   if (!v) return "—";
   return v === "admin" ? "Admin" : v;
@@ -65,9 +75,9 @@ export default function LoanLeadsTab() {
   const [q, setQ] = useState("");
   const [adding, setAdding] = useState(false);
   const [converting, setConverting] = useState<string | null>(null);
-  // Active and dead leads apart. Dead leads are deleted 30 days after being
-  // marked dead (migration 0101, daily in the database).
-  const [view, setView] = useState<"active" | "dead">("active");
+  // Active, dead and aborted leads apart. Dead leads are deleted 30 days after
+  // being marked dead (migration 0101, daily in the database).
+  const [view, setView] = useState<LeadView>("active");
   // The lead last opened — scrolled to and highlighted on the way back.
   const [highlightId, setHighlightId] = useState<string | null>(null);
 
@@ -75,9 +85,8 @@ export default function LoanLeadsTab() {
     setLoading(true);
     const { data } = await supabase()
       .from("loan_leads")
-      .select("id, lead_display_id, name, mobile, dob, loan_amount, project_size, project_size_unit, email, lead_owner_name, created_by, created_by_user_id, epc_business_id, epc_name_custom, status, dead_at, created_at, epc_business:epc_business_id(trade_name, legal_name, contact_name, epc_display_id)")
+      .select("id, lead_display_id, name, mobile, dob, loan_amount, project_size, project_size_unit, email, lead_owner_name, created_by, created_by_user_id, epc_business_id, epc_name_custom, status, dead_at, aborted_at, abort_reason, created_at, epc_business:epc_business_id(trade_name, legal_name, contact_name, epc_display_id)")
       .eq("status", "under_review")
-      .is("aborted_at", null)
       .order("created_at", { ascending: false });
     setRows((data ?? []) as unknown as LeadRow[]);
     setLoading(false);
@@ -89,7 +98,7 @@ export default function LoanLeadsTab() {
     sessionStorage.setItem("leadsList.lastRowId", id);
     router.push(`/admin/lead/${id}/view`);
   }
-  // Back from a lead: same scroll, its tab (active / dead), the row flashing.
+  // Back from a lead: same scroll, its tab (active / dead / aborted), the row flashing.
   useEffect(() => {
     if (loading) return;
     const y = sessionStorage.getItem("leadsList.scroll");
@@ -97,7 +106,8 @@ export default function LoanLeadsTab() {
     sessionStorage.removeItem("leadsList.scroll");
     sessionStorage.removeItem("leadsList.lastRowId");
     if (!id) return;
-    if (rows.find((r) => r.id === id)?.dead_at) setView("dead");
+    const back = rows.find((r) => r.id === id);
+    if (back) setView(viewOf(back));
     setHighlightId(id);
     if (y) requestAnimationFrame(() => window.scrollTo(0, Number(y) || 0));
     const t = window.setTimeout(() => setHighlightId(null), 2100);
@@ -105,10 +115,14 @@ export default function LoanLeadsTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
 
-  const deadCount = useMemo(() => rows.filter((r) => r.dead_at).length, [rows]);
+  const counts = useMemo(() => {
+    const c: Record<LeadView, number> = { active: 0, dead: 0, aborted: 0 };
+    for (const r of rows) c[viewOf(r)] += 1;
+    return c;
+  }, [rows]);
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
-    return rows.filter((r) => (view === "dead") === !!r.dead_at).filter((r) => !s ||
+    return rows.filter((r) => viewOf(r) === view).filter((r) => !s ||
       (r.name || "").toLowerCase().includes(s) ||
       (r.mobile || "").toLowerCase().includes(s) ||
       (r.lead_display_id || "").toLowerCase().includes(s) ||
@@ -161,11 +175,11 @@ export default function LoanLeadsTab() {
   return (
     <div className="w-full">
       <div className="inline-flex rounded-[8px] border bg-white p-0.5 mb-3" style={{ borderColor: ACCENTS.loanleads.tint }}>
-        {([["active", "Active", rows.length - deadCount], ["dead", "Dead", deadCount]] as const).map(([key, label, n]) => (
-          <button key={key} type="button" onClick={() => setView(key)}
-            className={"px-3.5 py-1.5 rounded-[6px] text-[13px] font-semibold " + (view === key ? "text-white" : "text-[var(--acc)] hover:bg-[var(--acc-tint)]")}
-            style={view === key ? { backgroundColor: key === "dead" ? "#b42318" : ACCENTS.loanleads.color } : undefined}>
-            {label} · {n}
+        {VIEW_TABS.map((t) => (
+          <button key={t.key} type="button" onClick={() => setView(t.key)}
+            className={"px-3.5 py-1.5 rounded-[6px] text-[13px] font-semibold " + (view === t.key ? "text-white" : "text-[var(--acc)] hover:bg-[var(--acc-tint)]")}
+            style={view === t.key ? { backgroundColor: t.color ?? ACCENTS.loanleads.color } : undefined}>
+            {t.label} · {counts[t.key]}
           </button>
         ))}
       </div>
@@ -198,14 +212,14 @@ export default function LoanLeadsTab() {
               {loading ? (
                 <tr><td colSpan={7} className="px-4 py-10 text-center text-[#5a8a76]">Loading…</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-[#5a8a76]">{(view === "dead" ? deadCount : rows.length - deadCount) > 0 ? "No leads match." : view === "dead" ? "No dead leads." : "No leads yet."}</td></tr>
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-[#5a8a76]">{counts[view] > 0 ? "No leads match." : VIEW_TABS.find((t) => t.key === view)!.empty}</td></tr>
               ) : (
                 filtered.map((r) => (
                   <tr
                     key={r.id}
                     onClick={() => openLead(r.id)}
                     style={{ transition: "background-color 2s ease-out", backgroundColor: highlightId === r.id ? "var(--acc-tint)" : undefined }}
-                    className={"border-b border-[#f0f4f2] last:border-0 cursor-pointer " + (r.dead_at ? "bg-[#fdf0f0] hover:bg-[#fbe6e6]" : "hover:bg-[#f7f7fd]")}
+                    className={"border-b border-[#f0f4f2] last:border-0 cursor-pointer " + (r.aborted_at ? "bg-[#f4f5f7] hover:bg-[#eceef1]" : r.dead_at ? "bg-[#fdf0f0] hover:bg-[#fbe6e6]" : "hover:bg-[#f7f7fd]")}
                   >
                     <td className="px-4 py-3">
                       <div className="font-semibold text-[#0f3d2e]">{r.name ? <RowLink href={`/admin/lead/${r.id}/view`} onOpen={() => openLead(r.id)}>{r.name}</RowLink> : "—"}</div>
@@ -231,7 +245,9 @@ export default function LoanLeadsTab() {
                     <td className="px-4 py-3 text-center text-[13px] text-[#5a8a76]">{r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : createdByLabel(r.created_by)}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-2 flex-wrap">
-                        {r.dead_at ? (
+                        {r.aborted_at ? (
+                          <span title={r.abort_reason ? `Reason: ${r.abort_reason}` : undefined} className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#eceef1] text-[#475467] border border-[#d0d5dd]">Aborted</span>
+                        ) : r.dead_at ? (
                           <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#fbe0e0] text-[#b42318] border border-[#f2c4c4]">Dead lead</span>
                         ) : (
                           <>

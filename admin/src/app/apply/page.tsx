@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
+import { amountInput } from "@/lib/money";
 
 type Step = "mobile" | "choose" | "form" | "done";
 type LeadType = "loan" | "insurance";
@@ -134,12 +135,12 @@ export default function ApplyPage() {
                 <Input label="Pincode" inputMode="numeric" value={pincode} onChange={(e) => setPincode(e.target.value.replace(/\D/g, "").slice(0, 6))} />
                 {leadType === "loan" ? (
                   <>
-                    <Input label="Project cost (₹)" inputMode="numeric" value={projectCost} onChange={(e) => setProjectCost(e.target.value.replace(/[^\d]/g, ""))} />
-                    <Input label="Loan amount wanted (₹)" inputMode="numeric" value={loanAmount} onChange={(e) => setLoanAmount(e.target.value.replace(/[^\d]/g, ""))} />
+                    <Input label="Project cost (₹)" inputMode="numeric" value={projectCost} onChange={(e) => setProjectCost(amountInput(e.target.value))} />
+                    <Input label="Loan amount wanted (₹)" inputMode="numeric" value={loanAmount} onChange={(e) => setLoanAmount(amountInput(e.target.value))} />
                   </>
                 ) : (
                   <>
-                    <Input label="Approx. plant value (₹)" inputMode="numeric" value={plantValue} onChange={(e) => setPlantValue(e.target.value.replace(/[^\d]/g, ""))} />
+                    <Input label="Approx. plant value (₹)" inputMode="numeric" value={plantValue} onChange={(e) => setPlantValue(amountInput(e.target.value))} />
                     <Input label="GSTIN (optional)" value={gstin} onChange={(e) => setGstin(e.target.value.toUpperCase())} />
                   </>
                 )}

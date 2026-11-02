@@ -30,6 +30,7 @@ import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness } from "@/lib/auth";
 import { computeCentralSubsidy, computeEmi, formatRupees, DEFAULT_INDICATIVE_ROI, TENURES } from "@/lib/emi";
 import { numberToWordsIndian } from "@/lib/numberToWords";
+import { amountInput } from "@/lib/money";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import { professionsFor } from "@/lib/loan-form";
 
@@ -162,7 +163,7 @@ const SCRIPT: Turn[] = [
     uploads: [{ name: "proforma", label: "Quotation / invoice" }], extractRoute: "extract-loan-docs" },
   { id: "loan_amount", bot: "Loan amount required (₹)?", kind: "text", field: "loan_amount_required", placeholder: "e.g. 250000",
     when: (f) => !(Number(f.loan_amount_required) > 0),
-    validate: (v) => (!v.trim() || /^\d+$/.test(v.trim()) ? null : "Enter the amount in digits, e.g. 250000.") },
+    validate: (v) => (!v.trim() || /^\d+(\.\d{1,2})?$/.test(v.trim()) ? null : "Enter the amount in digits, e.g. 250000 or 250000.50.") },
 
   // 11) Employment
   { id: "employment_type", bot: "Employment type?", kind: "choice", field: "employment_type", choices: [
@@ -266,9 +267,9 @@ const normLabel = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 function cleanText(raw: string): string {
   return raw.replace(/^\s*[-–—]\s*/, "").replace(/\s*\/-\s*$/, "").trim();
 }
-// Digits only (for amounts / subsidy): drop commas, "/-", "Rs", "₹", spaces.
-function digitsOnly(raw: string): string {
-  return cleanText(raw).replace(/rs\.?/gi, "").replace(/[,₹\s/-]/g, "").replace(/[^\d]/g, "");
+// An amount (amounts / subsidy): drop commas, "/-", "Rs", "₹", spaces; paise kept.
+function amountText(raw: string): string {
+  return amountInput(cleanText(raw).replace(/rs\.?/gi, "").replace(/[,₹\s/-]/g, ""));
 }
 // The leading number in a value ("3KW" → 3, "5 YEAR" → 5, "5year" → 5).
 function leadingNumber(raw: string): string {
@@ -312,11 +313,11 @@ function parseInfoSheet(text: string): Partial<Form> {
     if (!isCo && nl.includes("email")) { if (val) out.borrower_email = val; continue; }
     if (!isCo && nl.includes("name") && (nl.includes("app") || nl.includes("borrower") || nl.includes("customer"))) { if (val) out.borrower_name = val; continue; }
     // Loan / project money
-    if (nl.includes("project") && nl.includes("cost")) { const d = digitsOnly(rawVal); if (d) out.total_project_cost = d; continue; }
+    if (nl.includes("project") && nl.includes("cost")) { const d = amountText(rawVal); if (d) out.total_project_cost = d; continue; }
     if (nl.includes("loan") && nl.includes("tenure")) { const n = leadingNumber(rawVal); if (n) out.selected_tenure_years = String(parseInt(n, 10)); continue; }
     if (nl.includes("tenure")) { const n = leadingNumber(rawVal); if (n) out.selected_tenure_years = String(parseInt(n, 10)); continue; }
-    if (nl.includes("loan") && nl.includes("amount")) { const d = digitsOnly(rawVal); if (d) out.loan_amount_required = d; continue; }
-    if (nl.includes("subsidy")) { const d = digitsOnly(rawVal); if (d) out.central_subsidy = d; continue; }
+    if (nl.includes("loan") && nl.includes("amount")) { const d = amountText(rawVal); if (d) out.loan_amount_required = d; continue; }
+    if (nl.includes("subsidy")) { const d = amountText(rawVal); if (d) out.central_subsidy = d; continue; }
     // System / capacity / place
     if (nl.includes("capacity")) { const n = leadingNumber(rawVal); if (n) { out.project_size = n; out.project_size_unit = "kw"; } continue; }
     if (nl.includes("grid")) { const st = normSystemType(rawVal); if (st) out.system_type = st; continue; }
@@ -2078,9 +2079,9 @@ function LoanConfigDock({ loanAmt, subsidyCase, setSubsidyCase, centralSub, setC
       {subsidyCase === "subsidy" && (
         <div className="grid grid-cols-2 gap-2">
           <label className="text-[12px] text-text-muted">Central subsidy (₹)
-            <input value={centralSub} onChange={(e) => setCentralSub(e.target.value.replace(/[^\d]/g, ""))} className="mt-1 w-full border border-line rounded-lg px-2 py-1.5 text-[13px]" /></label>
+            <input value={centralSub} onChange={(e) => setCentralSub(amountInput(e.target.value))} className="mt-1 w-full border border-line rounded-lg px-2 py-1.5 text-[13px]" /></label>
           <label className="text-[12px] text-text-muted">State subsidy (₹)
-            <input value={stateSub} onChange={(e) => setStateSub(e.target.value.replace(/[^\d]/g, ""))} placeholder="0" className="mt-1 w-full border border-line rounded-lg px-2 py-1.5 text-[13px]" /></label>
+            <input value={stateSub} onChange={(e) => setStateSub(amountInput(e.target.value))} placeholder="0" className="mt-1 w-full border border-line rounded-lg px-2 py-1.5 text-[13px]" /></label>
         </div>
       )}
       <div>

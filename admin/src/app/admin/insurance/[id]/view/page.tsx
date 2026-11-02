@@ -165,7 +165,7 @@ function Inner() {
     { key: "gst", label: "GST certificate", path: app.gst_path, col: "gst_path" },
     { key: "ebill", label: "Electricity bill", path: app.ebill_path, col: "ebill_path" },
     { key: "plant", label: "Plant photo (geo-tagged)", path: app.plant_photo_path, col: "plant_photo_path" },
-    { key: "invoice", label: "Final invoice", path: app.invoice_path, col: "invoice_path" },
+    { key: "invoice", label: "Tax invoice / Quotation", path: app.invoice_path, col: "invoice_path" },
     { key: "policy", label: "Insurance policy", path: app.policy_path, col: "policy_path" },
     // Legacy 3-photo set from the earlier build — shown only if present.
     ...(app.photo_panel_path ? [{ key: "panel", label: "Customer with panel (legacy)", path: app.photo_panel_path, col: "photo_panel_path" }] : []),
@@ -318,7 +318,7 @@ function Inner() {
               <KV k="DOB" v={app.aadhaar_dob} />
               <KV k="Gender" v={app.aadhaar_gender} />
               <KV k="Care of" v={app.aadhaar_care_of} />
-              <KV k="Address" v={app.aadhaar_address} />
+              <KV k="Applicant address" v={app.aadhaar_address} />
               {(app.gstin || app.gst_legal_name) && (
                 <>
                   <KV k="GST legal name" v={app.gst_legal_name} />
@@ -334,7 +334,7 @@ function Inner() {
               <KV k="Sum insured" v={fmtRupees(app.sum_insured ?? app.invoice_confirmed_amount)} valueClass="text-[#178a5c]" />
               <KV k="Insurance partner" v={insurerLabel(app.insurance_partner)} />
               <KV k="Plant address" v={app.plant_address} />
-              <KV k="Final invoice amount" v={fmtRupees(app.invoice_confirmed_amount)} />
+              <KV k="Tax invoice / Quotation amount" v={fmtRupees(app.invoice_confirmed_amount)} />
               <KV k="OCR amount" v={fmtRupees(app.invoice_amount)} />
               {GEO.map((x) => (
                 x.g && x.g.lat != null
