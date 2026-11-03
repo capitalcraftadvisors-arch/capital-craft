@@ -127,7 +127,10 @@ export function loanChecks(
     const hasLetter = docCategories.includes("sanction_letter");
     add("sanction", "Sanction letter", hasLetter ? "pass" : l.sanction_letter_unavailable ? "partial" : "fail", hasLetter ? "" : l.sanction_letter_unavailable ? "Not available" : "Pending");
   }
-  if (opts.decided) add("credit", "Credit score", l.credit_score != null ? "pass" : "na", l.credit_score != null ? String(l.credit_score) : "Not on file");
+  if (opts.decided) {
+    const shown = [l.credit_score != null ? String(l.credit_score) : null, l.credit_ntc ? "NTC" : null].filter(Boolean).join(" · ");
+    add("credit", "Credit score", shown ? "pass" : "na", shown || "Not on file");
+  }
 
   // 12. Same mobile / PAN / K number on another application.
   if (opts.duplicates != null) add("dup", "Duplicate application", opts.duplicates ? "fail" : "pass", opts.duplicates ? `${opts.duplicates} found` : "None");

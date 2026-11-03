@@ -45,6 +45,7 @@ export default function LoanApprovalForm({
   const [sanctionChoice, setSanctionChoice] = useState<"upload" | "unavailable" | null>(null);
   const [creditScore, setCreditScore] = useState<string>("");
   const [creditNone, setCreditNone] = useState(false);
+  const [creditNtc, setCreditNtc] = useState(false); // New To Credit — may go with a score, never with "None"
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,6 +76,7 @@ export default function LoanApprovalForm({
     // A letter already on file opens the upload slot, so it shows as filled.
     setSanctionChoice(loan.sanction_letter_unavailable ? "unavailable" : hasSanctionLetter ? "upload" : null);
     setCreditScore(loan.credit_score != null ? String(loan.credit_score) : "");
+    setCreditNtc(loan.credit_ntc === true);
     // Re-seed only when the lender / mode changes — not on every loan re-read.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loan.id, lender, editMode]);
@@ -111,6 +113,10 @@ export default function LoanApprovalForm({
 
     // Credit score is OPTIONAL — if it isn't available yet, leave it blank (or
     // tick "None") and fill it in later.
+    const credit = {
+      credit_score: creditNone ? null : (Number(creditScore) > 0 ? Number(creditScore) : null),
+      credit_ntc: !creditNone && creditNtc,
+    };
 
     setSaving(true);
     setError(null);
@@ -127,8 +133,8 @@ export default function LoanApprovalForm({
       sanctioned_amount: saved.approved_loan_amount ?? null,
       // Sanction letter is part of approval details — record its state here.
       sanction_letter_unavailable: sanctionChoice === "unavailable",
-      // Credit score — a positive integer, or null when "None" is chosen.
-      credit_score: creditNone ? null : (Number(creditScore) > 0 ? Number(creditScore) : null),
+      // Credit score — a positive integer, or null when "None" is chosen; + NTC.
+      ...credit,
       reviewed_by: by, reviewed_at: now,
       // Pendings: a team member's approval details wait for the main admin.
       ...reviewPatch("approval"),
@@ -175,7 +181,7 @@ export default function LoanApprovalForm({
         approval_recorded_at: now,
         // Store credit score inside the per-lender details so each lender's card
         // shows its own score when comparing/finalizing.
-        approval_details: { ...saved, credit_score: creditNone ? null : (Number(creditScore) > 0 ? Number(creditScore) : null) },
+        approval_details: { ...saved, ...credit },
         rejected_at: null,
         rejection_reason: null,
       };
@@ -212,7 +218,7 @@ export default function LoanApprovalForm({
         <Section title="Approval details" summary={lenderName ?? undefined}>
           <ApprovalDetailsTable value={details} onChange={setDetails} />
 
-          {/* Credit score — optional: a positive integer or "None". */}
+          {/* Credit score — optional: a positive integer or "None"; NTC may go with a score. */}
           <div className="mt-4 pt-4 border-t border-[#eef1f4]">
             <label className="block text-[13px] font-medium text-[#0f3d2e] mb-1.5">Credit score <span className="text-[#5a8a76] font-normal">(optional)</span></label>
             <div className="flex items-center gap-4 flex-wrap">
@@ -229,19 +235,22 @@ export default function LoanApprovalForm({
                 <input
                   type="checkbox"
                   checked={creditNone}
-                  onChange={(e) => { setCreditNone(e.target.checked); if (e.target.checked) setCreditScore(""); }}
+                  onChange={(e) => { setCreditNone(e.target.checked); if (e.target.checked) { setCreditScore(""); setCreditNtc(false); } }}
                   className="h-4 w-4 accent-[#178a5c]"
                 />
                 None
               </label>
+              <label className="flex items-center gap-2 text-[14px] text-[#0f3d2e] cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={creditNtc}
+                  onChange={(e) => { setCreditNtc(e.target.checked); if (e.target.checked) setCreditNone(false); }}
+                  className="h-4 w-4 accent-[#178a5c]"
+                />
+                NTC
+              </label>
             </div>
           </div>
-
-          <p className="text-[12px] text-[#5a8a76] mt-3">
-            The approved amount must be greater than 0 and not more than the applied
-            amount. Credit score is optional. Everything you save here is restored when
-            you edit approval details later — you won&rsquo;t need to re-enter it.
-          </p>
         </Section>
       )}
 
@@ -284,6 +293,17 @@ export default function LoanApprovalForm({
             Will be recorded as not available at the time of filling. You can upload it later.
           </p>
         )}
+      </Section>
+
+      <Section title="Disbursement advice letter">
+        <FileUpload
+          applicationId={loan.id}
+          category="disbursement_advice"
+          table="user_application_docs"
+          uploadedBy="admin"
+          maxFiles={1}
+          uploadHint="PDF or image"
+        />
       </Section>
 
       {error && <p className="text-[13px] text-red-600 mt-3">{error}</p>}

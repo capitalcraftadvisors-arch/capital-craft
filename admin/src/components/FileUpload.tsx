@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { uploadDocument, getDocumentUrl, deleteDocument } from "@/lib/storage";
+import { uploadDocument, getDocumentUrl, deleteDocument, downloadDocument } from "@/lib/storage";
 import { isAcceptedFileType } from "@/lib/validators";
 
 type EpcCategory =
@@ -15,7 +15,7 @@ type LoanCategory =
   | "borrower_pan" | "borrower_aadhaar" | "borrower_photo"
   | "customer_photo"
   | "bank_statement" | "income_proof" | "electricity_bill"
-  | "property_doc" | "quotation" | "other" | "sanction_letter"
+  | "property_doc" | "quotation" | "other" | "sanction_letter" | "disbursement_advice"
   // Post-first-disbursement completion docs (migration 0043). Shared slots —
   // uploaded by either the admin (on behalf) or the EPC.
   | "completion_invoice" | "completion_plant_photo" | "completion_report"
@@ -56,6 +56,9 @@ type Props = {
   hideIds?: string[];
   // Small fixed-height box (UPLOAD_BOX_COMPACT), so a grid of slots lines up.
   compact?: boolean;
+  // A document slot (tranche docs): each file also has Download, and once a file
+  // is in, the upload box gives way to a small "+" on the last file's row.
+  slot?: boolean;
 };
 
 /** The compact upload box's height — shared with GeoOfficeUpload and the
@@ -83,7 +86,7 @@ export default function FileUpload(props: Props) {
     businessId, stakeholderId, applicationId,
     category, table, maxFiles = 1, uploadedBy,
     onUploaded, captureGps = false, extraMetadata, label, hint, uploadHint,
-    dedupe = false, onCountChange, hideIds, compact = false,
+    dedupe = false, onCountChange, hideIds, compact = false, slot = false,
   } = props;
   const inputRef = useRef<HTMLInputElement>(null);
   const [docs, setDocs] = useState<DocRow[]>([]);
@@ -234,14 +237,30 @@ export default function FileUpload(props: Props) {
 
   const canUploadMore = docs.length < maxFiles;
   const listed = hideIds?.length ? docs.filter((d) => !hideIds.includes(d.id)) : docs;
+  const filledSlot = slot && listed.length > 0;
+  // Rendered in the upload box, or (filled slot) in the small "+".
+  const fileInput = (
+    <input
+      ref={inputRef}
+      type="file"
+      className="hidden"
+      // image/* lets mobile browsers surface the camera + photo library
+      // + scanner/file-picker options. Backend ACCEPTED set still
+      // restricts to JPEG/PNG/WEBP/PDF; iOS Safari converts HEIC → JPEG
+      // at upload time so most camera shots arrive as image/jpeg.
+      accept="image/*,application/pdf"
+      multiple={maxFiles > 1}
+      onChange={(e) => handleFiles(e.target.files)}
+    />
+  );
 
   return (
     <div>
       {label && <p className="text-[13px] font-medium text-text-mid mb-2">{label}</p>}
 
       {listed.length > 0 && (
-        <ul className="space-y-2 mb-3">
-          {listed.map((d) => (
+        <ul className={filledSlot ? "space-y-2" : "space-y-2 mb-3"}>
+          {listed.map((d, n) => (
             <li
               key={d.id}
               className="flex items-center gap-3 bg-white border border-line rounded-input px-3 py-2"
@@ -273,6 +292,17 @@ export default function FileUpload(props: Props) {
                   <circle cx="12" cy="12" r="3" />
                 </svg>
               </button>
+              {slot && (
+                <button
+                  type="button"
+                  onClick={() => void downloadDocument(d.id)}
+                  title="Download"
+                  aria-label="Download"
+                  className="p-1.5 rounded hover:bg-bg-tint text-[#185fa5] transition-colors"
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16" /></svg>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => removeDoc(d)}
@@ -282,12 +312,19 @@ export default function FileUpload(props: Props) {
               >
                 <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
               </button>
+              {filledSlot && canUploadMore && n === listed.length - 1 && (
+                <label title="Add another" aria-label="Add another"
+                  className={"p-1.5 rounded hover:bg-bg-tint text-[#185fa5] transition-colors cursor-pointer" + (uploading ? " opacity-50 pointer-events-none" : "")}>
+                  {fileInput}
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
+                </label>
+              )}
             </li>
           ))}
         </ul>
       )}
 
-      {canUploadMore && (
+      {canUploadMore && !filledSlot && (
         <label
           className={[
             "flex flex-col items-center justify-center border-2 border-dashed border-[#185fa5] rounded-input bg-white",
@@ -295,18 +332,7 @@ export default function FileUpload(props: Props) {
             "text-center cursor-pointer hover:bg-[#f2f7fc] transition-colors",
           ].join(" ")}
         >
-          <input
-            ref={inputRef}
-            type="file"
-            className="hidden"
-            // image/* lets mobile browsers surface the camera + photo library
-            // + scanner/file-picker options. Backend ACCEPTED set still
-            // restricts to JPEG/PNG/WEBP/PDF; iOS Safari converts HEIC → JPEG
-            // at upload time so most camera shots arrive as image/jpeg.
-            accept="image/*,application/pdf"
-            multiple={maxFiles > 1}
-            onChange={(e) => handleFiles(e.target.files)}
-          />
+          {fileInput}
           <svg width={compact ? 20 : 28} height={compact ? 20 : 28} viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={compact ? "mb-1" : "mb-2"}>
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
             <polyline points="17 8 12 3 7 8" />

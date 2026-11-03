@@ -76,6 +76,24 @@ export async function getDocumentUrl(
   return data.ok && data.url ? data.url : null;
 }
 
+// Click a hidden anchor to a URL that the server signed with
+// Content-Disposition: attachment, so the browser saves it instead of
+// navigating away.
+export function triggerDownload(url: string) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.rel = "noopener";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/** Saves a stored document under its own file name. */
+export async function downloadDocument(docId: string): Promise<void> {
+  const url = await getDocumentUrl(docId, { download: true });
+  if (url) triggerDownload(url);
+}
+
 export async function deleteDocument(docId: string): Promise<boolean> {
   const res = await fetch(`/api/document/${docId}`, {
     method: "DELETE",

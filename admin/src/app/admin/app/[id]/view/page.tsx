@@ -16,7 +16,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness, isMainAdmin } from "@/lib/auth";
-import { getDocumentUrl, deleteDocument } from "@/lib/storage";
+import { getDocumentUrl, deleteDocument, downloadDocument, triggerDownload } from "@/lib/storage";
 import DeleteLoanAppModal from "@/components/DeleteLoanAppModal";
 import EditLoanDatesModal from "@/components/EditLoanDatesModal";
 import { invalidate } from "@/lib/list-cache";
@@ -194,7 +194,7 @@ function pathUploadedAt(loan: Loan, key: string, path: string): string | null {
 // the slot shows the latest one.
 const NAMED_SLOT_CATEGORIES = new Set<string>([
   "borrower_pan", "customer_photo", "borrower_photo", "quotation", "electricity_bill",
-  "bank_statement", "sanction_letter", "feasibility_report", "mmr_advance_receipt",
+  "bank_statement", "sanction_letter", "disbursement_advice", "feasibility_report", "mmr_advance_receipt",
   "completion_invoice", "completion_panel_photo", "completion_inverter_photo",
   "completion_meter_photo", "completion_report", "rooftop_photo_extra",
 ]);
@@ -305,6 +305,7 @@ function buildLoanDocGroups(loan: Loan, docsIn: Doc[]): LoanDocGroup[] {
     title: "Step 5 — Sanction Letter",
     slots: [
       slot("sanction_letter", "Sanction letter", ["sanction_letter"], null),
+      slot("disbursement_advice", "Disbursement advice letter", ["disbursement_advice"], null),
     ],
   });
 
@@ -515,22 +516,7 @@ function Inner() {
     if (url) window.open(url, "_blank", "noopener");
   }
 
-  // Click a hidden anchor to a URL that the server signed with
-  // Content-Disposition: attachment, so the browser saves it instead of
-  // navigating away.
-  function triggerDownload(url: string) {
-    const a = document.createElement("a");
-    a.href = url;
-    a.rel = "noopener";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  }
-
-  async function downloadDoc(id: string) {
-    const url = await getDocumentUrl(id, { download: true });
-    if (url) triggerDownload(url);
-  }
+  const downloadDoc = downloadDocument;
 
   // Sign a *_path column (whitelisted server-side) and RETURN the URL.
   async function signPath(path: string): Promise<string | null> {
@@ -999,6 +985,7 @@ function Inner() {
         approval_details: d,
         sanctioned_amount: (d.approved_loan_amount as number | null) ?? loan.sanctioned_amount ?? null,
         credit_score: (d.credit_score as number | null) ?? null,
+        credit_ntc: d.credit_ntc === true,
       };
       await supabase().from("epc_applications").update(patch).eq("id", loan.id);
       setLoan((prev) => (prev ? ({ ...prev, ...patch } as Loan) : prev));

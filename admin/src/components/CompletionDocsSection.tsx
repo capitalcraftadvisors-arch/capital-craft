@@ -24,7 +24,7 @@ import { useEffect, useState } from "react";
 import FileUpload, { UPLOAD_BOX_COMPACT } from "@/components/FileUpload";
 import GeoOfficeUpload from "@/components/GeoOfficeUpload";
 import { supabase } from "@/lib/supabase";
-import { getDocumentUrl, deleteDocument } from "@/lib/storage";
+import { getDocumentUrl, deleteDocument, downloadDocument } from "@/lib/storage";
 import { I } from "@/components/view/ViewKit";
 
 export const COMPLETION_CATEGORIES = [
@@ -209,6 +209,7 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
           maxFiles={10}
           label=""
           compact
+          slot
           onUploaded={() => setTick((n) => n + 1)}
         />
       </div>
@@ -230,7 +231,7 @@ function SlotTitle({ title }: { title: string }) {
   return <p className="text-[13px] font-semibold text-[#0f3d2e] mb-1.5 truncate" title={title}>{title}</p>;
 }
 
-// Shows the existing upload (with an eye-View) when present, otherwise the
+// Shows the existing upload (View, Download, Remove) when present, otherwise the
 // uploader — both in the same compact box height, so the grid stays level.
 function DocSlot({
   title, doc, onOpen, onRemove, children,
@@ -255,6 +256,14 @@ function DocSlot({
               className="text-[#185fa5] hover:text-[#144d84]"
             >
               {I.eye}
+            </button>
+            <button
+              type="button"
+              onClick={() => void downloadDocument(doc.id)}
+              title="Download" aria-label="Download"
+              className="text-[#185fa5] hover:text-[#144d84]"
+            >
+              {I.download}
             </button>
             {onRemove && (
               <button

@@ -7,7 +7,7 @@
 // forms; gozerobils (Sustera Ventures) builds its quotations in the portal's
 // Customer applications.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { getToken } from "@/lib/auth";
@@ -19,7 +19,7 @@ import {
 import {
   MODULE_BRANDS, INVERTER_BRANDS, ROOF_TYPES, MOUNTS_BY_ROOF,
   ACDB_DCDB_OPTIONS, CABLE_OPTIONS, BATTERY_OPTIONS, SYSTEM_TYPES, BRAND_FIELDS, BIJLEE, SARVATRA,
-  SARVATRA_ENERGY, SARVATRA_ENERGY_BOQ, boqField, sarvatraEnergyBoq, sarvatraEnergyTotals, RVS, RVS_BOM, rvsBom, rvsFigures,
+  SARVATRA_ENERGY, SARVATRA_ENERGY_BOQ, boqField, sarvatraEnergyBoq, sarvatraEnergyTotals, RVS, RVS_BOM, rvsBom, rvsFigures, rvsNoSubsidy,
   type BoqRow, type BoqCells, type BoqColumn,
 } from "@/lib/quotation-brands";
 
@@ -385,17 +385,18 @@ type SarvatraEnergyFields = {
   discom: string; kw: string; category: string; dcr: string; k_number: string; address: string; total: string;
 };
 // A bill of quantities whose every cell is a dropdown (custom values saved per row and column).
-function BoqTable({ title, rows, cells, columns, grid, onPick }: {
+function BoqTable({ title, rows, cells, columns, grid, onPick, extra }: {
   title: string; rows: BoqRow[]; cells: BoqCells; columns: [BoqColumn, string][];
-  grid: string; // the sm: grid columns — product + `columns`
+  grid: string; // the sm: grid columns — product + `columns` (+ `extra`)
   onPick: (cell: string, value: string) => void; // cell = `<row>_<column>`
+  extra?: { head: string; row: string; cell: ReactNode }; // one more column, filled on one row
 }) {
   const merge = useBrandOptions();
   return (
     <div className="bg-white rounded-2xl border border-line p-5 mt-5">
       <div className="text-[13px] font-semibold text-[#0f3d2e] mb-3">{title}</div>
       <div className={`hidden sm:grid ${grid} gap-2 mb-1.5 text-[12px] font-medium text-text-muted`}>
-        <span>Product</span>{columns.map(([c, head]) => <span key={c}>{head}</span>)}
+        <span>Product</span>{columns.map(([c, head]) => <span key={c}>{head}</span>)}{extra && <span>{extra.head}</span>}
       </div>
       <div className="flex flex-col gap-4 sm:gap-2">
         {rows.map((r) => (
@@ -406,6 +407,7 @@ function BoqTable({ title, rows, cells, columns, grid, onPick }: {
                 options={merge([cells[r.key][c], ...r[c]].filter(Boolean), boqField(r.key, c))} field={boqField(r.key, c)}
                 onChange={(v) => onPick(`${r.key}_${c}`, v)} />
             ))}
+            {extra && (r.key === extra.row ? extra.cell : <span className="hidden sm:block" />)}
           </div>
         ))}
       </div>
@@ -482,17 +484,18 @@ function SarvatraEnergyForm({ serialNext }: { serialNext: number | null }) {
 // RVS Technologies — their solar proposal: the customer (cover + welcome letter),
 // the bill of material (every cell a dropdown, prefilled as in their sample) and
 // the price; GST, savings, payback and the chart are worked out.
-type RvsFields = { customer_name: string; mobile: string; address: string; city: string; kw: string; price: string; subsidy: string };
+type RvsFields = { customer_name: string; mobile: string; address: string; city: string; kw: string; price: string; subsidy: string; dcr: string };
 
 function RvsForm() {
-  const [f, setF] = useState<RvsFields>({ customer_name: "", mobile: "", address: "", city: "", kw: "", price: "", subsidy: "" });
+  const [f, setF] = useState<RvsFields>({ customer_name: "", mobile: "", address: "", city: "", kw: "", price: "", subsidy: "", dcr: RVS.dcrTypes[0] });
   const [bom, setBom] = useState<Record<string, string>>({}); // picked cells, `<row>_<column>`
   const { formRef, onFormKey } = useKeyNav();
   const { busy, error, setError, run } = useQuotationDownload();
   const set = (k: keyof RvsFields, v: string) => setF((p) => ({ ...p, [k]: v }));
   const kw = Number(f.kw) || 0;
   const price = Number(f.price) || 0;
-  const fig = rvsFigures(kw, price, f.subsidy === "" ? null : Number(f.subsidy) || 0);
+  const fig = rvsFigures(kw, price, f.subsidy === "" ? null : Number(f.subsidy) || 0, f.dcr);
+  const noSubsidy = rvsNoSubsidy(f.dcr);
   const cells = rvsBom(bom, kw);
 
   async function download() {
@@ -517,14 +520,20 @@ function RvsForm() {
         </Section>
 
         <BoqTable title="Bill of material" rows={RVS_BOM} cells={cells}
-          columns={[["spec", "Item description"], ["qty", "QTY"], ["make", "Make"]]} grid="sm:grid-cols-[0.8fr_2fr_0.5fr_1fr]"
-          onPick={(cell, v) => setBom((p) => ({ ...p, [cell]: v }))} />
+          columns={[["spec", "Item description"], ["qty", "QTY"], ["make", "Make"]]} grid="sm:grid-cols-[0.8fr_2fr_0.5fr_1fr_0.8fr]"
+          onPick={(cell, v) => setBom((p) => ({ ...p, [cell]: v }))}
+          extra={{ head: "DCR / Non-DCR", row: "rvs_module",
+            cell: <SearchableSelect label="" value={f.dcr} options={RVS.dcrTypes} onChange={(v) => set("dcr", v)} /> }} />
 
         <Section title="Commercial offer">
           <Field l="System price (without GST) ₹" req><input className={input} inputMode="decimal" value={f.price} onChange={(e) => set("price", decimal(e.target.value))} placeholder="e.g. 414000" /></Field>
           <Field l={`Tax GST (${RVS.gst} %) ₹`}><input className={input + " bg-bg-soft"} readOnly value={inr(fig.gst)} /></Field>
           <Field l="Total cost ₹"><input className={input + " bg-bg-soft"} readOnly value={inr(fig.total)} /></Field>
-          <Field l="MNRE subsidy ₹"><input className={input} inputMode="decimal" value={f.subsidy} onChange={(e) => set("subsidy", decimal(e.target.value))} placeholder={inr(rvsFigures(kw, price, null).subsidy)} /></Field>
+          <Field l="MNRE subsidy ₹">
+            {noSubsidy
+              ? <input className={input + " bg-bg-soft"} readOnly value={inr(0)} />
+              : <input className={input} inputMode="decimal" value={f.subsidy} onChange={(e) => set("subsidy", decimal(e.target.value))} placeholder={inr(rvsFigures(kw, price, null).subsidy)} />}
+          </Field>
           <Field l="Effective cost after subsidy ₹"><input className={input + " bg-bg-soft font-semibold"} readOnly value={inr(fig.effective)} /></Field>
         </Section>
 

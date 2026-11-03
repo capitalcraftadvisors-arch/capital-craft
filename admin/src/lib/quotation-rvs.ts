@@ -7,12 +7,13 @@
 //   2 welcome — the name; "Dear <name>,"
 //   3 savings & payback — six figures + the 25-year savings chart
 //   4 commercial offer — the kW in the opening line + the price table
-//   5 bill of material — a cell is redrawn only where it differs from the sample
+//   5 bill of material — a cell is redrawn only where it differs from the sample;
+//     the modules' description ends with (DCR) / (Non-DCR)
 // Pages 6–7 (terms, contact) are unchanged.
 
 import { PDFDocument, PDFPage, rgb } from "pdf-lib";
 import { embedHelvetica, inr, num, printable, textWidth, wrap, type Fonts } from "./pdf-template";
-import { RVS_BOM, rvsBom, rvsFigures, type BoqCells, type BoqColumn } from "./quotation-brands";
+import { RVS, RVS_BOM, rvsBom, rvsFigures, type BoqCells, type BoqColumn } from "./quotation-brands";
 
 export type RvsInput = {
   customer_name: string;
@@ -23,6 +24,7 @@ export type RvsInput = {
   price: number;           // system price, before GST
   subsidy: number | null;  // MNRE subsidy; null = by kW
   bom: BoqCells;
+  dcr: string;             // the solar modules: DCR / Non-DCR
 };
 
 /** The form values → the builder's input. */
@@ -33,6 +35,7 @@ export function rvsInput(b: Record<string, unknown>): RvsInput {
     customer_name: s("customer_name"), mobile: s("mobile"), address: s("address"), city: s("city"), kw,
     price: Number(b.price) || 0, subsidy: s("subsidy") === "" ? null : Number(b.subsidy) || 0,
     bom: rvsBom(b.bom && typeof b.bom === "object" ? (b.bom as Record<string, unknown>) : {}, kw),
+    dcr: s("dcr") || RVS.dcrTypes[0],
   };
 }
 
@@ -98,7 +101,7 @@ export async function buildRvsQuotation(i: RvsInput, template: Buffer): Promise<
   const doc = await PDFDocument.load(template);
   const fonts = await embedHelvetica(doc);
   const pages = doc.getPages();
-  const k = rvsFigures(i.kw, i.price, i.subsidy);
+  const k = rvsFigures(i.kw, i.price, i.subsidy, i.dcr);
   const kw = num(i.kw);
 
   // 1 — cover
@@ -126,12 +129,13 @@ export async function buildRvsQuotation(i: RvsInput, template: Buffer): Promise<
   [kw, inr(i.price), inr(k.gst), inr(k.total), inr(k.subsidy), inr(k.effective)].forEach((v, n) =>
     offer.text(v, 860, [451, 519, 589, 657, 725, 793][n], 27, n < 3 ? [2, 14, 40] : BLACK, { bold: true, align: "center", max: 490 }));
 
-  // 5 — bill of material: only the cells that differ from the sample (the module / inverter logos stay until then)
+  // 5 — bill of material: only the cells that differ from the sample (the module / inverter logos stay until then);
+  //     the modules' DCR / Non-DCR follows their description
   const bom = canvas(pages[4], fonts, 1682);
   RVS_BOM.forEach((r, n) => {
     const [y0, y1] = BOM_ROWS[n];
     for (const col of Object.keys(BOM_COLS) as BoqColumn[]) {
-      const v = i.bom[r.key][col];
+      const v = r.key === "rvs_module" && col === "spec" && i.dcr ? `${i.bom[r.key][col]} (${i.dcr})` : i.bom[r.key][col];
       if (v === BOM_SAMPLE[r.key][col]) continue;
       const [x0, x1] = BOM_COLS[col], width = x1 - x0 - 10;
       bom.box(x0, y0, x1, y1, WHITE);

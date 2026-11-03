@@ -206,6 +206,7 @@ export const RVS = {
   unitsPerKw: 1460,
   tariff: 8,
   growth: 1.05 * 0.995,
+  dcrTypes: ["DCR", "Non-DCR"], // the solar modules' type, printed after their description
 };
 
 // Bill of material: description / QTY / make (UOM stays as printed). The sample's
@@ -241,11 +242,14 @@ export function rvsBom(picked: Record<string, unknown>, kw: number): BoqCells {
     : undefined);
 }
 
-/** RVS proposal figures: the system price is before GST; the MNRE subsidy blank (null) = by kW. */
-export function rvsFigures(kw: number, price: number, subsidy: number | null) {
+/** Non-DCR modules get no MNRE subsidy. */
+export const rvsNoSubsidy = (dcr: string) => dcr === RVS.dcrTypes[1];
+
+/** RVS proposal figures: the system price is before GST; the MNRE subsidy blank (null) = by kW, 0 for Non-DCR. */
+export function rvsFigures(kw: number, price: number, subsidy: number | null, dcr: string = RVS.dcrTypes[0]) {
   const gst = Math.round((price * RVS.gst) / 100);
   const total = price + gst;
-  const mnre = subsidy ?? centralSubsidyFor(kw, false);
+  const mnre = rvsNoSubsidy(dcr) ? 0 : subsidy ?? centralSubsidyFor(kw, false);
   const units = Math.round(kw * RVS.unitsPerKw);
   const savings = units * RVS.tariff;
   return {

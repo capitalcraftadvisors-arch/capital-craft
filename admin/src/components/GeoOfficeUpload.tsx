@@ -28,7 +28,7 @@
 import { useEffect, useRef, useState } from "react";
 import { gps as exifrGps } from "exifr";
 import { supabase } from "@/lib/supabase";
-import { uploadDocument, getDocumentUrl, deleteDocument } from "@/lib/storage";
+import { uploadDocument, getDocumentUrl, deleteDocument, downloadDocument } from "@/lib/storage";
 import { getToken } from "@/lib/auth";
 import { isAcceptedFileType } from "@/lib/validators";
 import { I } from "@/components/view/ViewKit";
@@ -569,7 +569,7 @@ export default function GeoOfficeUpload({
       )}
 
       {doc && compact ? (
-        // One fixed-height card: thumbnail, name, the GPS point, eye + delete.
+        // One fixed-height card: thumbnail, name, the GPS point, eye + download + delete.
         <div className={`${UPLOAD_BOX_COMPACT} flex items-center gap-3 bg-white border border-line rounded-input px-3`}>
           {thumb ? (
             /* eslint-disable-next-line @next/next/no-img-element */
@@ -585,6 +585,12 @@ export default function GeoOfficeUpload({
             <button type="button" onClick={() => void view()} title="View uploaded document" aria-label="View uploaded document"
               className="p-1.5 rounded hover:bg-bg-tint text-[#185fa5] transition-colors">
               {I.eye}
+            </button>
+          )}
+          {doc.id && (
+            <button type="button" onClick={() => void downloadDocument(doc.id)} title="Download" aria-label="Download"
+              className="p-1.5 rounded hover:bg-bg-tint text-[#185fa5] transition-colors">
+              {I.download}
             </button>
           )}
           <button type="button" onClick={() => void remove()} title="Remove" aria-label="Remove"

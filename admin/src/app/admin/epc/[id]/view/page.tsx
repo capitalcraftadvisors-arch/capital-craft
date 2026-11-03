@@ -26,7 +26,7 @@ import { getToken, getBusiness, isMainAdmin } from "@/lib/auth";
 import { epcReviewPatch, approveEpcReview, epcLocked, invalidatePendingCount, saveEpcLenderState } from "@/lib/review";
 import AdminPendingPill from "@/components/AdminPendingPill";
 import { toast } from "sonner";
-import { getDocumentUrl, deleteDocument } from "@/lib/storage";
+import { getDocumentUrl, deleteDocument, downloadDocument } from "@/lib/storage";
 import { logAudit } from "@/lib/auditLog";
 import { Period, inPeriod } from "@/lib/period";
 import LenderCell, { LenderMap } from "@/components/LenderCell";
@@ -277,17 +277,7 @@ function Inner() {
     if (u) window.open(u, "_blank");
   }
 
-  // Save the document (server signs with Content-Disposition: attachment).
-  async function downloadDoc(id: string) {
-    const u = await getDocumentUrl(id, { download: true });
-    if (!u) return;
-    const a = document.createElement("a");
-    a.href = u;
-    a.rel = "noopener";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  }
+  const downloadDoc = downloadDocument;
 
   // Remove an EPC document (epc_documents row + its GCS object) — immediate.
   async function removeDoc(id: string) {
