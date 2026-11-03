@@ -31,6 +31,11 @@ export function amountInput(v: string): string {
   return i < 0 ? s : s.slice(0, i + 1) + s.slice(i + 1).replace(/\./g, "").slice(0, 2);
 }
 
+/** "₹1.25 Cr" / "₹4.5 L" / "₹85,000" — short form for analytics figures. */
+export function rupeesShort(v: number): string {
+  return v >= 1e7 ? `₹${(v / 1e7).toFixed(2)} Cr` : v >= 1e5 ? `₹${(v / 1e5).toFixed(1)} L` : `₹${Math.round(v).toLocaleString("en-IN")}`;
+}
+
 /** Like fmtRupees but ALSO shows "—" for 0 (lender summaries / ZIP routes). */
 export function rupees(n: unknown): string {
   const v = Number(n);

@@ -38,6 +38,15 @@ export function lenderName(key: string | null | undefined): string {
   return lenderLabelIn(known, key);
 }
 
+// Chart colours: the original three keep theirs; any other lender takes the next of these.
+const LENDER_COLOR: Record<string, string> = { aerem: "#185fa5", creditfair: "#d97706", solfin: "#0f766e" };
+const MORE_COLORS = ["#7c3aed", "#db2777", "#0891b2", "#65a30d", "#ea580c", "#475569"];
+
+/** A lender's chart colour (stable per lender, from its place in `list`). */
+export function lenderColor(list: Lender[], key: string): string {
+  return LENDER_COLOR[key] ?? MORE_COLORS[Math.max(0, list.findIndex((l) => l.key === key)) % MORE_COLORS.length];
+}
+
 /** Registers a lender (its key from the name); an existing key is reused. */
 export async function addLender(label: string): Promise<{ lender?: Lender; existed?: boolean; error?: string }> {
   const name = label.trim();

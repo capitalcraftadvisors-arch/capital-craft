@@ -23,7 +23,7 @@ import { logout, getBusiness, allowedModules, canAccessModule, isMainAdmin, type
 import { pendingCount } from "@/lib/review";
 
 export type ConsoleTab = "epcs" | "apps" | "loanleads" | "insurance" | "otherins" | "leads";
-export type SectionKey = ConsoleTab | "analytics" | "board" | "pendings" | "team" | "pri";
+export type SectionKey = ConsoleTab | "analytics" | "insights" | "board" | "pendings" | "team" | "pri";
 
 // Per-dashboard theme — every dashboard is green, each in its own shade, so the
 // page itself says where you are. color = accent (buttons, active nav, table
@@ -36,6 +36,7 @@ export const ACCENTS: Record<SectionKey, { label: string; color: string; tint: s
   otherins:  { label: "Other Insurance",   color: "#3f7468", tint: "#d7e8e3", page: "#e9f2ee" }, // eucalyptus
   leads:     { label: "Leads (Non-EPC)",   color: "#5b6e1c", tint: "#e4ebcd", page: "#f1f4e3" }, // olive
   analytics: { label: "Analytics",         color: "#4f7560", tint: "#dbe8df", page: "#ecf3ee" }, // sage
+  insights:  { label: "Team analytics",    color: "#1f6b52", tint: "#d3e9df", page: "#e9f3ee" }, // emerald ink
   board:     { label: "Task Manager",      color: "#0b7d68", tint: "#cdece3", page: "#e3f4ee" }, // jade
   pendings:  { label: "Pendings",          color: "#14533d", tint: "#d1e3da", page: "#e5eee9" }, // pine
   team:      { label: "Stakeholders",      color: "#5a7a2e", tint: "#dfebd2", page: "#eef4e6" }, // moss
@@ -85,6 +86,9 @@ const ICONS: Record<SectionKey, ReactNode> = {
   analytics: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 3v18h18" /><path d="M7 14l3-3 4 4 6-6" /></svg>
   ),
+  insights: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-9-9v9z" /><path d="M15 3.5A9 9 0 0 1 20.5 9H15z" /></svg>
+  ),
   board: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="6" height="18" rx="1"/><rect x="10.5" y="3" width="6" height="12" rx="1"/><rect x="18" y="3" width="3" height="9" rx="1"/></svg>
   ),
@@ -110,6 +114,9 @@ export function sidebarNavKeys(biz = getBusiness()): SectionKey[] {
   // (MAIN_ADMIN sees all cases + RM tabs; an OPERATIONS_USER sees only their
   // own, enforced by RLS). Pinned to the top.
   if (biz?.business_type === "admin") keys.unshift("board");
+  // Team analytics — figures for the whole CC team (each sees the loans their
+  // own list shows), so every admin-type user has it.
+  if (biz?.business_type === "admin") keys.push("insights");
   // Pendings — the main admin's checker queue (maker-checker, lib/review) —
   // and Other Insurance (general, non-solar) are the main admin's only.
   if (isMainAdmin(biz)) {
@@ -126,7 +133,7 @@ export function sidebarNavKeys(biz = getBusiness()): SectionKey[] {
 
 // Where a section lives: console tabs are in-page state on /admin; the rest are routes.
 export const SECTION_ROUTE: Partial<Record<SectionKey, string>> = {
-  analytics: "/admin/analytics", board: "/admin/board", pendings: "/admin/pendings", team: "/admin/stakeholders", pri: "/admin/pri",
+  analytics: "/admin/analytics", insights: "/admin/team-analytics", board: "/admin/board", pendings: "/admin/pendings", team: "/admin/stakeholders", pri: "/admin/pri",
 };
 
 export default function AdminSidebar({

@@ -6,7 +6,8 @@
 // charted with Recharts. Read-only.
 
 import { useEffect, useMemo, useState } from "react";
-import { useLenders } from "@/lib/lenders";
+import { useLenders, lenderColor } from "@/lib/lenders";
+import { rupeesShort } from "@/lib/money";
 import { lenderLabelIn } from "@/lib/loan-lenders";
 import {
   ResponsiveContainer, BarChart, Bar, ComposedChart, Line, XAxis, YAxis,
@@ -20,9 +21,6 @@ const C = {
   green: "#178a5c", greenDark: "#0f7a52", blue: "#185fa5", amber: "#d97706",
   red: "#dc2626", teal: "#0f766e", slate: "#64748b", ink: "#0f3d2e", grid: "#eef1f4",
 };
-// The original three keep their colours; any other lender takes the next of these.
-const LENDER_COLOR: Record<string, string> = { aerem: "#185fa5", creditfair: "#d97706", solfin: "#0f766e" };
-const MORE_COLORS = ["#7c3aed", "#db2777", "#0891b2", "#65a30d", "#ea580c", "#475569"];
 // One colour per pipeline stage (matches the console's stage legend).
 const STAGE = [
   { key: "ready", label: "Ready", color: "#94a3b8" },
@@ -37,7 +35,7 @@ type LoanRow = Record<string, any>;
 type LeadRow = { status: string | null; dead_at: string | null; created_at: string | null };
 
 const num = (v: unknown) => Number(v) || 0;
-const money = (v: number) => (v >= 1e7 ? `₹${(v / 1e7).toFixed(2)} Cr` : v >= 1e5 ? `₹${(v / 1e5).toFixed(1)} L` : `₹${Math.round(v).toLocaleString("en-IN")}`);
+const money = rupeesShort;
 const inWin = (s: string | null, win: { start: number; end: number }) => { if (!s) return false; const t = Date.parse(s); return !isNaN(t) && t >= win.start && t <= win.end; };
 
 function stageOf(r: LoanRow): string | null {
@@ -83,7 +81,7 @@ export default function OverviewSection({ win, segment }: { win: { start: number
     return () => { cancelled = true; };
   }, []);
 
-  const colorOf = (k: string) => LENDER_COLOR[k] ?? MORE_COLORS[Math.max(0, lenders.findIndex((l) => l.key === k)) % MORE_COLORS.length];
+  const colorOf = (k: string) => lenderColor(lenders, k);
   const d = useMemo(() => {
     // Scope to a loan segment (Residential / C&I) when this section is segmented.
     const uni = segment ? loans.filter((l) => l.plant_use_type === segment) : loans;

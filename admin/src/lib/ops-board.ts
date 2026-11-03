@@ -127,7 +127,7 @@ const num = (v: unknown): number => (typeof v === "number" && isFinite(v) ? v : 
 // Columns: ready_login → send_lender → docs_pending → approved_rejected →
 // phase1 (1st disbursement) → abort. `stageSince` is when the case entered its
 // current stage (drives the per-column outline colour).
-function loanColumn(r: Record<string, any>, lenderMidDecision: boolean): { column: string | null; label: string; stageSince: string | null } {
+export function loanColumn(r: Record<string, any>, lenderMidDecision: boolean): { column: string | null; label: string; stageSince: string | null } {
   const s = r.status as string;
   // Aborted files live in their own column.
   if (r.aborted_at) return { column: "abort", label: "Aborted", stageSince: r.aborted_at };
@@ -153,7 +153,7 @@ function loanColumn(r: Record<string, any>, lenderMidDecision: boolean): { colum
   return { column: "ready_login", label: "Ready for login", stageSince: r.submitted_at || r.created_at || r.updated_at };
 }
 
-function epcColumn(r: Record<string, any>, lender: { docs: boolean; approved: boolean; rejected: boolean }): { column: string | null; label: string } {
+export function epcColumn(r: Record<string, any>, lender: { docs: boolean; approved: boolean; rejected: boolean }): { column: string | null; label: string } {
   const s = r.status as string;
   if (s === "rejected" || lender.rejected) return { column: "rejected", label: "Rejected" };
   if (s === "approved" || lender.approved) return { column: "approved", label: "Approved" };
