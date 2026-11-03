@@ -1496,6 +1496,7 @@ function Inner() {
                       lenderLabel={formFor.label}
                       editMode={formEdit}
                       hasSanctionLetter={hasCat("sanction_letter")}
+                      hasDisbursementAdvice={hasCat("disbursement_advice")}
                       onSaved={() => { setFormLender(null); setReloadKey((k) => k + 1); }}
                       onCancel={formLender ? () => setFormLender(null) : undefined}
                     />

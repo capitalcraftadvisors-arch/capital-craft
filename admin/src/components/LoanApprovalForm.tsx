@@ -29,20 +29,28 @@ import { reviewPatch, invalidatePendingCount } from "@/lib/review";
 
 type Loan = Record<string, any>;
 
+// The sanction / disbursement-advice choice buttons; `on` fills them (green by default).
+const choiceBtn = (on: boolean, onCls = "bg-[#178a5c] text-white border-[#178a5c]") => [
+  "px-4 py-2 rounded-[8px] text-[13px] font-semibold border transition-colors",
+  on ? onCls : "bg-white text-[#0f3d2e] border-[#cdeadd] hover:bg-[#f0faf5]",
+].join(" ");
+
 export default function LoanApprovalForm({
-  loan, lender, lenderLabel, editMode, hasSanctionLetter, onSaved, onCancel,
+  loan, lender, lenderLabel, editMode, hasSanctionLetter, hasDisbursementAdvice, onSaved, onCancel,
 }: {
   loan: Loan;
   lender: string;               // the approving lender's key ("" → the saved one)
   lenderLabel?: string | null;  // its display name (custom lenders)
   editMode: "approval" | "sanction" | null;
   hasSanctionLetter?: boolean;  // a sanction_letter doc is already on file
+  hasDisbursementAdvice?: boolean; // a disbursement_advice doc is already on file
   onSaved: () => void;
   onCancel?: () => void;
 }) {
   const lenders = useLenders();
   const [details, setDetails] = useState<ApprovalDetails>({});
   const [sanctionChoice, setSanctionChoice] = useState<"upload" | "unavailable" | null>(null);
+  const [adviceOpen, setAdviceOpen] = useState(false);
   const [creditScore, setCreditScore] = useState<string>("");
   const [creditNone, setCreditNone] = useState(false);
   const [creditNtc, setCreditNtc] = useState(false); // New To Credit — may go with a score, never with "None"
@@ -75,6 +83,7 @@ export default function LoanApprovalForm({
     });
     // A letter already on file opens the upload slot, so it shows as filled.
     setSanctionChoice(loan.sanction_letter_unavailable ? "unavailable" : hasSanctionLetter ? "upload" : null);
+    setAdviceOpen(!!hasDisbursementAdvice);
     setCreditScore(loan.credit_score != null ? String(loan.credit_score) : "");
     setCreditNtc(loan.credit_ntc === true);
     // Re-seed only when the lender / mode changes — not on every loan re-read.
@@ -254,57 +263,53 @@ export default function LoanApprovalForm({
         </Section>
       )}
 
-      {/* Sanction letter — part of Approval details (collected at approval time). */}
-      <Section title="Sanction letter">
-        <div className="flex flex-wrap gap-2 mb-3">
-          <button
-            type="button"
-            onClick={() => setSanctionChoice("upload")}
-            className={[
-              "px-4 py-2 rounded-[8px] text-[13px] font-semibold border transition-colors",
-              sanctionChoice === "upload" ? "bg-[#178a5c] text-white border-[#178a5c]" : "bg-white text-[#0f3d2e] border-[#cdeadd] hover:bg-[#f0faf5]",
-            ].join(" ")}
-          >
-            Upload sanction letter
-          </button>
-          <button
-            type="button"
-            onClick={() => setSanctionChoice("unavailable")}
-            className={[
-              "px-4 py-2 rounded-[8px] text-[13px] font-semibold border transition-colors",
-              sanctionChoice === "unavailable" ? "bg-[#854f0b] text-white border-[#854f0b]" : "bg-white text-[#0f3d2e] border-[#cdeadd] hover:bg-[#f0faf5]",
-            ].join(" ")}
-          >
-            I don&rsquo;t have it now
-          </button>
-        </div>
-        {sanctionChoice === "upload" && (
-          <FileUpload
-            applicationId={loan.id}
-            category="sanction_letter"
-            table="user_application_docs"
-            uploadedBy="admin"
-            maxFiles={1}
-            uploadHint="PDF or image"
-          />
-        )}
-        {sanctionChoice === "unavailable" && (
-          <p className="text-[12px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2">
-            Will be recorded as not available at the time of filling. You can upload it later.
-          </p>
-        )}
-      </Section>
+      {/* Sanction letter + disbursement advice letter — side by side, each
+          opening its upload slot from a button (collected at approval time). */}
+      <div className="grid gap-x-8 sm:grid-cols-2">
+        <Section title="Sanction letter">
+          <div className="flex flex-wrap gap-2 mb-3">
+            <button type="button" onClick={() => setSanctionChoice("upload")} className={choiceBtn(sanctionChoice === "upload")}>
+              Upload sanction letter
+            </button>
+            <button type="button" onClick={() => setSanctionChoice("unavailable")} className={choiceBtn(sanctionChoice === "unavailable", "bg-[#854f0b] text-white border-[#854f0b]")}>
+              I don&rsquo;t have it now
+            </button>
+          </div>
+          {sanctionChoice === "upload" && (
+            <FileUpload
+              applicationId={loan.id}
+              category="sanction_letter"
+              table="user_application_docs"
+              uploadedBy="admin"
+              maxFiles={1}
+              uploadHint="PDF or image"
+            />
+          )}
+          {sanctionChoice === "unavailable" && (
+            <p className="text-[12px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2">
+              Will be recorded as not available at the time of filling. You can upload it later.
+            </p>
+          )}
+        </Section>
 
-      <Section title="Disbursement advice letter">
-        <FileUpload
-          applicationId={loan.id}
-          category="disbursement_advice"
-          table="user_application_docs"
-          uploadedBy="admin"
-          maxFiles={1}
-          uploadHint="PDF or image"
-        />
-      </Section>
+        <Section title="Disbursement advice letter">
+          <div className="flex flex-wrap gap-2 mb-3">
+            <button type="button" onClick={() => setAdviceOpen(true)} className={choiceBtn(adviceOpen)}>
+              Upload disbursement advice
+            </button>
+          </div>
+          {adviceOpen && (
+            <FileUpload
+              applicationId={loan.id}
+              category="disbursement_advice"
+              table="user_application_docs"
+              uploadedBy="admin"
+              maxFiles={1}
+              uploadHint="PDF or image"
+            />
+          )}
+        </Section>
+      </div>
 
       {error && <p className="text-[13px] text-red-600 mt-3">{error}</p>}
 
