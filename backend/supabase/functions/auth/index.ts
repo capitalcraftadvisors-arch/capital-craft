@@ -12,6 +12,11 @@
 // (15 minutes, can't open the portal); { action: "change_password",
 // change_token, new_password } sets the EPC's own password and logs in.
 //
+// EPC staff (0119): a mobile that isn't a company login is looked up in
+// epc_members — always with a password (set by the company's owner / admin,
+// changed at first login, never readable). The session is the company's
+// (business_id) + member_id / member_role claims.
+//
 // Signing key selection (no code change needed to roll back):
 //   - If APP_SIGNING_JWK is set, sign with ES256 using that private JWK.
 //   - Otherwise, sign with HS256 using APP_JWT_SECRET (legacy fallback).
@@ -103,34 +108,61 @@ async function sha256Hex(s: string): Promise<string> {
 
 const CHANGE_TOKEN_MINUTES = 15;
 const BIZ_COLS = "id, status, business_type, current_step, contact_name, loan_app_unlocked, service_type, role, allowed_modules, parent_user_id";
+// An EPC staff login (0119) — logs in to its company with its own mobile + password.
+const MEMBER_COLS = "id, business_id, name, member_role, modules, active";
+type Member = { id: string; business_id: string; name: string; member_role: string; modules: string[]; active: boolean };
 
-// The EPC's own password in place of the issued one, then a normal login.
+// Password results shared by owners (verify_login_password) and staff (verify_member_password):
+// a Response to send back, or null = go on to the session.
+async function passwordGate(pw: unknown, change: { sub: string; member_id?: string }): Promise<Response | null> {
+  if (pw === "required") return json({ ok: false, password_required: true, error: "Enter your password." }, 401);
+  if (pw === "bad") return json({ ok: false, password_required: true, error: "Wrong password." }, 401);
+  if (pw === "locked") return json({ ok: false, password_required: true, error: "Too many wrong attempts. Try again in 15 minutes." }, 429);
+  // Right issued password → no session yet; only a pass to set their own password.
+  if (pw === "change") {
+    const change_token = await sign({ ...change, role: "anon", purpose: "pw_change" }, new Date(Date.now() + CHANGE_TOKEN_MINUTES * 60000));
+    return json({ ok: false, must_change_password: true, change_token }, 403);
+  }
+  return null;
+}
+
+// The EPC's (or a staff member's) own password in place of the issued one, then a normal login.
 async function changePassword(changeToken: unknown, newPassword: unknown): Promise<Response> {
   const t = await verifyToken(typeof changeToken === "string" ? changeToken : "");
   if (!t || t.purpose !== "pw_change" || typeof t.sub !== "string") {
     return json({ ok: false, error: "This step has expired — log in again." }, 401);
   }
-  const { data: r, error } = await supabase.rpc("set_own_password", {
-    p_business_id: t.sub, p_password: typeof newPassword === "string" ? newPassword.replace(/\s+/g, "") : "",
-  });
+  const memberId = typeof t.member_id === "string" ? t.member_id : null;
+  const p_password = typeof newPassword === "string" ? newPassword.replace(/\s+/g, "") : "";
+  const { data: r, error } = memberId
+    ? await supabase.rpc("set_own_member_password", { p_member_id: memberId, p_password })
+    : await supabase.rpc("set_own_password", { p_business_id: t.sub, p_password });
   if (error) return json({ ok: false, error: error.message }, 500);
   if (r === "weak") return json({ ok: false, error: "Use at least 8 characters with a letter and a number." }, 400);
-  if (r === "same") return json({ ok: false, error: "Choose a password different from the one we emailed." }, 400);
+  if (r === "same") return json({ ok: false, error: memberId ? "Choose a password different from the one you were given." : "Choose a password different from the one we emailed." }, 400);
   if (r !== "ok") return json({ ok: false, error: "Couldn't set the password — log in again." }, 400);
   const { data: biz } = await supabase.from("epc_business").select(BIZ_COLS).eq("id", t.sub).maybeSingle();
   if (!biz) return json({ ok: false, error: "Account not found." }, 404);
-  return session(biz);
+  if (!memberId) return session(biz);
+  const { data: m } = await supabase.from("epc_members").select(MEMBER_COLS).eq("id", memberId).maybeSingle();
+  if (!m || !m.active) return json({ ok: false, error: "This login is switched off." }, 403);
+  return session(biz, m as Member);
 }
 
-// Stamp the login and hand out the session token.
-async function session(biz: Record<string, any>): Promise<Response> {
+// Stamp the login and hand out the session token. A staff member's token is
+// its company's (business_id) + member_id / member_role — the database reads
+// the role live (epc_member_role, 0119), so the claim is informational.
+async function session(biz: Record<string, any>, member?: Member): Promise<Response> {
+  const now = new Date().toISOString();
   // Stamp last login (fire-and-forget; never block auth on it). Powers the
   // Team view's "Last login" without a separate tracking system.
-  supabase.from("epc_business").update({ last_login_at: new Date().toISOString() }).eq("id", biz.id)
+  (member
+    ? supabase.from("epc_members").update({ last_login_at: now }).eq("id", member.id)
+    : supabase.from("epc_business").update({ last_login_at: now }).eq("id", biz.id))
     .then(({ error }) => { if (error) console.warn("last_login_at update failed:", error.message); });
   // Append a login event (fire-and-forget) — powers "Logins / Active EPC" in
   // the analytics EPC-health panel (a count over a window, not just the latest).
-  supabase.from("epc_login_events").insert({ epc_business_id: biz.id })
+  supabase.from("epc_login_events").insert({ epc_business_id: biz.id, ...(member ? { member_id: member.id } : {}) })
     .then(({ error }) => { if (error) console.warn("login event insert failed:", error.message); });
 
   const claims = {
@@ -142,12 +174,20 @@ async function session(biz: Record<string, any>): Promise<Response> {
     // Named hierarchy_role so it never collides with the "authenticated" role.
     hierarchy_role: biz.role ?? null,               // 'MAIN_ADMIN' | 'OPERATIONS_USER' | null
     allowed_modules: biz.allowed_modules ?? null,   // e.g. ['epcs','apps',...]
+    ...(member ? { member_id: member.id, member_role: member.member_role } : {}),
   };
 
   const token = await sign(claims);
 
   // is_owner drives the Pri portal's visibility (0096); the server re-checks it.
-  return json({ ok: true, token, business: { ...biz, is_owner: biz.business_type === "admin" && await isOwner(biz.id) } });
+  return json({
+    ok: true, token,
+    business: {
+      ...biz,
+      is_owner: biz.business_type === "admin" && await isOwner(biz.id),
+      member: member ? { id: member.id, name: member.name, role: member.member_role, modules: member.modules } : null,
+    },
+  });
 }
 
 const MCP_KEY_DAYS = 90;
@@ -219,20 +259,28 @@ serve(async (req) => {
       .eq("contact_mobile", mobile)
       .maybeSingle();
 
+    // Passwords never contain spaces — drop any that came along with a copy-paste.
+    const typed = typeof password === "string" ? password.replace(/\s+/g, "") : "";
     if (biz) {
       // Password check. PGRST202 = function not deployed yet → no passwords exist.
-      // Passwords never contain spaces — drop any that came along with a copy-paste.
-      const { data: pw, error: pwErr } = await supabase.rpc("verify_login_password", {
-        p_business_id: biz.id, p_password: typeof password === "string" ? password.replace(/\s+/g, "") : "",
-      });
+      const { data: pw, error: pwErr } = await supabase.rpc("verify_login_password", { p_business_id: biz.id, p_password: typed });
       if (pwErr && pwErr.code !== "PGRST202") return json({ ok: false, error: pwErr.message }, 500);
-      if (pw === "required") return json({ ok: false, password_required: true, error: "Enter your password." }, 401);
-      if (pw === "bad") return json({ ok: false, password_required: true, error: "Wrong password." }, 401);
-      if (pw === "locked") return json({ ok: false, password_required: true, error: "Too many wrong attempts. Try again in 15 minutes." }, 429);
-      // Right issued password → no session yet; only a pass to set their own password.
-      if (pw === "change") {
-        const change_token = await sign({ sub: biz.id, role: "anon", purpose: "pw_change" }, new Date(Date.now() + CHANGE_TOKEN_MINUTES * 60000));
-        return json({ ok: false, must_change_password: true, change_token }, 403);
+      const stop = await passwordGate(pw, { sub: biz.id });
+      if (stop) return stop;
+    }
+
+    // Not a company login → one of a company's staff (0119)? A staff mobile never signs up a new company.
+    if (!biz) {
+      const { data: m } = await supabase.from("epc_members").select(MEMBER_COLS).eq("mobile", mobile).maybeSingle();
+      if (m) {
+        if (!m.active) return json({ ok: false, error: "This login is switched off. Ask your company's admin." }, 403);
+        const { data: pw, error: pwErr } = await supabase.rpc("verify_member_password", { p_member_id: m.id, p_password: typed });
+        if (pwErr) return json({ ok: false, error: pwErr.message }, 500);
+        const stop = await passwordGate(pw, { sub: m.business_id, member_id: m.id });
+        if (stop) return stop;
+        const { data: company } = await supabase.from("epc_business").select(BIZ_COLS).eq("id", m.business_id).maybeSingle();
+        if (!company) return json({ ok: false, error: "Account not found." }, 404);
+        return await session(company, m as Member);
       }
     }
 

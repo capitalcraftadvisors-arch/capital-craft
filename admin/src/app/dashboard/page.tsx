@@ -12,7 +12,9 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import LoginWelcome from "@/components/LoginWelcome";
-import { logout, getBusiness, getToken, greetingName, loanAccess, insuranceAccess } from "@/lib/auth";
+import PartnerShell, { NAVY, NAVY_ACCENT, PARTNER_SECTIONS, type PartnerSection } from "@/components/partner/PartnerShell";
+import { getBusiness, getToken, greetingName, loanAccess, insuranceAccess } from "@/lib/auth";
+import { canWork, hasModule } from "@/lib/epc-roles";
 import { fetchEpcName, shortEpcName } from "@/lib/epc-name";
 import { supabase } from "@/lib/supabase";
 import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template";
@@ -33,7 +35,6 @@ const RMS: { name: string; phone: string }[] = [
   { name: "Malvika",      phone: "917300085864" },
 ];
 
-const NAVY = "#14235c", NAVY_ACCENT = "#1e3a8a";
 
 type AppRow = {
   id: string;
@@ -72,16 +73,7 @@ const STAGE4_PILL: Record<Stage4, string> = {
   approved: "bg-[#e6f6ee] text-[#178a5c]", rejected: "bg-red-50 text-red-700",
 };
 
-type Section = "home" | "loans" | "insurance" | "emi" | "documents" | "quotation" | "customers";
-const ICON: Record<Section, ReactNode> = {
-  home: <path d="M3 10.5 12 3l9 7.5M5 9.5V21h14V9.5" />,
-  loans: <><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /></>,
-  insurance: <path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6z" />,
-  emi: <><rect x="5" y="3" width="14" height="18" rx="2" /><path d="M8 7h8M8 11h3M8 15h3" /></>,
-  documents: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
-  quotation: <><path d="M3 11V4a1 1 0 0 1 1-1h7l9 9-8 8-9-9Z" /><circle cx="7.5" cy="7.5" r="1.5" /></>,
-  customers: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6" /></>,
-};
+type Section = PartnerSection;
 
 // Integer → Indian words (Lakh / Crore) for the EMI calculator amount bars.
 // Words only (no "Rupees Only" suffix — callers append " rupees" in the UI).
@@ -140,17 +132,23 @@ function DashboardInner() {
   const [loading, setLoading] = useState(true);
   const [insBusy, setInsBusy] = useState(false);
   const [openCase, setOpenCase] = useState<AppRow | null>(null);
-  // Quotation builder is rolled out per-EPC: only show it when THIS EPC has a
-  // template configured (RLS scopes the lookup to their own row). gozerobils
-  // (Sustera Ventures) builds quotations in Customer applications instead.
+  // Quotations: an EPC with its own builder (an epc_quotation_templates row, RLS
+  // scoped) uses it; every other EPC gets the standard saved Quotations.
+  // gozerobils (Sustera Ventures) builds quotations in Customer applications.
   const [quoteTpl, setQuoteTpl] = useState<QuoteTemplate | null>(null);
   const customers = quoteTpl?.storage_path === SARVATRA.key;
-  const canQuote = !!quoteTpl && !customers;
 
   const me = getBusiness();
-  const canLoan = loanAccess(me);
-  const canInsurance = insuranceAccess(me);
-  const [section, setSection] = useState<Section>(canLoan || canInsurance ? "home" : "home");
+  // A staff login (0119): its modules narrow the sections; a Viewer only reads.
+  const canLoan = loanAccess(me) && hasModule(me, "loans");
+  const canInsurance = insuranceAccess(me) && hasModule(me, "insurance");
+  const work = canWork(me);
+  const [section, setSection] = useState<Section>("home");
+  // Opened from another partner page's nav (/dashboard?s=loans).
+  useEffect(() => {
+    const s = new URLSearchParams(window.location.search).get("s") as Section | null;
+    if (s && PARTNER_SECTIONS.includes(s)) setSection(s);
+  }, []);
   const [epcName, setEpcName] = useState(() => shortEpcName(me?.contact_name) || greetingName(me));
   useEffect(() => { void fetchEpcName().then(setEpcName); }, []);
 
@@ -195,110 +193,28 @@ function DashboardInner() {
 
   const sortedLoans = useMemo(() => [...rows].sort((a, b) => lastChangeTs(b) - lastChangeTs(a)), [rows]);
 
-  // Items with an href navigate to their own route (quotation builder lives at
-  // its own page); the rest switch the in-page section.
-  const NAV: { key: Section; label: string; show: boolean; href?: string }[] = [
-    { key: "home", label: "Dashboard", show: true },
-    { key: "loans", label: "Loans", show: canLoan },
-    { key: "insurance", label: "Insurance", show: canInsurance },
-    { key: "documents", label: "Document pending", show: true },
-    { key: "emi", label: "EMI calculator", show: true },
-    { key: "customers", label: "Customer applications", show: customers },
-    { key: "quotation", label: "Quotation builder", show: canQuote, href: "/dashboard/quotation" },
-  ];
-  const navItems = NAV.filter((n) => n.show);
-
-  function NavButton({ n }: { n: { key: Section; label: string; href?: string } }) {
-    const active = !n.href && section === n.key;
-    const badge = n.key === "documents" ? attnCount : 0;
-    return (
-      <button onClick={() => (n.href ? router.push(n.href as any) : setSection(n.key))} title={n.label}
-        className={["relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium transition-colors justify-center group-hover/side:justify-start", active ? "bg-white/15 text-white" : "text-white/70 hover:bg-white/10 hover:text-white"].join(" ")}>
-        <span className="relative shrink-0">
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{ICON[n.key]}</svg>
-          {badge > 0 && (
-            <span className="group-hover/side:hidden absolute -top-2 -right-2 min-w-[16px] h-[16px] px-1 grid place-items-center rounded-full bg-[#dc2626] text-white text-[9px] font-bold leading-none">{badge > 9 ? "9+" : badge}</span>
-          )}
-        </span>
-        <span className="hidden group-hover/side:inline whitespace-nowrap">{n.label}</span>
-        {badge > 0 && (
-          <span className="hidden group-hover/side:grid ml-auto min-w-[18px] h-[18px] px-1 place-items-center rounded-full bg-[#dc2626] text-white text-[10px] font-bold leading-none">{badge > 9 ? "9+" : badge}</span>
-        )}
-      </button>
-    );
-  }
-
   return (
-    <div className="min-h-screen flex bg-bg-soft">
+    <PartnerShell active={section} onSection={setSection} badge={attnCount} quoteTpl={quoteTpl}
+      title={<h1 className="font-display text-[22px] sm:text-[28px] font-bold text-[#0f3d2e]">नमस्ते, {epcName}</h1>}>
       <LoginWelcome />
-
-      {/* Sidebar (desktop) — a slim icon rail that expands on hover to reveal
-          labels + the full logo, overlaying the content (which reserves 68px). */}
-      <div className="hidden md:block w-[68px] shrink-0" aria-hidden />
-      <aside className="hidden md:flex group/side fixed top-0 left-0 z-40 h-screen w-[68px] hover:w-[224px] transition-[width] duration-200 ease-out flex-col text-white overflow-hidden shadow-xl" style={{ background: NAVY }}>
-        <div className="flex flex-col h-full p-3">
-          {/* Logo — mark when collapsed, full logo (on white) when expanded. */}
-          <a href="/" className="flex items-center justify-center group-hover/side:justify-start h-11 mb-4 shrink-0">
-            <span className="group-hover/side:hidden w-9 h-9 rounded-lg bg-white grid place-items-center shrink-0">
-              <img src="/brand/capital-craft-mark.png" alt="" className="w-7 h-7 object-contain" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
-            </span>
-            <span className="hidden group-hover/side:flex items-center bg-white rounded-lg px-2.5 h-9">
-              <img src="/brand/capital-craft.png" alt="Capital Craft" className="h-6 w-auto object-contain" />
-            </span>
-          </a>
-          <nav className="flex flex-col gap-1 flex-1">{navItems.map((n) => <NavButton key={n.key} n={n} />)}</nav>
-          <div className="pt-3 border-t border-white/15 hidden group-hover/side:block">
-            <div className="text-[12px] font-semibold truncate">{epcName}</div>
-            <button onClick={() => { logout(); router.replace("/login"); }} className="text-[11.5px] text-white/60 hover:text-white mt-1 whitespace-nowrap">Log out</button>
-          </div>
-        </div>
-      </aside>
-
-      <div className="flex-1 min-w-0 flex flex-col">
-        {/* Mobile top nav */}
-        <div className="md:hidden text-white px-4 py-3 flex items-center gap-3 overflow-x-auto" style={{ background: NAVY }}>
-          <img src="/brand/capital-craft-mark.png" alt="" className="w-7 h-7 rounded-md bg-white object-contain p-0.5 shrink-0" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
-          {navItems.map((n) => (
-            <button key={n.key} onClick={() => (n.href ? router.push(n.href as any) : setSection(n.key))} className={["relative text-[13px] whitespace-nowrap px-2 py-1 rounded-lg", !n.href && section === n.key ? "bg-white/20" : "text-white/70"].join(" ")}>
-              {n.label}
-              {n.key === "documents" && attnCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-1 grid place-items-center rounded-full bg-[#dc2626] text-white text-[9px] font-bold leading-none">{attnCount > 9 ? "9+" : attnCount}</span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* Header */}
-        <header className="px-5 sm:px-8 pt-6 pb-2 flex items-start justify-between gap-3">
-          <div>
-            <h1 className="font-display text-[22px] sm:text-[28px] font-bold text-[#0f3d2e]">नमस्ते, {epcName}</h1>
-          </div>
-          <div className="flex items-center gap-3 shrink-0">
-            <div className="text-right hidden sm:block min-w-0">
-              <div className="text-[13px] font-semibold text-[#0f3d2e] truncate max-w-[220px]">{epcName}</div>
-              <div className="text-[11px] text-text-muted">Portal</div>
-            </div>
-            <div className="w-10 h-10 rounded-full text-white grid place-items-center font-display font-bold text-[15px]" style={{ background: NAVY_ACCENT }} aria-hidden>{(epcName || "C").slice(0, 1).toUpperCase()}</div>
-          </div>
-        </header>
 
         <main className="px-5 sm:px-8 pb-12 pt-3">
           {section === "home" && (
             <HomeSection loans={rows} loading={loading} attnCount={attnCount}
-              canLoan={canLoan} canInsurance={canInsurance}
+              canLoan={canLoan && work} canInsurance={canInsurance && work}
               onApplyLoan={() => router.push("/dashboard/apply/chat" as any)}
               onApplyInsurance={() => void startInsurance()} applyingInsurance={insBusy}
               onOpenCase={(r) => setOpenCase(r)} onEmi={() => setSection("emi")}
-              canQuote={canQuote || customers} onQuotation={() => (customers ? setSection("customers") : router.push("/dashboard/quotation" as any))} onAttention={() => setSection("documents")} />
+              canQuote={hasModule(me, "quotes")} onQuotation={() => (customers ? setSection("customers") : router.push((quoteTpl ? "/dashboard/quotation" : "/dashboard/quotes") as any))} onAttention={() => setSection("documents")} />
           )}
           {section === "loans" && (
-            <LoansSection loans={sortedLoans} loading={loading} canLoan={canLoan}
+            <LoansSection loans={sortedLoans} loading={loading} canLoan={canLoan && work} readOnly={!work}
               onOpenCase={(r) => setOpenCase(r)} onApply={() => router.push("/dashboard/apply/chat" as any)}
               onEdit={(r) => router.push(`/dashboard/apply/chat?id=${r.id}&edit=1` as any)}
               onTranche={(r) => router.push(`/dashboard/${r.id}/disbursement` as any)} />
           )}
           {section === "insurance" && (
-            <InsuranceSection insRows={insRows} loading={loading} onApply={() => void startInsurance()} applying={insBusy}
+            <InsuranceSection insRows={insRows} loading={loading} onApply={work ? () => void startInsurance() : null} applying={insBusy}
               // A draft continues in the chat; a sent one opens its form to view / change.
               onOpen={(id) => router.push(`/dashboard/insurance/${id}/${insRows.find((r) => r.id === id)?.status === "draft" ? "chat" : "step-1"}` as any)} />
           )}
@@ -307,15 +223,14 @@ function DashboardInner() {
             onSerial={(n) => setQuoteTpl((t) => t && { ...t, serial_next: Math.max(t.serial_next ?? 1, n) })} />}
           {section === "documents" && <DocumentsSection loans={rows} insRows={insRows} onOpenMessage={(kind, id) => router.push(`/dashboard/messages/${kind}/${id}` as any)} />}
         </main>
-      </div>
 
       {openCase && (
-        <TimelineDrawer row={openCase} onClose={() => setOpenCase(null)}
+        <TimelineDrawer row={openCase} onClose={() => setOpenCase(null)} readOnly={!work}
           onEdit={() => router.push(`/dashboard/apply/chat?id=${openCase.id}&edit=1` as any)}
           onTranche={() => router.push(`/dashboard/${openCase.id}/disbursement` as any)}
           onMessage={() => router.push(`/dashboard/messages/loan/${openCase.id}` as any)} />
       )}
-    </div>
+    </PartnerShell>
   );
 }
 
@@ -561,8 +476,8 @@ function HomeSection({ loans, loading, attnCount, canLoan, canInsurance, onApply
 }
 
 // ── Loans ─────────────────────────────────────────────────────────────────────
-function LoansSection({ loans, loading, canLoan, onOpenCase, onApply, onEdit, onTranche }: {
-  loans: AppRow[]; loading: boolean; canLoan: boolean;
+function LoansSection({ loans, loading, canLoan, readOnly, onOpenCase, onApply, onEdit, onTranche }: {
+  loans: AppRow[]; loading: boolean; canLoan: boolean; readOnly: boolean;
   onOpenCase: (r: AppRow) => void; onApply: () => void; onEdit: (r: AppRow) => void; onTranche: (r: AppRow) => void;
 }) {
   const [q, setQ] = useState("");
@@ -641,8 +556,8 @@ function LoansSection({ loans, loading, canLoan, onOpenCase, onApply, onEdit, on
                     <td className="px-3 py-3.5 align-top whitespace-nowrap">{r.second_disbursement_amount != null ? <><div className="font-semibold text-[#0f3d2e]">{fmtRupees(r.second_disbursement_amount)}</div><div className="text-[10.5px] text-text-muted">{fmtDateShort(r.second_disbursement_date)}</div></> : approved && r.first_disbursement_amount != null ? <span className="text-[11px] font-semibold text-amber-700">Pending</span> : <span className="text-text-muted">—</span>}</td>
                     <td className="px-3 py-3.5 align-top whitespace-nowrap">{!approved ? <span className="text-text-muted">—</span> : (() => { const dl = deadlineState(r.first_disbursement_date, r.second_disbursement_amount != null); return <span className={["inline-block px-2 py-1 rounded-[6px] text-[11px] font-semibold whitespace-nowrap", DEADLINE_PILL[dl.tone]].join(" ")}>{dl.label}</span>; })()}</td>
                     <td className="px-3 py-3.5 align-top whitespace-nowrap">
-                      {approved ? <button onClick={(e) => { e.stopPropagation(); onTranche(r); }} className="px-3 py-1.5 rounded-lg text-white text-[12px] font-semibold" style={{ background: NAVY_ACCENT }}>2nd tranche</button>
-                        : rejected ? <button onClick={(e) => { e.stopPropagation(); onOpenCase(r); }} className="px-3 py-1.5 rounded-lg border border-line text-[12px] font-semibold text-text-mid">View</button>
+                      {approved && !readOnly ? <button onClick={(e) => { e.stopPropagation(); onTranche(r); }} className="px-3 py-1.5 rounded-lg text-white text-[12px] font-semibold" style={{ background: NAVY_ACCENT }}>2nd tranche</button>
+                        : rejected || readOnly ? <button onClick={(e) => { e.stopPropagation(); onOpenCase(r); }} className="px-3 py-1.5 rounded-lg border border-line text-[12px] font-semibold text-text-mid">View</button>
                         : canEpcEdit(r) ? <button onClick={(e) => { e.stopPropagation(); onEdit(r); }} className="px-4 py-1.5 rounded-lg border border-[#1e3a8a] text-[#1e3a8a] text-[12px] font-semibold hover:bg-[#1e3a8a]/[0.06]">Edit</button>
                         : <span className="inline-flex items-center gap-1 px-3.5 py-1.5 rounded-lg border border-line text-text-muted text-[12px] font-semibold cursor-not-allowed select-none"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>Edit</span>}
                     </td>
@@ -658,7 +573,7 @@ function LoansSection({ loans, loading, canLoan, onOpenCase, onApply, onEdit, on
 
 // ── Insurance ─────────────────────────────────────────────────────────────────
 function InsuranceSection({ insRows, loading, onApply, applying, onOpen }: {
-  insRows: InsRow[]; loading: boolean; onApply: () => void; applying: boolean; onOpen: (id: string) => void;
+  insRows: InsRow[]; loading: boolean; onApply: (() => void) | null; applying: boolean; onOpen: (id: string) => void;
 }) {
   const [q, setQ] = useState("");
   const [sf, setSf] = useState<"all" | "under_review" | "issued" | "hold" | "rejected" | "expiring">("all");
@@ -681,7 +596,7 @@ function InsuranceSection({ insRows, loading, onApply, applying, onOpen }: {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div><h2 className="font-display text-[20px] font-bold text-[#0f3d2e]">Your insurance applications</h2></div>
-        <button onClick={onApply} disabled={applying} className="px-4 py-2 rounded-xl text-white text-[13px] font-semibold disabled:opacity-60" style={{ background: NAVY_ACCENT }}>{applying ? "Starting…" : "Apply for insurance"}</button>
+        {onApply && <button onClick={onApply} disabled={applying} className="px-4 py-2 rounded-xl text-white text-[13px] font-semibold disabled:opacity-60" style={{ background: NAVY_ACCENT }}>{applying ? "Starting…" : "Apply for insurance"}</button>}
       </div>
 
       {/* Search + status/expiry filters */}
@@ -873,8 +788,8 @@ function DocumentsSection({ loans, insRows, onOpenMessage }: {
 }
 
 // ── Per-application timeline drawer ─────────────────────────────────────────────
-function TimelineDrawer({ row, onClose, onEdit, onTranche, onMessage }: {
-  row: AppRow; onClose: () => void; onEdit: () => void; onTranche: () => void; onMessage: () => void;
+function TimelineDrawer({ row, onClose, onEdit, onTranche, onMessage, readOnly }: {
+  row: AppRow; onClose: () => void; onEdit: () => void; onTranche: () => void; onMessage: () => void; readOnly: boolean;
 }) {
   const stg = stage4(row);
   const rejected = stg === "rejected";
@@ -944,7 +859,7 @@ function TimelineDrawer({ row, onClose, onEdit, onTranche, onMessage }: {
 
           {/* Actions */}
           <div className="flex gap-2 mt-4 flex-wrap">
-            {stg === "approved" ? (
+            {readOnly ? null : stg === "approved" ? (
               <button onClick={onTranche} className="flex-1 px-4 py-2.5 rounded-xl text-white text-[13px] font-semibold" style={{ background: NAVY_ACCENT }}>Upload 2nd tranche</button>
             ) : canEpcEdit(row) ? (
               stg !== "rejected" ? (

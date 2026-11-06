@@ -17,6 +17,7 @@ import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness, isMainAdmin } from "@/lib/auth";
 import { getDocumentUrl, deleteDocument, downloadDocument, triggerDownload } from "@/lib/storage";
+import { maskAcct } from "@/lib/epc-labels";
 import DeleteLoanAppModal from "@/components/DeleteLoanAppModal";
 import EditLoanDatesModal from "@/components/EditLoanDatesModal";
 import { invalidate } from "@/lib/list-cache";
@@ -51,6 +52,9 @@ import {
   type FieldRow, type ViewDocSlot, type ViewerItem, type StageState,
 } from "@/components/view/ViewKit";
 import LoanApprovalForm from "@/components/LoanApprovalForm";
+import ApprovalSummary from "@/components/ApprovalSummary";
+import ReviewBar from "@/components/ReviewBar";
+import { reviewState, canEditReview, reviewError } from "@/lib/review";
 import LoanDisbursementPanel from "@/components/LoanDisbursementPanel";
 
 type Loan = Record<string, any>;
@@ -147,11 +151,6 @@ function displayId(loan: Loan): string {
 // fmtRupees imported from @/lib/money
 function fmtDate(v: string | null | undefined): string {
   return fmtDateTime(v);
-}
-function maskAcct(a: string | null | undefined): string {
-  if (!a) return "—";
-  if (a.length <= 4) return "•".repeat(6) + a;
-  return "•".repeat(Math.max(6, a.length - 4)) + a.slice(-4);
 }
 function cap(s: string): string {
   return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
@@ -408,11 +407,16 @@ function Inner() {
   const [datesOpen, setDatesOpen] = useState(false);
   const [urls, setUrls] = useState<SignedUrls | null>(null);
   const [dups, setDups] = useState<DupRow[] | null>(null);
-  // Open stage tab — null = the case's current stage.
-  const [tab, setTab] = useState<Stage | null>(null);
+  // Open stage tab — null = the case's current stage; ?tab= opens one (Pendings → View).
+  const [tab, setTab] = useState<Stage | null>(() => {
+    const t = searchParams?.get("tab");
+    return t && ["submitted", "docs", "approved", "first", "second"].includes(t) ? (t as Stage) : null;
+  });
   // Lender whose approval form is open on the Approved stage (picked, or
   // "Change lender"); null = the saved / only lender.
   const [formLender, setFormLender] = useState<PickerLender | null>(null);
+  // The main admin re-opened checked approval details to correct them (Pendings).
+  const [approvalEdit, setApprovalEdit] = useState(false);
   // Document open in the in-page viewer (slot key).
   const [viewerKey, setViewerKey] = useState<string | null>(null);
 
@@ -608,7 +612,7 @@ function Inner() {
     const patch = { status: next, status_history: history, reviewed_by: by, reviewed_at: now, ...extra };
     const { error } = await supabase().from("epc_applications").update(patch).eq("id", loan.id);
     if (error) {
-      setStatusMsg("Couldn't update status — " + error.message);
+      setStatusMsg("Couldn't update status — " + reviewError(error.message));
       setStatusBusy(false);
       return;
     }
@@ -987,7 +991,8 @@ function Inner() {
         credit_score: (d.credit_score as number | null) ?? null,
         credit_ntc: d.credit_ntc === true,
       };
-      await supabase().from("epc_applications").update(patch).eq("id", loan.id);
+      const { error } = await supabase().from("epc_applications").update(patch).eq("id", loan.id);
+      if (error) throw new Error(reviewError(error.message)); // locked approval details (Pendings)
       setLoan((prev) => (prev ? ({ ...prev, ...patch } as Loan) : prev));
       await logLoanActivity(loan.id, "status_change", { detail: `Finalized ${row.lender_label} for disbursement` });
       setStatusMsg(`${row.lender_label} finalized.`);
@@ -1134,6 +1139,15 @@ function Inner() {
     formLender ?? savedLender ?? (!tRejected && withDocsOptions.length === 1 ? withDocsOptions[0] : null);
   const formEdit: "approval" | null = savedLender && formFor?.key === savedLender.key ? "approval" : null;
   const approveNow = () => (withDocsOptions.length === 1 ? approvePickLender(withDocsOptions[0]) : setApproveOpen(true));
+  // Pendings: saved approval details are read-only once saved — for the team
+  // until the admin sends them back, for the main admin until he clicks Edit.
+  const approvalLocked = approvalFilled && (mainAdmin
+    ? reviewState(loan, "approval") != null && !approvalEdit
+    : !canEditReview(loan, "approval"));
+  const mergeReview = (patch: Record<string, string | null>) => {
+    setLoan((prev) => (prev ? ({ ...prev, ...patch } as Loan) : prev));
+    invalidateLoanBoards();
+  };
 
   // Edit the application itself; each stage's details are edited in its stage.
   const editItems = aborted ? [] : [
@@ -1482,13 +1496,20 @@ function Inner() {
                     </ul>
                   </Section>
                 )}
-                {formFor && !aborted ? (
+                {formFor && !aborted && approvalLocked ? (
+                  <>
+                    <ReviewBar loan={loan} item="approval" onDecided={mergeReview}
+                      onEdit={mainAdmin ? () => setApprovalEdit(true) : undefined} />
+                    <ApprovalSummary loan={loan} lenderLabel={savedLender?.label ?? formFor.label} docs={docs} />
+                  </>
+                ) : formFor && !aborted ? (
                   <>
                     {!approvedPlus && canAct && (
                       <div className="flex justify-end gap-2 pt-5">
                         <HAction variant="reject" disabled={statusBusy} onClick={() => setRejectOpen(true)}>Rejected by lender</HAction>
                       </div>
                     )}
+                    {approvalFilled && <ReviewBar loan={loan} item="approval" onDecided={mergeReview} />}
                     <LoanApprovalForm
                       key={`${formFor.key}:${formEdit ?? "new"}`}
                       loan={loan}
@@ -1497,8 +1518,8 @@ function Inner() {
                       editMode={formEdit}
                       hasSanctionLetter={hasCat("sanction_letter")}
                       hasDisbursementAdvice={hasCat("disbursement_advice")}
-                      onSaved={() => { setFormLender(null); setReloadKey((k) => k + 1); }}
-                      onCancel={formLender ? () => setFormLender(null) : undefined}
+                      onSaved={() => { setFormLender(null); setApprovalEdit(false); setReloadKey((k) => k + 1); }}
+                      onCancel={formLender ? () => setFormLender(null) : approvalEdit ? () => setApprovalEdit(false) : undefined}
                     />
                   </>
                 ) : (

@@ -133,6 +133,11 @@ export async function POST(req: NextRequest) {
           ? (bz.contact_name || bz.trade_name || bz.legal_name || "Capital Craft")
           : (bz.trade_name || bz.legal_name || bz.contact_name || "EPC");
       }
+      // An EPC staff login (0119): the company + the person ("Surya Solar · Ravi").
+      if (!isAdmin && claims.member_id) {
+        const { data: m } = await supabase.from("epc_members").select("name").eq("id", claims.member_id).maybeSingle();
+        if (m?.name) authorName = `${authorName ?? "EPC"} · ${m.name}`;
+      }
       const { data: inserted, error } = await supabase.from(msgTable).insert({
         [fk]: parentId,
         sender,

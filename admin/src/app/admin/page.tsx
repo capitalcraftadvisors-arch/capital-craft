@@ -41,6 +41,7 @@ import { latestLenderStatus, latestStatusLabel, lenderLabelIn, type LoanLenderRo
 import { addLender as addRegistryLender, useLenders } from "@/lib/lenders";
 import { otherInsDoc, OTHER_INS_LIST_CACHE } from "@/lib/other-insurance";
 import { loanDocChecklist } from "@/lib/loan-doc-checklist";
+import { BUSINESS_TYPE_LABEL } from "@/lib/epc-labels";
 
 type Tab = "epcs" | "apps" | "loanleads" | "insurance" | "otherins" | "leads";
 
@@ -178,12 +179,6 @@ function Inner() {
 
 // ── EPCs tab ────────────────────────────────────────────────────────────────
 
-const BUSINESS_TYPE_LABEL: Record<string, string> = {
-  proprietorship: "Proprietorship",
-  pvt_ltd:        "Private Limited",
-  partnership:    "Partnership",
-  llp:            "LLP",
-};
 
 // Lender keys are DYNAMIC (the `lenders` registry — lib/lenders), so a plain string.
 type Lender = string;

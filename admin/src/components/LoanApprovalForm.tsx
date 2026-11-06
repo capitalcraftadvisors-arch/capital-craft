@@ -25,7 +25,9 @@ import { rupeesInWords } from "@/lib/numberToWords";
 import { I, Section } from "@/components/view/ViewKit";
 import FileUpload from "@/components/FileUpload";
 import { fmtRupeesExact as fmtRs } from "@/lib/money"; // approval amounts are shown exact, never rounded
-import { reviewPatch, invalidatePendingCount } from "@/lib/review";
+import { reviewPatch, reviewError, canEditReview, invalidatePendingCount } from "@/lib/review";
+import ApprovalSummary from "@/components/ApprovalSummary";
+import ReviewBar from "@/components/ReviewBar";
 
 type Loan = Record<string, any>;
 
@@ -170,7 +172,7 @@ export default function LoanApprovalForm({
 
     const { error: err } = await supabase().from("epc_applications").update(patch).eq("id", loan.id);
     if (err) {
-      setError("Couldn't save the approval — " + err.message);
+      setError("Couldn't save the approval — " + reviewError(err.message));
       setSaving(false);
       return;
     }
@@ -220,6 +222,17 @@ export default function LoanApprovalForm({
   }
 
   const lenderName = details.approved_by ? (lenderLabel || lenderLabelIn(lenders, String(details.approved_by))) : null;
+
+  // Pendings: saved details are locked for the team while they wait for the
+  // admin's check and once approved (lib/review) — shown read-only.
+  if (loan.approval_details_filled === true && !canEditReview(loan, "approval")) {
+    return (
+      <div>
+        <ReviewBar loan={loan} item="approval" onDecided={() => onSaved()} />
+        <ApprovalSummary loan={loan} lenderLabel={lenderName} />
+      </div>
+    );
+  }
 
   return (
     <div>

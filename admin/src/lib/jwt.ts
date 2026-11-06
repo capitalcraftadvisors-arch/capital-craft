@@ -42,6 +42,9 @@ export type JwtClaims = {
   // older tokens (minted before this claim existed) still verify cleanly.
   hierarchy_role?: "MAIN_ADMIN" | "MANAGER" | "OPERATIONS_USER" | null;
   allowed_modules?: string[] | null;
+  // An EPC staff login (0119): the member + its role at login (the database reads it live).
+  member_id?: string;
+  member_role?: "ADMIN" | "SALES" | "VIEWER";
 };
 
 export function getBearerToken(req: Request): string | null {

@@ -261,6 +261,88 @@ export function rvsFigures(kw: number, price: number, subsidy: number | null, dc
   };
 }
 
+// Standard quotation — Capital Craft's own proposal for every EPC without a
+// builder of its own (saved quotations, epc_quotes 0118), in two kinds, with
+// defaults taken from the EPCs' own quotations:
+//   residential — PM Surya Ghar: DCR modules, central subsidy by kW, net cost
+//   commercial  — non-domestic: Non-DCR, no subsidy, bigger advances
+// Every figure comes from ONE kW + price entry (their samples' typos came from
+// typing the same size several times) — lib/quote-calc.
+export type Segment = "residential" | "commercial";
+export type PaymentStage = [stage: string, pct: number];
+
+export const STANDARD = {
+  gst: 8.9,                      // % on the system price (70 % at 5 % + 30 % at 18 %)
+  unitsPerKw: 1460,              // a year (4 units a kW a day)
+  tariff: { residential: 8, commercial: 10 } as Record<Segment, number>, // ₹ a unit
+  tariffRise: 0.03,              // a year
+  degradation: 0.005,            // panel output lost a year
+  emiYears: [3, 4, 5],           // the EMI box (indicative rate, never printed)
+  validityDays: { residential: 30, commercial: 7 } as Record<Segment, number>,
+  categories: { residential: ["Domestic"], commercial: ["Non-Domestic", "Industrial"] } as Record<Segment, string[]>,
+  phases: ["Single phase", "Three phase"],
+  systemTypes: ["On-grid", "Hybrid"],
+  payment: {
+    residential: [["Advance with the order", 30], ["Before dispatch of panels & inverter", 60], ["After installation & commissioning", 10]],
+    commercial: [["Advance with the work order", 10], ["Before material delivery", 85], ["After commissioning", 5]],
+  } as Record<Segment, PaymentStage[]>,
+  timeline: {
+    residential: "Installation within 30 days of the DISCOM approval and the advance payment.",
+    commercial: "Installation within 15 to 30 days of the advance payment.",
+  } as Record<Segment, string>,
+  warranty: [
+    ["Solar modules", "12 years product, 25 years performance (min. 80%)"],
+    ["Inverter", "8 years (as per manufacturer)"],
+    ["Mounting structure", "5 years"],
+    ["Workmanship & balance of system", "1 year"],
+    ["Free maintenance", "1 year"],
+  ] as [string, string][],
+  // Scope of work ("DISCOM and net-metering fees" joins one side by the quotation's toggle).
+  scope: {
+    ours: ["Design, supply, installation and commissioning", "Transport of all material to the site", "Net-metering and DISCOM liaison"],
+    residential: ["Subsidy application on the PM Surya Ghar portal"],
+    theirs: ["A shadow-free roof with safe access", "Power and water during installation", "Safe storage for the material",
+      "Space for the ACDB and meters near the main panel", "Internet (Wi-Fi) for remote monitoring", "Regular cleaning of the panels"],
+  },
+};
+
+// Bill of material — description / make / QTY dropdowns, prefilled as in the
+// samples; the battery row only on a hybrid system.
+export const STANDARD_BOM: BoqRow[] = [
+  { key: "std_module", product: "Solar PV modules",
+    spec: ["Mono PERC half-cut bifacial 550 Wp", "TOPCon bifacial 580 Wp", "TOPCon bifacial 600 Wp", "TOPCon bifacial 625 Wp", "TOPCon bifacial 700 Wp"],
+    make: ["Waaree", "Adani Solar", "Tata Power Solar", "Vikram Solar", "Premier Energies", "Goldi Solar", "Rayzon Solar", "Saatvik Solar", "RenewSys", "Avaada"],
+    qty: [] }, // from the kW and the module's watts
+  { key: "std_inverter", product: "Solar inverter", spec: [], // <kW> kW on-grid string inverter, <phase>
+    make: ["Polycab", "Sungrow", "Solis", "Growatt", "GoodWe", "Microtek", "Havells", "Luminous", "Deye"], qty: ["1 No.", "2 Nos."] },
+  { key: "std_battery", product: "Battery", spec: ["Lithium-ion 5 kWh", "Lithium-ion 10 kWh", "Lead-acid 150 Ah"],
+    make: ["Exide", "Luminous", "Livguard", "Amaron"], qty: ["1 No.", "2 Nos.", "4 Nos."] },
+  { key: "std_structure", product: "Module mounting structure",
+    spec: ["Hot-dip galvanised (HDG), wind speed 150 km/h", "Pre-galvanised GI pipe 75x75 / 60x40 / 40x40", "Elevated HDG structure (6 to 8 ft)", "Aluminium rails for tin roof"],
+    make: ["Apollo", "Tata Structura", "Jindal", "As per standard"], qty: ["1 Set"] },
+  { key: "std_acdb", product: "ACDB & DCDB", spec: ["With MCB, SPD & fuse (IP65)"], make: ["Havells / Elmex", "Schneider", "Havells", "Elmex", "Polycab"], qty: ["1 + 1"] },
+  { key: "std_dc_cable", product: "DC cable", spec: ["4 sq mm copper, UV protected", "6 sq mm copper, UV protected"], make: ["Polycab", "Havells", "KEI", "RR Kabel", "Finolex"], qty: ["As required"] },
+  { key: "std_ac_cable", product: "AC cable", spec: ["Copper armoured, as per load", "4C 10 sq mm copper armoured"], make: ["Polycab", "Havells", "KEI", "RR Kabel", "Finolex"], qty: ["As required"] },
+  { key: "std_earthing", product: "Earthing", spec: ["Chemical earthing pit", "Copper-bonded rod"], make: ["As per standard"], qty: ["3 Nos.", "2 Nos.", "4 Nos."] },
+  { key: "std_arrester", product: "Lightning arrester", spec: ["Conventional, 1 m", "ESE type"], make: ["As per standard"], qty: ["1 No.", "2 Nos."] },
+  { key: "std_meter", product: "Solar & net meter", spec: ["As per DISCOM norms"], make: ["L&T / HPL / Secure", "L&T", "HPL", "Secure", "Genus"], qty: ["1 + 1"] },
+  { key: "std_bos", product: "MC4 connectors & accessories", spec: ["Conduits, cable ties & SS hardware"], make: ["As per standard"], qty: ["As required"] },
+  { key: "std_monitoring", product: "Remote monitoring", spec: ["Wi-Fi data logger with mobile app"], make: ["With inverter"], qty: ["1 No."] },
+  { key: "std_install", product: "Installation & commissioning", spec: ["Transport, civil work & net-metering liaison"], make: ["Included"], qty: ["Lump sum"] },
+];
+
+/** The standard bill of material: module QTY from the kW and watts, the inverter line from the kW + phase. */
+export function standardBom(picked: Record<string, unknown>, kw: number, phase: string, hybrid: boolean): { rows: BoqRow[]; cells: BoqCells } {
+  const rows = STANDARD_BOM.filter((r) => hybrid || r.key !== "std_battery");
+  return {
+    rows,
+    cells: boqCells(rows, picked, (row, col, c) =>
+      row === "std_inverter" && col === "spec" ? (kw > 0 ? `${kwText(kw)} kW ${hybrid ? "hybrid" : "on-grid string"} inverter, ${phase.toLowerCase()}` : "")
+      : row === "std_module" && col === "qty" ? (panelsFor(kw, c.spec) ? `${panelsFor(kw, c.spec)} Nos.` : "")
+      : undefined),
+  };
+}
+
 // Field keys used for persisting custom options (quotation_brand_options.field).
 export const BRAND_FIELDS = {
   module: "module_brand",

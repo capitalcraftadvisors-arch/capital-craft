@@ -2,7 +2,7 @@
 
 import { ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Business, ModuleKey, getBusiness, getToken, routeForBusiness, setBusiness, portalAccess, canAccessModule, onSessionChangeElsewhere } from "@/lib/auth";
+import { Business, ModuleKey, getBusiness, getToken, routeForBusiness, setBusiness, portalAccess, canAccessModule, onSessionChangeElsewhere, logout } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { useIdleLogout } from "@/lib/use-idle-logout";
 
@@ -53,15 +53,29 @@ export default function AuthGuard({ children, allow, requireModule }: Props) {
     // Re-fetch the business row so we catch admin-side status changes,
     // the self-edit lock flag, the loan_app_unlocked gate, and the hierarchy
     // role/allowed_modules (authoritative — never trust localStorage for
-    // permission decisions).
-    supabase()
-      .from("epc_business")
-      .select("id, status, business_type, current_step, contact_name, epc_self_edited, epc_self_edited_at, loan_app_unlocked, service_type, role, allowed_modules, parent_user_id")
-      .eq("id", biz.id)
-      .maybeSingle()
-      .then(({ data }: { data: Business | null }) => {
+    // permission decisions). An EPC staff login (0119) also re-reads its own
+    // role / modules in the same request.
+    const member = biz.member ?? null;
+    const cols = "id, status, business_type, current_step, contact_name, epc_self_edited, epc_self_edited_at, loan_app_unlocked, service_type, role, allowed_modules, parent_user_id";
+    const sel: string = member ? `${cols}, epc_members(id, name, member_role, modules, active)` : cols;
+    let q = supabase().from("epc_business").select(sel).eq("id", biz.id);
+    if (member) q = q.eq("epc_members.id", member.id);
+    type Row = Business & { epc_members?: { id: string; name: string; member_role: string; modules: string[]; active: boolean }[] };
+    q.maybeSingle()
+      .then((res) => {
+        const data = res.data as unknown as Row | null;
+        // A switched-off staff login can't read its company any more → signed out.
+        const m = member ? data?.epc_members?.[0] : null;
+        if (member && (!data || !m || !m.active)) {
+          logout();
+          router.replace("/login");
+          return;
+        }
+        const { epc_members: _members, ...row } = data ?? ({} as Business & { epc_members?: unknown });
         // Merge so login-only fields (is_owner) survive the refresh.
-        const latest = data ? ({ ...biz, ...(data as Business) }) : biz;
+        const latest: Business = data
+          ? { ...biz, ...(row as Business), ...(m ? { member: { id: m.id, name: m.name, role: m.member_role as "ADMIN" | "SALES" | "VIEWER", modules: m.modules } } : {}) }
+          : biz;
         if (data) setBusiness(latest);
         if (!matches(latest, allow)) {
           router.replace(routeForBusiness(latest) as any);

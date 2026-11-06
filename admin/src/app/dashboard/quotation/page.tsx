@@ -10,6 +10,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
+import BackHeader from "@/components/PartnerBackHeader";
 import { getToken } from "@/lib/auth";
 import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template";
 import SearchableSelect from "@/components/quotation/SearchableSelect";
@@ -57,7 +58,11 @@ function Builder() {
   const [failed, setFailed] = useState(false);
   useEffect(() => { fetchQuoteTemplate().then(setTpl, () => setFailed(true)); }, []);
   const customers = tpl?.storage_path === SARVATRA.key;
-  useEffect(() => { if (customers) router.replace("/dashboard" as any); }, [customers, router]);
+  // No builder of its own → the standard saved Quotations.
+  useEffect(() => {
+    if (customers) router.replace("/dashboard" as any);
+    else if (tpl === null) router.replace("/dashboard/quotes" as any);
+  }, [customers, tpl, router]);
   if (failed) {
     return (
       <div className="min-h-screen bg-bg-soft">
@@ -66,7 +71,7 @@ function Builder() {
       </div>
     );
   }
-  if (tpl === undefined || customers) return null;
+  if (!tpl || customers) return null;
   if (tpl?.storage_path === BIJLEE.key) return <BijleeForm serialNext={tpl.serial_next} />;
   if (tpl?.storage_path === SARVATRA_ENERGY.key) return <SarvatraEnergyForm serialNext={tpl.serial_next} />;
   if (tpl?.storage_path === RVS.key) return <RvsForm />;
@@ -99,17 +104,6 @@ function DownloadBar({ busy, error, onClick }: { busy: boolean; error: string | 
         </button>
       </div>
     </>
-  );
-}
-
-function BackHeader() {
-  const router = useRouter();
-  return (
-    <header className="border-b border-line bg-white">
-      <div className="max-w-[900px] mx-auto px-5 sm:px-7 h-14 flex items-center">
-        <button onClick={() => router.push("/dashboard" as any)} className="text-[13px] text-text-muted hover:text-text inline-flex items-center gap-1">← Back to dashboard</button>
-      </div>
-    </header>
   );
 }
 

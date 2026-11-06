@@ -27,6 +27,7 @@ import { epcReviewPatch, approveEpcReview, epcLocked, invalidatePendingCount, sa
 import AdminPendingPill from "@/components/AdminPendingPill";
 import { toast } from "sonner";
 import { getDocumentUrl, deleteDocument, downloadDocument } from "@/lib/storage";
+import { BUSINESS_TYPE_LABEL, maskAcct, peopleHeading } from "@/lib/epc-labels";
 import { logAudit } from "@/lib/auditLog";
 import { Period, inPeriod } from "@/lib/period";
 import LenderCell, { LenderMap } from "@/components/LenderCell";
@@ -87,23 +88,6 @@ type AdminInfo = {
   turnover_lakhs: number | null;
 };
 
-const BUSINESS_TYPE_LABEL: Record<string, string> = {
-  proprietorship: "Proprietorship",
-  pvt_ltd:        "Private Limited",
-  partnership:    "Partnership",
-  llp:            "LLP",
-};
-
-function peopleHeading(bt: string | null | undefined): string {
-  switch (bt) {
-    case "proprietorship": return "Proprietor details";
-    case "pvt_ltd":        return "Director details";
-    case "partnership":
-    case "llp":            return "Partner details";
-    default:               return "Stakeholder details";
-  }
-}
-
 function roleLabel(bt: string | null | undefined): string {
   switch (bt) {
     case "proprietorship": return "Proprietor";
@@ -132,12 +116,6 @@ function DOC_LABEL(cat: string): string {
     gst_r3b: "GSTR-3B",
   };
   return M[cat] ?? cat;
-}
-
-function maskAcct(a: string | null | undefined): string {
-  if (!a) return "—";
-  if (a.length <= 4) return "•".repeat(6) + a;
-  return "•".repeat(Math.max(6, a.length - 4)) + a.slice(-4);
 }
 
 function maskMobile(m: string | null | undefined): string {

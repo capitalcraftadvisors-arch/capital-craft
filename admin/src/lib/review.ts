@@ -1,24 +1,49 @@
 // Pendings — maker-checker for loan approval + disbursement details, and for
 // EPC profiles the team approves (see epcReviewPatch below).
 //
-// A team member's (manager / RM) approval details and 1st / 2nd disbursement
-// wait for the MAIN ADMIN's check on /admin/pendings; the main admin's own entry
-// is approved at once. While the approval details are pending, the team can't
-// enter a disbursement. Migration 0092 adds the columns and a DB trigger that
-// enforces both rules (only the main admin can approve; no disbursement while
-// the approval is pending), so this is not just a UI lock.
+// Approval details, the 1st and the 2nd disbursement each go:
+//   team fills + saves → 'pending' (LOCKED for the team) → the MAIN ADMIN checks
+//   it (on /admin/pendings or on that stage of the loan profile) and
+//     • approves → 'approved' — still locked for the team; the next stage opens
+//       (approval → 1st disbursement → 2nd disbursement)
+//     • sends it back with a reason → 'sent_back' — the team corrects + saves again
+//     • edits it himself (his save is approved at once), or
+//     • undoes a decision → back to 'pending'.
+// The main admin's own entry is approved at once. NULL = legacy (before the
+// checks) — never locked. Migrations 0092 + 0121 enforce all of this in the DB.
 
 import { getBusiness, isMainAdmin } from "./auth";
 import { supabase } from "./supabase";
 import { getCached, setCached, invalidate } from "./list-cache";
 
 export type ReviewItem = "approval" | "disb1" | "disb2";
+export type ReviewState = "pending" | "approved" | "sent_back" | null;
 
 export const REVIEW_LABEL: Record<ReviewItem, string> = {
   approval: "Approval details",
   disb1: "1st disbursement",
   disb2: "2nd disbursement",
 };
+
+type Loan = Record<string, any> | null | undefined;
+
+export const reviewState = (loan: Loan, item: ReviewItem): ReviewState =>
+  (loan?.[`${item}_review_status`] as ReviewState) ?? null;
+
+// Can the signed-in user change this item's saved details? The main admin always;
+// the team only before saving (legacy) or after it was sent back to them.
+export function canEditReview(loan: Loan, item: ReviewItem): boolean {
+  if (isMainAdmin(getBusiness())) return true;
+  const s = reviewState(loan, item);
+  return s == null || s === "sent_back";
+}
+
+// Is the stage AFTER this item open to the signed-in user? (The main admin always.)
+export function reviewOpen(loan: Loan, item: ReviewItem): boolean {
+  if (isMainAdmin(getBusiness())) return true;
+  const s = reviewState(loan, item);
+  return s == null || s === "approved";
+}
 
 // The review columns to write alongside an approval / disbursement save.
 export function reviewPatch(item: ReviewItem): Record<string, string | null> {
@@ -31,15 +56,39 @@ export function reviewPatch(item: ReviewItem): Record<string, string | null> {
   };
 }
 
-// The main admin approves a pending item (the DB trigger rejects anyone else).
-export async function approveReview(id: string, item: ReviewItem): Promise<string | null> {
-  const me = getBusiness();
-  const { error } = await supabase().from("epc_applications").update({
-    [`${item}_review_status`]: "approved",
-    [`${item}_reviewed_at`]: new Date().toISOString(),
-    [`${item}_reviewed_by`]: me?.contact_name || "Admin",
-  }).eq("id", id);
-  return error ? error.message : null;
+// The main admin's decisions (the DB trigger refuses anyone else). Each returns
+// the columns it wrote (to merge into the row on screen) or throws a readable error.
+async function decide(id: string, patch: Record<string, string | null>): Promise<Record<string, string | null>> {
+  const { error } = await supabase().from("epc_applications").update(patch).eq("id", id);
+  if (error) throw new Error(reviewError(error.message));
+  invalidatePendingCount();
+  return patch;
+}
+const decidedBy = () => ({ at: new Date().toISOString(), by: getBusiness()?.contact_name || "Admin" });
+
+export function approveReview(id: string, item: ReviewItem) {
+  const d = decidedBy();
+  return decide(id, { [`${item}_review_status`]: "approved", [`${item}_reviewed_at`]: d.at, [`${item}_reviewed_by`]: d.by });
+}
+export function sendBackReview(id: string, item: ReviewItem, reason: string) {
+  const d = decidedBy();
+  return decide(id, {
+    [`${item}_review_status`]: "sent_back", [`${item}_review_note`]: reason.trim(),
+    [`${item}_reviewed_at`]: d.at, [`${item}_reviewed_by`]: d.by,
+  });
+}
+// Undo the admin's decision (approved / sent back) — the item waits for the check again.
+export function undoReview(id: string, item: ReviewItem) {
+  return decide(id, { [`${item}_review_status`]: "pending", [`${item}_reviewed_at`]: null, [`${item}_reviewed_by`]: null });
+}
+
+// The DB trigger's refusals (0092 / 0111 / 0121), in plain words.
+export function reviewError(msg: string): string {
+  if (msg.includes("review_main_admin_only")) return "Only the admin can approve, send back or undo.";
+  if (msg.includes("review_locked")) return "Locked — saved details can only be changed by the admin, or after the admin sends them back.";
+  if (msg.includes("disbursement_locked_pending_disb1")) return "Locked — waiting for the admin to approve the 1st disbursement.";
+  if (msg.includes("disbursement_locked_pending_approval")) return "Locked — waiting for the admin to approve the approval details.";
+  return msg;
 }
 
 export const PENDING_FILTER = "approval_review_status.eq.pending,disb1_review_status.eq.pending,disb2_review_status.eq.pending";

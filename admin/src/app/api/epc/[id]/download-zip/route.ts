@@ -25,6 +25,7 @@ import { Readable } from "node:stream";
 import { downloadBuffer } from "@/lib/gcs";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { fetchLenders, lenderLabelIn } from "@/lib/loan-lenders";
+import { BUSINESS_TYPE_LABEL } from "@/lib/epc-labels";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -282,12 +283,6 @@ function pathInZip(doc: Doc, memberLabelById: Map<string, string>): string {
 
 // ── AEREM Excel template ──────────────────────────────────────────────
 
-const BUSINESS_TYPE_LABEL: Record<string, string> = {
-  proprietorship: "Proprietorship",
-  pvt_ltd:        "Private Limited",
-  partnership:    "Partnership",
-  llp:            "LLP",
-};
 
 function display(v: unknown): string {
   if (v === null || v === undefined) return "";

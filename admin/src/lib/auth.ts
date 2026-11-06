@@ -37,6 +37,10 @@ export type Business = {
   // Owner account (0096) — sees the private Pri portal. Set by the auth
   // function at login; the server re-checks it for everything it unlocks.
   is_owner?: boolean;
+  // An EPC staff login (0119) — the person signed in to this company; null /
+  // absent = the company's owner. AuthGuard refreshes it (role / modules) on
+  // every page; lib/epc-roles reads it.
+  member?: { id: string; name: string; role: "ADMIN" | "SALES" | "VIEWER"; modules: string[] } | null;
 };
 
 // The six admin console module keys (match AdminSidebar tab keys).
@@ -74,7 +78,7 @@ export function isMainAdmin(b: Business | null | undefined): boolean {
 export function greetingName(b: Business | null | undefined): string {
   if (b?.is_owner) return "Pri"; // the owner's own console (0096)
   if (b?.role === "MAIN_ADMIN") return "Admin";
-  const full = (b?.contact_name || "").trim();
+  const full = (b?.member?.name || b?.contact_name || "").trim(); // an EPC staff login: its own name
   return full ? full.split(" ")[0] : "there";
 }
 
@@ -139,8 +143,9 @@ export function logout() {
 // never keeps acting (marking messages seen, saving) under a name it no longer
 // shows. A refresh of the same account's row is ignored.
 export function onSessionChangeElsewhere(cb: () => void): () => void {
+  // The company + the person (an EPC staff login of the same company is someone else).
   const idOf = (v: string | null) => {
-    try { return v ? ((JSON.parse(v) as { id?: string }).id ?? null) : null; } catch { return null; }
+    try { const b = v ? (JSON.parse(v) as Business) : null; return b ? `${b.id}:${b.member?.id ?? ""}` : null; } catch { return null; }
   };
   const h = (e: StorageEvent) => {
     if (e.key === TOKEN_KEY && e.newValue === null) cb();

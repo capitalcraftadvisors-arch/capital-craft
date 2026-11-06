@@ -14,18 +14,25 @@
 // The 1st disbursement is entered with the lender's three charges (processing
 // fee incl. GST, legal, CERSAI); the 2nd must then equal
 // sanctioned − (1st + charges), or it isn't saved.
+//
+// Pendings (lib/review; migrations 0092 + 0121): a team member's saved 1st / 2nd
+// disbursement is locked and waits for the main admin's check (ReviewBar —
+// approve, send back, edit, undo). Each stage opens for the team only once the
+// one before it is approved: approval details → 1st disbursement → completion
+// documents + 2nd disbursement.
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, isMainAdmin } from "@/lib/auth";
-import { reviewPatch, invalidatePendingCount } from "@/lib/review";
+import { reviewPatch, reviewError, reviewOpen, reviewState, canEditReview, invalidatePendingCount, type ReviewItem } from "@/lib/review";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import CompletionDocsSection from "@/components/CompletionDocsSection";
 import EmailComposerModal from "@/components/EmailComposerModal";
+import ReviewBar from "@/components/ReviewBar";
 import { lenderName } from "@/lib/lenders";
 import DateField from "@/components/ui/DateField";
-import { KV, Section, StatusBtn } from "@/components/view/ViewKit";
+import { I, KV, Section, StatusBtn } from "@/components/view/ViewKit";
 import {
   remainingAmount, fmtRupeesExact, fmtDateShort, DISBURSEMENT_WINDOW_DAYS,
   FIRST_CHARGES, firstCharges, type FirstChargeKey,
@@ -38,6 +45,16 @@ function todayISO(): string {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// The team's lock until the admin approves the stage before.
+function LockNote({ what }: { what: string }) {
+  return (
+    <div className="mt-5 flex items-center gap-2.5 rounded-[8px] border border-[#f3d9a4] bg-[#fef8ee] px-4 py-3 text-[13px] font-medium text-[#854f0b]">
+      <span className="shrink-0 inline-flex">{I.lock}</span>
+      Locked — waiting for the admin to approve the {what}.
+    </div>
+  );
 }
 
 export default function LoanDisbursementPanel({
@@ -64,6 +81,8 @@ export default function LoanDisbursementPanel({
   // Tranche-1 docs (Feasibility + MMR / Advance receipt) gate the 1st disbursement.
   const [t1Uploaded, setT1Uploaded] = useState(0);
   const [t1Total, setT1Total] = useState(0);
+  // The main admin re-opened a checked tranche to correct it.
+  const [editing, setEditing] = useState<ReviewItem | null>(null);
 
   // Show what's saved (the form opens filled in).
   useEffect(() => {
@@ -111,13 +130,14 @@ export default function LoanDisbursementPanel({
       .from("epc_applications")
       .update({ first_disbursement_amount: amt, ...chargeVals, first_disbursement_date: firstDate, ...reviewPatch("disb1") })
       .eq("id", loan.id);
-    if (e) { setError("Couldn't save — " + e.message); setBusy(false); return; }
+    if (e) { setError("Couldn't save — " + reviewError(e.message)); setBusy(false); return; }
     await logLoanActivity(loan.id, "status_change", {
       detail: `First disbursement ${fmtRupeesExact(amt)} + charges ${fmtRupeesExact(total - amt)} on ${fmtDateShort(firstDate)} — 45-day clock started`,
     });
     invalidateLoanBoards(); // disbursement moves the case on the Task Manager / list
     invalidatePendingCount();
     setMsg("First disbursement saved — the 45-day clock has started.");
+    setEditing(null);
     await onChanged();
     setBusy(false);
   }
@@ -134,7 +154,7 @@ export default function LoanDisbursementPanel({
         completion_reviewed_by: me?.contact_name || "admin",
       })
       .eq("id", loan.id);
-    if (e) { setError("Couldn't save the review — " + e.message); setBusy(false); return; }
+    if (e) { setError("Couldn't save the review — " + reviewError(e.message)); setBusy(false); return; }
     await logLoanActivity(loan.id, "status_change", {
       detail: next === "approved"
         ? "Completion documents reviewed and approved — 2nd disbursement unlocked"
@@ -165,22 +185,26 @@ export default function LoanDisbursementPanel({
       .from("epc_applications")
       .update({ second_disbursement_amount: amt, second_disbursement_date: secondDate, ...reviewPatch("disb2") })
       .eq("id", loan.id);
-    if (e) { setError("Couldn't save — " + e.message); setBusy(false); return; }
+    if (e) { setError("Couldn't save — " + reviewError(e.message)); setBusy(false); return; }
     await logLoanActivity(loan.id, "status_change", {
       detail: `Second disbursement ${fmtRupeesExact(amt)} on ${fmtDateShort(secondDate)}`,
     });
     invalidateLoanBoards(); // 2nd disbursement moves the case on the Task Manager / list
     invalidatePendingCount();
     setMsg("Second disbursement saved.");
+    setEditing(null);
     await onChanged();
     setBusy(false);
   }
 
-  // Pendings (maker-checker): a team member can't enter a disbursement while the
-  // approval details await the main admin's check (the DB trigger enforces it too).
-  const approvalLocked = !isMainAdmin(getBusiness()) && loan.approval_review_status === "pending";
+  // Pendings gate: nothing here opens for the team until the admin has approved
+  // the approval details (the DB trigger refuses the writes too).
+  if (!reviewOpen(loan, "approval")) return <LockNote what="approval details" />;
+
+  const admin = isMainAdmin(getBusiness());
   const sanctioned = loan.sanctioned_amount != null ? Number(loan.sanctioned_amount) : null;
   const firstSaved = loan.first_disbursement_amount != null;
+  const secondSaved = loan.second_disbursement_amount != null;
   // No disbursement is allowed until a lender has APPROVED the application.
   const isApproved = ["approved", "rfd", "sent_to_nbfc", "disbursed"].includes(String(loan.status));
   // The 1st-disbursement entry opens once both Tranche-1 documents are uploaded
@@ -188,11 +212,23 @@ export default function LoanDisbursementPanel({
   const tranche1Complete = isApproved && (firstSaved || (t1Total > 0 && t1Uploaded >= t1Total));
   const remaining = remainingAmount(sanctioned, loan.first_disbursement_amount, firstCharges(loan));
   const typedCharges = firstCharges(charges);
-  const reviewState: string | null = loan.completion_docs_status ?? null;
+  const docsReview: string | null = loan.completion_docs_status ?? null;
   const allDocsIn = docsUploaded >= docsTotal;
-  const secondUnlocked = reviewState === "approved";
+  const secondUnlocked = docsReview === "approved";
   const showFirst = part !== "second";
   const showSecond = part !== "first";
+  // The 2nd tranche opens for the team once the admin approved the 1st disbursement.
+  const secondOpen = reviewOpen(loan, "disb1");
+  // A saved tranche is read-only while it waits for the admin's check and once
+  // checked; the team can correct it only when sent back, the main admin with Edit.
+  const lockedFor = (item: ReviewItem, saved: boolean) =>
+    saved && (admin ? reviewState(loan, item) != null && editing !== item : !canEditReview(loan, item));
+  const firstLocked = lockedFor("disb1", firstSaved);
+  const secondLocked = lockedFor("disb2", secondSaved);
+  const bar = (item: ReviewItem) => (
+    <ReviewBar loan={loan} item={item} onDecided={() => void onChanged()}
+      onEdit={admin && editing !== item ? () => setEditing(item) : undefined} />
+  );
 
   const inputCls =
     "w-full border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] " +
@@ -208,27 +244,37 @@ export default function LoanDisbursementPanel({
 
       {showFirst && (
         <>
-          <Section title="1st tranche documents">
-            <p className="text-[13px] text-[#5a8a76] mb-3">
-              {loan.approved_lender === "solfin"
-                ? "Upload the Feasibility Report. Once it's in, the 1st-disbursement entry below opens."
-                : "Upload the Feasibility Report and MMR / Advance Receipt. Once both are in, the 1st-disbursement entry below opens."}
-            </p>
-            <CompletionDocsSection
-              applicationId={loan.id}
-              uploadedBy="admin"
-              mode="tranche1"
-              noAdvanceReceipt={loan.approved_lender === "solfin"}
-              onCountChange={(u, t) => { setT1Uploaded(u); setT1Total(t); }}
-            />
-          </Section>
+          {(admin || !firstLocked) && (
+            <Section title="1st tranche documents">
+              <p className="text-[13px] text-[#5a8a76] mb-3">
+                {loan.approved_lender === "solfin"
+                  ? "Upload the Feasibility Report. Once it's in, the 1st-disbursement entry below opens."
+                  : "Upload the Feasibility Report and MMR / Advance Receipt. Once both are in, the 1st-disbursement entry below opens."}
+              </p>
+              <CompletionDocsSection
+                applicationId={loan.id}
+                uploadedBy="admin"
+                mode="tranche1"
+                noAdvanceReceipt={loan.approved_lender === "solfin"}
+                onCountChange={(u, t) => { setT1Uploaded(u); setT1Total(t); }}
+              />
+            </Section>
+          )}
+
+          {firstSaved && bar("disb1")}
 
           <Section title="1st disbursement">
-            {!tranche1Complete || approvalLocked ? (
+            {firstLocked ? (
+              <div className="max-w-[520px]">
+                <KV k="Amount" v={fmtRupeesExact(loan.first_disbursement_amount)} />
+                <KV k="Date" v={fmtDateShort(loan.first_disbursement_date)} />
+                {FIRST_CHARGES.map((c) => <KV key={c.key} k={c.label} v={fmtRupeesExact(loan[c.key] ?? 0)} />)}
+                <KV k="Remaining (pending)" v={fmtRupeesExact(remaining)} />
+                <KV k="Deadline (45 days)" v={fmtDateShort(loan.disbursement_deadline)} />
+              </div>
+            ) : !tranche1Complete ? (
               <p className="text-[13px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2">
-                {approvalLocked
-                  ? "Waiting for the admin to approve the approval details."
-                  : !isApproved
+                {!isApproved
                   ? "The application must be approved by a lender before the 1st disbursement can be entered."
                   : loan.approved_lender === "solfin"
                   ? "Upload the Feasibility Report above to open the 1st disbursement."
@@ -269,11 +315,17 @@ export default function LoanDisbursementPanel({
                     Remaining after this: <span className="font-semibold text-[#0f3d2e]">{fmtRupeesExact(remainingAmount(sanctioned, Number(firstAmt), typedCharges))}</span>
                   </p>
                 )}
-                <div className="mt-4">
+                <div className="mt-4 flex gap-2">
                   <button type="button" onClick={() => void saveFirst()} disabled={busy}
                     className="px-4 py-2 bg-[#178a5c] text-white rounded-[8px] text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-60">
                     {busy ? "Saving…" : firstSaved ? "Update first disbursement" : "Save first disbursement"}
                   </button>
+                  {editing === "disb1" && (
+                    <button type="button" onClick={() => setEditing(null)} disabled={busy}
+                      className="px-4 py-2 bg-white border border-[#cdeadd] text-[#5a8a76] rounded-[8px] text-[13px] font-semibold hover:bg-[#f0faf5] disabled:opacity-60">
+                      Cancel
+                    </button>
+                  )}
                 </div>
               </>
             )}
@@ -281,39 +333,43 @@ export default function LoanDisbursementPanel({
         </>
       )}
 
-      {showSecond && (
+      {showSecond && firstSaved && !secondOpen && <LockNote what="1st disbursement" />}
+
+      {showSecond && (secondOpen || !firstSaved) && (
         <>
           {/* Completion docs — only meaningful once the clock is running. */}
-          <Section title="Completion documents" summary={`${docsUploaded}/${docsTotal}`}>
-            {!firstSaved ? (
-              <p className="text-[13px] text-[#5a8a76]">
-                Enter the first disbursement to begin collecting completion documents.
-              </p>
-            ) : (
-              <>
-                <p className="text-[13px] text-[#5a8a76] mb-4">
-                  Collected from the customer. The EPC can upload these too — same slots.
+          {(admin || !secondLocked) && (
+            <Section title="Completion documents" summary={`${docsUploaded}/${docsTotal}`}>
+              {!firstSaved ? (
+                <p className="text-[13px] text-[#5a8a76]">
+                  Enter the first disbursement to begin collecting completion documents.
                 </p>
-                <CompletionDocsSection
-                  applicationId={loan.id}
-                  uploadedBy="admin"
-                  mode="tranche2"
-                  onCountChange={(u, t) => { setDocsUploaded(u); setDocsTotal(t); }}
-                />
-              </>
-            )}
-          </Section>
+              ) : (
+                <>
+                  <p className="text-[13px] text-[#5a8a76] mb-4">
+                    Collected from the customer. The EPC can upload these too — same slots.
+                  </p>
+                  <CompletionDocsSection
+                    applicationId={loan.id}
+                    uploadedBy="admin"
+                    mode="tranche2"
+                    onCountChange={(u, t) => { setDocsUploaded(u); setDocsTotal(t); }}
+                  />
+                </>
+              )}
+            </Section>
+          )}
 
           {/* Admin review — gate for the 2nd disbursement. */}
-          {firstSaved && (
+          {firstSaved && (admin || !secondLocked) && (
             <Section title="Documents review">
               <div className="max-w-[520px]">
-                <KV k="Status" v={reviewState ? reviewState[0].toUpperCase() + reviewState.slice(1) : "Not reviewed"} />
+                <KV k="Status" v={docsReview ? docsReview[0].toUpperCase() + docsReview.slice(1) : "Not reviewed"} />
                 {loan.completion_reviewed_at && (
                   <KV k="Reviewed" v={`${fmtDateShort(loan.completion_reviewed_at)}${loan.completion_reviewed_by ? ` · ${loan.completion_reviewed_by}` : ""}`} />
                 )}
               </div>
-              {!allDocsIn && reviewState !== "approved" && (
+              {!allDocsIn && docsReview !== "approved" && (
                 <p className="text-[12px] text-[#854f0b] mt-2">
                   All {docsTotal} completion documents must be uploaded before review.
                 </p>
@@ -343,14 +399,19 @@ export default function LoanDisbursementPanel({
             </Section>
           )}
 
+          {secondSaved && bar("disb2")}
+
           {/* 2nd disbursement — unlocked by an approved review. */}
           {firstSaved && (
             <Section title="2nd disbursement">
-              {approvalLocked || (!secondUnlocked && loan.second_disbursement_amount == null) ? (
+              {secondLocked ? (
+                <div className="max-w-[520px]">
+                  <KV k="Amount" v={fmtRupeesExact(loan.second_disbursement_amount)} />
+                  <KV k="Date" v={fmtDateShort(loan.second_disbursement_date)} />
+                </div>
+              ) : !secondUnlocked && !secondSaved ? (
                 <p className="text-[13px] text-[#5a8a76]">
-                  {approvalLocked
-                    ? "Waiting for the admin to approve the approval details."
-                    : "Available once the completion documents are reviewed and approved above."}
+                  Available once the completion documents are reviewed and approved above.
                 </p>
               ) : (
                 <>
@@ -368,11 +429,17 @@ export default function LoanDisbursementPanel({
                       <DateField className={inputCls} value={secondDate} onChange={(iso) => setSecondDate(iso)} ariaLabel="Second disbursement date" />
                     </div>
                   </div>
-                  <div className="mt-4">
+                  <div className="mt-4 flex gap-2">
                     <button type="button" onClick={() => void saveSecond()} disabled={busy}
                       className="px-4 py-2 bg-[#178a5c] text-white rounded-[8px] text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-60">
-                      {busy ? "Saving…" : loan.second_disbursement_amount != null ? "Update second disbursement" : "Save second disbursement"}
+                      {busy ? "Saving…" : secondSaved ? "Update second disbursement" : "Save second disbursement"}
                     </button>
+                    {editing === "disb2" && (
+                      <button type="button" onClick={() => setEditing(null)} disabled={busy}
+                        className="px-4 py-2 bg-white border border-[#cdeadd] text-[#5a8a76] rounded-[8px] text-[13px] font-semibold hover:bg-[#f0faf5] disabled:opacity-60">
+                        Cancel
+                      </button>
+                    )}
                   </div>
                 </>
               )}

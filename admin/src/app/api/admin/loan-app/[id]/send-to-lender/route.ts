@@ -17,6 +17,7 @@ import ExcelJS from "exceljs";
 import archiver from "archiver";
 import { sendMail, mailConfigured } from "@/lib/mailer";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { isMainAdmin } from "@/lib/hierarchy";
 import { uploadBuffer, downloadBuffer } from "@/lib/gcs";
 import { fileLinkUrl } from "@/lib/file-links";
 import { publicOrigin } from "@/lib/login-password-server";
@@ -152,6 +153,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     ]);
     if (loadErr) return err(loadErr.message, 500);
     if (!loan) return err("Loan application not found.", 404);
+    // Pendings: the 2nd tranche (its completion pack included) opens for the team
+    // only once the main admin has approved the approval details and the 1st
+    // disbursement (lib/review — NULL = legacy, open).
+    if (scope === "completion" && !isMainAdmin(claims)) {
+      const open = (s: unknown) => s == null || s === "approved";
+      if (!open(loan.approval_review_status)) return err("Locked — waiting for the admin to approve the approval details.", 403);
+      if (!open(loan.disb1_review_status)) return err("Locked — waiting for the admin to approve the 1st disbursement.", 403);
+    }
 
     const borrowerName: string = loan.borrower_name || loan.aadhaar_name || "applicant";
     const epcName: string =

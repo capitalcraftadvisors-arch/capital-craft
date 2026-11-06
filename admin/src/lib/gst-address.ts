@@ -52,3 +52,15 @@ export function parseGstAddress(text: string): string | null {
   }
   return null;
 }
+
+// GST addresses are stored with field labels ("Floor No.: 251/151, Building
+// No./Flat No.: ROOPPURA, …, PIN Code: 333033"). For display we strip the
+// labels and keep just the values → "251/151, ROOPPURA, …, 333033".
+export function formatGstAddress(raw?: string | null): string {
+  if (!raw) return "";
+  return raw
+    .split(/,\s*/)
+    .map((part) => { const i = part.indexOf(":"); return (i >= 0 ? part.slice(i + 1) : part).trim(); })
+    .filter(Boolean)
+    .join(", ");
+}
