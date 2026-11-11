@@ -34,15 +34,16 @@ import { REVIEW_LABEL } from "@/lib/review";
 // stages open the loan's own workflow screen (change #10). ──
 const LOAN_FORWARD: Record<string, string[]> = {
   ready_login: ["send_lender", "abort"],
-  send_lender: ["docs_pending", "approved_rejected", "abort"],
-  docs_pending: ["approved_rejected", "abort"],
-  approved_rejected: ["phase1", "abort"],
+  send_lender: ["docs_pending", "approved", "rejected", "abort"],
+  docs_pending: ["approved", "rejected", "abort"],
+  approved: ["phase1", "abort"],
+  rejected: [], // the lender's decision is final here (Change review on the loan page)
   phase1: [], // no abort once in 1st Phase (disbursement under way)
   abort: [],
 };
 // Loan target columns whose drop opens the real loan screen instead of a plain
 // status write. (docs_pending is a simple "put on hold" status move.)
-const LOAN_OPENS_SCREEN = new Set(["send_lender", "approved_rejected", "phase1", "abort"]);
+const LOAN_OPENS_SCREEN = new Set(["send_lender", "approved", "rejected", "phase1", "abort"]);
 
 // Per-source comment table (insurance has none).
 const COMMENT_TBL: Record<CaseSource, { table: string; key: string } | null> = {
@@ -67,7 +68,8 @@ function stageCheck(c: OpsCase, target: string, label: string): { ok: boolean; m
     if (!allowed.includes(target)) return { ok: false, msg: "Stages are locked — a loan can only move forward to its next stage (no going back or skipping ahead)." };
     if (target === "phase1" && c.outcome === "rejected") return { ok: false, msg: "A rejected loan can’t move to disbursement." };
     if (target === "send_lender") return { ok: true, msg: `Send ${c.name}’s documents to a lender — pick which one next.` };
-    if (target === "approved_rejected") return { ok: true, msg: `Record the lender’s decision for ${c.name} — approved or rejected?` };
+    if (target === "approved") return { ok: true, msg: `Record the lender’s approval for ${c.name} — pick the lender next.` };
+    if (target === "rejected") return { ok: true, msg: `Record the lender’s rejection for ${c.name} — pick the lender next.` };
     if (target === "phase1") return { ok: true, msg: `Open ${c.name}’s disbursement screen (RFD + 1st-tranche docs)?` };
     if (target === "abort") return { ok: true, msg: `Open ${c.name} to abort it (with a reason)?` };
     return { ok: true, msg: `Move ${c.name} to “Docs Pending” (put on hold to collect documents)?` };
@@ -107,13 +109,13 @@ const LOAN_OUTLINE: Record<string, [number, number]> = {
   ready_login: [72, 168],       // >3d → yellow, >7d → red
   send_lender: [24, 48],        // >24h → yellow, >48h → red
   docs_pending: [24, 48],       // >24h → yellow, >48h → red
-  approved_rejected: [24, 48],  // approved cards: >24h → yellow, >48h → red
+  approved: [24, 48],           // >24h → yellow, >48h → red
   phase1: [600, 1080],          // >25d → yellow, ≥45d → red
   phase2: [600, 1080],          // 2nd disbursement — same aging as 1st
 };
 function loanOutline(c: OpsCase): "green" | "yellow" | "red" | "neutral" {
   if (c.column === "abort") return "neutral";
-  if (c.column === "approved_rejected" && c.outcome === "rejected") return "neutral"; // rejected: pale-red fill + sinks to bottom
+  if (c.column === "rejected") return "neutral"; // rejected: pale fill, no TAT
   const t = LOAN_OUTLINE[c.column ?? ""];
   if (!t) return "green";
   if (c.stageHours >= t[1]) return "red";
@@ -138,9 +140,12 @@ function fmtFull(v: number): string {
   return "₹" + Math.round(v).toLocaleString("en-IN");
 }
 // The next action a case needs, derived from its stage. null = nothing to do
-// (rejected / aborted / fully disbursed / off-board) — excluded from My Day.
+// (aborted / fully disbursed / off-board, a rejected non-loan case) — excluded
+// from My Day. Rejected loans stay, in their own last tab, below the work.
+const isRejectedLoan = (c: OpsCase) => c.source === "loan" && c.column === "rejected";
 function nextAction(c: OpsCase): { text: string; cta: string; tone?: string } | null {
-  if (c.outcome === "rejected" || c.column === "abort" || c.column == null) return null;
+  if ((c.outcome === "rejected" && c.source !== "loan") || c.column === "abort" || c.column == null) return null;
+  if (isRejectedLoan(c)) return { text: c.statusLabel, cta: "Open", tone: "#64748b" };
   if (c.source === "loan") {
     // The admin sent a stage back — fixing it comes first.
     const back = c.reviews?.find((v) => v.status === "sent_back");
@@ -149,7 +154,7 @@ function nextAction(c: OpsCase): { text: string; cta: string; tone?: string } | 
       case "ready_login":       return { text: "Send the documents to a lender", cta: "Open" };
       case "send_lender":       return { text: "Follow up the lender · record the decision", cta: "Open" };
       case "docs_pending":      return { text: "Collect the pending documents", cta: "Open" };
-      case "approved_rejected": return { text: "Record the disbursement", cta: "Open" };
+      case "approved":          return { text: "Record the disbursement", cta: "Open" };
       case "phase1":            return { text: "Record the 2nd disbursement", cta: "Open" };
       case "phase2":            return null; // fully disbursed — done
       default:                  return { text: c.statusLabel, cta: "Open" };
@@ -320,7 +325,7 @@ function waitingOn(c: OpsCase): WaitParty {
   if (c.source === "lead" || c.source === "insurance") return "Customer";
   switch (c.column) {
     case "send_lender":
-    case "approved_rejected": return "Lender";
+    case "approved": return "Lender";
     case "docs_pending": return "Customer";
     case "phase1": return "EPC";
     default: return "Internal"; // ready_login etc. — our move next
@@ -410,14 +415,16 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
   const byColour = colour === "all" ? byStage : byStage.filter((c) => lvlOf(c) === colour);
   const shown = ql ? byColour.filter((c) => `${c.name} ${c.lender ?? ""} ${c.epcName ?? ""} ${c.ownerName ?? ""}`.toLowerCase().includes(ql)) : byColour;
   const urgent = shown.filter((c) => lvlOf(c) === "red").length;
-  // Rank the day: idle days × loan value → biggest exposure first, work top-down.
+  // Rank the day: idle days × loan value → biggest exposure first, work top-down;
+  // rejected loans last (shown, but not counted as work below).
   const rankVal = (c: OpsCase) => Math.max(1, Math.floor(c.stageHours / 24)) * (c.amount || 1);
-  const ranked = [...shown].sort((a, b) => rankVal(b) - rankVal(a));
-  const custCases = shown.filter((c) => waitingOn(c) === "Customer");
-  const blocked = shown.filter((c) => Math.floor(c.stageHours / 24) >= 2).reduce((s, c) => s + (c.amount || 0), 0);
+  const ranked = [...shown].sort((a, b) => Number(isRejectedLoan(a)) - Number(isRejectedLoan(b)) || rankVal(b) - rankVal(a));
+  const work = shown.filter((c) => !isRejectedLoan(c));
+  const custCases = work.filter((c) => waitingOn(c) === "Customer");
+  const blocked = work.filter((c) => Math.floor(c.stageHours / 24) >= 2).reduce((s, c) => s + (c.amount || 0), 0);
   const recoverable = custCases.reduce((s, c) => s + (c.amount || 0), 0);
   const delayCats: WaitParty[] = ["Customer", "Lender", "EPC", "Internal"];
-  const delayCounts = delayCats.map((k) => ({ k, n: shown.filter((c) => waitingOn(c) === k).length }));
+  const delayCounts = delayCats.map((k) => ({ k, n: work.filter((c) => waitingOn(c) === k).length }));
   const delayMax = Math.max(1, ...delayCounts.map((d) => d.n));
   const todayLabel = (() => { try { return new Date(todayStr + "T00:00:00").toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "short" }).toUpperCase(); } catch { return ""; } })();
   // WhatsApp composer uses an EPC-specific doc list + intents when the open case
@@ -430,7 +437,7 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
         <p className="text-[11px] font-semibold uppercase tracking-wider text-text-muted">{todayLabel} · one ranked list, work top-down</p>
         <div className="flex items-center gap-3 flex-wrap mt-1">
           <h2 className="text-[22px] font-display font-bold text-text">Act today</h2>
-          <span className="text-[13px] text-text-muted">· {shown.length} to action{urgent > 0 ? ` · ${urgent} urgent` : ""}</span>
+          <span className="text-[13px] text-text-muted">· {work.length} to action{urgent > 0 ? ` · ${urgent} urgent` : ""}</span>
           <div className="ml-auto flex items-center gap-2">
             {ownerControl}
             <select value={colour} onChange={(e) => setColour(e.target.value as "all" | "red" | "yellow" | "green")}
@@ -554,7 +561,7 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
             <p className="text-[12px] font-bold uppercase tracking-wide text-[#b42318] mb-2">Today&rsquo;s math</p>
             <div className="flex justify-between items-baseline text-[13px] py-1 border-b border-[#f2c4c4]/60"><span className="text-[#8a3a3a]">₹ blocked (stuck &gt; 2d)</span><span className="font-bold text-[#b42318]">{fmtFull(blocked)}</span></div>
             <div className="flex justify-between items-baseline text-[13px] py-1 border-b border-[#f2c4c4]/60"><span className="text-[#8a3a3a]">Recoverable by {custCases.length} call{custCases.length === 1 ? "" : "s"}</span><span className="font-bold text-[#b42318]">{fmtFull(recoverable)}</span></div>
-            <div className="flex justify-between items-baseline text-[13px] py-1"><span className="text-[#8a3a3a]">Cases to action</span><span className="font-bold text-[#b42318]">{shown.length}</span></div>
+            <div className="flex justify-between items-baseline text-[13px] py-1"><span className="text-[#8a3a3a]">Cases to action</span><span className="font-bold text-[#b42318]">{work.length}</span></div>
           </div>
           <div className="rounded-lg border border-line bg-white p-4">
             <p className="text-[12px] font-bold uppercase tracking-wide text-text-mid mb-3">Who is delaying</p>
@@ -1037,7 +1044,7 @@ function Inner() {
     setPicker({ c, mode, rows: (data ?? []) as unknown as LoanLenderRow[] });
   }
 
-  async function confirmDrop(decision?: "approved" | "rejected") {
+  async function confirmDrop() {
     if (!drop) return;
     const c = cases.find((x) => x.id === drop.caseId);
     if (!c) { setDrop(null); return; }
@@ -1046,7 +1053,7 @@ function Inner() {
       // The lender picker + reject popup happen ON the board; only Approve then
       // opens the approval-details page, and 1st-Phase opens disbursement.
       if (col === "send_lender") { setDrop(null); await openLenderPicker(c, "docsent"); return; }
-      if (col === "approved_rejected") { setDrop(null); await openLenderPicker(c, decision === "rejected" ? "reject" : "approve"); return; }
+      if (col === "approved" || col === "rejected") { setDrop(null); await openLenderPicker(c, col === "rejected" ? "reject" : "approve"); return; }
       if (col === "phase1") { sessionStorage.setItem("ccReturnTo", "/admin/board"); setDrop(null); router.push(`/admin/app/${c.id}/disbursement` as unknown as string); return; }
       if (col === "abort") { sessionStorage.setItem("ccReturnTo", "/admin/board"); setDrop(null); router.push(`/admin/app/${c.id}/view?do=abort` as unknown as string); return; }
     }
@@ -1619,9 +1626,8 @@ function Inner() {
         if (!c) return null;
         const dropLabel = columnsFor(c.source).find((x) => x.key === drop.column)?.label || drop.column;
         const chk = stageCheck(c, drop.column, dropLabel);
-        const isDecision = c.source === "loan" && drop.column === "approved_rejected";
         const opensScreen = c.source === "loan" && !!drop.column && LOAN_OPENS_SCREEN.has(drop.column);
-        const title = !chk.ok ? "Can’t move there" : isDecision ? "Approved or rejected?" : opensScreen ? "Continue to the loan?" : "Move this case?";
+        const title = !chk.ok ? "Can’t move there" : opensScreen ? "Continue to the loan?" : "Move this case?";
         return (
           <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 px-4" onClick={() => !busy && setDrop(null)}>
             <div className="w-full max-w-sm rounded-[12px] bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
@@ -1629,13 +1635,7 @@ function Inner() {
               <p className={"text-[13px] mt-2 " + (chk.ok ? "text-text-mid" : "text-red-700")}>{chk.msg}</p>
               <div className="mt-4 flex items-center justify-end gap-2">
                 <button className="btn-act ghost" onClick={() => setDrop(null)} disabled={busy}>{chk.ok ? "Cancel" : "OK"}</button>
-                {chk.ok && isDecision && (
-                  <>
-                    <button className="btn-act" onClick={() => void confirmDrop("rejected")} disabled={busy}>✕ Rejected</button>
-                    <button className="btn-act primary" onClick={() => void confirmDrop("approved")} disabled={busy}>✓ Approved</button>
-                  </>
-                )}
-                {chk.ok && !isDecision && (
+                {chk.ok && (
                   <button className="btn-act primary" onClick={() => void confirmDrop()} disabled={busy}>
                     {busy ? "Working…" : opensScreen ? "Continue →" : "Yes, move"}
                   </button>

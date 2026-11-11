@@ -107,8 +107,8 @@ function loanFigures(d: TeamData, segment: "residential" | "commercial", w: Wind
   // Where each file is now (the Task Manager's stage).
   const stageOf = (r: Row) => loanColumn(r, mine(r).some((x) => x.docs_sent_at && !x.approved_at && !x.rejected_at)).column;
   const staged = loans.map((r) => ({ r, col: stageOf(r) }));
-  const live = staged.filter(({ r, col }) => col === "ready_login" || col === "send_lender" || col === "docs_pending" || col === "phase1" || (col === "approved_rejected" && r.status !== "rejected"));
-  const liveKey = ({ r, col }: { r: Row; col: string | null }) => (col === "approved_rejected" && r.status !== "rejected" ? "approved" : col);
+  const live = staged.filter(({ col }) => col === "ready_login" || col === "send_lender" || col === "docs_pending" || col === "phase1" || col === "approved");
+  const liveKey = ({ col }: { col: string | null }) => col;
   const PIPE = [
     { key: "ready_login", label: "Ready for login", color: "#7c8da1" },
     { key: "send_lender", label: "With lender", color: C.blue },
@@ -123,7 +123,7 @@ function loanFigures(d: TeamData, segment: "residential" | "commercial", w: Wind
 
   const outcome = [
     { name: "In progress", value: staged.filter(({ col }) => col === "ready_login" || col === "send_lender" || col === "docs_pending").length, color: C.blue },
-    { name: "Approved", value: staged.filter(({ r, col }) => col === "approved_rejected" && r.status !== "rejected").length, color: C.green },
+    { name: "Approved", value: staged.filter(({ col }) => col === "approved").length, color: C.green },
     { name: "Disbursed", value: staged.filter(({ col }) => col === "phase1" || col === "phase2").length, color: C.teal },
     { name: "Rejected", value: staged.filter(({ r }) => r.status === "rejected" && !r.aborted_at).length, color: C.red },
     { name: "Aborted", value: staged.filter(({ col }) => col === "abort").length, color: C.slate },

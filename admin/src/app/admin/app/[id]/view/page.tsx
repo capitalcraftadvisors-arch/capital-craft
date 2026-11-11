@@ -41,7 +41,7 @@ import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
 import { loanDocChecklist } from "@/lib/loan-doc-checklist";
 import { loanChecks } from "@/lib/loan-verification";
 import { cachedLoanUpdateCount } from "@/lib/use-epc-updates";
-import { deadlineState, DEADLINE_PILL, remainingAmount, fmtDateShort } from "@/lib/disbursement";
+import { deadlineState, DEADLINE_PILL, remainingAmount, fmtDateShort, firstDisbursedShown } from "@/lib/disbursement";
 import { fmtDateTime } from "@/lib/dates";
 import { fmtRupees, fmtRupeesExact, pctOf } from "@/lib/money";
 import { CATEGORY_LABEL } from "@/lib/loan-form";
@@ -1184,7 +1184,8 @@ function Inner() {
   ) : null;
 
   const approvedAmt = tApproved ? (loan.sanctioned_amount ?? approvalDetails?.approved_loan_amount ?? null) : null;
-  const disbursedAmt = Number(loan.first_disbursement_amount ?? 0) + Number(loan.second_disbursement_amount ?? 0);
+  // Credit Fair's 1st disbursement counts with its three charges (lib/disbursement).
+  const disbursedAmt = (firstDisbursedShown(loan as Record<string, any>) ?? 0) + Number(loan.second_disbursement_amount ?? 0);
   const tranchesPaid = (firstDone ? 1 : 0) + (secondDone ? 1 : 0);
   const initials = initialsOf(applicantName);
   const kw = loan.project_size ? `${loan.project_size} ${String(loan.project_size_unit ?? "kw").toUpperCase()}` : null;

@@ -77,7 +77,7 @@ function columnToStatus(source: string, col: string): { status: string; stamp?: 
   const now = new Date().toISOString();
   if (source === "loan") {
     // Loans move via their own screens now; the only direct board move is → Docs Pending.
-    const m: Record<string, string> = { ready_login: "under_review", docs_pending: "on_hold", send_lender: "docs_sent", approved_rejected: "approved" };
+    const m: Record<string, string> = { ready_login: "under_review", docs_pending: "on_hold", send_lender: "docs_sent", approved: "approved" };
     const s = m[col]; if (!s) return null;
     const stamp: Record<string, unknown> = {};
     if (s === "docs_sent") stamp.docs_sent_at = now;

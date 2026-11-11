@@ -370,4 +370,20 @@ export const BRAND_FIELDS = {
   connectionType: "connection_type",
   roofType: "roof_type",
   structureType: "structure_type",
+  discom: "discom", // the standard quotation's DISCOM — a name typed once is offered to every EPC after
 } as const;
+
+// India's electricity distribution companies, for the standard quotation's DISCOM.
+export const DISCOMS = [
+  "JVVNL", "AVVNL", "JdVVNL",                                   // Rajasthan
+  "MSEDCL", "Adani Electricity Mumbai", "BEST", "Tata Power Mumbai",
+  "UGVCL", "MGVCL", "PGVCL", "DGVCL", "Torrent Power",          // Gujarat
+  "PVVNL", "MVVNL", "DVVNL", "PuVVNL", "KESCo", "NPCL",         // Uttar Pradesh
+  "MP Paschim Kshetra VVCL", "MP Madhya Kshetra VVCL", "MP Poorv Kshetra VVCL",
+  "UHBVN", "DHBVN", "PSPCL", "HPSEBL", "UPCL",
+  "BSES Rajdhani", "BSES Yamuna", "Tata Power-DDL", "NDMC",     // Delhi
+  "BESCOM", "MESCOM", "HESCOM", "GESCOM", "CESC Mysore",        // Karnataka
+  "TNPDCL", "KSEB", "TSSPDCL", "TSNPDCL", "APSPDCL", "APEPDCL", "APCPDCL",
+  "NBPDCL", "SBPDCL", "JBVNL", "CSPDCL", "WBSEDCL", "CESC",
+  "TPCODL", "TPSODL", "TPWODL", "TPNODL", "APDCL",
+];

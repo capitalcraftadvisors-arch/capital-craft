@@ -17,9 +17,9 @@ import DateField from "@/components/ui/DateField";
 import { PairRows, PaymentRows, RemoveBtn, paymentTotal } from "@/components/partner/RowEditors";
 import { fetchKyc, fetchOrgSettings } from "@/lib/org-settings";
 import { resolveQuoteDefaults, type OrgProfile } from "@/lib/org-profile";
-import { addDays, GST_RATES, newQuoteDoc, quoteSavings, quoteTotals, standardItems, withAutoItems, withBatteryRow, type QuoteDoc, type QuoteItem } from "@/lib/quote-calc";
+import { addDays, GST_RATES, newQuoteDoc, quoteTotals, standardItems, withAutoItems, withBatteryRow, type QuoteDoc, type QuoteItem } from "@/lib/quote-calc";
 import { deleteQuote, downloadQuotePdf, fetchQuote, saveQuote, setQuoteStatus, QUOTE_STATUSES, QUOTE_STATUS_LABEL, QUOTE_STATUS_PILL, type QuoteRow, type QuoteStatus } from "@/lib/quotes";
-import { STANDARD, STANDARD_BOM, STANDARD_EXTRAS, boqField, type Segment } from "@/lib/quotation-brands";
+import { BRAND_FIELDS, DISCOMS, STANDARD, STANDARD_BOM, STANDARD_EXTRAS, boqField, type Segment } from "@/lib/quotation-brands";
 import { centralSubsidyFor } from "@/lib/emi";
 import { INDIA_STATES, stateOfGstin } from "@/lib/india-states";
 import { amountInput, fmtRupees } from "@/lib/money";
@@ -95,7 +95,6 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
 
   const resi = doc.segment === "residential";
   const pays = resi && totals.eligible ? totals.net : totals.total;
-  const sv = quoteSavings(doc.kw, doc.tariff, pays);
   const autoSubsidy = totals.eligible ? centralSubsidyFor(doc.kw, false) : 0;
 
   const up = (patch: Partial<QuoteDoc>) => {
@@ -258,7 +257,11 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
                 </select>
               </F>
               <F l="K. No."><input className={input} value={doc.customer.k_number} onChange={(e) => upCust({ k_number: e.target.value })} /></F>
-              <F l="DISCOM"><input className={input} value={doc.customer.discom} onChange={(e) => upCust({ discom: e.target.value })} /></F>
+              {/* A DISCOM typed once is kept and offered on every quotation after. */}
+              <F l="DISCOM">
+                <SearchableSelect label="" value={doc.customer.discom} field={BRAND_FIELDS.discom} clearable
+                  options={merge([doc.customer.discom, ...DISCOMS].filter(Boolean), BRAND_FIELDS.discom)} onChange={(v) => upCust({ discom: v })} />
+              </F>
               {!resi && (
                 <>
                   <F l="Category">
@@ -429,11 +432,12 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
             </>
           )}
           {pays > 0 && <p className="text-[12px] text-text-muted mt-2">{rupeesInWords(Math.round(pays))}</p>}
-          <div className="border-t border-line my-3" />
-          <Sum l="Generation a year" text={`${sv.units.toLocaleString("en-IN")} units`} />
-          <Sum l="Savings a year" v={sv.savings} />
-          <Sum l="Payback" text={sv.payback ? `${sv.payback.toFixed(1)} years` : "—"} />
-          {totals.perKw > 0 && <Sum l="Per kW (incl. GST)" v={totals.perKw} />}
+          {totals.perKw > 0 && (
+            <>
+              <div className="border-t border-line my-3" />
+              <Sum l="Per kW (incl. GST)" v={totals.perKw} />
+            </>
+          )}
         </aside>
       </div>
     </div>

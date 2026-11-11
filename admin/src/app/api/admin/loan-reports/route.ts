@@ -159,11 +159,12 @@ async function monthly(wb: ExcelJS.Workbook, loans: Loan[], lenders: Lender[], m
   header(ws, `Lender-wise disbursements — ${monthName}`, [
     { label: "EPC name", width: 28 }, { label: "Borrower name", width: 24 }, { label: "Lender name", width: 16 },
     { label: "Project cost", width: 14 }, { label: "Applied loan", width: 14 }, { label: "Approved loan", width: 14 },
-    { label: "ROI", width: 9 }, { label: "Tenure", width: 10 },
+    { label: "ROI", width: 9 }, { label: "Tenure", width: 10 }, { label: "Processing fees", width: 14 },
     { label: "1st disbursement", width: 14, pair: ["Date", "Amount"] },
     { label: "2nd disbursement", width: 14, pair: ["Date", "Amount"] },
   ]);
-  const MONEY = [4, 5, 6, 10, 12];
+  // Columns: 1 EPC … 8 Tenure, 9 Processing fees, 10–11 1st (date, amount), 12–13 2nd.
+  const MONEY = [4, 5, 6, 9, 11, 13];
   // Lender by lender (registry order), loans by their first date.
   const byLender = new Map<string, Loan[]>();
   for (const l of rows) {
@@ -191,21 +192,23 @@ async function monthly(wb: ExcelJS.Workbook, loans: Loan[], lenders: Lender[], m
         epcOf(l), borrowerOf(l), name,
         num(l.total_project_cost), num(d.applied_loan_amount) ?? num(l.loan_amount_required) ?? num(l.loan_amount), approvedOf(l),
         roi != null ? `${roi}%` : "", tenure != null ? `${tenure} ${tenure === 1 ? "year" : "years"}` : "",
+        num(l.first_processing_fee),
         day(l.first_disbursement_date), a1, day(l.second_disbursement_date), a2,
       ]);
       money(row, MONEY);
       // A disbursement from another month is shown for reference, not counted.
-      if (!in1) for (const c of [9, 10]) row.getCell(c).font = { color: { argb: GREY }, italic: true };
-      if (!in2) for (const c of [11, 12]) row.getCell(c).font = { color: { argb: GREY }, italic: true };
+      if (!in1) for (const c of [10, 11]) row.getCell(c).font = { color: { argb: GREY }, italic: true };
+      if (!in2) for (const c of [12, 13]) row.getCell(c).font = { color: { argb: GREY }, italic: true };
     }
-    totalRow(ws, [`${name} — disbursed in ${monthName}`, ...Array(8).fill(""), "", sum1, "", sum2], [10, 12]);
-    ws.mergeCells(ws.rowCount, 1, ws.rowCount, 9);
+    // The label spans columns 1–10; the sums sit under the two Amount columns.
+    totalRow(ws, [`${name} — disbursed in ${monthName}`, ...Array(9).fill(""), sum1, "", sum2], [11, 13]);
+    ws.mergeCells(ws.rowCount, 1, ws.rowCount, 10);
     grand1 += sum1; grand2 += sum2;
   }
   if (rows.length === 0) ws.addRow(["No disbursements in this month."]);
   else {
-    totalRow(ws, [`Total disbursed in ${monthName}`, ...Array(8).fill(""), "", grand1, "", grand2], [10, 12]);
-    ws.mergeCells(ws.rowCount, 1, ws.rowCount, 9);
+    totalRow(ws, [`Total disbursed in ${monthName}`, ...Array(9).fill(""), grand1, "", grand2], [11, 13]);
+    ws.mergeCells(ws.rowCount, 1, ws.rowCount, 10);
   }
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

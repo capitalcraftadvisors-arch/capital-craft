@@ -27,7 +27,7 @@ import RowLink from "@/components/RowLink";
 import { toast } from "sonner";
 import { nameCase, initialsOf } from "@/lib/names";
 import {
-  deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort, remainingAmount, firstCharges, FIRST_CHARGE_COLS,
+  deadlineState, DEADLINE_PILL, fmtRupees, fmtDateShort, remainingAmount, firstCharges, firstDisbursedShown, FIRST_CHARGE_COLS,
   displayAmount as amountFor,
 } from "@/lib/disbursement";
 import { fmtDate, fmtDateTime, localIsoDate } from "@/lib/dates";
@@ -1213,6 +1213,8 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
     first_disbursement_amount: number | null;
     first_disbursement_date: string | null;
     second_disbursement_amount: number | null;
+    // The lender's 1st-disbursement charges (0111) — Credit Fair's shown amount adds them.
+    first_processing_fee?: number | null; first_legal_charges?: number | null; first_cersai_charges?: number | null;
     status: string; created_at: string; created_by: string; created_by_user_id: string | null;
     rfd_at: string | null;
     reviewed_at: string | null;
@@ -1357,6 +1359,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         "borrower_pan, borrower_mobile, borrower_father_name, " +
         "loan_amount, loan_amount_required, " +
         "sanctioned_amount, first_disbursement_amount, first_disbursement_date, second_disbursement_amount, " +
+        `${FIRST_CHARGE_COLS}, ` +
         // NOTE: rfd_at is intentionally NOT selected — it doesn't exist until
         // migration 0059 is applied, and the dashboard doesn't need it (new
         // RFD rows carry status='rfd'; disbursed rows are detected by amount).
@@ -1890,7 +1893,7 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
                     <>
                       {r.first_disbursement_amount != null && (
                         <>
-                          <p className="text-[13px] font-semibold text-[#0f3d2e]">{fmtRupees(r.first_disbursement_amount)}</p>
+                          <p className="text-[13px] font-semibold text-[#0f3d2e]">{fmtRupees(firstDisbursedShown(r))}</p>
                           <p className="text-[11px] text-[#7a958a] mt-0.5">{fmtDateShort(r.first_disbursement_date)}</p>
                         </>
                       )}

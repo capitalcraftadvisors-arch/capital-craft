@@ -31,10 +31,11 @@ const LOAN_COLS: ColumnDef[] = [
   { key: "ready_login", label: "Ready for Login" },
   { key: "send_lender", label: "Send to Lender" },
   { key: "docs_pending", label: "Docs Pending" },
-  { key: "approved_rejected", label: "Approved / Rejected" },
+  { key: "approved", label: "Approved" },
   { key: "phase1", label: "1st Phase" },
   { key: "phase2", label: "2nd Phase" },
   { key: "abort", label: "Abort" },
+  { key: "rejected", label: "Rejected" }, // last (the user, 11/11)
 ];
 const INSURANCE_COLS: ColumnDef[] = [
   { key: "docs", label: "Doc collection" },
@@ -129,7 +130,7 @@ const earliest = (xs: (string | null | undefined)[]) => xs.filter(Boolean).sort(
 const latest = (xs: (string | null | undefined)[]) => xs.filter(Boolean).sort().pop() ?? null;
 
 // ── Per-source placement → the source's own column key ──
-// Columns: ready_login → send_lender → docs_pending → approved_rejected →
+// Columns: ready_login → send_lender → docs_pending → approved | rejected →
 // phase1 (1st disbursement) → abort. `stageSince` is when the case entered its
 // current stage — My Day's "Idle" days + the per-column outline colour.
 // `lenderRows` (loan_application_lenders): docs sent / approved from the loan
@@ -139,21 +140,21 @@ export function loanColumn(r: Record<string, any>, lenderMidDecision: boolean, l
   const s = r.status as string;
   // Aborted files live in their own column.
   if (r.aborted_at) return { column: "abort", label: "Aborted", stageSince: r.aborted_at };
-  // Rejected cases STAY on the board (Approved/Rejected column). How far back
+  // Rejected cases STAY on the board (Rejected column). How far back
   // you see them is governed by the board's period dropdown (default All time),
   // not by hard month-aging — so a case rejected in a prior month is still
   // reachable by choosing that period instead of silently vanishing.
   if (s === "rejected") {
-    return { column: "approved_rejected", label: "Rejected by lender", stageSince: r.rejected_at || r.updated_at };
+    return { column: "rejected", label: "Rejected by lender", stageSince: r.rejected_at || r.updated_at };
   }
-  // Approved → stays in Approved/Rejected until the 1st disbursement is recorded
+  // Approved → stays in Approved until the 1st disbursement is recorded
   // (RFD removed). Once the 1st tranche is in → 1st Phase; drops off after the 2nd.
   if (s === "rfd" || s === "approved" || s === "sent_to_nbfc" || s === "disbursed") {
     if (r.first_disbursement_amount != null) {
       if (r.second_disbursement_amount != null) return { column: "phase2", label: "2nd disbursed", stageSince: r.second_disbursement_date };
       return { column: "phase1", label: "1st disbursed · 2nd pending", stageSince: r.first_disbursement_date };
     }
-    return { column: "approved_rejected", label: "Approved by lender", stageSince: r.approved_at || latest(lenderRows.map((l) => l.approved_at)) || r.updated_at };
+    return { column: "approved", label: "Approved by lender", stageSince: r.approved_at || latest(lenderRows.map((l) => l.approved_at)) || r.updated_at };
   }
   if (s === "docs_sent") {
     // Since the docs went to the lender(s) still deciding (else the first send).
@@ -203,7 +204,7 @@ function allColumnFor(source: CaseSource, srcCol: string | null, r: Record<strin
   if (srcCol == null) return null;
   if (source === "loan") {
     if (r.status === "rejected" || r.aborted_at) return null;
-    return { ready_login: "docs", docs_pending: "pending", send_lender: "lender", approved_rejected: "approved", phase1: "phase1", phase2: "phase2" }[srcCol] ?? "docs";
+    return { ready_login: "docs", docs_pending: "pending", send_lender: "lender", approved: "approved", phase1: "phase1", phase2: "phase2" }[srcCol] ?? "docs";
   }
   if (source === "epc") {
     if (srcCol === "rejected") return null;
@@ -330,7 +331,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       epcName: (r.epc_business_id ? epcNameById.get(r.epc_business_id) : null) ?? null,
       lender: loanLenderLabel(lrows),
       statusLabel: label, column, allColumn: allColumnFor("loan", column, r),
-      outcome: r.status === "rejected" ? "rejected" : (column === "approved_rejected" || column === "phase1") ? "approved" : null,
+      outcome: r.status === "rejected" ? "rejected" : (column === "approved" || column === "phase1") ? "approved" : null,
       // A case can't have sat in its CURRENT stage longer than it has existed in
       // the system. User-entered event dates (rejection / disbursement dates) can
       // predate the record's own created_at, which would otherwise render a "37d

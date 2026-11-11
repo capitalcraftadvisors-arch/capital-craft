@@ -117,6 +117,17 @@ export function firstCharges(l: Partial<Record<FirstChargeKey, number | string |
   return FIRST_CHARGES.reduce((s, c) => s + (Number.isFinite(Number(l[c.key])) ? Number(l[c.key]) : 0), 0);
 }
 
+/** The 1st disbursement as the Loans table and the profile show it: Credit Fair
+ *  pays out net of its charges, so its amount + the three charges; every other
+ *  lender (Solfin …) the amount as entered. Null before the 1st disbursement. */
+export function firstDisbursedShown(l: Partial<Record<FirstChargeKey, number | string | null>> & {
+  first_disbursement_amount?: number | string | null; approved_lender?: string | null;
+}): number | null {
+  if (l.first_disbursement_amount == null) return null;
+  const a = Number(l.first_disbursement_amount) || 0;
+  return l.approved_lender === "creditfair" ? a + firstCharges(l) : a;
+}
+
 /** Sanctioned − (first disbursement + its charges). Null when we don't know the sanctioned amount. */
 export function remainingAmount(
   sanctioned: number | null | undefined,
