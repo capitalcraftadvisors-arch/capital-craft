@@ -13,6 +13,7 @@ import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { epcQuoteTemplate } from "@/lib/quotation";
 import { buildSarvatraFile } from "@/lib/quotation-sarvatra";
 import { SARVATRA } from "@/lib/quotation-brands";
+import { SUBSCRIPTION_MSG } from "@/lib/custom-template";
 import { uploadBuffer } from "@/lib/gcs";
 import { fileLinkUrl } from "@/lib/file-links";
 import { publicOrigin } from "@/lib/login-password-server";
@@ -42,6 +43,8 @@ export async function POST(req: NextRequest) {
     });
     const tpl = await epcQuoteTemplate(db, claims.business_id);
     if (tpl?.storage_path !== SARVATRA.key) return err("Not available for your account.", 403);
+    // WhatsApp sending comes with the subscription (CC's On switch, 0122).
+    if (!tpl.unlocked) return err(SUBSCRIPTION_MSG, 403);
     if (!(Number(b.price) > 0) || !(SARVATRA.kwOf(b.kw) > 0)) return err("This customer has no system size or price.", 400);
 
     const doc = String(b.doc ?? "");

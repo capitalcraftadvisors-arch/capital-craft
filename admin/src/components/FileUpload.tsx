@@ -9,7 +9,8 @@ type EpcCategory =
   | "pan_business" | "gstin" | "extra_doc" | "admin_extra"
   | "stakeholder_pan" | "stakeholder_aadhaar"
   | "cancelled_cheque"
-  | "office_exterior" | "office_interior" | "office_selfie";
+  | "office_exterior" | "office_interior" | "office_selfie"
+  | "custom_quote_sample"; // the EPC's own quotation, for its custom template (0122)
 
 type LoanCategory =
   | "borrower_pan" | "borrower_aadhaar" | "borrower_photo"

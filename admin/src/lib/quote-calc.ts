@@ -5,10 +5,10 @@
 // GST: "blended" = one system price + 8.9 % (70 % at 5 % + 30 % at 18 %);
 // "lines" = each item row's qty × rate at its own rate. Split CGST + SGST when
 // the place of supply is the EPC's own state, else IGST. A discount comes off
-// before tax. Subsidy only on a residential plant with DCR modules.
+// before tax. Subsidy only on a grid-connected (not off-grid) residential plant with DCR modules.
 
 import { centralSubsidyFor, computeEmi, DEFAULT_INDICATIVE_ROI } from "./emi";
-import { STANDARD, standardBom, type PaymentStage, type Segment } from "./quotation-brands";
+import { STANDARD, standardBom, withBattery, type PaymentStage, type Segment } from "./quotation-brands";
 import { resolveQuoteDefaults, type OrgProfile } from "./org-profile";
 
 export type QuoteItem = {
@@ -25,7 +25,7 @@ export type QuoteCustomer = {
   billing: string; shipping: string;   // shipping "" = same as billing (the site)
   state: string;                       // place of supply
   k_number: string; discom: string; category: string;
-  application_no: string;              // PM Surya Ghar (residential)
+  application_no: string;              // PM Surya Ghar (no longer asked or printed, 11/11)
   sanctioned_load: string;             // kW (commercial)
 };
 
@@ -54,8 +54,8 @@ const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSt
 export const addDays = (iso: string, days: number) => { const d = new Date(`${iso}T00:00:00`); d.setDate(d.getDate() + days); return isoDay(d); };
 
 /** The standard bill of material as item rows (lump-sum rates empty). */
-export function standardItems(kw: number, phase: string, hybrid: boolean): QuoteItem[] {
-  const { rows, cells } = standardBom({}, kw, phase, hybrid);
+export function standardItems(kw: number, phase: string, systemType: string): QuoteItem[] {
+  const { rows, cells } = standardBom({}, kw, phase, systemType);
   return rows.map((r) => ({
     key: r.key, item: r.product, spec: cells[r.key].spec, make: cells[r.key].make, qty: cells[r.key].qty,
     hsn: r.key === "std_install" ? "995442" : "8541", unit: "", rate: 0, gst: r.key === "std_install" ? 18 : 5,
@@ -75,7 +75,7 @@ export function newQuoteDoc(segment: Segment, org: OrgProfile | null): QuoteDoc 
       k_number: "", discom: "", category: STANDARD.categories[segment][0], application_no: "", sanctioned_load: "" },
     kw: 0, phase, system_type: STANDARD.systemTypes[0], dcr: resi, tariff: STANDARD.tariff[segment],
     gst_mode: org?.gst_mode ?? "blended", price: 0, discount: 0, subsidy: null, state_subsidy: 0, discom_included: resi,
-    items: standardItems(0, phase, false),
+    items: standardItems(0, phase, STANDARD.systemTypes[0]),
     payment: d.payment.map((p) => [...p] as PaymentStage), timeline: d.timeline,
     warranty: d.warranty.map((w) => [...w] as [string, string]),
     scope_ours: [...STANDARD.scope.ours, ...(resi ? STANDARD.scope.residential : [])], scope_theirs: [...STANDARD.scope.theirs],
@@ -85,7 +85,7 @@ export function newQuoteDoc(segment: Segment, org: OrgProfile | null): QuoteDoc 
 
 /** Rows still following the kW / phase get their module count / inverter line again. */
 export function withAutoItems(doc: QuoteDoc): QuoteDoc {
-  const auto = standardItems(doc.kw, doc.phase, doc.system_type === "Hybrid");
+  const auto = standardItems(doc.kw, doc.phase, doc.system_type);
   const of = (key?: string) => auto.find((a) => a.key === key);
   return {
     ...doc,
@@ -93,10 +93,27 @@ export function withAutoItems(doc: QuoteDoc): QuoteDoc {
       if (!it.auto) return it;
       const a = of(it.key);
       if (!a) return it;
-      const moduleQty = it.key === "std_module" ? standardBom({ std_module_spec: it.spec }, doc.kw, doc.phase, false).cells.std_module.qty : a.qty;
+      const moduleQty = it.key === "std_module" ? standardBom({ std_module_spec: it.spec }, doc.kw, doc.phase, doc.system_type).cells.std_module.qty : a.qty;
       return { ...it, ...(it.auto.qty ? { qty: moduleQty } : {}), ...(it.auto.spec ? { spec: a.spec } : {}) };
     }),
   };
+}
+
+/** A new system type: hybrid / off-grid add the battery row (after the inverter);
+ *  on-grid drops it again while it is still untouched. */
+export function withBatteryRow(doc: QuoteDoc): QuoteDoc {
+  const at = doc.items.findIndex((it) => it.key === "std_battery");
+  const std = standardItems(doc.kw, doc.phase, "Hybrid").find((it) => it.key === "std_battery")!;
+  if (withBattery(doc.system_type)) {
+    if (at >= 0) return doc;
+    const items = [...doc.items];
+    const inv = items.findIndex((it) => it.key === "std_inverter");
+    items.splice(inv >= 0 ? inv + 1 : items.length, 0, std);
+    return { ...doc, items };
+  }
+  const it = doc.items[at];
+  const untouched = it && it.item === std.item && it.spec === std.spec && it.make === std.make && it.qty === std.qty && !it.rate;
+  return untouched ? { ...doc, items: doc.items.filter((_, i) => i !== at) } : doc;
 }
 
 export const qtyNum = (q: string) => parseFloat(String(q).replace(/[^\d.]/g, "")) || 0;
@@ -119,7 +136,7 @@ export function quoteTotals(doc: QuoteDoc, epcState: string) {
   const tax = taxes.reduce((a, t) => a + t.amount, 0);
   const total = r2(sub + tax);
   const resi = doc.segment === "residential";
-  const eligible = resi && doc.dcr;
+  const eligible = resi && doc.dcr && doc.system_type !== "Off-grid"; // PM Surya Ghar: grid-connected only
   const central = eligible ? (doc.subsidy ?? centralSubsidyFor(doc.kw, false)) : 0;
   const state = eligible ? Math.max(0, Number(doc.state_subsidy) || 0) : 0;
   const net = Math.max(0, r2(total - central - state));

@@ -62,8 +62,8 @@ export default function PartnerShell({ active, onSection, badge = 0, quoteTpl, t
     { key: "documents", label: "Document pending", show: true },
     { key: "emi", label: "EMI calculator", show: true },
     { key: "customers", label: "Customer applications", show: customers && quotes },
-    // Own builder (Bijlee, RVS …) or the standard saved Quotations for everyone else.
-    { key: "quotation", label: tpl && !customers ? "Quotation builder" : "Quotations", show: !customers && quotes, href: tpl ? "/dashboard/quotation" : "/dashboard/quotes" },
+    // Quotations — "New quotation" there picks the Simple or the Custom template.
+    { key: "quotation", label: "Quotations", show: !customers && quotes, href: "/dashboard/quotes" },
     { key: "settings", label: "Settings", show: manage, href: SETTINGS_HREF },
   ];
   const items = nav.filter((n) => n.show);

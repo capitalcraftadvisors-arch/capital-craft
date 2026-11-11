@@ -59,35 +59,37 @@ export default function ReviewBar({ loan, item, onDecided, onEdit, compact }: {
     state === "sent_back" ? { box: "border-red-200 bg-red-50 text-red-700", icon: UNDO, text: "Sent back by Admin" } :
                             { box: "border-[#f3d9a4] bg-[#fef8ee] text-[#854f0b]", icon: I.lock, text: admin ? "Waiting for your check" : "Waiting for admin check" };
 
+  const sm = !!compact; // Pendings rows: small buttons on one line
   const actions = admin && (
-    <div className="flex items-center gap-2 flex-wrap justify-end">
+    <div className={["flex items-center justify-end", sm ? "gap-1.5" : "gap-2 flex-wrap"].join(" ")}>
       {state === "pending" ? (
         <>
-          <HAction variant="reject" disabled={busy} onClick={() => setBackOpen((o) => !o)}>Send back</HAction>
-          {onEdit && <HAction variant="outline" icon={I.edit} disabled={busy} onClick={onEdit}>Edit</HAction>}
-          <HAction variant="primary" icon={I.check} disabled={busy} onClick={approve}>{busy ? "Saving…" : "Approve"}</HAction>
+          <HAction small={sm} variant="reject" disabled={busy} onClick={() => setBackOpen((o) => !o)}>Send back</HAction>
+          {onEdit && <HAction small={sm} variant="outline" icon={I.edit} disabled={busy} onClick={onEdit}>Edit</HAction>}
+          <HAction small={sm} variant="primary" icon={I.check} disabled={busy} onClick={approve}>{busy ? "Saving…" : "Approve"}</HAction>
         </>
       ) : (
         <>
-          {onEdit && <HAction variant="outline" icon={I.edit} disabled={busy} onClick={onEdit}>Edit</HAction>}
-          <HAction variant="ghost" icon={UNDO} disabled={busy} onClick={undo}>{busy ? "Saving…" : "Undo"}</HAction>
+          {onEdit && <HAction small={sm} variant="outline" icon={I.edit} disabled={busy} onClick={onEdit}>Edit</HAction>}
+          <HAction small={sm} variant="ghost" icon={UNDO} disabled={busy} onClick={undo}>{busy ? "Saving…" : "Undo"}</HAction>
         </>
       )}
     </div>
   );
 
   const backForm = backOpen && (
-    <div className="mt-3 flex items-center gap-2 flex-wrap">
+    <div className={["flex items-center gap-2", sm ? "mt-1.5 justify-end" : "mt-3 flex-wrap"].join(" ")}>
       <input
         autoFocus
         value={reason}
         onChange={(e) => setReason(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") sendBack(); }}
         placeholder="Reason"
-        className="flex-1 min-w-[220px] border border-red-200 rounded-[8px] px-3 py-2 text-[13px] outline-none focus:border-red-400 bg-white text-[#0f3d2e]"
+        className={["border border-red-200 rounded-[8px] outline-none focus:border-red-400 bg-white text-[#0f3d2e]",
+          sm ? "w-[200px] px-2.5 py-1 text-[12px]" : "flex-1 min-w-[220px] px-3 py-2 text-[13px]"].join(" ")}
       />
-      <HAction variant="reject" disabled={busy || !reason.trim()} onClick={sendBack}>{busy ? "Saving…" : "Send back"}</HAction>
-      <HAction variant="ghost" disabled={busy} onClick={() => { setBackOpen(false); setReason(""); }}>Cancel</HAction>
+      <HAction small={sm} variant="reject" disabled={busy || !reason.trim()} onClick={sendBack}>{busy ? "Saving…" : "Send back"}</HAction>
+      <HAction small={sm} variant="ghost" disabled={busy} onClick={() => { setBackOpen(false); setReason(""); }}>Cancel</HAction>
     </div>
   );
 
@@ -95,15 +97,15 @@ export default function ReviewBar({ loan, item, onDecided, onEdit, compact }: {
     return (
       <div>
         {state === "pending" ? actions : (
-          <div className="flex items-center gap-2 justify-end">
-            <span className={["inline-flex items-center gap-1.5 text-[12px] font-semibold px-2.5 py-1 rounded-[8px] border", tone.box].join(" ")}>
+          <div className="flex items-center gap-1.5 justify-end">
+            <span className={["inline-flex items-center gap-1.5 text-[12px] font-semibold px-2.5 py-1 rounded-[8px] border whitespace-nowrap", tone.box].join(" ")}>
               <span className="inline-flex">{tone.icon}</span>{tone.text}
             </span>
             {actions}
           </div>
         )}
         {backForm}
-        {error && <p className="text-[12px] text-red-600 mt-1.5 text-right">{error}</p>}
+        {error && <p className="text-[12px] text-red-600 mt-1 text-right whitespace-normal">{error}</p>}
       </div>
     );
   }

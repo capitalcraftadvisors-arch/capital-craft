@@ -8,18 +8,18 @@
 // Totals are live (lib/quote-calc — the same maths as the PDF). Nothing saves
 // until Save; the PDF saves first when there are changes.
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { NAVY } from "@/components/partner/PartnerShell";
 import { input, Toggle, useBrandOptions } from "@/components/quotation/form-kit";
 import SearchableSelect from "@/components/quotation/SearchableSelect";
 import DateField from "@/components/ui/DateField";
-import { AddBtn, PairRows, PaymentRows, RemoveBtn, paymentTotal } from "@/components/partner/RowEditors";
+import { PairRows, PaymentRows, RemoveBtn, paymentTotal } from "@/components/partner/RowEditors";
 import { fetchKyc, fetchOrgSettings } from "@/lib/org-settings";
 import { resolveQuoteDefaults, type OrgProfile } from "@/lib/org-profile";
-import { addDays, GST_RATES, newQuoteDoc, quoteSavings, quoteTotals, withAutoItems, type QuoteDoc, type QuoteItem } from "@/lib/quote-calc";
+import { addDays, GST_RATES, newQuoteDoc, quoteSavings, quoteTotals, standardItems, withAutoItems, withBatteryRow, type QuoteDoc, type QuoteItem } from "@/lib/quote-calc";
 import { deleteQuote, downloadQuotePdf, fetchQuote, saveQuote, setQuoteStatus, QUOTE_STATUSES, QUOTE_STATUS_LABEL, QUOTE_STATUS_PILL, type QuoteRow, type QuoteStatus } from "@/lib/quotes";
-import { STANDARD, STANDARD_BOM, boqField, type Segment } from "@/lib/quotation-brands";
+import { STANDARD, STANDARD_BOM, STANDARD_EXTRAS, boqField, type Segment } from "@/lib/quotation-brands";
 import { centralSubsidyFor } from "@/lib/emi";
 import { INDIA_STATES, stateOfGstin } from "@/lib/india-states";
 import { amountInput, fmtRupees } from "@/lib/money";
@@ -45,6 +45,21 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
   const [error, setError] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const merge = useBrandOptions();
+  // Undo: earlier versions of the quotation (a burst of typing = one step; a
+  // removed or added row always its own). Ctrl+Z outside a text box too.
+  const [past, setPast] = useState<QuoteDoc[]>([]);
+  const lastStep = useRef(0);
+  const undoRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "z" && !t?.closest("input, textarea, select")) {
+        e.preventDefault(); undoRef.current();
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -81,13 +96,33 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
   const resi = doc.segment === "residential";
   const pays = resi && totals.eligible ? totals.net : totals.total;
   const sv = quoteSavings(doc.kw, doc.tariff, pays);
-  const autoSubsidy = resi && doc.dcr ? centralSubsidyFor(doc.kw, false) : 0;
+  const autoSubsidy = totals.eligible ? centralSubsidyFor(doc.kw, false) : 0;
 
   const up = (patch: Partial<QuoteDoc>) => {
-    const next = { ...doc, ...patch };
-    setDoc("kw" in patch || "phase" in patch || "system_type" in patch ? withAutoItems(next) : next);
+    let next = { ...doc, ...patch };
+    if ("system_type" in patch) next = withBatteryRow(next);
+    if ("kw" in patch || "phase" in patch || "system_type" in patch) next = withAutoItems(next);
+    // A row added / removed is always its own undo step; typing joins one step until a 1 s pause.
+    const rows = (["items", "payment", "warranty"] as const).some((k) => k in patch && (patch[k] as unknown[]).length !== doc[k].length);
+    if (rows || Date.now() - lastStep.current > 1000) setPast((p) => [...p.slice(-49), doc]);
+    lastStep.current = Date.now();
+    setDoc(next);
     setDirty(true); setError(null);
   };
+  // Back one step — the typed amounts follow the restored quotation.
+  const undo = () => {
+    const prev = past[past.length - 1];
+    if (!prev) return;
+    setPast(past.slice(0, -1));
+    lastStep.current = 0;
+    setDoc(prev);
+    setPrice(prev.price ? String(prev.price) : "");
+    setDiscount(prev.discount ? String(prev.discount) : "");
+    setSubsidy(prev.subsidy == null ? "" : String(prev.subsidy));
+    setStateSub(prev.state_subsidy ? String(prev.state_subsidy) : "");
+    setDirty(true); setError(null);
+  };
+  undoRef.current = work ? undo : () => {};
   const upCust = (patch: Partial<QuoteDoc["customer"]>) => up({ customer: { ...doc.customer, ...patch } });
   const setItem = (i: number, patch: Partial<QuoteItem>) => {
     const items = doc.items.map((it, j) => {
@@ -156,6 +191,15 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
 
   const bomOf = (key?: string) => STANDARD_BOM.find((r) => r.key === key);
   const lines = totals.lines;
+  // "+ Add item": the standard rows not on the quotation (e.g. one removed by
+  // mistake — the battery too), then the usual extras; "Write your own" is a blank row.
+  const std = standardItems(doc.kw, doc.phase, doc.system_type);
+  if (!std.some((s) => s.key === "std_battery")) std.splice(2, 0, standardItems(doc.kw, doc.phase, "Hybrid").find((s) => s.key === "std_battery")!);
+  const addOptions = [
+    ...std.filter((s) => !doc.items.some((it) => it.key === s.key)).map((s) => ({ label: s.item, item: s })),
+    ...STANDARD_EXTRAS.filter((x) => !doc.items.some((it) => it.item === x.product))
+      .map((x) => ({ label: x.product, item: { item: x.product, spec: x.spec, make: "", hsn: "", qty: "1", unit: "", rate: 0, gst: 18 } as QuoteItem })),
+  ];
 
   return (
     <div className="max-w-[1250px]">
@@ -172,6 +216,12 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
         )}
         <div className="ml-auto flex items-center gap-2 flex-wrap">
           {error && <span className="text-[13px] text-red-600 mr-1">{error}</span>}
+          {work && (
+            <button type="button" onClick={undo} disabled={!past.length || busy !== null} title="Undo (Ctrl+Z)" className={ghost + " inline-flex items-center gap-1.5"}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 14 4 9l5-5" /><path d="M4 9h11a5 5 0 0 1 0 10h-3" /></svg>
+              Undo
+            </button>
+          )}
           {row && work && <button type="button" onClick={() => router.push(`/dashboard/quotes/new?from=${row.id}` as any)} className={ghost}>Copy</button>}
           {row && work && <button type="button" onClick={() => void remove()} disabled={busy !== null} className={ghost + " text-red-600"}>Delete</button>}
           {/* A viewer downloads the saved quotation as it is. */}
@@ -191,8 +241,8 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
             <Grid>
               <F l="Customer name" req><input className={input} value={doc.customer.name} onChange={(e) => upCust({ name: e.target.value })} /></F>
               <F l="Mobile"><input className={input} inputMode="numeric" value={doc.customer.mobile} onChange={(e) => upCust({ mobile: e.target.value.replace(/\D/g, "").slice(0, 10) })} /></F>
-              <F l="Email"><input className={input} type="email" value={doc.customer.email} onChange={(e) => upCust({ email: e.target.value.trim() })} /></F>
-              <F l="GSTIN"><input className={input} value={doc.customer.gstin} onChange={(e) => { const g = e.target.value.toUpperCase().replace(/\s/g, "").slice(0, 15); upCust({ gstin: g, ...(g.length >= 2 && stateOfGstin(g) ? { state: stateOfGstin(g) } : {}) }); }} /></F>
+              <F l="Email" opt><input className={input} type="email" value={doc.customer.email} onChange={(e) => upCust({ email: e.target.value.trim() })} /></F>
+              <F l="GSTIN" opt><input className={input} value={doc.customer.gstin} onChange={(e) => { const g = e.target.value.toUpperCase().replace(/\s/g, "").slice(0, 15); upCust({ gstin: g, ...(g.length >= 2 && stateOfGstin(g) ? { state: stateOfGstin(g) } : {}) }); }} /></F>
               <F l="Billing address" wide><textarea className={input + " min-h-[60px]"} value={doc.customer.billing} onChange={(e) => upCust({ billing: e.target.value })} /></F>
               <F l="Site address" wide>
                 <label className="flex items-center gap-2 text-[13px] text-text-mid mb-1.5">
@@ -209,9 +259,7 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
               </F>
               <F l="K. No."><input className={input} value={doc.customer.k_number} onChange={(e) => upCust({ k_number: e.target.value })} /></F>
               <F l="DISCOM"><input className={input} value={doc.customer.discom} onChange={(e) => upCust({ discom: e.target.value })} /></F>
-              {resi ? (
-                <F l="PM Surya Ghar application no."><input className={input} value={doc.customer.application_no} onChange={(e) => upCust({ application_no: e.target.value })} /></F>
-              ) : (
+              {!resi && (
                 <>
                   <F l="Category">
                     <select className={input} value={doc.customer.category} onChange={(e) => upCust({ category: e.target.value })}>
@@ -305,9 +353,8 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
                   </div>
                 );
               })}
-              <div>
-                <AddBtn label="+ Add item" onClick={() => up({ items: [...doc.items, { item: "", spec: "", make: "", hsn: "", qty: lines ? "1" : "", unit: "", rate: 0, gst: 18 }] })} />
-              </div>
+              <AddItemMenu options={addOptions}
+                onPick={(it) => up({ items: [...doc.items, it ?? { item: "", spec: "", make: "", hsn: "", qty: lines ? "1" : "", unit: "", rate: 0, gst: 18 }] })} />
             </div>
           </Block>
 
@@ -317,7 +364,7 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
                 <F l="System price (before GST)" req><input className={input} inputMode="decimal" value={price} onChange={(e) => amount(setPrice, "price")(e.target.value)} placeholder="e.g. 260000" /></F>
               )}
               <F l="Discount (₹)"><input className={input} inputMode="decimal" value={discount} onChange={(e) => amount(setDiscount, "discount")(e.target.value)} /></F>
-              {resi && doc.dcr && (
+              {totals.eligible && (
                 <>
                   <F l="Central subsidy (₹)">
                     <input className={input} inputMode="decimal" value={subsidy} placeholder={String(autoSubsidy)}
@@ -409,10 +456,38 @@ function Block({ title, right, children }: { title: string; right?: ReactNode; c
 function Grid({ children }: { children: ReactNode }) {
   return <div className="grid gap-3 sm:grid-cols-2">{children}</div>;
 }
-function F({ l, req, wide, children }: { l: string; req?: boolean; wide?: boolean; children: ReactNode }) {
+// "+ Add item ▾" — a standard row or a usual extra from the list, or a blank row to write your own.
+function AddItemMenu({ options, onPick }: { options: { label: string; item: QuoteItem }[]; onPick: (it: QuoteItem | null) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  const pick = (it: QuoteItem | null) => { setOpen(false); onPick(it ? { ...it } : null); };
+  const opt = "block w-full text-left px-4 py-2 text-[13px] hover:bg-[#f0f5fc]";
+  return (
+    <div className="relative self-start" ref={ref}>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="text-[13px] font-semibold text-[#1e3a8a] hover:underline inline-flex items-center gap-1">
+        + Add item
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      {open && (
+        <div className="absolute left-0 z-30 mt-1 w-64 max-h-72 overflow-y-auto bg-white border border-line rounded-xl shadow-lg py-1">
+          {options.map((o) => <button key={o.label} type="button" onClick={() => pick(o.item)} className={opt + " text-text"}>{o.label}</button>)}
+          <button type="button" onClick={() => pick(null)} className={opt + " font-semibold text-[#1e3a8a]" + (options.length ? " border-t border-line" : "")}>Write your own</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function F({ l, req, opt, wide, children }: { l: string; req?: boolean; opt?: boolean; wide?: boolean; children: ReactNode }) {
   return (
     <div className={"flex flex-col gap-1 min-w-0" + (wide ? " sm:col-span-2" : "")}>
-      <span className="text-[12.5px] font-medium text-text-mid">{l}{req && <span className="text-red-500"> *</span>}</span>
+      <span className="text-[12.5px] font-medium text-text-mid">{l}{req && <span className="text-red-500"> *</span>}{opt && <span className="font-normal text-text-muted"> (optional)</span>}</span>
       {children}
     </div>
   );

@@ -38,6 +38,7 @@ import OwnershipCard from "@/components/OwnershipCard";
 import ActivityLog from "@/components/ActivityLog";
 import DeleteEpcModal from "@/components/DeleteEpcModal";
 import EpcPasswordEmailModal from "@/components/EpcPasswordEmailModal";
+import CustomTemplateCard from "@/components/CustomTemplateCard";
 import { epcLoginPassword } from "@/lib/passwords";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import { invalidate } from "@/lib/list-cache";
@@ -114,6 +115,7 @@ function DOC_LABEL(cat: string): string {
     office_interior: "Office int",
     office_selfie: "Selfie",
     gst_r3b: "GSTR-3B",
+    custom_quote_sample: "Sample quotation",
   };
   return M[cat] ?? cat;
 }
@@ -870,6 +872,12 @@ function Inner() {
                 assignedToUserId={biz.assigned_to_user_id ?? null}
               />
             </Section>
+            {/* The EPC's custom quotation template (0122) — reads when opened. */}
+            {biz.business_type !== "admin" && (
+              <Section card dropdown icon={I.files} title="Custom quotation">
+                <CustomTemplateCard businessId={biz.id} />
+              </Section>
+            )}
             <Section card icon={I.lock} title="Comments">
               <CommentsSection
                 businessId={biz.id}

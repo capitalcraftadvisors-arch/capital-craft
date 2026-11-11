@@ -13,10 +13,14 @@ import { fmtDate } from "@/lib/dates";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getBusiness } from "@/lib/auth";
+import { getBusiness, isMainAdmin } from "@/lib/auth";
+import { REVIEW_COLS, REVIEW_LABEL, loanReviews, reviewNotices } from "@/lib/review";
+import { markNotifSeen, notifSeen, onNotifSeen } from "@/lib/notif-seen";
 
 type Source = "loan" | "epc" | "lead" | "insurance";
-type Notif = { id: string; kind: "comment" | "assign"; source: Source; caseName: string; author: string; text: string; at: string; href: string };
+// kind "review": the admin approved / sent back a stage the team saved (lib/review).
+// kind "request": an EPC asked for its custom quotation template (uploaded a sample, 0122).
+type Notif = { id: string; kind: "comment" | "assign" | "review" | "request"; source: Source; caseName: string; author: string; text: string; at: string; href: string; ok?: boolean };
 
 const SRC_LABEL: Record<Source, string> = { loan: "Loan", epc: "EPC", lead: "Lead", insurance: "Insurance" };
 const SRC_TINT: Record<Source, { bg: string; fg: string }> = {
@@ -25,7 +29,6 @@ const SRC_TINT: Record<Source, { bg: string; fg: string }> = {
   lead: { bg: "#e8e7fb", fg: "#4338ca" },
   insurance: { bg: "#fdf0e3", fg: "#b45309" },
 };
-const SEEN_KEY = "cc_notif_seen";
 
 // One shared AudioContext, resumed on the first user gesture (autoplay policy).
 let audioCtx: AudioContext | null = null;
@@ -71,7 +74,8 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
-  const [seen, setSeen] = useState<number>(() => (typeof window !== "undefined" ? Number(localStorage.getItem(SEEN_KEY)) : 0) || 0);
+  const [seen, setSeen] = useState<number>(() => (typeof window !== "undefined" ? notifSeen() : 0));
+  useEffect(() => onNotifSeen(setSeen), []); // marked read in My Day
   const lastMax = useRef(0);
   const first = useRef(true);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -104,7 +108,8 @@ export default function NotificationBell() {
     const loanIds = [...loanName.keys()], epcIds = [...epcName.keys()], leadIds = [...leadName.keys()];
 
     const empty = Promise.resolve({ data: [] as Record<string, string>[] });
-    const [lc, ec, dc, act] = await Promise.all([
+    const since = new Date(Date.now() - 14 * 86400000).toISOString();
+    const [lc, ec, dc, act, rv, rq] = await Promise.all([
       loanIds.length ? db.from("loan_comments").select("id, application_id, author_id, author_name, comment_text, created_at").in("application_id", loanIds).neq("author_id", meId).order("created_at", { ascending: false }).limit(20) : empty,
       epcIds.length ? db.from("epc_comments").select("id, business_id, author_id, author_name, comment_text, created_at").in("business_id", epcIds).neq("author_id", meId).order("created_at", { ascending: false }).limit(20) : empty,
       leadIds.length ? db.from("lead_comments").select("id, lead_id, author_id, author_name, comment_text, created_at").in("lead_id", leadIds).neq("author_id", meId).order("created_at", { ascending: false }).limit(20) : empty,
@@ -113,7 +118,29 @@ export default function NotificationBell() {
         .select("id, module, record_id, action, created_at, actor:actor_user_id(contact_name)")
         .eq("subject_user_id", meId).in("action", ["assigned", "reassigned"]).neq("actor_user_id", meId)
         .order("created_at", { ascending: false }).limit(20),
+      // The admin's approvals / send-backs of the last 14 days — for the team
+      // (the admin made them). Every loan the user can see (RLS).
+      isMainAdmin(getBusiness()) ? empty : db.from("epc_applications")
+        .select(`id, aadhaar_name, borrower_name, ${REVIEW_COLS}`)
+        .or(`approval_reviewed_at.gte.${since},disb1_reviewed_at.gte.${since},disb2_reviewed_at.gte.${since}`)
+        .limit(50),
+      // EPCs asking for a custom quotation template (a sample uploaded in the last
+      // 14 days, no ready template yet) — for every CC account.
+      getBusiness()?.business_type !== "admin" ? empty : db.from("epc_documents")
+        .select("id, business_id, created_at, epc_business:business_id(trade_name, legal_name, contact_name, epc_quotation_templates(ready_at))")
+        .eq("category", "custom_quote_sample").gte("created_at", since)
+        .order("created_at", { ascending: false }).limit(30),
     ]);
+    const requests = new Map<string, Notif>(); // one per EPC, its latest upload
+    for (const d of (rq.data ?? []) as Record<string, any>[]) {
+      const b = d.epc_business as Record<string, any> | null;
+      if (requests.has(d.business_id) || (b?.epc_quotation_templates ?? []).some((t: Record<string, any>) => t.ready_at)) continue;
+      const name = b?.trade_name || b?.legal_name || b?.contact_name || "An EPC";
+      requests.set(d.business_id, { id: "q" + d.business_id, kind: "request", source: "epc", caseName: name, author: name,
+        text: "Custom quotation template", at: d.created_at, href: `/admin/epc/${d.business_id}/view` });
+    }
+    const reviews = reviewNotices(((rv.data ?? []) as Record<string, any>[])
+      .map((r) => ({ id: r.id as string, name: r.aadhaar_name || r.borrower_name || "—", reviews: loanReviews(r) })));
 
     // module → { display source, name lookup, view href }
     const MOD: Record<string, { source: Source; names: Map<string, string>; href: (id: string) => string }> = {
@@ -132,6 +159,11 @@ export default function NotificationBell() {
         const author = (r.actor as { contact_name?: string } | null)?.contact_name || "Someone";
         return { id: "a" + r.id, kind: "assign" as const, source: m.source, caseName: m.names.get(r.record_id) || "a case", author, text: r.action === "reassigned" ? "assigned you this case" : "assigned you a new case", at: r.created_at, href: m.href(r.record_id) };
       }),
+      ...reviews.map((n) => ({
+        id: "r" + n.loanId + n.item, kind: "review" as const, source: "loan" as const, caseName: n.name, author: "Admin",
+        text: REVIEW_LABEL[n.item] + (n.status === "sent_back" && n.note ? ` — ${n.note}` : ""), at: n.at, href: n.href, ok: n.status === "approved",
+      })),
+      ...requests.values(),
     ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 30);
 
     setItems(merged);
@@ -145,6 +177,14 @@ export default function NotificationBell() {
   // for notifications ONLY when the user opens it (see the button handler below),
   // so it costs zero Supabase egress while idle. Trade-off: the unread badge
   // appears after the first time the bell is opened in a session, not before.
+  // Opening it again within 2 minutes shows the same list without re-querying.
+  const loadedAt = useRef(0);
+  function check() {
+    if (Date.now() - loadedAt.current < 120000) return;
+    loadedAt.current = Date.now();
+    setLoading(true);
+    void load().finally(() => { setLoading(false); setLoadedOnce(true); });
+  }
 
   // Close on outside click.
   useEffect(() => {
@@ -156,12 +196,12 @@ export default function NotificationBell() {
 
   const unread = useMemo(() => items.filter((n) => new Date(n.at).getTime() > seen).length, [items, seen]);
 
-  function markAllRead() { const now = Date.now(); localStorage.setItem(SEEN_KEY, String(now)); setSeen(now); }
+  function markAllRead() { setSeen(markNotifSeen()); }
   function openItem(n: Notif) { markAllRead(); setOpen(false); router.push(n.href); }
 
   return (
     <div className="relative" ref={boxRef}>
-      <button type="button" onClick={() => { const next = !open; setOpen(next); if (next) { setLoading(true); void load().finally(() => { setLoading(false); setLoadedOnce(true); }); } }}
+      <button type="button" onClick={() => { const next = !open; setOpen(next); if (next) check(); }}
         aria-label="Notifications" title="Check notifications from your team"
         className="relative grid place-items-center w-9 h-9 rounded-lg border border-line bg-white hover:bg-bg-tint transition-colors">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#15241d" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -199,12 +239,16 @@ export default function NotificationBell() {
                       <div className="flex items-center gap-1.5 mb-0.5">
                         {isNew && <span className="w-2 h-2 rounded-full bg-[#178a5c] shrink-0" />}
                         <span className="text-[12px] font-bold text-text truncate">{n.author}</span>
-                        <span className="text-[11px] text-text-muted">{n.kind === "assign" ? "assigned you" : "commented on"}</span>
+                        <span className="text-[11px] text-text-muted">{n.kind === "assign" ? "assigned you" : n.kind === "review" ? (n.ok ? "approved" : "sent back") : n.kind === "request" ? "wants a custom quotation" : "commented on"}</span>
                         <span className="text-[9px] font-bold px-1.5 py-0.5 rounded ml-auto shrink-0" style={{ backgroundColor: tint.bg, color: tint.fg }}>{SRC_LABEL[n.source]}</span>
                       </div>
                       <div className="text-[12px] font-semibold text-text truncate">{n.caseName}</div>
                       {n.kind === "comment"
                         ? <div className="text-[12px] text-text-mid line-clamp-2 mt-0.5">{n.text}</div>
+                        : n.kind === "review"
+                        ? <div className={["text-[12px] font-medium line-clamp-2 mt-0.5", n.ok ? "text-[#178a5c]" : "text-red-700"].join(" ")}>{n.ok ? "✓ " : "↩ "}{n.text}</div>
+                        : n.kind === "request"
+                        ? <div className="text-[12px] font-medium text-[#185fa5] mt-0.5">{n.text}</div>
                         : <div className="text-[11px] text-[#178a5c] font-medium mt-0.5">New assignment — tap to open</div>}
                       <div className="text-[10px] text-text-muted mt-1">{ago(n.at)}</div>
                     </button>

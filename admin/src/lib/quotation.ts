@@ -128,11 +128,11 @@ export async function readBundledTemplate(key: string): Promise<Buffer> {
 
 /** The EPC's quotation template (read with the caller's token — RLS: their own
  *  row, or any for an admin), or null when none is set up. */
-export async function epcQuoteTemplate(db: SupabaseClient, bizId: string): Promise<{ id: string; storage_path: string } | null> {
+export async function epcQuoteTemplate(db: SupabaseClient, bizId: string): Promise<{ id: string; storage_path: string; ready_at: string | null; unlocked: boolean | null } | null> {
   try {
-    const { data } = await db.from("epc_quotation_templates").select("id, storage_path")
+    const { data } = await db.from("epc_quotation_templates").select("id, storage_path, ready_at, unlocked")
       .eq("epc_business_id", bizId).order("created_at", { ascending: false }).limit(1).maybeSingle();
-    return data?.storage_path ? (data as { id: string; storage_path: string }) : null;
+    return data?.storage_path ? (data as { id: string; storage_path: string; ready_at: string | null; unlocked: boolean | null }) : null;
   } catch {
     return null; // table missing → treated as no template
   }

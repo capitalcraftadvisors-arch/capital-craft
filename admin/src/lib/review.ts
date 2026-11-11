@@ -30,6 +30,32 @@ type Loan = Record<string, any> | null | undefined;
 export const reviewState = (loan: Loan, item: ReviewItem): ReviewState =>
   (loan?.[`${item}_review_status`] as ReviewState) ?? null;
 
+// The loan profile tab of each item (?tab=…).
+export const REVIEW_TAB: Record<ReviewItem, string> = { approval: "approved", disb1: "first", disb2: "second" };
+const REVIEW_ITEMS: ReviewItem[] = ["approval", "disb1", "disb2"];
+// The review columns of a loan row — for lists that show the checks.
+export const REVIEW_COLS = REVIEW_ITEMS.map((k) => `${k}_review_status, ${k}_reviewed_at, ${k}_review_note`).join(", ");
+
+export type LoanReview = { item: ReviewItem; status: Exclude<ReviewState, null>; at: string | null; note: string | null };
+// A loan row's checks that have a status (REVIEW_COLS selected).
+export function loanReviews(r: Record<string, any>): LoanReview[] {
+  return REVIEW_ITEMS.filter((k) => r[`${k}_review_status`]).map((k) => ({
+    item: k, status: r[`${k}_review_status`], at: r[`${k}_reviewed_at`] ?? null, note: r[`${k}_review_note`] ?? null,
+  }));
+}
+
+// What the team hears about: the admin's approvals and send-backs of the last
+// 14 days, newest first (an Undo removes the decision, so it drops out too).
+export type ReviewNotice = LoanReview & { loanId: string; name: string; at: string; href: string };
+export function reviewNotices(loans: { id: string; name: string; reviews?: LoanReview[] }[], days = 14): ReviewNotice[] {
+  const from = Date.now() - days * 86400000;
+  return loans
+    .flatMap((l) => (l.reviews ?? [])
+      .filter((v) => (v.status === "approved" || v.status === "sent_back") && v.at && new Date(v.at).getTime() >= from)
+      .map((v) => ({ ...v, at: v.at as string, loanId: l.id, name: l.name, href: `/admin/app/${l.id}/view?tab=${REVIEW_TAB[v.item]}` })))
+    .sort((a, b) => (a.at < b.at ? 1 : -1));
+}
+
 // Can the signed-in user change this item's saved details? The main admin always;
 // the team only before saving (legacy) or after it was sent back to them.
 export function canEditReview(loan: Loan, item: ReviewItem): boolean {

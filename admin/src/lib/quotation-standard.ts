@@ -203,8 +203,7 @@ export async function buildStandardQuotation(doc: QuoteDoc, quoteNo: string, org
     ["Name", cust.name], ["Mobile", cust.mobile ? `+91 ${cust.mobile}` : ""], ["Email", cust.email], ["GSTIN", cust.gstin],
     ["Billing address", cust.billing], ...(site && site !== cust.billing.trim() ? [["Site address", site] as [string, string]] : []),
     ["Place of supply", cust.state], ["K. No.", cust.k_number], ["DISCOM", cust.discom],
-    ...(resi ? [["PM Surya Ghar application", cust.application_no] as [string, string]]
-      : [["Sanctioned load", cust.sanctioned_load ? `${cust.sanctioned_load} kW` : ""] as [string, string]]),
+    ...(resi ? [] : [["Sanctioned load", cust.sanctioned_load ? `${cust.sanctioned_load} kW` : ""] as [string, string]]),
   ];
   const offerRows: [string, string][] = [
     ["Quotation no.", quoteNo], ["Date", dmy(doc.date)], ["Valid till", dmy(doc.valid_till)],
@@ -218,7 +217,7 @@ export async function buildStandardQuotation(doc: QuoteDoc, quoteNo: string, org
   sheet.para(`Dear ${cust.name || "Sir / Madam"},`, { bold: true, size: 10 });
   sheet.y += 4;
   sheet.para(resi
-    ? `Thank you for considering solar for your home. We are pleased to offer a ${kw} kWp ${doc.system_type.toLowerCase()} rooftop solar power plant under the PM Surya Ghar: Muft Bijli Yojana, designed for your roof and your electricity use. It is expected to produce about ${inr(sv.units)} units a year${sv.payback ? ` and to pay for itself in about ${payback}` : ""}, then keep saving for 25 years and more.`
+    ? `Thank you for considering solar for your home. We are pleased to offer a ${kw} kWp ${doc.system_type.toLowerCase()} rooftop solar power plant${t.eligible ? " under the PM Surya Ghar: Muft Bijli Yojana" : ""}, designed for your roof and your electricity use. It is expected to produce about ${inr(sv.units)} units a year${sv.payback ? ` and to pay for itself in about ${payback}` : ""}, then keep saving for 25 years and more.`
     : `Thank you for your enquiry. We are pleased to submit our techno-commercial offer for the design, supply, installation and commissioning of a ${kw} kWp ${doc.system_type.toLowerCase()} rooftop solar power plant at your premises. It is expected to produce about ${inr(sv.units)} units a year and to cut your electricity bill from the first month.`,
     { size: 10 });
   sheet.y += 4;
@@ -245,7 +244,7 @@ export async function buildStandardQuotation(doc: QuoteDoc, quoteNo: string, org
     const sysCols: Col[] = [{ w: 170 }, { w: CW - 170 }];
     const sysRows = [
       ["Plant capacity", `${kw} kWp`],
-      ["System type", `${doc.system_type} rooftop solar${doc.system_type === "Hybrid" ? " with battery backup" : ", connected to the grid with net metering"}`],
+      ["System type", `${doc.system_type} rooftop solar${doc.system_type === "Hybrid" ? " with battery backup" : doc.system_type === "Off-grid" ? " with battery storage, not connected to the grid" : ", connected to the grid with net metering"}`],
       ["Connection", `${doc.phase}${cust.category ? `, ${cust.category}` : ""}`],
       ["Solar modules", [panels ? `${panels} Nos.` : "", mod?.spec, dcrText, mod?.make].filter(Boolean).join(" · ")],
       ["Inverter", [inv?.spec, inv?.make].filter(Boolean).join(" · ")],
@@ -303,7 +302,7 @@ export async function buildStandardQuotation(doc: QuoteDoc, quoteNo: string, org
   const TOTAL = "Total (incl. GST)", NET = "Your cost after subsidy";
   rows.push([TOTAL, rs(t.total)]);
   if (resi) {
-    rows.push(["Central subsidy (PM Surya Ghar)", t.eligible ? `- ${rs(t.central)}` : "Not applicable (Non-DCR)"]);
+    rows.push(["Central subsidy (PM Surya Ghar)", t.eligible ? `- ${rs(t.central)}` : `Not applicable (${doc.system_type === "Off-grid" ? "off-grid" : "Non-DCR"})`]);
     if (t.state) rows.push(["State subsidy", `- ${rs(t.state)}`]);
     if (t.eligible) rows.push([NET, rs(t.net)]);
   } else rows.push(["Government subsidy", "Not applicable"]);

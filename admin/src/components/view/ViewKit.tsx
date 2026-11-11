@@ -107,7 +107,7 @@ export function KpiTile({ label, value, sub, accent }: { label: string; value: s
 
 // ── Header / stage action button — green-primary theme, soft shades. ─
 export function HAction({
-  children, onClick, variant = "ghost", icon, disabled, title,
+  children, onClick, variant = "ghost", icon, disabled, title, small,
 }: {
   children: React.ReactNode;
   onClick: () => void;
@@ -115,6 +115,8 @@ export function HAction({
   icon?: React.ReactNode;
   disabled?: boolean;
   title?: string;
+  /** Table rows (Pendings): the smaller size. */
+  small?: boolean;
 }) {
   const cls =
     variant === "approve" ? "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd] hover:bg-[#d6efe3]" :
@@ -130,7 +132,7 @@ export function HAction({
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={["text-[13px] font-semibold px-3 py-2 rounded-[8px] border transition-colors disabled:opacity-60 inline-flex items-center gap-1.5", cls].join(" ")}
+      className={[small ? "text-[12px] px-2.5 py-1 whitespace-nowrap" : "text-[13px] px-3 py-2", "font-semibold rounded-[8px] border transition-colors disabled:opacity-60 inline-flex items-center gap-1.5", cls].join(" ")}
     >
       {icon && <span className="shrink-0" style={{ display: "inline-flex" }}>{icon}</span>}
       {children}

@@ -281,7 +281,7 @@ export const STANDARD = {
   validityDays: { residential: 30, commercial: 7 } as Record<Segment, number>,
   categories: { residential: ["Domestic"], commercial: ["Non-Domestic", "Industrial"] } as Record<Segment, string[]>,
   phases: ["Single phase", "Three phase"],
-  systemTypes: ["On-grid", "Hybrid"],
+  systemTypes: ["On-grid", "Off-grid", "Hybrid"], // residential + commercial alike
   payment: {
     residential: [["Advance with the order", 30], ["Before dispatch of panels & inverter", 60], ["After installation & commissioning", 10]],
     commercial: [["Advance with the work order", 10], ["Before material delivery", 85], ["After commissioning", 5]],
@@ -331,13 +331,27 @@ export const STANDARD_BOM: BoqRow[] = [
   { key: "std_install", product: "Installation & commissioning", spec: ["Transport, civil work & net-metering liaison"], make: ["Included"], qty: ["Lump sum"] },
 ];
 
-/** The standard bill of material: module QTY from the kW and watts, the inverter line from the kW + phase. */
-export function standardBom(picked: Record<string, unknown>, kw: number, phase: string, hybrid: boolean): { rows: BoqRow[]; cells: BoqCells } {
-  const rows = STANDARD_BOM.filter((r) => hybrid || r.key !== "std_battery");
+// Items a quotation may add beyond the standard bill of material ("+ Add item").
+export const STANDARD_EXTRAS: { product: string; spec: string }[] = [
+  { product: "Generation meter", spec: "As per DISCOM norms" },
+  { product: "Zero export device", spec: "Export limiter with CT" },
+  { product: "Panel cleaning system", spec: "Sprinklers with water line" },
+  { product: "Walkway & safety railing", spec: "GI walkway with railing" },
+  { product: "Fire extinguisher & danger signage", spec: "As per safety norms" },
+  { product: "Annual maintenance (AMC)", spec: "Cleaning & check-ups, 1 year" },
+];
+
+/** A battery bank: hybrid and off-grid systems. */
+export const withBattery = (systemType: string) => systemType === "Hybrid" || systemType === "Off-grid";
+
+/** The standard bill of material: module QTY from the kW and watts, the inverter line from the kW + phase + system type. */
+export function standardBom(picked: Record<string, unknown>, kw: number, phase: string, systemType: string): { rows: BoqRow[]; cells: BoqCells } {
+  const rows = STANDARD_BOM.filter((r) => withBattery(systemType) || r.key !== "std_battery");
+  const inverter = systemType === "Hybrid" ? "hybrid" : systemType === "Off-grid" ? "off-grid" : "on-grid string";
   return {
     rows,
     cells: boqCells(rows, picked, (row, col, c) =>
-      row === "std_inverter" && col === "spec" ? (kw > 0 ? `${kwText(kw)} kW ${hybrid ? "hybrid" : "on-grid string"} inverter, ${phase.toLowerCase()}` : "")
+      row === "std_inverter" && col === "spec" ? (kw > 0 ? `${kwText(kw)} kW ${inverter} inverter, ${phase.toLowerCase()}` : "")
       : row === "std_module" && col === "qty" ? (panelsFor(kw, c.spec) ? `${panelsFor(kw, c.spec)} Nos.` : "")
       : undefined),
   };

@@ -20,6 +20,7 @@ import { supabase } from "@/lib/supabase";
 import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template";
 import { SARVATRA } from "@/lib/quotation-brands";
 import CustomerApplications from "@/components/quotation/CustomerApplications";
+import CustomTemplateBanner from "@/components/partner/CustomTemplateBanner";
 import { fmtRupees, fmtDateShort, deadlineState, DEADLINE_PILL } from "@/lib/disbursement";
 import { numberToWordsIndian } from "@/lib/numberToWords";
 import { fmtDateTime as fmtDateTimeLib } from "@/lib/dates";
@@ -199,13 +200,14 @@ function DashboardInner() {
       <LoginWelcome />
 
         <main className="px-5 sm:px-8 pb-12 pt-3">
+          {section === "home" && hasModule(me, "quotes") && <CustomTemplateBanner tpl={quoteTpl} />}
           {section === "home" && (
             <HomeSection loans={rows} loading={loading} attnCount={attnCount}
               canLoan={canLoan && work} canInsurance={canInsurance && work}
               onApplyLoan={() => router.push("/dashboard/apply/chat" as any)}
               onApplyInsurance={() => void startInsurance()} applyingInsurance={insBusy}
               onOpenCase={(r) => setOpenCase(r)} onEmi={() => setSection("emi")}
-              canQuote={hasModule(me, "quotes")} onQuotation={() => (customers ? setSection("customers") : router.push((quoteTpl ? "/dashboard/quotation" : "/dashboard/quotes") as any))} onAttention={() => setSection("documents")} />
+              canQuote={hasModule(me, "quotes")} onQuotation={() => (customers ? setSection("customers") : router.push("/dashboard/quotes" as any))} onAttention={() => setSection("documents")} />
           )}
           {section === "loans" && (
             <LoansSection loans={sortedLoans} loading={loading} canLoan={canLoan && work} readOnly={!work}
@@ -219,7 +221,7 @@ function DashboardInner() {
               onOpen={(id) => router.push(`/dashboard/insurance/${id}/${insRows.find((r) => r.id === id)?.status === "draft" ? "chat" : "step-1"}` as any)} />
           )}
           {section === "emi" && <EmiSection />}
-          {section === "customers" && customers && <CustomerApplications serialNext={quoteTpl.serial_next}
+          {section === "customers" && customers && <CustomerApplications serialNext={quoteTpl.serial_next} whatsapp={!!quoteTpl.unlocked}
             onSerial={(n) => setQuoteTpl((t) => t && { ...t, serial_next: Math.max(t.serial_next ?? 1, n) })} />}
           {section === "documents" && <DocumentsSection loans={rows} insRows={insRows} onOpenMessage={(kind, id) => router.push(`/dashboard/messages/${kind}/${id}` as any)} />}
         </main>

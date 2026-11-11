@@ -6,7 +6,8 @@
 import { supabase } from "./supabase";
 import { getBusiness } from "./auth";
 
-export type QuoteTemplate = { storage_path: string; serial_next: number | null };
+// ready_at / unlocked: the custom template's free months + CC's switch (0122, lib/custom-template).
+export type QuoteTemplate = { storage_path: string; serial_next: number | null; ready_at: string | null; unlocked: boolean | null };
 
 let cached: { id: string; tpl: QuoteTemplate | null } | null = null;
 
@@ -15,7 +16,7 @@ export async function fetchQuoteTemplate(fresh = false): Promise<QuoteTemplate |
   const id = getBusiness()?.id ?? "";
   if (!fresh && cached?.id === id) return cached.tpl;
   const { data, error } = await supabase().from("epc_quotation_templates")
-    .select("storage_path, serial_next").order("created_at", { ascending: false }).limit(1).maybeSingle();
+    .select("storage_path, serial_next, ready_at, unlocked").order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (error) throw error;
   cached = { id, tpl: data };
   return data;

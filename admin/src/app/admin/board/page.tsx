@@ -13,6 +13,7 @@ import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import AdminSidebar, { ACCENTS, SectionMark, themeStyle } from "@/components/AdminSidebar";
 import NotificationBell from "@/components/NotificationBell";
+import ReviewNotices from "@/components/ReviewNotices";
 import LoanLenderPickerModal, { type PickerLender } from "@/components/LoanLenderPickerModal";
 import Select from "@/components/ui/Select";
 import DateField from "@/components/ui/DateField";
@@ -26,6 +27,7 @@ import { PERIOD_OPTIONS, inPeriod, type Period } from "@/lib/period";
 import { LOAN_LENDER_COLS, lendersWithDocs, type LoanLenderRow } from "@/lib/loan-lenders";
 import { useLenders } from "@/lib/lenders";
 import { logLoanActivity } from "@/lib/loanAudit";
+import { REVIEW_LABEL } from "@/lib/review";
 
 // ── Loan pipeline: forward-only stage locking (no going back, no skipping —
 // except a lender decision straight after Send to Lender). Moves into these
@@ -122,6 +124,8 @@ const OUTLINE: Record<"green" | "yellow" | "red" | "neutral", string> = { green:
 // Inner card fill by SLA status (replaces the coloured border): green = within
 // SLA, amber = approaching breach, red = breached/blocked, neutral = terminal.
 const OUTLINE_FILL: Record<"green" | "yellow" | "red" | "neutral", string> = { green: "#e7f5ee", yellow: "#fdf0da", red: "#fbe4e4", neutral: "#e8ebef" };
+// My Day's Idle chip text on those fills.
+const IDLE_TEXT: Record<"green" | "yellow" | "red" | "neutral", string> = { green: "#178a5c", yellow: "#854f0b", red: "#b42318", neutral: "#64748b" };
 
 function fmt(v: number): string {
   if (!v) return "₹0";
@@ -135,9 +139,12 @@ function fmtFull(v: number): string {
 }
 // The next action a case needs, derived from its stage. null = nothing to do
 // (rejected / aborted / fully disbursed / off-board) — excluded from My Day.
-function nextAction(c: OpsCase): { text: string; cta: string } | null {
+function nextAction(c: OpsCase): { text: string; cta: string; tone?: string } | null {
   if (c.outcome === "rejected" || c.column === "abort" || c.column == null) return null;
   if (c.source === "loan") {
+    // The admin sent a stage back — fixing it comes first.
+    const back = c.reviews?.find((v) => v.status === "sent_back");
+    if (back) return { text: `Sent back by Admin · ${REVIEW_LABEL[back.item]}${back.note ? ` — ${back.note}` : ""}`, cta: "Open", tone: "#b42318" };
     switch (c.column) {
       case "ready_login":       return { text: "Send the documents to a lender", cta: "Open" };
       case "send_lender":       return { text: "Follow up the lender · record the decision", cta: "Open" };
@@ -516,8 +523,13 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
                             <span className="w-2 h-2 rounded-full" style={{ backgroundColor: WAIT_COLOR[w] }} />{w}
                           </span>
                         </td>
-                        <td className="px-2.5 py-2.5 align-top font-semibold whitespace-nowrap" style={{ color: days >= 2 ? "#b42318" : "#5a8a76" }}>{days}d</td>
-                        <td className="px-2.5 py-2.5 align-top text-text-mid"><span className="block truncate max-w-[230px]">{act.text}</span></td>
+                        {/* Days in the CURRENT stage, coloured by the board's TAT for that stage. */}
+                        <td className="px-2.5 py-2.5 align-top whitespace-nowrap">
+                          <span className="inline-block text-[12px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: OUTLINE_FILL[lvlOf(c)], color: IDLE_TEXT[lvlOf(c)] }}>{days}d</span>
+                        </td>
+                        <td className="px-2.5 py-2.5 align-top text-text-mid">
+                          <span className="block truncate max-w-[230px]" title={act.text} style={act.tone ? { color: act.tone, fontWeight: 600 } : undefined}>{act.text}</span>
+                        </td>
                         {showOwner && <td className="px-2.5 py-2.5 align-top whitespace-nowrap">{c.ownerName ? <span className="text-text-mid">{c.ownerName}</span> : <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-[#fef0d6] text-[#854f0b]">Unassigned</span>}</td>}
                         <td className="px-2.5 py-2.5 align-top whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
                           <span className="inline-flex items-center gap-2 text-[13px]">
@@ -1110,6 +1122,8 @@ function Inner() {
       : isManager ? [me?.id, ...myRms.map((r) => r.id)] : [me?.id];
     return new Set(ids.filter(Boolean) as string[]);
   }, [isMainAdmin, isManager, boardPeople, myRms, me]);
+  // Open a case from My Day; its page's back link returns here.
+  const openCase = (href: string) => { sessionStorage.setItem("ccReturnTo", "/admin/board"); router.push(href as unknown as string); };
   // Today in IST ("YYYY-MM-DD") — for follow-up due/overdue comparisons.
   const todayStr = useMemo(() => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()), []);
   const myDay = useMemo(() => {
@@ -1291,6 +1305,9 @@ function Inner() {
           <div className="flex-1 overflow-auto p-4 sm:p-6">
             {view === "myday" ? (
               loading ? <p className="text-text-muted">Loading…</p> : (
+                <>
+                {/* The admin's approvals / send-backs — for the team, not the admin who made them. */}
+                {!isMainAdmin && <ReviewNotices loans={cases.filter((c) => c.source === "loan")} onOpen={openCase} />}
                 <MyDayQueue items={myDayScoped} q={q} onSearch={setQ} showOwner={canOversee}
                   defaultSrc={canOversee ? "epc" : "loan"} rmName={me?.contact_name || greetingName(me) || "Capital Craft"}
                   todayStr={todayStr} onStampContact={(c) => void stampContact(c)} onSetFollowUp={(c, d) => void setFollowUp(c, d)}
@@ -1304,7 +1321,8 @@ function Inner() {
                       {boardPeople.map((r) => (<option key={r.id} value={r.id}>{r.name}</option>))}
                     </select>
                   ) : undefined}
-                  onOpen={(href) => { sessionStorage.setItem("ccReturnTo", "/admin/board"); router.push(href as unknown as string); }} />
+                  onOpen={openCase} />
+                </>
               )
             ) : (
             <>

@@ -24,6 +24,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { downloadBuffer } from "@/lib/gcs";
 import { buildQuotationData, fillTemplate, readBundledTemplate, epcQuoteTemplate, type QuotationInput } from "@/lib/quotation";
+import { customState, CUSTOM_LOCKED_MSG } from "@/lib/custom-template";
 import { docxToPdf } from "@/lib/docx-to-pdf";
 import { buildBijleeQuotation } from "@/lib/quotation-bijlee";
 import { buildSarvatraFile, safeFileName as safeName } from "@/lib/quotation-sarvatra";
@@ -69,6 +70,9 @@ export async function POST(req: NextRequest) {
     const tpl = await epcQuoteTemplate(supabase, bizId);
     if (!tpl) return err("No quotation template is set up for your account yet.", 403);
     const { storage_path: storagePath, id: templateId } = tpl;
+    // The custom template's free months are over and CC hasn't switched it on
+    // (0122). Sustera's customer builder never locks.
+    if (claims.business_type !== "admin" && storagePath !== SARVATRA.key && customState(tpl) === "locked") return err(CUSTOM_LOCKED_MSG, 403);
 
     if ([BIJLEE.key, SARVATRA.key, SARVATRA_ENERGY.key, RVS.key].includes(storagePath)) {
       const b = body as unknown as Record<string, unknown>;

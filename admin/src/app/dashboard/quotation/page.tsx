@@ -13,6 +13,8 @@ import AuthGuard from "@/components/AuthGuard";
 import BackHeader from "@/components/PartnerBackHeader";
 import { getToken } from "@/lib/auth";
 import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template";
+import { customState } from "@/lib/custom-template";
+import { markCustomTemplateSeen } from "@/components/partner/CustomTemplateBanner";
 import SearchableSelect from "@/components/quotation/SearchableSelect";
 import {
   NAVY, input, inr, decimal, digits, useKeyNav, useBrandOptions, downloadQuotation, YesNo, Section, Field,
@@ -58,11 +60,14 @@ function Builder() {
   const [failed, setFailed] = useState(false);
   useEffect(() => { fetchQuoteTemplate().then(setTpl, () => setFailed(true)); }, []);
   const customers = tpl?.storage_path === SARVATRA.key;
-  // No builder of its own → the standard saved Quotations.
+  // No custom template, or it's locked (free months over, not switched on) →
+  // Quotations, whose "New quotation" says so.
+  const locked = !!tpl && customState(tpl) === "locked";
   useEffect(() => {
     if (customers) router.replace("/dashboard" as any);
-    else if (tpl === null) router.replace("/dashboard/quotes" as any);
-  }, [customers, tpl, router]);
+    else if (tpl === null || locked) router.replace("/dashboard/quotes" as any);
+    else if (tpl) markCustomTemplateSeen(tpl);
+  }, [customers, tpl, locked, router]);
   if (failed) {
     return (
       <div className="min-h-screen bg-bg-soft">
@@ -71,7 +76,7 @@ function Builder() {
       </div>
     );
   }
-  if (!tpl || customers) return null;
+  if (!tpl || customers || locked) return null;
   if (tpl?.storage_path === BIJLEE.key) return <BijleeForm serialNext={tpl.serial_next} />;
   if (tpl?.storage_path === SARVATRA_ENERGY.key) return <SarvatraEnergyForm serialNext={tpl.serial_next} />;
   if (tpl?.storage_path === RVS.key) return <RvsForm />;

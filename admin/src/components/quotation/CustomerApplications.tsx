@@ -18,6 +18,7 @@ import { MODULE_BRANDS, INVERTER_BRANDS, BRAND_FIELDS, SARVATRA, sarvatraTerms }
 import { EMAIL_RE } from "@/lib/validators";
 import { waTel, waUrl, WA_LANGS, type WaLang } from "@/lib/wa-link";
 import { ChipField } from "@/components/EmailComposerModal";
+import { SUBSCRIPTION_MSG } from "@/lib/custom-template";
 import SearchableSelect from "./SearchableSelect";
 import {
   NAVY, input, inr, decimal, digits, useKeyNav, useBrandOptions, downloadQuotation, quotationFile, YesNo, Chips, Section, Field,
@@ -151,7 +152,9 @@ let cache: { biz: string; rows: Row[] } | null = null;
 
 // serialNext = the next suggested quote no.; onSerial moves it on (kept by the
 // dashboard, so leaving and coming back keeps it).
-export default function CustomerApplications({ serialNext, onSerial }: { serialNext: number | null; onSerial: (n: number) => void }) {
+// whatsapp = the EPC has the subscription (CC's On switch, 0122) — until then
+// the WhatsApp button stays closed; Email is always open.
+export default function CustomerApplications({ serialNext, onSerial, whatsapp }: { serialNext: number | null; onSerial: (n: number) => void; whatsapp: boolean }) {
   const biz = getBusiness()?.id ?? "";
   const [rows, setRowsState] = useState<Row[] | null>(cache?.biz === biz ? cache.rows : null);
   const setRows = (fn: (r: Row[]) => Row[]) =>
@@ -268,8 +271,11 @@ export default function CustomerApplications({ serialNext, onSerial }: { serialN
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>
                         Email
                       </button>
-                      <button type="button" onClick={() => setWa(r)} className={TOOL}>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21l1.7-5A8.5 8.5 0 1 1 8 19.3z" /></svg>
+                      <button type="button" onClick={() => setWa(r)} disabled={!whatsapp} title={whatsapp ? undefined : SUBSCRIPTION_MSG}
+                        className={TOOL + " disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-line disabled:hover:text-text-mid"}>
+                        {whatsapp
+                          ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 21l1.7-5A8.5 8.5 0 1 1 8 19.3z" /></svg>
+                          : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>}
                         WhatsApp
                       </button>
                     </div>
