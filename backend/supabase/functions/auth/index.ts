@@ -250,7 +250,11 @@ serve(async (req) => {
     if (body?.action === "mcp_create") return await mcpCreate(req);
     if (body?.action === "mcp_exchange") return await mcpExchange(body.key);
     if (body?.action === "change_password") return await changePassword(body.change_token, body.new_password);
-    const { mobile, password } = body;
+    const { password } = body;
+    // A login needs a real 10-digit mobile — without one the sign-up below made
+    // blank epc_business drafts (contact_mobile NULL). Refuse before any lookup.
+    const mobile = typeof body?.mobile === "string" ? body.mobile.trim() : "";
+    if (!/^\d{10}$/.test(mobile)) return json({ ok: false, error: "Enter a valid 10-digit mobile number." }, 400);
 
     // Find or create
     let { data: biz } = await supabase

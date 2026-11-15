@@ -20,6 +20,7 @@ import Button from "@/components/ui/Button";
 import EpcApplyTracker from "@/components/EpcApplyTracker";
 import { getToken } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
+import { amountInput, numberInput } from "@/lib/money";
 import {
   TENURES, DEFAULT_INDICATIVE_ROI,
   computeCentralSubsidy, computeEmi, formatRupees,
@@ -184,21 +185,21 @@ function Inner() {
               label="Project size (kW)"
               inputMode="decimal"
               value={sizeKw}
-              onChange={(e) => setSizeKw(e.target.value.replace(/[^\d.]/g, ""))}
+              onChange={(e) => setSizeKw(numberInput(e.target.value))}
               placeholder="e.g. 5"
             />
             <Input
               label="Total project cost (₹)"
               inputMode="numeric"
               value={totalCost}
-              onChange={(e) => setTotalCost(e.target.value.replace(/[^\d.]/g, ""))}
+              onChange={(e) => setTotalCost(amountInput(e.target.value))}
               placeholder="e.g. 350000"
             />
             <Input
               label="Loan amount required (₹)"
               inputMode="numeric"
               value={loanAmount}
-              onChange={(e) => setLoanAmount(e.target.value.replace(/[^\d.]/g, ""))}
+              onChange={(e) => setLoanAmount(amountInput(e.target.value))}
               placeholder="e.g. 250000"
               error={loanExceeds ? "Cannot exceed project cost." : undefined}
             />

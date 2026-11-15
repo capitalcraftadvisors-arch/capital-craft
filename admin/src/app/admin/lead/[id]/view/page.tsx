@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
+import { fmtRupees } from "@/lib/money";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import CommentsSection from "@/components/CommentsSection";
@@ -146,7 +147,7 @@ function Inner() {
   if (loading) return <main className="min-h-screen grid place-items-center bg-white"><p className="text-[#5a8a76]">Loading…</p></main>;
   if (!lead) return <main className="min-h-screen grid place-items-center bg-white"><p className="text-red-700">Lead not found.</p></main>;
 
-  const money = (v: number | null) => (v == null ? "—" : "₹" + Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 }));
+  const money = (v: number | null) => fmtRupees(v); // paise when present
   const sizeStr = lead.project_size != null ? `${lead.project_size} ${(lead.project_size_unit || "kw").toUpperCase()}` : "—";
   const aborted = !!lead.aborted_at;
 

@@ -6,7 +6,9 @@
 //   6155   -> "Six Thousand One Hundred Fifty Five Rupees Only"
 //   5      -> "Five years"
 //
-// Paise are ignored (values are floored) — every amount here is a whole rupee.
+// numberToWordsIndian floors (whole rupees); rupeesInWords adds the paise and a
+// minus: 174139.2 -> "One Lakh Seventy Four Thousand One Hundred Thirty Nine
+// Rupees and Twenty Paise Only".
 
 const ONES = [
   "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
@@ -58,7 +60,10 @@ export function numberToWordsIndian(value: number): string {
 // "Two Lakh Eighty Thousand Rupees Only"
 export function rupeesInWords(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return "";
-  return numberToWordsIndian(Number(value)) + " Rupees Only";
+  const v = Math.round(Math.abs(Number(value)) * 100);
+  const rupees = Math.floor(v / 100), paise = v % 100;
+  return (Number(value) < 0 ? "Minus " : "") + numberToWordsIndian(rupees) + " Rupees"
+    + (paise ? ` and ${numberToWordsIndian(paise)} Paise` : "") + " Only";
 }
 
 // "Five years" / "One year"

@@ -6,6 +6,7 @@
 
 import { input } from "@/components/quotation/form-kit";
 import type { PaymentStage } from "@/lib/quotation-brands";
+import { numberInput } from "@/lib/money";
 
 export function AddBtn({ onClick, label = "+ Add row" }: { onClick: () => void; label?: string }) {
   return <button type="button" onClick={onClick} className="text-[13px] font-semibold text-[#1e3a8a] hover:underline">{label}</button>;
@@ -31,7 +32,7 @@ export function PaymentRows({ rows, onChange }: { rows: PaymentStage[]; onChange
             onChange={(e) => onChange(rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))} />
           <div className="relative w-[96px] shrink-0">
             <input className={input + " pr-7 text-right"} inputMode="decimal" value={String(pct)}
-              onChange={(e) => onChange(rows.map((r, j) => (j === i ? [r[0], Number(e.target.value.replace(/[^\d.]/g, "")) || 0] : r)))} />
+              onChange={(e) => onChange(rows.map((r, j) => (j === i ? [r[0], Number(numberInput(e.target.value)) || 0] : r)))} />
             <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[13px] text-text-muted">%</span>
           </div>
           <RemoveBtn onClick={() => onChange(rows.filter((_, j) => j !== i))} />

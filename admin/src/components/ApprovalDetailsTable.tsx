@@ -27,7 +27,7 @@ import type { LenderKey } from "@/components/LenderPickerModal";
 import { rupeesInWords, yearsInWords } from "@/lib/numberToWords";
 import { useLenders } from "@/lib/lenders";
 import { lenderLabelIn } from "@/lib/loan-lenders";
-import { amountInput } from "@/lib/money";
+import { amountInput, fmtRupees, numberInput } from "@/lib/money";
 
 // Persisted shape → epc_applications.approval_details (jsonb).
 export type ApprovalDetails = {
@@ -164,7 +164,7 @@ const ROWS: RowDef[] = [
 function fmt(v: number | null | undefined, money: boolean, suffix?: string): string {
   if (v === null || v === undefined || !Number.isFinite(Number(v))) return "—";
   const n = Number(v);
-  const base = money ? "₹" + Math.round(n).toLocaleString("en-IN") : String(n);
+  const base = money ? fmtRupees(n) : String(n); // paise when present
   return suffix ? `${base} ${suffix}` : base;
 }
 
@@ -289,7 +289,7 @@ export default function ApprovalDetailsTable({ value, onChange, readOnly }: Prop
                     type="text"
                     inputMode="decimal"
                     value={value.roi == null ? "" : String(value.roi)}
-                    onChange={(e) => { let c = e.target.value.replace(/[^\d.]/g, ""); const i = c.indexOf("."); if (i !== -1) c = c.slice(0, i + 1) + c.slice(i + 1).replace(/\./g, ""); onChange?.({ ...value, roi: c === "" ? null : c }); }}
+                    onChange={(e) => { const c = numberInput(e.target.value); onChange?.({ ...value, roi: c === "" ? null : c }); }}
                     placeholder="0"
                     className="w-24 border border-[#cdeadd] rounded-[8px] px-3 py-2 text-[14px] text-right focus:border-[#185fa5] outline-none bg-white"
                   />

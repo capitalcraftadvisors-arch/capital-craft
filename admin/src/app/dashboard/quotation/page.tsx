@@ -164,13 +164,13 @@ function Inner() {
         customer_name: x.customer_name || p.customer_name,
         pincode: x.pincode || p.pincode,
         address: x.address || p.address,
-        kw: x.kw ? String(x.kw).replace(/[^\d.]/g, "") : p.kw,
+        kw: x.kw ? decimal(String(x.kw)) : p.kw,
         system_type: normType(x.system_type) || p.system_type,
         total: x.total ? decimal(String(x.total)) : p.total,
         central_subsidy: x.central_subsidy ? decimal(String(x.central_subsidy)) : p.central_subsidy,
         make_panel: x.module_brand || p.make_panel,
         make_inverter: x.inverter_brand || p.make_inverter,
-        battery: x.battery ? String(x.battery).replace(/[^\d.]/g, "") : p.battery,
+        battery: x.battery ? decimal(String(x.battery)) : p.battery,
       }));
       if (x.pincode && /^\d{6}$/.test(String(x.pincode))) void resolvePincode(String(x.pincode));
     } catch (e) { setError((e as Error)?.message || "Network error."); }
@@ -255,7 +255,7 @@ function Inner() {
 
         {/* System */}
         <Section title="System">
-          <Field l="System size (kW)" req><input className={input} inputMode="decimal" value={f.kw} onChange={(e) => set("kw", e.target.value.replace(/[^\d.]/g, ""))} placeholder="e.g. 3" /></Field>
+          <Field l="System size (kW)" req><input className={input} inputMode="decimal" value={f.kw} onChange={(e) => set("kw", decimal(e.target.value))} placeholder="e.g. 3" /></Field>
           <Field l="System type">
             <select className={input} value={f.system_type} onChange={(e) => set("system_type", e.target.value)}>
               {SYSTEM_TYPES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -264,7 +264,7 @@ function Inner() {
           {hasBattery && (
             <Field l="Battery">
               <div className="flex gap-2">
-                <input className={input} inputMode="decimal" value={f.battery} onChange={(e) => set("battery", e.target.value.replace(/[^\d.]/g, ""))} placeholder="e.g. 150" />
+                <input className={input} inputMode="decimal" value={f.battery} onChange={(e) => set("battery", decimal(e.target.value))} placeholder="e.g. 150" />
                 <select className={input + " max-w-[100px]"} value={f.battery_unit} onChange={(e) => set("battery_unit", e.target.value)}>
                   {BATTERY_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
                 </select>
@@ -366,8 +366,8 @@ function BijleeForm({ serialNext }: { serialNext: number | null }) {
         </Section>
 
         <Section title="Cost">
-          <Field l="Price per kW ₹" req><input className={input} inputMode="numeric" value={f.rate_per_kw} onChange={(e) => set("rate_per_kw", digits(e.target.value))} placeholder="e.g. 38000" /></Field>
-          <Field l="Structure price per kW ₹"><input className={input} inputMode="numeric" value={f.structure_rate_per_kw} onChange={(e) => set("structure_rate_per_kw", digits(e.target.value))} placeholder="0" /></Field>
+          <Field l="Price per kW ₹" req><input className={input} inputMode="numeric" value={f.rate_per_kw} onChange={(e) => set("rate_per_kw", decimal(e.target.value))} placeholder="e.g. 38000" /></Field>
+          <Field l="Structure price per kW ₹"><input className={input} inputMode="numeric" value={f.structure_rate_per_kw} onChange={(e) => set("structure_rate_per_kw", decimal(e.target.value))} placeholder="0" /></Field>
         </Section>
 
         <DownloadBar busy={busy} error={error} onClick={() => void download()} />

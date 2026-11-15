@@ -5,6 +5,8 @@
 // formula, same PM Surya Ghar subsidy tiers, so the numbers a customer
 // sees in either flow always agree.
 
+import { inrPlain } from "./money";
+
 export const ROI_MIN = 7.5;
 export const ROI_MAX = 10.8;
 export const CENTRAL_SUBSIDY_CAP = 78000;
@@ -52,5 +54,5 @@ export function computeFlatEmi(principal: number, flatPct: number, years: number
 
 export function formatRupees(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return "—";
-  return "₹" + Math.round(n).toLocaleString("en-IN");
+  return "₹" + inrPlain(n); // paise when present (lib/money)
 }

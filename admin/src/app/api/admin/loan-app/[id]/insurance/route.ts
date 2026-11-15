@@ -108,9 +108,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         let amount: number | null = null;
         if (tax) {
           const g = await geminiExtractInvoice([{ buffer: c.buf, mime: c.mime }]).catch(() => null);
-          amount = g?.amount != null && Number(g.amount) > 0 ? Math.round(Number(g.amount)) : null;
+          amount = g?.amount != null && Number(g.amount) > 0 ? Number(g.amount) : null; // paise kept
         }
-        if (amount == null && Number(l.total_project_cost) > 0) amount = Math.round(Number(l.total_project_cost));
+        if (amount == null && Number(l.total_project_cost) > 0) amount = Number(l.total_project_cost);
         // The amounts belong to the invoice just filled in (e.g. the quotation
         // was removed so the tax invoice could take its place).
         if (amount != null) Object.assign(patch, { invoice_amount: amount, invoice_confirmed_amount: amount, sum_insured: amount });

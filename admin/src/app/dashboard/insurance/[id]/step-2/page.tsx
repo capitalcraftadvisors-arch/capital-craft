@@ -1,5 +1,5 @@
 "use client";
-import { fmtRupees } from "@/lib/money";
+import { fmtRupees, amountInput } from "@/lib/money";
 
 // Insurance — Step 2: one geo-tagged plant photo + plant address + invoice.
 //
@@ -94,7 +94,7 @@ function Inner() {
     else alert("Couldn't save the address: " + (d?.error || res.status));
   }
 
-  const confirmNum = confirmAmount.trim() === "" ? null : Number(confirmAmount.replace(/[^\d.]/g, ""));
+  const confirmNum = confirmAmount.trim() === "" ? null : Number(amountInput(confirmAmount));
   const amountMismatch = ocrAmount != null && confirmNum != null && Math.round(confirmNum) !== Math.round(ocrAmount);
 
   async function saveContinue() {
@@ -189,7 +189,7 @@ function Inner() {
                   inputMode="decimal"
                   placeholder="Re-enter the amount"
                   value={confirmAmount}
-                  onChange={(e) => setConfirmAmount(e.target.value.replace(/[^\d.]/g, ""))}
+                  onChange={(e) => setConfirmAmount(amountInput(e.target.value))}
                   error={amountMismatch ? "Doesn't match the detected amount — check the invoice." : undefined}
                   hint={!amountMismatch && confirmNum != null ? "Confirmed." : undefined}
                 />

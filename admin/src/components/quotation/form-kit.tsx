@@ -5,11 +5,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getToken } from "@/lib/auth";
+import { inrPlain, numberInput } from "@/lib/money";
 
 export const NAVY = "#1e3a8a";
 export const input = "w-full border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none focus:border-[#1e3a8a]";
-export const inr = (n: number) => (Number.isFinite(n) ? Math.round(n).toLocaleString("en-IN") : "0");
-export const decimal = (v: string) => v.replace(/[^\d.]/g, "");
+export const inr = (n: number) => (Number.isFinite(n) ? inrPlain(n) : "0"); // paise when present
+// A number box: any real number (minus, decimals). `digits` is for codes only — mobiles, PIN codes.
+export const decimal = (v: string) => numberInput(v);
 export const digits = (v: string) => v.replace(/\D/g, "");
 
 // Keyboard navigation: Enter / ↓ / → (at caret end) → next field; ↑ / ← (at

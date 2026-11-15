@@ -283,7 +283,8 @@ function buildLoanDocGroups(loan: Loan, docsIn: Doc[]): LoanDocGroup[] {
   // user_application_docs row in category "bank_statement" (the extra
   // statements added by the Step-4 multi-file uploader). Show them all —
   // taking only the first row (as slot() does) would hide the rest.
-  const bankRows = docs.filter((d) => d.category === "bank_statement" && !usedRowIds.has(d.id));
+  // (A row holding the same file as the column is shown once.)
+  const bankRows = docs.filter((d) => d.category === "bank_statement" && !usedRowIds.has(d.id) && d.storage_path !== loan.bank_statement_path);
   bankRows.forEach((d) => usedRowIds.add(d.id));
   const bankSlots: LoanSlot[] = [];
   if (loan.bank_statement_path) {

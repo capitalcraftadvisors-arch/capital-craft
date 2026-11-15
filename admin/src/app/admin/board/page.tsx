@@ -28,6 +28,7 @@ import { LOAN_LENDER_COLS, lendersWithDocs, type LoanLenderRow } from "@/lib/loa
 import { useLenders } from "@/lib/lenders";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { REVIEW_LABEL } from "@/lib/review";
+import { fmtRupees, inrPlain } from "@/lib/money";
 
 // ── Loan pipeline: forward-only stage locking (no going back, no skipping —
 // except a lender decision straight after Send to Lender). Moves into these
@@ -133,12 +134,10 @@ function fmt(v: number): string {
   if (!v) return "₹0";
   if (v >= 1e7) return "₹" + (v / 1e7).toFixed(2) + " Cr";
   if (v >= 1e5) return "₹" + (v / 1e5).toFixed(1) + " L";
-  return "₹" + v.toLocaleString("en-IN");
+  return "₹" + inrPlain(v);
 }
-// Full Indian-grouped rupees for the side panel (₹1,80,000 — never "1.8 L").
-function fmtFull(v: number): string {
-  return "₹" + Math.round(v).toLocaleString("en-IN");
-}
+// Full Indian-grouped rupees for the side panel (₹1,80,000 — never "1.8 L"), paise when present.
+const fmtFull = (v: number) => fmtRupees(v);
 // The next action a case needs, derived from its stage. null = nothing to do
 // (aborted / fully disbursed / off-board, a rejected non-loan case) — excluded
 // from My Day. Rejected loans stay, in their own last tab, below the work.
@@ -177,7 +176,7 @@ function monthEnd(ym: string): string {
 }
 
 // ── Side-panel detail form (loan cases) ──────────────────────────────────────
-const money = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? "₹" + Math.round(n).toLocaleString("en-IN") : "—"; };
+const money = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? fmtRupees(n) : "—"; };
 const GRID_LABEL: Record<string, string> = { on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" };
 const gridLabel = (s: unknown) => (s ? GRID_LABEL[String(s)] ?? String(s) : "—");
 const placeLabel = (s: unknown) => (s === "residential" ? "House (residential)" : s === "commercial" ? "Commercial" : "—");
@@ -342,6 +341,18 @@ function WhatsAppIcon({ size = 16 }: { size?: number }) {
   );
 }
 
+// The Task Manager's screen, kept for this browser tab (sessionStorage — no
+// request): coming Back from a case returns to the same view, tabs, filters and
+// search, with the case last opened scrolled to and blinking.
+type TmState = { view?: "myday" | "board"; src?: CaseSource; stage?: string; colour?: "all" | "red" | "yellow" | "green"; owner?: string; q?: string; last?: string };
+const tmKey = () => `cc_tm_state:${getBusiness()?.id ?? ""}`;
+function tmState(): TmState {
+  try { return JSON.parse(sessionStorage.getItem(tmKey()) || "{}") as TmState; } catch { return {}; }
+}
+function saveTm(patch: Partial<TmState>) {
+  try { sessionStorage.setItem(tmKey(), JSON.stringify({ ...tmState(), ...patch })); } catch { /* storage blocked */ }
+}
+
 function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defaultSrc, rmName, todayStr, onStampContact, onSetFollowUp, onAddNote, onDetectDocs }: {
   items: OpsCase[]; onOpen: (href: string) => void; q: string; onSearch: (v: string) => void;
   showOwner: boolean; ownerControl?: React.ReactNode; defaultSrc: CaseSource; rmName: string;
@@ -351,9 +362,18 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
   onAddNote: (c: OpsCase, text: string) => void;
   onDetectDocs: (c: OpsCase) => Promise<{ have: string[]; need: string[] }>;
 }) {
-  const [src, setSrc] = useState<CaseSource>(defaultSrc);
-  const [stage, setStage] = useState<string>("all"); // stage sub-tab within the source
-  const [colour, setColour] = useState<"all" | "red" | "yellow" | "green">("all");
+  const [src, setSrc] = useState<CaseSource>(() => tmState().src ?? defaultSrc);
+  const [stage, setStage] = useState<string>(() => tmState().stage ?? "all"); // stage sub-tab within the source
+  const [colour, setColour] = useState<"all" | "red" | "yellow" | "green">(() => tmState().colour ?? "all");
+  useEffect(() => { saveTm({ src, stage, colour }); }, [src, stage, colour]);
+  // The case opened last (back from its page): scrolled to and blinking for a moment.
+  const [blink, setBlink] = useState<string | null>(() => tmState().last ?? null);
+  useEffect(() => {
+    if (!blink) return;
+    document.getElementById(`myday-${blink}`)?.scrollIntoView({ block: "center" });
+    const t = setTimeout(() => { setBlink(null); saveTm({ last: undefined }); }, 2600);
+    return () => clearTimeout(t);
+  }, [blink]);
   // WhatsApp composer state.
   const [waCase, setWaCase] = useState<OpsCase | null>(null);
   const [waIntent, setWaIntent] = useState<WaIntent>("docs");
@@ -517,7 +537,9 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
                     const hasNote = !!COMMENT_TBL[c.source];
                     const fuDue = !!c.followUpAt && c.followUpAt <= todayStr;
                     return (
-                      <tr key={c.source + c.id} className="border-b border-[#f0f4f2] last:border-0 hover:bg-[#f7fcfa] cursor-pointer" onClick={() => onOpen(c.href)}>
+                      <tr key={c.source + c.id} id={`myday-${c.source}:${c.id}`}
+                        className={["border-b border-[#f0f4f2] last:border-0 hover:bg-[#f7fcfa] cursor-pointer", blink === `${c.source}:${c.id}` ? "animate-pulse !bg-[#cdeee4]" : ""].join(" ")}
+                        onClick={() => { saveTm({ last: `${c.source}:${c.id}` }); onOpen(c.href); }}>
                         <td className="px-2.5 py-2.5 align-top text-text-muted font-semibold">{i + 1}</td>
                         <td className="px-2.5 py-2.5 align-top">
                           <div className="font-semibold text-text truncate max-w-[190px] flex items-center gap-1.5">
@@ -755,14 +777,14 @@ function Inner() {
   // No mixed "All" view — everyone works one source at a time (default: loans).
   const [srcFilter, setSrcFilter] = useState<"all" | CaseSource>("loan");
   const [ownerFilter, setOwnerFilter] = useState<string>(isMainAdmin ? "all" : "me"); // 'me' | 'all' | userId | 'unassigned'
-  const [myDayOwner, setMyDayOwner] = useState<string>("all"); // My Day (manager): 'all' team | 'me' | RM userId
+  const [myDayOwner, setMyDayOwner] = useState<string>(() => tmState().owner ?? "all"); // My Day (manager): 'all' team | 'me' | RM userId
   const [busy, setBusy] = useState(false);
   const [touches, setTouches] = useState(0);
   const sla = 1; // fixed at ≤1 day (backend only — no UI control, per spec)
   const [target, setTarget] = useState<number>(() => (typeof window !== "undefined" ? Number(localStorage.getItem("opsboard.target")) : 0) || 65);
   // The EPC tab's own target — a NUMBER of EPCs onboarded (approved) in the period.
   const [epcTarget, setEpcTarget] = useState<number>(() => (typeof window !== "undefined" ? Number(localStorage.getItem("opsboard.epcTarget")) : 0) || 10);
-  const [q, setQ] = useState("");
+  const [q, setQ] = useState(() => tmState().q ?? "");
   // Period filter (by the case's boardDate — active cases carry into the current
   // month automatically). Default "Current Month"; persisted; "custom" uses
   // month-to-month pickers (boardFrom/boardTo as "YYYY-MM").
@@ -770,7 +792,9 @@ function Inner() {
   const [boardFrom, setBoardFrom] = useState("");
   const [boardTo, setBoardTo] = useState("");
   // RMs / managers default to the "My Day" action queue; admins stay on the board.
-  const [view, setView] = useState<"myday" | "board">(isMainAdmin ? "board" : "myday");
+  // Back from a case → the same view (and My Day's tabs / filters, see TmState).
+  const [view, setView] = useState<"myday" | "board">(() => tmState().view ?? (isMainAdmin ? "board" : "myday"));
+  useEffect(() => { saveTm({ view, owner: myDayOwner, q }); }, [view, myDayOwner, q]);
   const [quick, setQuick] = useState<"none" | "myoverdue" | "unassigned" | "breaches">("none");
   const [dragId, setDragId] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ caseId: string; column: string } | null>(null);
@@ -1232,10 +1256,10 @@ function Inner() {
               {isMainAdmin && (
                 <label className="text-[12px] text-text-muted flex items-center gap-1.5">Target
                   {epcTab ? (
-                    <input type="number" min={1} max={999} value={epcTarget} onChange={(e) => setEpcTarget(Math.max(1, Number(e.target.value) || 10))}
+                    <input type="number" step="any" min={1} max={999} value={epcTarget} onChange={(e) => setEpcTarget(Math.max(1, Number(e.target.value) || 10))}
                       className="w-16 border border-line rounded-md px-2 py-1 text-[13px]" />
                   ) : (
-                    <input type="number" min={1} max={999} value={target} onChange={(e) => setTarget(Math.max(1, Number(e.target.value) || 65))}
+                    <input type="number" step="any" min={1} max={999} value={target} onChange={(e) => setTarget(Math.max(1, Number(e.target.value) || 65))}
                       className="w-16 border border-line rounded-md px-2 py-1 text-[13px]" />
                   )}
                   {epcTab ? "EPCs" : "L"}</label>

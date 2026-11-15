@@ -16,6 +16,7 @@ import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import { supabase } from "@/lib/supabase";
+import { amountInput, numberInput } from "@/lib/money";
 
 const CUSTOM = "__custom__";
 
@@ -178,7 +179,7 @@ function Inner() {
               placeholder="e.g. 5"
               inputMode="numeric"
               value={projectSize}
-              onChange={(e) => setProjectSize(e.target.value.replace(/[^\d.]/g, ""))}
+              onChange={(e) => setProjectSize(numberInput(e.target.value))}
             />
             <Select
               label="Unit"
@@ -192,14 +193,14 @@ function Inner() {
             placeholder="e.g. 500000"
             inputMode="numeric"
             value={projectCost}
-            onChange={(e) => setProjectCost(e.target.value.replace(/[^\d.]/g, ""))}
+            onChange={(e) => setProjectCost(amountInput(e.target.value))}
           />
           <Input
             label="Loan amount required (₹)"
             placeholder="e.g. 200000"
             inputMode="numeric"
             value={loanAmount}
-            onChange={(e) => setLoanAmount(e.target.value.replace(/[^\d.]/g, ""))}
+            onChange={(e) => setLoanAmount(amountInput(e.target.value))}
           />
           <Input label="Lead owner name" placeholder="Who owns this lead" value={leadOwner} onChange={(e) => setLeadOwner(e.target.value)} />
         </Card>

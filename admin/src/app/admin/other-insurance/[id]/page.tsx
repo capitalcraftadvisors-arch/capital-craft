@@ -18,6 +18,7 @@ import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { invalidate } from "@/lib/list-cache";
 import { OTHER_INS_LIST_CACHE, otherInsCompanies } from "@/lib/other-insurance";
 import SearchableSelect from "@/components/quotation/SearchableSelect";
+import { amountInput } from "@/lib/money";
 
 export default function OtherInsuranceFormPage() {
   return (
@@ -171,7 +172,7 @@ function Inner() {
               <div>
                 <p className="text-[12px] text-[#5a8a76] mb-1">Sum insured (optional)</p>
                 <input className={inputCls} inputMode="decimal" value={sumInsured}
-                  onChange={(e) => setSumInsured(e.target.value.replace(/[^\d.]/g, ""))} />
+                  onChange={(e) => setSumInsured(amountInput(e.target.value))} />
               </div>
               <div>
                 <p className="text-[12px] text-[#5a8a76] mb-1">Insurance company (optional)</p>

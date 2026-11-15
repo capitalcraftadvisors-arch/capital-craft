@@ -33,6 +33,7 @@ import { numberToWordsIndian } from "@/lib/numberToWords";
 import { amountInput } from "@/lib/money";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import { professionsFor } from "@/lib/loan-form";
+import { withoutThumbs } from "@/lib/chat-draft";
 
 export default function IntakePage() {
   return (
@@ -155,7 +156,8 @@ const SCRIPT: Turn[] = [
   { id: "coapp_email", bot: "Co-applicant's email?", kind: "text", field: "coapp_email", placeholder: "name@example.com", optional: true, when: hasCoapp, validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email, or skip.") },
 
   // Bank statement — its own upload step (not one of the table's slots).
-  { id: "bank", bot: "Upload the bank statement.", kind: "docs", docLabel: "Bank statement", when: (f) => !docProvided("bank", f),
+  // Asked when there's no statement, or one is on file but its details were never read.
+  { id: "bank", bot: "Upload the bank statement.", kind: "docs", docLabel: "Bank statement", when: (f) => !docProvided("bank", f) || !f.bank_account_no,
     uploads: [{ name: "file", label: "Bank statement" }], extractRoute: "extract-bank-statement", extraForm: { method: "manual_epdf" } },
 
   // 6) Quotation / proforma — its own step (never in the table; Gemini tags it "other").
@@ -541,9 +543,33 @@ function Inner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // The application + its uploaded documents (same request) — documents the
+  // partner uploaded live as rows, not columns (prefillFromApp folds them in).
   async function loadApp(id: string): Promise<Record<string, any> | null> {
-    const { data } = await supabase().from("epc_applications").select("*").eq("id", id).maybeSingle();
+    const { data } = await supabase().from("epc_applications").select("*, docs:user_application_docs(category, storage_path)").eq("id", id).maybeSingle();
     return (data as Record<string, any>) ?? null;
+  }
+
+  // A bank statement on file whose details were never read (e.g. the partner
+  // uploaded it): read that file and show the "Read from the document" card —
+  // never ask for it again.
+  async function readStoredBank() {
+    const t = SCRIPT.find((x) => x.id === "bank");
+    if (!t || !appId || !form.bank_statement_path) return;
+    setBusy(true); setError(null);
+    try {
+      const fd = new FormData();
+      fd.append("path", form.bank_statement_path);
+      fd.append("method", form.bank_statement_method || "manual_epdf");
+      const res = await fetch(`/api/admin/loan-app/${appId}/extract-bank-statement`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't read the bank statement on file. Attach it again, or skip."); return; }
+      const { patch, fields } = mapExtract(t, j);
+      merge(patch);
+      void persistForm({ ...form, ...patch });
+      const gaps = fields.filter((f) => !f.ok).map((f) => f.label);
+      setConfirm({ fields, note: gaps.length ? `Couldn't read: ${gaps.join(", ")}. You can edit them here.` : "All details read cleanly.", thumbs: [] });
+    } finally { setBusy(false); }
   }
 
   // Autosave the transcript + form + cursor (debounced) so a close/refresh never
@@ -573,8 +599,11 @@ function Inner() {
       else if (isTurnFilled(turn, form)) { setIdx((i) => i + 1); return; } // "complete" → ask only missing
     }
     if (turn.kind === "leadsave") { void createLead(); return; }
-    pushBot(turn.bot, turn.id);
+    // Bank statement already on file but never read → read it, don't ask for it.
+    const bankOnFile = turn.id === "bank" && !!form.bank_statement_path;
+    pushBot(bankOnFile ? "The bank statement is already uploaded — reading it." : turn.bot, turn.id);
     setInput(""); setError(null); setFiles({}); setThumbs({}); setConfirm(null); setEditing(null); setSheetReview(null);
+    if (bankOnFile) void readStoredBank();
     // Re-editing a filled field → prefill the input with its current value.
     if (editMode && editStage === "selected" && (turn.kind === "text" || turn.kind === "pincode") && turn.field) setInput(form[turn.field] || "");
     if (turn.kind === "loanconfig") {
@@ -678,6 +707,9 @@ function Inner() {
         const j = await res.json().catch(() => ({}));
         if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't start the application."); setBusy(false); return; }
         setAppId(j.application.id);
+        // The application in the address: a refresh (e.g. during a slow OCR) reopens
+        // this chat from its autosave instead of starting a new, blank one.
+        window.history.replaceState(null, "", `${window.location.pathname}?app=${j.application.id}`);
       } finally { setBusy(false); }
     }
     // Every answer is editable by default — tap the ✎ on any message to change it.
@@ -716,7 +748,7 @@ function Inner() {
   // serializable across a reload, so document receipts are saved by name only.
   async function saveChat(opts: { markUnderReview?: boolean } = {}) {
     if (!appId) return;
-    const transcript = msgs.map((m) => (m.files ? { ...m, files: m.files.map((f) => ({ name: f.name, thumb: null })) } : m));
+    const transcript = withoutThumbs(msgs);
     try {
       await fetch(`/api/admin/loan-app/${appId}/intake-chat`, {
         method: "POST", headers: hdr(),
@@ -2139,7 +2171,11 @@ function isTurnFilled(t: Turn, f: Form): boolean {
   if (t.field && t.field.startsWith("_")) return true;
   // The document table is "filled" when every applicable slot is on the profile.
   if (t.kind === "doc_table") return docTableComplete(f);
-  if (t.kind === "docs") { const keys = DOC_PATHS[t.id] || []; return keys.length > 0 && keys.every((k) => !!(f[k] && String(f[k]).trim())); }
+  if (t.kind === "docs") {
+    const keys = DOC_PATHS[t.id] || [];
+    // The bank statement counts once its details are read too (Bank details on the profile).
+    return keys.length > 0 && keys.every((k) => !!(f[k] && String(f[k]).trim())) && (t.id !== "bank" || !!f.bank_account_no);
+  }
   if (t.kind === "loanconfig") return !!(f.selected_tenure_years && String(f.selected_tenure_years).trim());
   if (t.field) return !!(f[t.field] && String(f[t.field]).trim());
   return false;
@@ -2231,6 +2267,16 @@ const PREFILL_KEYS = [
 function prefillFromApp(a: Record<string, any>): Form {
   const f: Form = {};
   for (const k of PREFILL_KEYS) if (a[k] != null && a[k] !== "") f[k] = String(a[k]);
+  // Documents uploaded as rows (the partner chat, the multi-file uploaders) count
+  // as on file too — else the chat asks for a document the profile already shows.
+  const ROW_PATH: Record<string, string> = {
+    bank_statement: "bank_statement_path", customer_photo: "customer_photo_path", borrower_photo: "rooftop_photo_path",
+    quotation: "proforma_invoice_path", electricity_bill: "ebill_path",
+  };
+  for (const d of (Array.isArray(a.docs) ? a.docs : []) as { category: string; storage_path: string | null }[]) {
+    const k = ROW_PATH[d.category];
+    if (k && !f[k] && d.storage_path) f[k] = d.storage_path;
+  }
   if (a.bill_on_applicant_name === true) { f.bill_on_applicant_name = "yes"; f.coapp_needed = "no"; }
   else if (a.bill_on_applicant_name === false || a.coapp_name) { f.bill_on_applicant_name = "no"; f._has_coapp = "1"; f.coapp_needed = "yes"; }
   if (a.consent_at) f.consent = "yes";

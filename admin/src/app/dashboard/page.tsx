@@ -26,7 +26,7 @@ import { numberToWordsIndian } from "@/lib/numberToWords";
 import { fmtDateTime as fmtDateTimeLib } from "@/lib/dates";
 import { policyValidityParts, VALIDITY_TEXT } from "@/lib/insurance-validity";
 import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES, formatRupees } from "@/lib/emi";
-import { amountInput } from "@/lib/money";
+import { amountInput, inrPlain, numberInput } from "@/lib/money";
 
 // Capital Craft regional managers shown on the EPC portal (tap to Call). Numbers
 // are in international format, digits only. TODO: confirm these are the correct
@@ -85,7 +85,7 @@ function compactRupees(n: number | null | undefined): string {
   const v = Number(n) || 0;
   if (v >= 1e7) return `₹${(v / 1e7).toFixed(2).replace(/\.?0+$/, "")}Cr`;
   if (v >= 1e5) return `₹${(v / 1e5).toFixed(2).replace(/\.?0+$/, "")}L`;
-  return `₹${Math.round(v).toLocaleString("en-IN")}`;
+  return `₹${inrPlain(v)}`;
 }
 function fmtDateTime(iso: string | null): string {
   return iso ? fmtDateTimeLib(iso) : "";
@@ -677,7 +677,7 @@ function EmiSection() {
           <div className="flex flex-col gap-5">
             <div>
               <label className={labelCls}>System size (kW)</label>
-              <input value={size} inputMode="decimal" placeholder="e.g. 3" onChange={(e) => setSize(e.target.value.replace(/[^\d.]/g, ""))} className={inputCls} />
+              <input value={size} inputMode="decimal" placeholder="e.g. 3" onChange={(e) => setSize(numberInput(e.target.value))} className={inputCls} />
             </div>
             <div>
               <label className={labelCls}>Project cost (₹)</label>

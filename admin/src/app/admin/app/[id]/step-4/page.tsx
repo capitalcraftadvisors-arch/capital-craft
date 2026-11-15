@@ -32,6 +32,7 @@ import { getToken } from "@/lib/auth";
 import { getDocumentUrl } from "@/lib/storage";
 import { IFSC_RE, MOBILE_RE, EMAIL_RE } from "@/lib/validators";
 import { professionsFor } from "@/lib/loan-form";
+import { amountInput } from "@/lib/money";
 
 // ── Static option lists ──────────────────────────────────────────────
 
@@ -480,7 +481,7 @@ function Inner() {
                   type="text"
                   inputMode="numeric"
                   value={annualIncome}
-                  onChange={(e) => setAnnualIncome(e.target.value.replace(/[^\d.]/g, ""))}
+                  onChange={(e) => setAnnualIncome(amountInput(e.target.value))}
                   placeholder="e.g. 800000"
                 />
               </div>

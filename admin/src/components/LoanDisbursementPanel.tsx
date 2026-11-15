@@ -33,6 +33,7 @@ import ReviewBar from "@/components/ReviewBar";
 import { lenderName } from "@/lib/lenders";
 import DateField from "@/components/ui/DateField";
 import { I, KV, Section, StatusBtn } from "@/components/view/ViewKit";
+import { amountInput } from "@/lib/money";
 import {
   remainingAmount, fmtRupeesExact, fmtDateShort, DISBURSEMENT_WINDOW_DAYS,
   FIRST_CHARGES, firstCharges, type FirstChargeKey,
@@ -296,7 +297,7 @@ export default function LoanDisbursementPanel({
                   <div>
                     <p className="text-[12px] text-[#5a8a76] mb-1">First disbursement amount</p>
                     <input type="text" inputMode="decimal" className={inputCls} placeholder="0"
-                      value={firstAmt} onChange={(e) => setFirstAmt(e.target.value.replace(/[^\d.]/g, ""))} />
+                      value={firstAmt} onChange={(e) => setFirstAmt(amountInput(e.target.value))} />
                   </div>
                   <div>
                     <p className="text-[12px] text-[#5a8a76] mb-1">Date</p>
@@ -306,7 +307,7 @@ export default function LoanDisbursementPanel({
                     <div key={c.key}>
                       <p className="text-[12px] text-[#5a8a76] mb-1">{c.label}</p>
                       <input type="text" inputMode="decimal" className={inputCls} placeholder="0"
-                        value={charges[c.key]} onChange={(e) => { const v = e.target.value.replace(/[^\d.]/g, ""); setCharges((p) => ({ ...p, [c.key]: v })); }} />
+                        value={charges[c.key]} onChange={(e) => { const v = amountInput(e.target.value); setCharges((p) => ({ ...p, [c.key]: v })); }} />
                     </div>
                   ))}
                 </div>
@@ -422,7 +423,7 @@ export default function LoanDisbursementPanel({
                     <div>
                       <p className="text-[12px] text-[#5a8a76] mb-1">Second disbursement amount</p>
                       <input type="text" inputMode="decimal" className={inputCls} placeholder="0"
-                        value={secondAmt} onChange={(e) => setSecondAmt(e.target.value.replace(/[^\d.]/g, ""))} />
+                        value={secondAmt} onChange={(e) => setSecondAmt(amountInput(e.target.value))} />
                     </div>
                     <div>
                       <p className="text-[12px] text-[#5a8a76] mb-1">Date</p>

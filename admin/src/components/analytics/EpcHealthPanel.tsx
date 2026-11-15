@@ -9,12 +9,13 @@ import { useEffect, useMemo, useState } from "react";
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from "recharts";
 import Card from "@/components/ui/Card";
 import { supabase } from "@/lib/supabase";
+import { rupeesShort } from "@/lib/money";
 
 const C = { green: "#178a5c", greenDark: "#0f7a52", blue: "#185fa5", teal: "#0f766e", amber: "#d97706", slate: "#64748b", red: "#dc2626", ink: "#0f3d2e" };
 const APPROVED = new Set(["approved", "rfd", "sent_to_nbfc", "disbursed"]);
 const DAY = 86400000;
 const num = (v: unknown) => Number(v) || 0;
-const money = (v: number) => (v >= 1e7 ? `₹${(v / 1e7).toFixed(2)} Cr` : v >= 1e5 ? `₹${(v / 1e5).toFixed(1)} L` : `₹${Math.round(v).toLocaleString("en-IN")}`);
+const money = rupeesShort; // lib/money — paise when present
 
 type Epc = { id: string; name: string; created_at: string | null; last_login_at: string | null };
 type App = Record<string, any>;

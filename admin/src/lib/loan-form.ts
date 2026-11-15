@@ -68,6 +68,10 @@ export async function hydrateLoanForm(id: string): Promise<HydratedLoan> {
   const rows = ((docs ?? []) as LoanDocRow[]);
   const byCat = (c: string) => rows.find((d) => d.category === c);
   const selfie = byCat("customer_photo"); if (selfie?.storage_path) S("customer_photo_path", selfie.storage_path);
-  const bank = byCat("bank_statement"); if (bank?.storage_path) S("bank_statement_path", bank.storage_path);
+  // The bank statement: the read one (column, with its details) first, else an uploaded row.
+  S("bank_statement_path", a.bank_statement_path); S("bank_statement_method", a.bank_statement_method);
+  S("bank_account_holder", a.bank_account_holder); S("bank_name", a.bank_name); S("bank_account_no", a.bank_account_no);
+  S("bank_ifsc", a.bank_ifsc); S("bank_account_type", a.bank_account_type); S("bank_mobile", a.bank_mobile); S("bank_email", a.bank_email);
+  const bank = byCat("bank_statement"); if (!p.bank_statement_path && bank?.storage_path) S("bank_statement_path", bank.storage_path);
   return { form: p, docRows: rows, row: a };
 }

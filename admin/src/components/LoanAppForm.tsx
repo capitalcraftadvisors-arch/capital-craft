@@ -133,13 +133,13 @@ export default function LoanAppForm({
       <Card className="p-6 sm:p-7">
         <h3 className="font-display font-semibold text-[18px] mb-4">Loan &amp; system</h3>
         <div className="grid gap-5 sm:grid-cols-2">
-          <Input label="Loan amount (₹)" type="number" inputMode="numeric"
+          <Input label="Loan amount (₹)" type="number" step="any" inputMode="decimal"
                  {...register("loan_amount", { required: "Required", min: { value: 1, message: "Must be > 0" } })}
                  error={errors.loan_amount?.message} />
-          <Input label="Tenure (months)" type="number" {...register("tenure_months")} />
-          <Input label="System capacity (kW)" type="number" step="0.01" {...register("system_capacity_kw")} />
-          <Input label="System cost (₹)" type="number" {...register("system_cost")} />
-          <Input label="Down payment (₹)" type="number" {...register("down_payment")} />
+          <Input label="Tenure (months)" type="number" step="any" {...register("tenure_months")} />
+          <Input label="System capacity (kW)" type="number" step="any" {...register("system_capacity_kw")} />
+          <Input label="System cost (₹)" type="number" step="any" {...register("system_cost")} />
+          <Input label="Down payment (₹)" type="number" step="any" {...register("down_payment")} />
           <Input label="Install address (optional)" {...register("install_address")} />
         </div>
       </Card>
@@ -147,7 +147,7 @@ export default function LoanAppForm({
       <Card className="p-6 sm:p-7">
         <h3 className="font-display font-semibold text-[18px] mb-4">Credit context (optional)</h3>
         <div className="grid gap-5 sm:grid-cols-2">
-          <Input label="Monthly income (₹)" type="number" {...register("monthly_income")} />
+          <Input label="Monthly income (₹)" type="number" step="any" {...register("monthly_income")} />
           <Select label="Employment type" placeholder="Select…" options={[
             { value: "salaried", label: "Salaried" },
             { value: "self_employed", label: "Self-Employed" },

@@ -25,6 +25,7 @@ import Button from "@/components/ui/Button";
 import LoanAppStepTracker from "@/components/LoanAppStepTracker";
 import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
+import { amountInput } from "@/lib/money";
 
 type Loan = {
   id: string;
@@ -313,7 +314,7 @@ function Inner() {
               inputMode="numeric"
               value={subsidyCase === "non_subsidy" ? "0" : centralSub}
               disabled={subsidyCase === "non_subsidy"}
-              onChange={(e) => setCentralSub(e.target.value.replace(/[^\d.]/g, ""))}
+              onChange={(e) => setCentralSub(amountInput(e.target.value))}
               placeholder="0"
               hint={subsidyCase === "non_subsidy"
                 ? "Non-subsidy case — no central subsidy."
@@ -326,7 +327,7 @@ function Inner() {
               inputMode="numeric"
               value={subsidyCase === "non_subsidy" ? "0" : stateSubsidy}
               disabled={subsidyCase === "non_subsidy"}
-              onChange={(e) => setStateSub(e.target.value.replace(/[^\d.]/g, ""))}
+              onChange={(e) => setStateSub(amountInput(e.target.value))}
               placeholder="0"
               hint="Enter applicable state subsidy if any; conditional per state/eligibility."
             />

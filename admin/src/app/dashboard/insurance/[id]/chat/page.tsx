@@ -17,7 +17,7 @@ import GeoOfficeUpload from "@/components/GeoOfficeUpload";
 import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
 import { fetchEpcName } from "@/lib/epc-name";
-import { fmtRupeesExact } from "@/lib/money";
+import { fmtRupeesExact, amountInput } from "@/lib/money";
 
 export default function InsuranceChatPage() {
   return (
@@ -50,7 +50,7 @@ const QUESTION: Record<Stage, string> = {
 
 const auth = () => ({ Authorization: `Bearer ${getToken() ?? ""}` });
 const thumbOf = (f: File) => (f.type.startsWith("image/") ? URL.createObjectURL(f) : null);
-const num = (s: string) => { const n = Number(s.replace(/[^\d.]/g, "")); return s.trim() && Number.isFinite(n) ? n : null; };
+const num = (s: string) => { const n = Number(amountInput(s)); return s.trim() && Number.isFinite(n) ? n : null; };
 
 function panCard(f: Record<string, any>): CardRow[] {
   return [{ label: "PAN", value: f.pan ?? f.pan_number ?? null }, ...(f.name ? [{ label: "Name", value: f.name }] : [])];
@@ -425,7 +425,7 @@ function Inner() {
                   <input
                     autoFocus value={input}
                     inputMode={active === "amount" ? "decimal" : "text"}
-                    onChange={(e) => setInput(active === "amount" ? e.target.value.replace(/[^\d.]/g, "") : e.target.value)}
+                    onChange={(e) => setInput(active === "amount" ? amountInput(e.target.value) : e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") (active === "address" ? void sendAddress() : sendAmount()); }}
                     placeholder={active === "address" ? "Where the plant is installed" : "Amount in ₹"}
                     className="flex-1 min-w-0 px-4 py-2.5 text-[14px] bg-transparent focus:outline-none" />

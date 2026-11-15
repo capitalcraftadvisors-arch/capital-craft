@@ -430,6 +430,21 @@ export async function POST(req: NextRequest) {
           ...(b.system_type      !== undefined ? { system_type:      strOrNull(b.system_type) } : {}),
           ...(b.plant_use_type   !== undefined ? { plant_use_type:   strOrNull(b.plant_use_type) } : {}),
           ...(b.connection_category !== undefined ? { connection_category: strOrNull(b.connection_category) } : {}),
+          // Bank statement + the details read from it as it was uploaded —
+          // written only when present, never nulling what's on file. An IFSC /
+          // mobile / email the reader got wrong is left out rather than failing the submit.
+          ...(strOrNull(b.bank_statement_path) ? {
+            bank_statement_path: strOrNull(b.bank_statement_path),
+            bank_statement_method: b.bank_statement_method === "scanned_pdf" ? "scanned_pdf" : "manual_epdf",
+            bank_statement_uploaded_at: now,
+          } : {}),
+          ...(strOrNull(b.bank_account_holder) ? { bank_account_holder: strOrNull(b.bank_account_holder) } : {}),
+          ...(strOrNull(b.bank_name)           ? { bank_name:           strOrNull(b.bank_name) } : {}),
+          ...(strOrNull(b.bank_account_no)     ? { bank_account_no:     strOrNull(b.bank_account_no) } : {}),
+          ...(strOrNull(b.bank_account_type)   ? { bank_account_type:   strOrNull(b.bank_account_type) } : {}),
+          ...(/^[A-Z]{4}0[A-Z0-9]{6}$/.test(String(b.bank_ifsc ?? "").toUpperCase()) ? { bank_ifsc: String(b.bank_ifsc).toUpperCase() } : {}),
+          ...(/^[6-9]\d{9}$/.test(String(b.bank_mobile ?? "")) ? { bank_mobile: String(b.bank_mobile) } : {}),
+          ...(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(b.bank_email ?? "")) ? { bank_email: String(b.bank_email) } : {}),
           // Consent is captured at the end of the chatbot (just before submit).
           ...(b.consented === true ? {
             consent_at: now, consent_policies: CONSENT_POLICIES,

@@ -32,6 +32,7 @@ import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
 import { MOBILE_RE, EMAIL_RE, PAN_RE } from "@/lib/validators";
 import { INDIA_STATES } from "@/lib/india-states";
+import { amountInput, numberInput, fmtRupees } from "@/lib/money";
 
 // ── Static option lists ──────────────────────────────────────────────
 
@@ -700,7 +701,7 @@ function Inner() {
                   type="text"
                   inputMode="decimal"
                   value={projectSize}
-                  onChange={(e) => setProjectSize(e.target.value.replace(/[^\d.]/g, ""))}
+                  onChange={(e) => setProjectSize(numberInput(e.target.value))}
                   placeholder="e.g. 5"
                   className="flex-1 min-w-0 border border-line rounded-input px-3.5 py-2.5 text-[14px] outline-none focus:border-blue bg-white"
                 />
@@ -722,7 +723,7 @@ function Inner() {
               type="text"
               inputMode="numeric"
               value={totalCost}
-              onChange={(e) => setTotalCost(e.target.value.replace(/[^\d.]/g, ""))}
+              onChange={(e) => setTotalCost(amountInput(e.target.value))}
               placeholder="e.g. 350000"
             />
             <Input
@@ -730,7 +731,7 @@ function Inner() {
               type="text"
               inputMode="numeric"
               value={loanAmount}
-              onChange={(e) => setLoanAmount(e.target.value.replace(/[^\d.]/g, ""))}
+              onChange={(e) => setLoanAmount(amountInput(e.target.value))}
               placeholder="e.g. 250000"
               error={loanExceedsCost ? "Loan amount cannot exceed total project cost." : undefined}
             />
@@ -753,7 +754,7 @@ function Inner() {
               <SummaryRow label="Loan-to-value ratio"
                 value={ltvPct !== null ? `${ltvPct.toFixed(1)}%` : "—"} />
               <SummaryRow label="Cost per KW"
-                value={costPerKw !== null ? `₹${Math.round(costPerKw).toLocaleString("en-IN")}` : "—"} />
+                value={costPerKw !== null ? fmtRupees(costPerKw) : "—"} />
             </div>
           </Card>
         )}

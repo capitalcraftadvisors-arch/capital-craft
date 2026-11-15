@@ -33,6 +33,7 @@ import FileUpload from "@/components/FileUpload";
 import DateField from "@/components/ui/DateField";
 import { toIsoDate } from "@/lib/dates";
 import { MOBILE_RE, EMAIL_RE, PAN_RE, ACCOUNT_RE } from "@/lib/validators";
+import { clearChatDraft, loadChatDraft, saveChatDraft } from "@/lib/chat-draft";
 
 export default function EpcIntakePage() {
   return (
@@ -630,6 +631,9 @@ function Inner() {
       const biz = j.business;
       pushUser(m, { turnId: "mobile" });
       setEpcId(biz.id);
+      // The EPC in the address: a refresh (e.g. during a slow OCR) reopens it and
+      // replays every saved answer, then asks only what's still missing.
+      window.history.replaceState(null, "", `${window.location.pathname}?epc=${biz.id}`);
       if (j.duplicate) {
         say("bot", `An EPC with this number already exists (${biz.display_id || biz.id.slice(0, 8)}). I'll open it and continue with whatever's still missing.`);
         setEditMode(true);
@@ -1050,7 +1054,15 @@ function StakeholdersDock({ epcId, businessType, initial, busy, onContinue }: {
   epcId: string; businessType?: string; initial: Stakeholder[]; busy: boolean; onContinue: (list: Stakeholder[]) => void;
 }) {
   const cfg = configFor(businessType);
-  const [list, setList] = useState<Stakeholder[]>(() => (initial.length ? initial : [emptyMember(cfg.defDesig)]));
+  // Members being filled in are kept in this browser (lib/chat-draft) until
+  // "Save members & continue" — a refresh keeps every Aadhaar / PAN read so far,
+  // and the same member ids keep their uploaded documents.
+  const memberDraft = `cc_chat:epc_members:${epcId}`;
+  const [list, setList] = useState<Stakeholder[]>(() => {
+    const d = loadChatDraft<Stakeholder[]>(memberDraft);
+    return d?.length ? d : initial.length ? initial : [emptyMember(cfg.defDesig)];
+  });
+  useEffect(() => { saveChatDraft(memberDraft, list); }, [memberDraft, list]);
   const [stkError, setStkError] = useState<string | null>(null);
   const [panKey, setPanKey] = useState(0); // remounts the proprietor's PAN slot once it's filed
 
@@ -1126,6 +1138,7 @@ function StakeholdersDock({ epcId, businessType, initial, busy, onContinue }: {
     if (cleaned.some((s) => !s.name)) { setStkError("Every member needs a name (or remove the empty row)."); return; }
     if (cleaned.length < cfg.minRows) { setStkError(`Add at least ${cfg.minRows} ${cfg.roleLabel.toLowerCase()}${cfg.minRows > 1 ? "s" : ""}.`); return; }
     setStkError(null);
+    clearChatDraft(memberDraft); // saved on the profile from here
     onContinue(cleaned);
   }
 

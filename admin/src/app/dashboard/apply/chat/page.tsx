@@ -40,6 +40,8 @@ import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES, for
 import { pctOf } from "@/lib/money";
 import { CATEGORY_LABEL } from "@/lib/loan-form";
 import { amountInput } from "@/lib/money";
+import { supabase } from "@/lib/supabase";
+import { clearChatDraft, loadChatDraft, saveChatDraft, withoutThumbs } from "@/lib/chat-draft";
 
 const MOBILE_RE = /^[6-9]\d{9}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -71,6 +73,13 @@ const mobileErr = (v: string) => (MOBILE_RE.test(v.trim()) ? null : "Enter a val
 // The lead owner this EPC last used on this device — pre-fills the lead-owner
 // inputs only (never written into the form on its own). Saved after a submit.
 const leadOwnerKey = () => `cc.leadOwner.${getBusiness()?.id ?? ""}`;
+// The application being filled in (one at a time per login, in this browser): a
+// refresh or a closed tab comes back to it, up to the last answer (lib/chat-draft).
+const draftKey = () => { const b = getBusiness(); return `cc_chat:loan:${b?.id ?? ""}:${b?.member?.id ?? "owner"}`; };
+type LoanChatDraft = {
+  appId: string; msgs: Msg[]; form: Form; idx: number; undo: { msgs: Msg[]; form: Form; idx: number }[];
+  subsidyCase: "subsidy" | "non_subsidy"; centralSub: string; stateSub: string; tenure: number | null;
+};
 function lastLeadOwner(field: string): string {
   try { return (JSON.parse(localStorage.getItem(leadOwnerKey()) || "{}") as Form)[field] || ""; } catch { return ""; }
 }
@@ -375,6 +384,22 @@ function ChatInner() {
         } else {
           setScript(EDIT_INTRO);
         }
+      } else {
+        // An application left half-way (refresh, slow OCR, closed tab) — continue
+        // it where it stopped, while it's still a draft.
+        const d = loadChatDraft<LoanChatDraft>(draftKey());
+        if (d?.appId) {
+          const { data } = await supabase().from("epc_applications").select("status").eq("id", d.appId).maybeSingle();
+          if ((data as { status?: string } | null)?.status === "draft") {
+            setAppId(d.appId); setMsgs(d.msgs); setForm(d.form); setIdx(d.idx); setUndoStack(d.undo ?? []);
+            setSubsidyCase(d.subsidyCase ?? "subsidy"); setCentralSub(d.centralSub ?? ""); setStateSub(d.stateSub ?? ""); setTenure(d.tenure ?? null);
+            const nm = await fetchEpcName();
+            if (nm && nm !== "there") setEpcName(nm);
+            setReady(true);
+            return;
+          }
+          clearChatDraft(draftKey()); // submitted or gone
+        }
       }
       const epcName = await fetchEpcName();
       if (epcName && epcName !== "there") setEpcName(epcName);
@@ -425,6 +450,14 @@ function ChatInner() {
   useEffect(() => {
     const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, [msgs, busy, done]);
+
+  // Every answer kept in this browser (no request) once the draft exists, so the
+  // chat survives a refresh; cleared when the application is submitted.
+  useEffect(() => {
+    if (!ready || editMode || !appId || done) return;
+    const base = { appId, msgs: withoutThumbs(msgs), form, idx, subsidyCase, centralSub, stateSub, tenure };
+    saveChatDraft(draftKey(), { ...base, undo: undoStack.map((s) => ({ ...s, msgs: withoutThumbs(s.msgs) })) }, { ...base, undo: [] });
+  }, [ready, editMode, appId, done, msgs, form, idx, undoStack, subsidyCase, centralSub, stateSub, tenure]);
 
   // Seed the loan-config defaults on arrival. When editing, prefer the values
   // already on the application (subsidy / state subsidy / tenure); otherwise
@@ -575,7 +608,7 @@ function ChatInner() {
 
   async function submitNumber() {
     if (!turn) return;
-    const n = Number(input.replace(/[^\d.]/g, ""));
+    const n = Number(amountInput(input));
     if (!Number.isFinite(n) || n <= 0) { setError("Enter a valid amount."); return; }
     const cost = Number(form.total_project_cost) || 0;
     if (cost > 0 && n > cost) { setError(`Loan amount can't exceed the project cost (₹${cost.toLocaleString("en-IN")}).`); return; }
@@ -755,6 +788,11 @@ function ChatInner() {
           // Lead owner (asked just before consent).
           lead_owner_name: form.lead_owner_name || undefined,
           lead_owner_phone: form.lead_owner_phone || undefined,
+          // Bank statement + what was read from it (written only when present).
+          bank_statement_path: form.bank_statement_path || undefined, bank_statement_method: form.bank_statement_method || undefined,
+          bank_account_holder: form.bank_account_holder || undefined, bank_name: form.bank_name || undefined,
+          bank_account_no: form.bank_account_no || undefined, bank_ifsc: form.bank_ifsc || undefined,
+          bank_account_type: form.bank_account_type || undefined, bank_mobile: form.bank_mobile || undefined, bank_email: form.bank_email || undefined,
         }),
       });
       const j = await res.json().catch(() => ({}));
@@ -762,6 +800,7 @@ function ChatInner() {
       if (form.lead_owner_name) {
         try { localStorage.setItem(leadOwnerKey(), JSON.stringify({ lead_owner_name: form.lead_owner_name, lead_owner_phone: form.lead_owner_phone || "" })); } catch { /* storage unavailable */ }
       }
+      if (!editMode) clearChatDraft(draftKey()); // submitted — the next "Apply" starts fresh
       setDone({ loanId: form.loan_display_id || null, borrowerName: form.borrower_name || form.aadhaar_name || "your customer", edit: editMode });
     } catch (e) {
       // A network-level failure (server unreachable / dropped connection) throws
@@ -1207,9 +1246,26 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
         ...(p.project_size_unit ? { project_size_unit: String(p.project_size_unit) } : {}),
       };
     }
-    // Photos + bank statement — upload only (no OCR); replace keeps one row/slot.
-    const category = unit === "rooftop" ? "borrower_photo" : unit === "selfie" ? "customer_photo" : "bank_statement";
-    const pathField = unit === "rooftop" ? "rooftop_photo_path" : unit === "selfie" ? "customer_photo_path" : "bank_statement_path";
+    // Bank statement — stored AND read (holder, bank, a/c no., IFSC, type), the
+    // same reader the team's chat uses, so the profile's Bank details fill in
+    // and the team never has to ask for it again. Saved with the application on submit.
+    if (unit === "bank") {
+      const fd = new FormData();
+      fd.append("file", fileOf("bank"));
+      fd.append("method", "manual_epdf");
+      const res = await fetch(`/api/admin/loan-app/${appId}/extract-bank-statement`, { method: "POST", headers: auth(), body: fd });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the bank statement.");
+      const b = (j.fields ?? {}) as Record<string, string | null>;
+      return {
+        bank_statement_path: j.storage_path ?? "", bank_statement_method: j.method ?? "manual_epdf",
+        bank_account_holder: b.account_holder ?? "", bank_name: b.bank_name ?? "", bank_account_no: b.account_no ?? "",
+        bank_ifsc: b.ifsc ?? "", bank_account_type: b.account_type ?? "", bank_mobile: b.mobile ?? "", bank_email: b.email ?? "",
+      };
+    }
+    // Photos — upload only (no OCR); replace keeps one row/slot.
+    const category = unit === "rooftop" ? "borrower_photo" : "customer_photo";
+    const pathField = unit === "rooftop" ? "rooftop_photo_path" : "customer_photo_path";
     const fd = new FormData();
     if (unit === "rooftop" && form.plant_use_type === "commercial") {
       const g = await geoTagged(fileOf("rooftop"), category);
@@ -1569,7 +1625,7 @@ function QuotationDock({ appId, form, onPatch, onDone }: { appId: string; form: 
             { label: "Project size (kW)", field: "project_size", value: form.project_size || "" },
             { label: "Total project cost (₹)", field: "total_project_cost", value: form.total_project_cost || "" },
           ]}
-          onEdit={(field, value) => onPatch({ [field]: value.replace(/[^\d.]/g, "") })}
+          onEdit={(field, value) => onPatch({ [field]: amountInput(value) })}
         />
       </div>
       <div className="flex items-center gap-2 flex-wrap">

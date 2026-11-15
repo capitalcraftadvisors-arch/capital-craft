@@ -1,16 +1,19 @@
 // POST /api/admin/loan-app/[id]/extract-bank-statement
 //
 // Multipart body:
-//   file:   File   (image or PDF)
+//   file:   File   (image or PDF)                   — a new statement, OR
+//   path:   string                                  — one already on the file
+//                                                      (applications/{id}/…), read again
 //   method: string ("manual_epdf" | "scanned_pdf")   — echoed back so the
 //                                                      client stores the
 //                                                      method with the doc.
 //
 // Server-side:
-//   1. Verify admin JWT.
-//   2. Confirm the loan app exists and is at current_step ≥ 4.
+//   1. Verify the JWT — CC, or the EPC on its own application (the partner
+//      chat reads the statement as it lands). The app read is RLS-scoped.
+//   2. Confirm the loan app exists.
 //   3. Compress the file with sharp (image only — PDFs pass through).
-//   4. Upload to applications/{id}/bank_statement/.
+//   4. Upload to applications/{id}/bank_statement/ (a `path` is read in place).
 //   5. Run Vision DOCUMENT_TEXT_DETECTION + parseBankStatement to pull
 //      the retrieved-bank-info fields (best-effort — every field can be
 //      null and the Step 4 UI lets admin fill in what OCR misses).
@@ -22,7 +25,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
 import { createClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
-import { uploadBuffer, getSignedReadUrl } from "@/lib/gcs";
+import { uploadBuffer, getSignedReadUrl, downloadBuffer } from "@/lib/gcs";
 import { extractBankStatement, type BankStatementFields } from "@/lib/bank-statement";
 import { geminiExtractBankStatement } from "@/lib/doc-extractors";
 
@@ -56,17 +59,21 @@ export async function POST(
   try {
     const token = getBearerToken(req);
     if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
+    await verifyJwt(token); // CC or the application's own EPC — the app read below is RLS-scoped
 
     const appId = params.id;
     if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);
 
     const form = await req.formData();
     const file   = form.get("file");
+    const onFile = String(form.get("path") ?? "").trim(); // a statement already uploaded
     const method = String(form.get("method") ?? "").trim();
-    if (!(file instanceof File)) return err("Bank statement file is required.", 400);
-    if (!ACCEPTED.has(file.type)) return err("File must be JPEG, PNG, WebP, or PDF.", 400);
+    if (onFile) {
+      if (!onFile.startsWith(`applications/${appId}/`)) return err("That file isn't on this application.", 400);
+    } else {
+      if (!(file instanceof File)) return err("Bank statement file is required.", 400);
+      if (!ACCEPTED.has(file.type)) return err("File must be JPEG, PNG, WebP, or PDF.", 400);
+    }
     if (!METHODS.has(method))     return err("Invalid upload method.", 400);
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
@@ -80,23 +87,33 @@ export async function POST(
       .maybeSingle();
     if (loadErr) return err(loadErr.message, 500);
     if (!app)    return err("Loan application not found.", 404);
-    if (claims.business_type !== "admin" && (app.current_step ?? 1) < 4) return err("Complete Step 3 before Step 4 uploads.", 409);
 
-    // Compress (images only) + upload.
-    const ab = await file.arrayBuffer();
-    const input = Buffer.from(ab);
-    let output: Buffer = input;
-    let mime = file.type;
-    if (file.type.startsWith("image/")) {
-      output = await sharp(input)
-        .rotate()
-        .resize({ width: MAX_DIMENSION, height: MAX_DIMENSION, fit: "inside", withoutEnlargement: true })
-        .jpeg({ quality: 75, mozjpeg: true })
-        .toBuffer();
-      mime = "image/jpeg";
+    let output: Buffer;
+    let mime: string;
+    let path: string;
+    if (onFile) {
+      // Read the statement already on the file (e.g. the EPC uploaded it before
+      // statements were read on upload) — no new copy is stored.
+      try { output = await downloadBuffer(onFile); } catch { return err("Couldn't open the bank statement on file.", 404); }
+      mime = /\.pdf$/i.test(onFile) ? "application/pdf" : "image/jpeg";
+      path = onFile;
+    } else {
+      // Compress (images only) + upload.
+      const f = file as File;
+      const input = Buffer.from(await f.arrayBuffer());
+      output = input;
+      mime = f.type;
+      if (f.type.startsWith("image/")) {
+        output = await sharp(input)
+          .rotate()
+          .resize({ width: MAX_DIMENSION, height: MAX_DIMENSION, fit: "inside", withoutEnlargement: true })
+          .jpeg({ quality: 75, mozjpeg: true })
+          .toBuffer();
+        mime = "image/jpeg";
+      }
+      path = `applications/${appId}/bank_statement/${Date.now()}_${safeName(f.name, "bank_statement")}`;
+      await uploadBuffer(path, output, mime);
     }
-    const path = `applications/${appId}/bank_statement/${Date.now()}_${safeName(file.name, "bank_statement")}`;
-    await uploadBuffer(path, output, mime);
 
     // OCR — Gemini reads the statement faithfully (primary); on any failure
     // it returns null and we fall back to the Vision + regex parser. Every

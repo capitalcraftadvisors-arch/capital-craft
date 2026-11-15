@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+import { fmtRupees } from "@/lib/money";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import RowLink from "@/components/RowLink";
@@ -45,10 +46,7 @@ type LeadRow = {
 // Table header cell — same as the other console tables.
 const TH = "px-4 py-3 font-medium text-[12px] uppercase tracking-wide";
 
-function rupees(v: number | null): string {
-  if (v == null) return "—";
-  return "₹" + Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
-}
+const rupees = (v: number | null): string => fmtRupees(v); // lib/money — paise when present
 function epcName(r: LeadRow): string {
   const b = r.epc_business;
   if (b) return b.trade_name || b.legal_name || b.contact_name || "—";
