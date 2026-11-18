@@ -23,7 +23,7 @@ import { logout, getBusiness, allowedModules, canAccessModule, isMainAdmin, type
 import { pendingCount } from "@/lib/review";
 
 export type ConsoleTab = "epcs" | "apps" | "loanleads" | "insurance" | "otherins" | "leads";
-export type SectionKey = ConsoleTab | "analytics" | "insights" | "board" | "pendings" | "team" | "pri";
+export type SectionKey = ConsoleTab | "analytics" | "insights" | "board" | "pendings" | "team" | "pri" | "gzb";
 
 // Per-dashboard theme — every dashboard is green, each in its own shade, so the
 // page itself says where you are. color = accent (buttons, active nav, table
@@ -41,6 +41,7 @@ export const ACCENTS: Record<SectionKey, { label: string; color: string; tint: s
   pendings:  { label: "Pendings",          color: "#14533d", tint: "#d1e3da", page: "#e5eee9" }, // pine
   team:      { label: "Stakeholders",      color: "#5a7a2e", tint: "#dfebd2", page: "#eef4e6" }, // moss
   pri:       { label: "Pri",               color: "#2f5d3a", tint: "#d7e6da", page: "#eaf2eb" }, // hunter
+  gzb:       { label: "gozerobils Leads",  color: "#2e7d4f", tint: "#d5ecdd", page: "#e9f5ed" }, // leaf
 };
 
 // The sidebar's own petrol (blue-green) — a shade no dashboard uses.
@@ -98,6 +99,9 @@ const ICONS: Record<SectionKey, ReactNode> = {
   team: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="7.5" cy="15.5" r="4.5" /><path d="M10.7 12.3 21 2M16 7l3 3M19 4l2 2" /></svg>
   ),
+  gzb: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
+  ),
   pendings: (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 4H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2" /><rect x="9" y="2" width="6" height="4" rx="1" /><path d="M9 14l2 2 4-4" /></svg>
   ),
@@ -123,6 +127,7 @@ export function sidebarNavKeys(biz = getBusiness()): SectionKey[] {
     keys.splice(1, 0, "pendings");
     const at = keys.indexOf("insurance");
     keys.splice(at >= 0 ? at + 1 : keys.length, 0, "otherins");
+    keys.push("gzb");  // gozerobils.com solar enquiries (0123)
     keys.push("team"); // Stakeholders — team logins + profiles, partners
   }
   // Pri — the owner's own dashboard (0096), first in the owner's sidebar; no
@@ -133,7 +138,7 @@ export function sidebarNavKeys(biz = getBusiness()): SectionKey[] {
 
 // Where a section lives: console tabs are in-page state on /admin; the rest are routes.
 export const SECTION_ROUTE: Partial<Record<SectionKey, string>> = {
-  analytics: "/admin/analytics", insights: "/admin/team-analytics", board: "/admin/board", pendings: "/admin/pendings", team: "/admin/stakeholders", pri: "/admin/pri",
+  analytics: "/admin/analytics", insights: "/admin/team-analytics", board: "/admin/board", pendings: "/admin/pendings", team: "/admin/stakeholders", pri: "/admin/pri", gzb: "/admin/gozerobils",
 };
 
 export default function AdminSidebar({

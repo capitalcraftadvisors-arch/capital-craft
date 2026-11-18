@@ -1,6 +1,9 @@
 // GET /api/admin/insurance/[id]/download-zip
 //
-// Admin-only. Streams a ZIP for the insurance application: a summary.xlsx plus
+// Admin-only. Streams a ZIP for the insurance application: a summary.xlsx (the
+// 12 fields the insurer needs — ID, project cost = sum insured, applicant as per
+// the bill, PAN, Aadhaar, DOB, gender, Aadhaar address, risk location, mobile,
+// email) plus
 // every stored document (PAN, Aadhaar front/back/face, GST, plant photo,
 // invoice). Mirrors the loan ZIP route (archiver → Node Readable → Web
 // ReadableStream); missing GCS objects are logged and skipped.
@@ -14,6 +17,7 @@ import { downloadBuffer } from "@/lib/gcs";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { SUPABASE_URL, SUPABASE_ANON, UUID_RE } from "@/lib/insurance-server";
 import { rupees } from "@/lib/money";
+import { fmtDate } from "@/lib/dates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,46 +53,40 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
     const displayId: string = app.insurance_display_id || "INS-" + id.replace(/-/g, "").slice(0, 8).toUpperCase();
     const applicant: string = app.aadhaar_name || "applicant";
-    const epcName: string = app.epc_business?.trade_name || app.epc_business?.legal_name || app.epc_business?.contact_name || "—";
+
+    // The loan this insurance was made from (0112), if any — the customer's
+    // mobile / email and the bill name live there.
+    const { data: loan } = await supabase.from("epc_applications")
+      .select("borrower_mobile, borrower_email, ebill_name, ebill_address_line, total_project_cost")
+      .eq("insurance_application_id", id).maybeSingle();
+    // What the electricity-bill reader returned (stored as JSON when it read cleanly).
+    let bill: { ebill_name?: string | null; ebill_address_line?: string | null } = {};
+    try { bill = JSON.parse(String(app.ebill_ocr_raw ?? "")); } catch { /* plain OCR text */ }
+    const dash = (v: unknown) => (v == null || String(v).trim() === "" ? "—" : String(v));
+    const projectCost = app.invoice_confirmed_amount ?? app.sum_insured ?? loan?.total_project_cost ?? app.invoice_amount;
 
     // ── summary.xlsx ────────────────────────────────────────
+    // Only these fields (the team's list, 18/11): the sum insured equals the project cost.
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet("Insurance");
-    ws.columns = [{ width: 30 }, { width: 46 }];
+    ws.columns = [{ width: 34 }, { width: 60 }];
     const title = ws.addRow(["Capital Craft — Insurance Application", ""]);
     title.font = { bold: true, size: 14 };
     ws.addRow([]);
     const rows: Array<[string, string]> = [
       ["Insurance ID", displayId],
-      ["Insurance partner", app.insurance_partner ?? "—"],
-      ["Sum insured", rupees(app.sum_insured ?? app.invoice_confirmed_amount)],
-      ["Status", String(app.status ?? "—")],
-      ["Submitted", app.submitted_at ? new Date(app.submitted_at).toLocaleString("en-IN") : "—"],
-      ["EPC Partner", `${epcName}${app.epc_business?.epc_display_id ? ` (${app.epc_business.epc_display_id})` : ""}`],
-      ["", ""],
-      ["Applicant", applicant],
-      ["PAN", app.pan_number ?? "—"],
-      ["GST legal name", app.gst_legal_name ?? "—"],
-      ["GST trade name", app.gst_trade_name ?? "—"],
-      ["GSTIN", app.gstin ?? "—"],
-      ["Policy period", app.policy_from_date && app.policy_to_date ? `${app.policy_from_date} to ${app.policy_to_date}` : "—"],
-      ["Aadhaar", app.aadhaar_number_masked ?? "—"],
-      ["DOB", app.aadhaar_dob ?? "—"],
-      ["Gender", app.aadhaar_gender ?? "—"],
-      ["Address (Aadhaar)", app.aadhaar_address ?? "—"],
-      ["", ""],
-      ["Plant address", app.plant_address ?? "—"],
-      ["Invoice amount (confirmed)", rupees(app.invoice_confirmed_amount)],
-      ["Invoice amount (OCR)", rupees(app.invoice_amount)],
+      ["Project Cost", rupees(projectCost)],
+      ["Sum Insured", rupees(projectCost)],
+      ["Applicant Name (as per electricity bill)", dash(bill.ebill_name || loan?.ebill_name || app.aadhaar_name)],
+      ["PAN", dash(app.pan_number)],
+      ["Aadhaar", dash(app.aadhaar_number_masked)],
+      ["DOB", app.aadhaar_dob ? fmtDate(app.aadhaar_dob) : "—"],
+      ["Gender", dash(app.aadhaar_gender)],
+      ["Address as per Aadhaar", dash(app.aadhaar_address)],
+      ["Risk Location Address (as per electricity bill)", dash(app.plant_address || bill.ebill_address_line || loan?.ebill_address_line)],
+      ["Mobile No", dash(loan?.borrower_mobile)],
+      ["Email ID", dash(loan?.borrower_email)],
     ];
-    for (const [label, col] of [
-      ["Panel photo GPS", "photo_panel_gps"],
-      ["Inverter photo GPS", "photo_inverter_gps"],
-      ["Meter photo GPS", "photo_meter_gps"],
-    ] as const) {
-      const g = app[col] as { lat?: number; lng?: number } | null;
-      if (g && g.lat != null) rows.push([label, `${g.lat}, ${g.lng}`]);
-    }
     for (const [k, v] of rows) {
       const r = ws.addRow([k, v]);
       r.getCell(1).font = { bold: true, color: { argb: "FF0F3D2E" } };

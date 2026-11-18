@@ -37,6 +37,7 @@ import LenderCell from "@/components/LenderCell";
 import AdminPendingPill from "@/components/AdminPendingPill";
 import { epcLocked, saveEpcLenderState } from "@/lib/review";
 import LoanLeadsTab from "@/components/LoanLeadsTab";
+import { LEAD_STATUS_PILL } from "@/lib/lead-status";
 import { latestLenderStatus, latestStatusLabel, lenderLabelIn, type LoanLenderRow } from "@/lib/loan-lenders";
 import { addLender as addRegistryLender, useLenders } from "@/lib/lenders";
 import { otherInsDoc, OTHER_INS_LIST_CACHE } from "@/lib/other-insurance";
@@ -2703,12 +2704,6 @@ type Lead = {
   pan: string | null; aadhaar: string | null;
   project_cost: number | null; loan_amount: number | null;
   plant_value: number | null; gstin: string | null; status: string;
-};
-const LEAD_STATUS_PILL: Record<string, string> = {
-  new:       "bg-[#dceffb] text-[#185fa5]",
-  contacted: "bg-[#fef0d6] text-[#854f0b]",
-  converted: "bg-[#e6f6ee] text-[#178a5c]",
-  closed:    "bg-[#eef1f0] text-[#5a8a76]",
 };
 function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
   const [rows, setRows] = useState<Lead[]>([]);
