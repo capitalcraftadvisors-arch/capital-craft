@@ -13,6 +13,7 @@ import { getBusiness } from "./auth";
 import { isUndefinedColumn } from "./optional-column";
 import { getCached, setCached, invalidate } from "./list-cache";
 import { REVIEW_COLS, loanReviews, type LoanReview } from "./review";
+import { TRANCHE2_COLS, publishTranche2, tranche2Of, type Tranche2 } from "./tranche2";
 
 export type CaseSource = "loan" | "insurance" | "lead" | "epc";
 export type ColumnDef = { key: string; label: string };
@@ -107,6 +108,7 @@ export type OpsCase = {
   lastContactedAt: string | null; // ISO — when an RM last called / WhatsApp'd
   href: string;
   reviews?: LoanReview[]; // loans: the admin's checks (approval, 1st / 2nd disbursement)
+  tranche2?: Tranche2 | null; // loans: 2nd-tranche documents from the EPC, 2nd not paid (0125)
 };
 
 export type TeamUser = { id: string; name: string; role: string | null; parentUserId: string | null };
@@ -259,8 +261,12 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
     // select must not fail (42703 = undefined column) — retry without it.
     (async () => {
       const LOAN_COLS = `id, borrower_name, aadhaar_name, borrower_mobile, loan_amount, loan_amount_required, status, created_at, submitted_at, docs_sent_at, hold_at, approved_at, rejected_at, rfd_at, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, second_disbursement_date, aborted_at, updated_at, review_notes, assigned_to_user_id, epc_business_id, ${REVIEW_COLS}`;
-      const withCol = await db.from("epc_applications").select(`${LOAN_COLS}, lead_owner_name`);
-      if (isUndefinedColumn(withCol.error, "lead_owner_name")) return await db.from("epc_applications").select(LOAN_COLS);
+      const sel = (cols: string) => db.from("epc_applications").select(cols);
+      // tranche2_* arrive with 0125 — same fallback until it is everywhere.
+      const withT2 = await sel(`${LOAN_COLS}, lead_owner_name, ${TRANCHE2_COLS}`);
+      if (!isUndefinedColumn(withT2.error, "tranche2_")) return withT2;
+      const withCol = await sel(`${LOAN_COLS}, lead_owner_name`);
+      if (isUndefinedColumn(withCol.error, "lead_owner_name")) return await sel(LOAN_COLS);
       return withCol;
     })(),
     db.from("loan_application_lenders").select("application_id, lender_key, lender_label, docs_sent_at, approved_at, rejected_at"),
@@ -318,6 +324,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
     const lrows = lenderByApp.get(r.id) ?? [];
     const midDecision = lrows.some((l) => l.docs_sent_at && !l.approved_at && !l.rejected_at);
     const { column, label, stageSince } = loanColumn(r, midDecision, lrows);
+    const epcName = (r.epc_business_id ? epcNameById.get(r.epc_business_id) : null) ?? null;
     cases.push({
       id: r.id, source: "loan",
       // Verified KYC (Aadhaar) name first — matches the list/profile/emails.
@@ -328,7 +335,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       ownerUserId: r.assigned_to_user_id ?? null,
       ownerName: r.assigned_to_user_id ? nameOf.get(r.assigned_to_user_id) ?? null : null,
       leadOwnerName: r.lead_owner_name ?? null,
-      epcName: (r.epc_business_id ? epcNameById.get(r.epc_business_id) : null) ?? null,
+      epcName,
       lender: loanLenderLabel(lrows),
       statusLabel: label, column, allColumn: allColumnFor("loan", column, r),
       outcome: r.status === "rejected" ? "rejected" : (column === "approved" || column === "phase1") ? "approved" : null,
@@ -358,6 +365,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
       lastContactedAt: touchBy.get(`loan:${r.id}`)?.lastContactedAt ?? null,
       href: `/admin/app/${r.id}/view`,
       reviews: loanReviews(r),
+      tranche2: tranche2Of(r, r.aadhaar_name || r.borrower_name || "—", epcName),
     });
   }
 
@@ -448,5 +456,9 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
 
   const result = { cases, users };
   setCached(cacheKey, result);
+  // Skipped when tranche2_* aren't there yet (pre-0125), so a stored list isn't wiped.
+  if ((loans.data ?? []).some((r: any) => "tranche2_epc_at" in r)) {
+    publishTranche2(cases.map((c) => c.tranche2).filter((t): t is Tranche2 => !!t));
+  }
   return result;
 }

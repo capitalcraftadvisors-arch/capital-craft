@@ -18,6 +18,8 @@ import NotificationBell from "@/components/NotificationBell";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
 import { getCached, setCached, invalidate } from "@/lib/list-cache";
 import { invalidateLoanBoards } from "@/lib/ops-board";
+import { TRANCHE2_COLS, publishTranche2, tranche2Of, type Tranche2 } from "@/lib/tranche2";
+import { isUndefinedColumn } from "@/lib/optional-column";
 import { useAdminNames } from "@/lib/use-admin-names";
 import { useEpcUpdates } from "@/lib/use-epc-updates";
 import { KpiTile } from "@/components/view/ViewKit";
@@ -1353,9 +1355,10 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
       const cached = getCached<{ rows: Row[]; lenderLatest: Record<string, string>; lenderSentAt?: Record<string, string>; lenderKeys?: Record<string, string[]> }>(CK, 45000);
       if (cached) { setRows(cached.rows); setLenderLatest(cached.lenderLatest); setLenderSentAt(cached.lenderSentAt ?? {}); setLenderKeys(cached.lenderKeys ?? {}); setLoaded(true); return; }
     }
-    const { data } = await supabase()
+    const appsSel = (extra: string) => supabase()
       .from("epc_applications")
       .select(
+        extra +
         "id, borrower_name, aadhaar_name, loan_display_id, " +
         "borrower_pan, borrower_mobile, borrower_father_name, " +
         "loan_amount, loan_amount_required, " +
@@ -1374,9 +1377,21 @@ function AppsTab({ period, pFrom, pTo }: TabPeriodProps) {
         "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
       )
       .order("created_at", { ascending: false });
-    const rows = (data ?? []) as unknown as Row[];
+    // tranche2_* (0125) feed the bell's 2nd-tranche count — same request; until
+    // 0125 is everywhere, retry without them.
+    let res = await appsSel(`${TRANCHE2_COLS}, `);
+    const hasT2 = !isUndefinedColumn(res.error, "tranche2_");
+    if (!hasT2) res = await appsSel("");
+    const rows = (res.data ?? []) as unknown as Row[];
     setRows(rows);
     setLoaded(true);
+    if (hasT2 && !res.error) {
+      publishTranche2(rows.map((r) => {
+        const b = r.epc_business;
+        return tranche2Of(r as unknown as Record<string, any>, r.aadhaar_name || r.borrower_name || "—",
+          b?.trade_name || b?.legal_name || b?.contact_name || null);
+      }).filter((t): t is Tranche2 => !!t));
+    }
 
     // Per-lender latest status (6h) — group loan_application_lenders by app,
     // then the most-recent event across each app's lenders becomes its label.

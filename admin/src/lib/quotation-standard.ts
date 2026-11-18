@@ -549,12 +549,10 @@ function bankAndSign(s: Sheet, org: StdOrg, signature: PDFImage | null, stamp: P
   s.round(x, top, w, h, 8, s.c.white, s.c.line);
   s.text(`For ${org.name}`, x + 12, top + 20, { size: 9, bold: true, color: s.c.primary, max: w - 24 });
   // The signature across the signatory's line, the stamp over its right end.
+  // (No customer's acceptance box — removed 18/11; the signatory has the box.)
   if (signature) s.image(signature, x + 12, top + 40, half - 24, 40);
   if (stamp) s.image(stamp, x + half - 62, top + 26, 56, 56);
-  s.hline(x + 12, top + 86, half - 24, s.c.muted, 0.6);
-  s.hline(x + half + 6, top + 86, half - 18, s.c.muted, 0.6);
+  s.hline(x + 12, top + 86, w - 24, s.c.muted, 0.6);
   s.text("Authorised signatory", x + 12, top + 98, { size: 7.8, color: s.c.muted });
-  s.text("Customer's acceptance", x + half + 6, top + 98, { size: 7.8, color: s.c.muted });
-  s.text("Name, signature & date", x + half + 6, top + 109, { size: 7, color: s.c.muted });
   s.y = top + h + 6;
 }

@@ -14,6 +14,8 @@ import AuthGuard from "@/components/AuthGuard";
 import AdminSidebar, { ACCENTS, SectionMark, themeStyle } from "@/components/AdminSidebar";
 import NotificationBell from "@/components/NotificationBell";
 import ReviewNotices from "@/components/ReviewNotices";
+import Tranche2List from "@/components/Tranche2List";
+import type { Tranche2 } from "@/lib/tranche2";
 import LoanLenderPickerModal, { type PickerLender } from "@/components/LoanLenderPickerModal";
 import Select from "@/components/ui/Select";
 import DateField from "@/components/ui/DateField";
@@ -1339,6 +1341,7 @@ function Inner() {
                 <>
                 {/* The admin's approvals / send-backs — for the team, not the admin who made them. */}
                 {!isMainAdmin && <ReviewNotices loans={cases.filter((c) => c.source === "loan")} onOpen={openCase} />}
+                <Tranche2List items={cases.map((c) => c.tranche2).filter((t): t is Tranche2 => !!t)} onOpen={openCase} />
                 <MyDayQueue items={myDayScoped} q={q} onSearch={setQ} showOwner={canOversee}
                   defaultSrc={canOversee ? "epc" : "loan"} rmName={me?.contact_name || greetingName(me) || "Capital Craft"}
                   todayStr={todayStr} onStampContact={(c) => void stampContact(c)} onSetFollowUp={(c, d) => void setFollowUp(c, d)}

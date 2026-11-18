@@ -17,6 +17,7 @@ import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
 import { supabase } from "@/lib/supabase";
 import { amountInput, numberInput } from "@/lib/money";
+import LoanShareChips from "@/components/LoanShareChips";
 
 const CUSTOM = "__custom__";
 
@@ -202,6 +203,8 @@ function Inner() {
             value={loanAmount}
             onChange={(e) => setLoanAmount(amountInput(e.target.value))}
           />
+          {/* Applied loan amount: 80 / 90 / 100 % of the project cost, or Custom. */}
+          <LoanShareChips cost={Number(projectCost) || 0} value={loanAmount} onPick={setLoanAmount} />
           <Input label="Lead owner name" placeholder="Who owns this lead" value={leadOwner} onChange={(e) => setLeadOwner(e.target.value)} />
         </Card>
 

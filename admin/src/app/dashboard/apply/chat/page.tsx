@@ -36,6 +36,7 @@ import { nameReadable } from "@/lib/name-match";
 import { fmtDate, toIsoDate } from "@/lib/dates";
 import { coappReasonText, decideRoles, eligibility, idNamesMatch, isBillOwner, personName, type IneligibleReason, type PersonFacts, type RoleDecision } from "@/lib/loan-roles";
 import EditTable from "@/components/EditTable";
+import LoanShareChips from "@/components/LoanShareChips";
 import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES, formatRupees } from "@/lib/emi";
 import { pctOf } from "@/lib/money";
 import { CATEGORY_LABEL } from "@/lib/loan-form";
@@ -930,6 +931,11 @@ function ChatInner() {
               const amt = turn.field && AMOUNT_FIELDS.has(turn.field) ? Number(amountInput(input)) : 0;
               return (
                 <div className="flex flex-col gap-1.5">
+                  {/* Applied loan amount: 80 / 90 / 100 % of the project cost, or Custom. */}
+                  {turn.field === "loan_amount_required" && (
+                    <LoanShareChips cost={Number(form.total_project_cost) || 0} value={input} tone="#1e3a8a"
+                      onPick={setInput} onCustom={() => inputRef.current?.focus()} />
+                  )}
                   <div className="flex items-center gap-2">
                     <div className="flex-1 flex items-center border border-line rounded-full bg-white overflow-hidden focus-within:border-[#1e3a8a] focus-within:ring-2 focus-within:ring-[#1e3a8a]/15">
                       <input

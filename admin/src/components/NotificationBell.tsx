@@ -16,11 +16,13 @@ import { supabase } from "@/lib/supabase";
 import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { REVIEW_COLS, REVIEW_LABEL, loanReviews, reviewNotices } from "@/lib/review";
 import { markNotifSeen, notifSeen, onNotifSeen } from "@/lib/notif-seen";
+import { TRANCHE2_COLS, TRANCHE2_TOTAL, onTranche2, publishTranche2, readTranche2, tranche2Href, tranche2Of, type Tranche2 } from "@/lib/tranche2";
 
 type Source = "loan" | "epc" | "lead" | "insurance";
 // kind "review": the admin approved / sent back a stage the team saved (lib/review).
 // kind "request": an EPC asked for its custom quotation template (uploaded a sample, 0122).
-type Notif = { id: string; kind: "comment" | "assign" | "review" | "request"; source: Source; caseName: string; author: string; text: string; at: string; href: string; ok?: boolean };
+// kind "tranche": an EPC uploaded 2nd-tranche (completion) documents on its portal.
+type Notif = { id: string; kind: "comment" | "assign" | "review" | "request" | "tranche"; source: Source; caseName: string; author: string; text: string; at: string; href: string; ok?: boolean };
 
 const SRC_LABEL: Record<Source, string> = { loan: "Loan", epc: "EPC", lead: "Lead", insurance: "Insurance" };
 const SRC_TINT: Record<Source, { bg: string; fg: string }> = {
@@ -109,7 +111,8 @@ export default function NotificationBell() {
 
     const empty = Promise.resolve({ data: [] as Record<string, string>[] });
     const since = new Date(Date.now() - 14 * 86400000).toISOString();
-    const [lc, ec, dc, act, rv, rq] = await Promise.all([
+    const isCC = getBusiness()?.business_type === "admin";
+    const [lc, ec, dc, act, rv, rq, tr] = await Promise.all([
       loanIds.length ? db.from("loan_comments").select("id, application_id, author_id, author_name, comment_text, created_at").in("application_id", loanIds).neq("author_id", meId).order("created_at", { ascending: false }).limit(20) : empty,
       epcIds.length ? db.from("epc_comments").select("id, business_id, author_id, author_name, comment_text, created_at").in("business_id", epcIds).neq("author_id", meId).order("created_at", { ascending: false }).limit(20) : empty,
       leadIds.length ? db.from("lead_comments").select("id, lead_id, author_id, author_name, comment_text, created_at").in("lead_id", leadIds).neq("author_id", meId).order("created_at", { ascending: false }).limit(20) : empty,
@@ -126,11 +129,23 @@ export default function NotificationBell() {
         .limit(50),
       // EPCs asking for a custom quotation template (a sample uploaded in the last
       // 14 days, no ready template yet) — for every CC account.
-      getBusiness()?.business_type !== "admin" ? empty : db.from("epc_documents")
+      !isCC ? empty : db.from("epc_documents")
         .select("id, business_id, created_at, epc_business:business_id(trade_name, legal_name, contact_name, epc_quotation_templates(ready_at))")
         .eq("category", "custom_quote_sample").gte("created_at", since)
         .order("created_at", { ascending: false }).limit(30),
+      // Loans whose EPC uploaded 2nd-tranche documents, 2nd disbursement not paid (0125).
+      !isCC ? empty : db.from("epc_applications")
+        .select(`id, aadhaar_name, borrower_name, second_disbursement_amount, ${TRANCHE2_COLS}, epc_business:epc_business_id(trade_name, legal_name, contact_name)`)
+        .not("tranche2_epc_at", "is", null).is("second_disbursement_amount", null)
+        .order("tranche2_epc_at", { ascending: false }).limit(50),
     ]);
+    // Saved for every page's bell (lib/tranche2); shown from that list, not from here.
+    if (isCC && !("error" in tr && tr.error)) {
+      publishTranche2(((tr.data ?? []) as Record<string, any>[]).map((r) => {
+        const b = r.epc_business as Record<string, any> | null;
+        return tranche2Of(r, r.aadhaar_name || r.borrower_name || "—", b?.trade_name || b?.legal_name || b?.contact_name || null);
+      }).filter((t): t is Tranche2 => !!t));
+    }
     const requests = new Map<string, Notif>(); // one per EPC, its latest upload
     for (const d of (rq.data ?? []) as Record<string, any>[]) {
       const b = d.epc_business as Record<string, any> | null;
@@ -194,7 +209,19 @@ export default function NotificationBell() {
     return () => document.removeEventListener("mousedown", h);
   }, [open]);
 
-  const unread = useMemo(() => items.filter((n) => new Date(n.at).getTime() > seen).length, [items, seen]);
+  // 2nd-tranche uploads come from the list the pages already loaded (lib/tranche2),
+  // so the red count shows on every page without asking the database.
+  const [t2, setT2] = useState<Tranche2[]>([]);
+  useEffect(() => { setT2(readTranche2()); return onTranche2(setT2); }, []);
+  const all = useMemo(() => [
+    ...items,
+    ...t2.map((t): Notif => ({
+      id: "t" + t.id, kind: "tranche", source: "loan", caseName: t.name, author: t.epc || "EPC",
+      text: `2nd tranche documents · ${t.docs}/${TRANCHE2_TOTAL}`, at: t.at, href: tranche2Href(t.id), ok: t.docs >= TRANCHE2_TOTAL,
+    })),
+  ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()), [items, t2]);
+
+  const unread = useMemo(() => all.filter((n) => new Date(n.at).getTime() > seen).length, [all, seen]);
 
   function markAllRead() { setSeen(markNotifSeen()); }
   function openItem(n: Notif) { markAllRead(); setOpen(false); router.push(n.href); }
@@ -223,13 +250,13 @@ export default function NotificationBell() {
               ? <button type="button" onClick={markAllRead} className="text-[11px] font-semibold text-[#178a5c] hover:underline">Mark all read</button>
               : <span className="text-[11px] text-text-muted">You're all caught up</span>}
           </div>
-          {loading && items.length === 0 ? (
+          {loading && all.length === 0 ? (
             <div className="px-4 py-6 text-[12px] text-text-muted text-center">Checking…</div>
-          ) : items.length === 0 ? (
+          ) : all.length === 0 ? (
             <div className="px-4 py-6 text-[12px] text-text-muted text-center">{loadedOnce ? "Nothing yet." : "Nothing to show."}<br />When your team assigns you a case or comments on your work, it shows here.</div>
           ) : (
             <ul className="divide-y divide-line">
-              {items.map((n) => {
+              {all.map((n) => {
                 const isNew = new Date(n.at).getTime() > seen;
                 const tint = SRC_TINT[n.source];
                 return (
@@ -239,7 +266,7 @@ export default function NotificationBell() {
                       <div className="flex items-center gap-1.5 mb-0.5">
                         {isNew && <span className="w-2 h-2 rounded-full bg-[#178a5c] shrink-0" />}
                         <span className="text-[12px] font-bold text-text truncate">{n.author}</span>
-                        <span className="text-[11px] text-text-muted">{n.kind === "assign" ? "assigned you" : n.kind === "review" ? (n.ok ? "approved" : "sent back") : n.kind === "request" ? "wants a custom quotation" : "commented on"}</span>
+                        <span className="text-[11px] text-text-muted">{n.kind === "assign" ? "assigned you" : n.kind === "review" ? (n.ok ? "approved" : "sent back") : n.kind === "request" ? "wants a custom quotation" : n.kind === "tranche" ? "uploaded" : "commented on"}</span>
                         <span className="text-[9px] font-bold px-1.5 py-0.5 rounded ml-auto shrink-0" style={{ backgroundColor: tint.bg, color: tint.fg }}>{SRC_LABEL[n.source]}</span>
                       </div>
                       <div className="text-[12px] font-semibold text-text truncate">{n.caseName}</div>
@@ -249,6 +276,8 @@ export default function NotificationBell() {
                         ? <div className={["text-[12px] font-medium line-clamp-2 mt-0.5", n.ok ? "text-[#178a5c]" : "text-red-700"].join(" ")}>{n.ok ? "✓ " : "↩ "}{n.text}</div>
                         : n.kind === "request"
                         ? <div className="text-[12px] font-medium text-[#185fa5] mt-0.5">{n.text}</div>
+                        : n.kind === "tranche"
+                        ? <div className={["text-[12px] font-medium mt-0.5", n.ok ? "text-[#178a5c]" : "text-[#b45309]"].join(" ")}>{n.ok ? "✓ " : ""}{n.text}</div>
                         : <div className="text-[11px] text-[#178a5c] font-medium mt-0.5">New assignment — tap to open</div>}
                       <div className="text-[10px] text-text-muted mt-1">{ago(n.at)}</div>
                     </button>

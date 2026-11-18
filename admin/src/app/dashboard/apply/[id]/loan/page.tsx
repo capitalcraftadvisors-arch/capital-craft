@@ -21,6 +21,7 @@ import EpcApplyTracker from "@/components/EpcApplyTracker";
 import { getToken } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { amountInput, numberInput } from "@/lib/money";
+import LoanShareChips from "@/components/LoanShareChips";
 import {
   TENURES, DEFAULT_INDICATIVE_ROI,
   computeCentralSubsidy, computeEmi, formatRupees,
@@ -204,6 +205,8 @@ function Inner() {
               error={loanExceeds ? "Cannot exceed project cost." : undefined}
             />
           </div>
+          {/* Applied loan amount: 80 / 90 / 100 % of the project cost, or Custom. */}
+          <LoanShareChips cost={Number(totalCost) || 0} value={loanAmount} onPick={setLoanAmount} tone="#1e3a8a" />
           {validSize && validCost && (
             <p className="text-[12px] text-[#5a8a76]">
               Per kW price:{" "}

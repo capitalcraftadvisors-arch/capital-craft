@@ -10,7 +10,7 @@ import Card from "@/components/ui/Card";
 import FieldGroup from "@/components/ui/FieldGroup";
 import WizardProgress from "@/components/WizardProgress";
 import FileUpload from "@/components/FileUpload";
-import { getBusiness, setBusiness, isImpersonating } from "@/lib/auth";
+import { getBusiness, setBusiness, isImpersonating, logout } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { extractPan, extractGstLegalName } from "@/lib/ocr";
 import { PAN_RE } from "@/lib/validators";
@@ -87,6 +87,8 @@ export default function Step2Page() {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
   const [businessId, setBusinessId] = useState<string | null>(null);
+  // This PAN / GSTIN is already another EPC's (0124) → onboarding stops here.
+  const [taken, setTaken] = useState<{ pan: boolean; gstin: boolean } | null>(null);
 
   const {
     register, handleSubmit, reset, watch, setValue,
@@ -134,12 +136,26 @@ export default function Step2Page() {
     })();
   }, [reset]);
 
+  // A new sign-up whose PAN / GST registration is already another EPC's — the
+  // company is on Capital Craft already (add the user from its partner portal).
+  // Only for an EPC onboarding itself (a CC admin working on behalf isn't stopped).
+  // True when it's taken (and the stop screen is shown).
+  async function alreadyRegistered(pan: string, gstin: string): Promise<boolean> {
+    if (isImpersonating() || (!pan.trim() && !gstin.trim())) return false;
+    const { data, error } = await supabase().rpc("epc_pan_gst_taken", { p_pan: pan, p_gstin: gstin });
+    const t = !error ? (data as { pan?: boolean; gstin?: boolean } | null) : null;
+    if (!t?.pan && !t?.gstin) return false;
+    setTaken({ pan: !!t.pan, gstin: !!t.gstin });
+    return true;
+  }
+
   // OCR runs silently — no user-facing feedback. Fields simply appear
   // populated a moment after upload. EPCs can edit anything wrong.
   async function handlePanUploaded({ file }: { file: File }) {
     try {
       const r = await extractPan(file);
       if (r.ok && r.pan) setValue("pan_number", r.pan, { shouldValidate: true });
+      if (r.ok && r.pan) await alreadyRegistered(r.pan, "");
     } catch (e) {
       console.warn("[step-2] PAN OCR silent failure:", e);
     }
@@ -153,6 +169,7 @@ export default function Step2Page() {
       if (r.trade_name) setValue("trade_name", r.trade_name, { shouldValidate: true });
       if (r.gstin)      setValue("gstin_number", r.gstin,      { shouldValidate: true });
       if (r.address)    setValue("gst_address", r.address,     { shouldValidate: true });
+      if (r.gstin) await alreadyRegistered(watch("pan_number") || "", r.gstin);
       // Persist OCR audit trail on the gstin doc row for future debugging.
       try {
         await supabase()
@@ -222,6 +239,9 @@ export default function Step2Page() {
       }
     }
 
+    // Typed (not read) PAN / GSTIN too — checked before anything is saved.
+    if (await alreadyRegistered(values.pan_number, values.gstin_number)) return;
+
     setSaving(true);
     const { error } = await supabase()
       .from("epc_business")
@@ -252,6 +272,29 @@ export default function Step2Page() {
 
   const extraLabel = extraDocLabel(bt);
   const isDraft = getBusiness()?.status === "draft" && !isImpersonating();
+
+  // Already on Capital Craft — stop: one company, one partner account.
+  if (taken) {
+    const what = taken.pan && taken.gstin ? "PAN card and GST registration are" : taken.pan ? "PAN card is" : "GST registration is";
+    return (
+      <div className="max-w-lg mx-auto mt-10 rounded-2xl border border-[#f3d9a4] bg-[#fef8ee] p-7 text-center">
+        <div className="mx-auto mb-4 grid place-items-center w-12 h-12 rounded-full bg-[#854f0b] text-white text-[22px] font-bold">!</div>
+        <h1 className="font-display text-[22px] font-bold text-[#0f3d2e]">Already registered</h1>
+        <p className="mt-3 text-[15px] text-[#0f3d2e]">This {what} already registered with Capital Craft.</p>
+        <p className="mt-2 text-[14px] text-text-mid">To add a user, log in to your company&apos;s partner portal and add them in <b>Settings → Users</b>.</p>
+        <div className="mt-6 flex justify-center gap-2 flex-wrap">
+          <button type="button" onClick={() => setTaken(null)}
+            className="px-4 py-2.5 rounded-xl border border-line bg-white text-[14px] font-semibold text-[#0f3d2e] hover:bg-bg-soft">
+            Check the documents again
+          </button>
+          <button type="button" onClick={() => { logout(); router.replace("/login" as any); }}
+            className="px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c]">
+            Log out
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>

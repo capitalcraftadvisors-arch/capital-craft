@@ -34,6 +34,7 @@ import { amountInput } from "@/lib/money";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import { professionsFor } from "@/lib/loan-form";
 import { withoutThumbs } from "@/lib/chat-draft";
+import LoanShareChips from "@/components/LoanShareChips";
 
 export default function IntakePage() {
   return (
@@ -1392,6 +1393,13 @@ function Inner() {
 
             {(active.kind === "text" || active.kind === "pincode") && (
               <div className="flex flex-col gap-1">
+                {/* Applied loan amount: 80 / 90 / 100 % of the project cost, or Custom. */}
+                {active.field === "loan_amount_required" && (
+                  <div className="mb-1">
+                    <LoanShareChips cost={Number(form.total_project_cost) || 0} value={input}
+                      onPick={setInput} onCustom={() => inputRef.current?.focus()} />
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <input ref={inputRef} autoFocus value={input} onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === "Enter") void (active.kind === "pincode" ? submitPincode() : submitText()); if (e.key === "Escape" && editing) cancelEdit(); }}

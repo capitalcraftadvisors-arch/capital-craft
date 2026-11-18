@@ -33,6 +33,7 @@ import { getToken } from "@/lib/auth";
 import { MOBILE_RE, EMAIL_RE, PAN_RE } from "@/lib/validators";
 import { INDIA_STATES } from "@/lib/india-states";
 import { amountInput, numberInput, fmtRupees } from "@/lib/money";
+import LoanShareChips from "@/components/LoanShareChips";
 
 // ── Static option lists ──────────────────────────────────────────────
 
@@ -736,6 +737,8 @@ function Inner() {
               error={loanExceedsCost ? "Loan amount cannot exceed total project cost." : undefined}
             />
           </div>
+          {/* Applied loan amount: 80 / 90 / 100 % of the project cost, or Custom. */}
+          <div className="mt-3"><LoanShareChips cost={Number(totalCost) || 0} value={loanAmount} onPick={setLoanAmount} /></div>
         </Card>
 
         {/* d. Project Summary — read-only computed */}
