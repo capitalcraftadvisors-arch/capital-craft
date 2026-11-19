@@ -32,7 +32,8 @@ type Form = {
   gst_username: string;
 };
 
-const BANK_STMT_REQUIRED = 12; // exactly 12 monthly statements
+// Bank statements: at least one file (one PDF can cover all 12 months), as many as they like.
+const BANK_STMT_MIN = 1;
 
 // Masks all but the last 4 digits, e.g. "1000009414001643" → "••••••••••••1643".
 function maskAccount(s: string): string {
@@ -229,8 +230,8 @@ export default function Step4Page() {
       if (!v.bank_name.trim()) {
         return alert("Please enter the bank name.");
       }
-      if (bankStmtCount < BANK_STMT_REQUIRED) {
-        return alert(`Please upload all ${BANK_STMT_REQUIRED} monthly bank statements (${bankStmtCount}/${BANK_STMT_REQUIRED} so far).`);
+      if (bankStmtCount < BANK_STMT_MIN) {
+        return alert("Please upload your last 12 months' bank statements.");
       }
       if (!v.gst_username.trim()) {
         return alert("Please enter the GST username.");
@@ -250,7 +251,7 @@ export default function Step4Page() {
   // is present (they can also Skip). Saving always disables.
   const continueDisabled =
     saving || (isDraft
-      ? (!acctMatches || bankStmtCount < BANK_STMT_REQUIRED || !gstUser.trim())
+      ? (!acctMatches || bankStmtCount < BANK_STMT_MIN || !gstUser.trim())
       : acct.length > 0 && !acctMatches);
 
   return (
@@ -373,23 +374,23 @@ export default function Step4Page() {
           </form>
         </Card>
 
-        {/* 12 months of bank statements — exactly 12, deduplicated on upload. */}
+        {/* 12 months of bank statements — one file or many, deduplicated on upload. */}
         {businessId && (
           <Card className="p-6 sm:p-7">
             <h2 className="font-display font-semibold text-[16px]">Last 12 months&rsquo; bank statements</h2>
             <p className="text-[13px] text-text-mid mt-1 mb-3">
-              Upload all 12 monthly statements for the account above. Duplicate files are skipped automatically.
-              <span className="font-semibold text-[#0f3d2e]"> {bankStmtCount}/{BANK_STMT_REQUIRED} uploaded.</span>
+              One file or as many as you need. Duplicate files are skipped automatically.
+              {bankStmtCount > 0 && <span className="font-semibold text-[#0f3d2e]"> {bankStmtCount} uploaded.</span>}
             </p>
             <FileUpload
               businessId={businessId}
               table="epc_documents"
               category="bank_statement"
-              maxFiles={BANK_STMT_REQUIRED}
+              maxFiles={Infinity}
               uploadedBy="epc"
               dedupe
               onCountChange={setBankStmtCount}
-              uploadHint="PDF or image — 12 monthly statements"
+              uploadHint="PDF or image"
             />
           </Card>
         )}
