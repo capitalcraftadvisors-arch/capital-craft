@@ -57,11 +57,18 @@ export default function AuthGuard({ children, allow, requireModule }: Props) {
     // role / modules in the same request.
     const member = biz.member ?? null;
     const cols = "id, status, business_type, current_step, contact_name, epc_self_edited, epc_self_edited_at, loan_app_unlocked, service_type, role, allowed_modules, parent_user_id, is_demo";
-    const sel: string = member ? `${cols}, epc_members(id, name, member_role, modules, active)` : cols;
-    let q = supabase().from("epc_business").select(sel).eq("id", biz.id);
-    if (member) q = q.eq("epc_members.id", member.id);
-    type Row = Business & { epc_members?: { id: string; name: string; member_role: string; modules: string[]; active: boolean }[] };
-    q.maybeSingle()
+    // An EPC's Partner Portal v2 switch (0133) comes in the same read; a database
+    // without it yet answers an error → read again without it.
+    const v2 = biz.business_type !== "admin" ? ", epc_subscriptions(portal_v2)" : "";
+    const read = (extra: string) => {
+      const sel: string = (member ? `${cols}, epc_members(id, name, member_role, modules, active)` : cols) + extra;
+      let q = supabase().from("epc_business").select(sel).eq("id", biz.id);
+      if (member) q = q.eq("epc_members.id", member.id);
+      return q.maybeSingle();
+    };
+    type Sub = { portal_v2: boolean };
+    type Row = Business & { epc_members?: { id: string; name: string; member_role: string; modules: string[]; active: boolean }[]; epc_subscriptions?: Sub | Sub[] | null };
+    read(v2).then((res) => (res.error && v2 ? read("") : res))
       .then((res) => {
         const data = res.data as unknown as Row | null;
         // A switched-off staff login can't read its company any more → signed out.
@@ -71,10 +78,12 @@ export default function AuthGuard({ children, allow, requireModule }: Props) {
           router.replace("/login");
           return;
         }
-        const { epc_members: _members, ...row } = data ?? ({} as Business & { epc_members?: unknown });
+        const { epc_members: _members, epc_subscriptions: subs, ...row } = data ?? ({} as Row);
+        const sub = Array.isArray(subs) ? subs[0] : subs;
         // Merge so login-only fields (is_owner) survive the refresh.
         const latest: Business = data
-          ? { ...biz, ...(row as Business), ...(m ? { member: { id: m.id, name: m.name, role: m.member_role as "ADMIN" | "SALES" | "VIEWER" | "SITE", modules: m.modules } } : {}) }
+          ? { ...biz, ...(row as Business), portal_v2: !!sub?.portal_v2,
+              ...(m ? { member: { id: m.id, name: m.name, role: m.member_role as "ADMIN" | "SALES" | "VIEWER" | "SITE", modules: m.modules } } : {}) }
           : biz;
         if (data) setBusiness(latest);
         if (!matches(latest, allow)) {

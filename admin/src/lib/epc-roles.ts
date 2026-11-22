@@ -21,8 +21,8 @@ export const canManageOrg = (b: Business | null | undefined) => ["OWNER", "ADMIN
 /** Create / change loans, insurance, quotations, leads. */
 export const canWork = (b: Business | null | undefined) => !["VIEWER", "SITE"].includes(epcRole(b));
 export const hasModule = (b: Business | null | undefined, m: EpcModule) => !b?.member || (b.member.role !== "SITE" && b.member.modules.includes(m));
-/** Partner Portal v2 (leads, projects, Site staff, WhatsApp, …) — the demo EPC only until each phase is checked. */
-export const portalV2 = (b: Business | null | undefined) => !!b?.is_demo;
+/** Partner Portal v2 (leads, projects, Site staff, WhatsApp, …) — the demo EPC, and each EPC CC switches it on for (0133). */
+export const portalV2 = (b: Business | null | undefined) => !!b?.is_demo || !!b?.portal_v2;
 /** Site staff (0128): their projects only. */
 export const isSiteStaff = (b: Business | null | undefined) => epcRole(b) === "SITE";
 /** A role's name in the portal — Portal v2 calls Admin "Manager". */

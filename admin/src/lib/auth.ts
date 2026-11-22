@@ -43,6 +43,8 @@ export type Business = {
   member?: { id: string; name: string; role: "ADMIN" | "SALES" | "VIEWER" | "SITE"; modules: string[] } | null;
   // The hidden demo EPC (0081) — Partner Portal v2 is switched on here first (lib/epc-roles portalV2).
   is_demo?: boolean;
+  // Partner Portal v2 switched on for this EPC by CC (epc_subscriptions.portal_v2, 0133; AuthGuard reads it).
+  portal_v2?: boolean;
 };
 
 // The six admin console module keys (match AdminSidebar tab keys).

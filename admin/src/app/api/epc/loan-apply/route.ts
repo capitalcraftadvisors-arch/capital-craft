@@ -68,13 +68,14 @@ function err(message: string, status: number) {
 }
 
 // Duplicate customer (0127): another EPC already filed a loan for this mobile / PAN
-// → stop, without saying which. Only the demo EPC for now (`demo` — Partner Portal
-// v2); before 0127 the call fails and nothing is blocked.
+// → stop, without saying which. Only EPCs with Partner Portal v2 (`v2`, 0133; `demo`
+// before it); before 0127 the call fails and nothing is blocked.
 const TAKEN_MSG = "This customer has already applied through another partner.";
 async function customerCheck(db: SupabaseClient, mobile: string | null, pan: string | null): Promise<{ taken: boolean; v2: boolean }> {
   const { data } = await db.rpc("epc_customer_taken", { p_mobile: mobile, p_pan: pan });
-  const t = data as { mobile?: boolean; pan?: boolean; demo?: boolean } | null;
-  return { taken: !!t?.demo && (!!t.mobile || !!t.pan), v2: !!t?.demo };
+  const t = data as { mobile?: boolean; pan?: boolean; v2?: boolean; demo?: boolean } | null;
+  const v2 = !!(t?.v2 ?? t?.demo);
+  return { taken: v2 && (!!t?.mobile || !!t?.pan), v2 };
 }
 function strOrNull(v: unknown): string | null {
   if (v == null) return null;

@@ -5,8 +5,8 @@
 // migration 0131 — only its hash is stored), which answers one row per person to
 // remind: each active staff member with an email gets the open leads they own
 // whose follow-up is today or earlier; the company owner gets the leads with no
-// owner. One email per person from the Capital Craft Gmail. The demo EPC only
-// for now (the is_demo line in 0131). One database request per run.
+// owner. One email per person from the Capital Craft Gmail. Only EPCs with the
+// new partner portal (epc_portal_v2, 0133). One database request per run.
 // Answers: 200 {ok, sent, failed} · 401 bad key · 500
 //
 // Deploy steps (once, after migration 0131 is applied):

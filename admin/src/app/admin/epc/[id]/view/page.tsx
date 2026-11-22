@@ -879,8 +879,8 @@ function Inner() {
                 <CustomTemplateCard businessId={biz.id} />
               </Section>
             )}
-            {/* Paid features (0128) — the demo EPC first (Partner Portal v2). */}
-            {biz.business_type !== "admin" && (biz as { is_demo?: boolean }).is_demo && (
+            {/* CC's switches for this EPC (0128 / 0133): the new partner portal + the paid features. */}
+            {biz.business_type !== "admin" && (
               <Section card dropdown icon={I.lock} title="Subscription">
                 <SubscriptionCard businessId={biz.id} />
               </Section>
