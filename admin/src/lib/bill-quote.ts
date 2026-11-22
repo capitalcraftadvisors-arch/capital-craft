@@ -31,16 +31,17 @@ export type BillQuoteFields = {
   k_number: string | null;       // consumer / K / CA number
 };
 
-// Units 1 kW of solar makes in a month, by state. Rajasthan 120; every other
-// state is 120 too until the user gives its figure — add it here.
+// Units 1 kW of solar makes in a month — only the starting figure: it varies
+// (site, roof, state), so the partner changes it on every quotation (23/11).
 export const UNITS_PER_KW_MONTH: Record<string, number> = { Rajasthan: 120 };
 const DEFAULT_UNITS_PER_KW_MONTH = 120;
 export const unitsPerKwMonth = (state: string | null | undefined) => UNITS_PER_KW_MONTH[state ?? ""] ?? DEFAULT_UNITS_PER_KW_MONTH;
 
-/** The plant for the units a month: up to the next 0.5 kW, not above the sanctioned load + 1 kW. 0 = no units. */
-export function suggestKw(units: number | null, state: string | null, sanctionedKw: number | null): number {
-  if (!units || !(units > 0)) return 0;
-  const kw = Math.ceil((units / unitsPerKwMonth(state)) * 2 - 1e-9) / 2;
+/** The plant for the units a month at `perKwMonth` units a kW: up to the next 0.5 kW,
+ *  not above the sanctioned load + 1 kW. 0 = no units. */
+export function suggestKw(units: number | null, perKwMonth: number, sanctionedKw: number | null): number {
+  if (!units || !(units > 0) || !(perKwMonth > 0)) return 0;
+  const kw = Math.ceil((units / perKwMonth) * 2 - 1e-9) / 2;
   if (!sanctionedKw || !(sanctionedKw > 0)) return kw;
   return Math.max(0.5, Math.min(kw, Math.floor((sanctionedKw + 1) * 2 + 1e-9) / 2));
 }

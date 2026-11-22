@@ -17,12 +17,13 @@ import { saveQuote, type QuoteRow } from "@/lib/quotes";
 import { stateOfGstin } from "@/lib/india-states";
 import { fmtRupees } from "@/lib/money";
 import { MOBILE_RE } from "@/lib/validators";
-import { billFigures, billQuoteDoc, defaultPricePerKw, readBill, suggestKw, type BillQuoteFields } from "@/lib/bill-quote";
+import { billFigures, billQuoteDoc, defaultPricePerKw, readBill, suggestKw, unitsPerKwMonth, type BillQuoteFields } from "@/lib/bill-quote";
 import type { OrgProfile } from "@/lib/org-profile";
 
 type Draft = {
   name: string; mobile: string; address: string; discom: string;
   units: string; bill: string; domestic: boolean;
+  per_kw: string | null; // units a kW makes a month; null = the state's starting figure
   kw: string | null;     // null = follows the units
   price: string | null;  // null = the default price per kW
   state: string; k_number: string; sanctioned_kw: number | null;
@@ -31,7 +32,7 @@ type Draft = {
 const draftOf = (b: BillQuoteFields | null, mobile = ""): Draft => ({
   name: b?.name ?? "", mobile, address: b?.address ?? "", discom: b?.discom ?? "",
   units: b?.units != null ? String(b.units) : "", bill: b?.bill != null ? String(b.bill) : "",
-  domestic: b?.domestic ?? true, kw: null, price: null,
+  domestic: b?.domestic ?? true, per_kw: null, kw: null, price: null,
   state: b?.state ?? "", k_number: b?.k_number ?? "", sanctioned_kw: b?.sanctioned_kw ?? null,
 });
 
@@ -71,7 +72,8 @@ export default function BillToQuote({ quotes, onClose }: { quotes: QuoteRow[]; o
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => { setD((p) => ({ ...p, [k]: v })); setError(null); };
 
   const epcState = gstState || org?.state || "";
-  const autoKw = suggestKw(Number(d.units) || null, d.state || org?.state || null, d.sanctioned_kw);
+  const perKwText = d.per_kw ?? String(unitsPerKwMonth(d.state || org?.state || null));
+  const autoKw = suggestKw(Number(d.units) || null, Number(perKwText) || 0, d.sanctioned_kw);
   const kwText = d.kw ?? (autoKw ? String(autoKw) : "");
   const defPrice = useMemo(() => defaultPricePerKw(org, d.domestic ? "residential" : "commercial", quotes), [org, d.domestic, quotes]);
   const priceText = d.price ?? (defPrice ? String(defPrice) : "");
@@ -152,6 +154,7 @@ export default function BillToQuote({ quotes, onClose }: { quotes: QuoteRow[]; o
               </Field>
               <Field l="Units / month"><input className={input} inputMode="decimal" value={d.units} onChange={(e) => set("units", decimal(e.target.value))} /></Field>
               <Field l="Current bill ₹ / month"><input className={input} inputMode="decimal" value={d.bill} onChange={(e) => set("bill", decimal(e.target.value))} /></Field>
+              <Field l="Units per kW / month"><input className={input} inputMode="decimal" value={perKwText} onChange={(e) => { set("per_kw", decimal(e.target.value)); set("kw", null); }} /></Field>
               <Field l="System size (kW)" req><input className={input} inputMode="decimal" value={kwText} onChange={(e) => set("kw", decimal(e.target.value))} /></Field>
               <Field l="Price per kW ₹ (before GST)" req><input className={input} inputMode="decimal" value={priceText} onChange={(e) => set("price", decimal(e.target.value))} /></Field>
             </fieldset>

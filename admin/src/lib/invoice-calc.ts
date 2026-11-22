@@ -9,7 +9,8 @@
 // the place of supply is the EPC's own state (its GSTIN's), else IGST — the same
 // rule as lib/quote-calc (an unknown state counts as the EPC's own).
 
-// Rates to be confirmed by the CA.
+// GST is fixed at 8.9 % overall (the user, 23/11), written on the invoice as the
+// solar composite supply: 70 % goods at 5 % + 30 % services at 18 %.
 type SplitLine = { key: string; share: number; rate: number; hsn: string; description: (size: string) => string };
 export const INVOICE_SPLIT: SplitLine[] = [
   { key: "goods", share: 0.7, rate: 5, hsn: "8541", description: (size) => `Supply of ${size}rooftop solar power plant (solar modules, inverter, structure and balance of system)` },

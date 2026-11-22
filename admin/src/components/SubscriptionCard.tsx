@@ -1,16 +1,14 @@
 "use client";
 
 // Admin EPC profile → "Subscription" (0128 / 0129): the paid features CC switches
-// on for this EPC — WhatsApp (one-tap share, reminders) and Invoices — until an
-// optional end date (after it, old invoices stay downloadable, nothing new is
-// made or sent). The main admin changes it; everyone else sees where it stands.
-// Reads once, when opened.
+// on for this EPC — WhatsApp (one-tap share, reminders) and Invoices — on a plain
+// On / Off switch (the user, 23/11; switched off, old invoices stay downloadable,
+// nothing new is made or sent). The main admin changes it; everyone else sees
+// where it stands. Reads once, when opened.
 
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, isMainAdmin } from "@/lib/auth";
-import { fmtDate } from "@/lib/dates";
-import DateField from "@/components/ui/DateField";
 import { hasFeature, type Feature, type Subscription } from "@/lib/subscription";
 
 const FEATURES: [Feature, string][] = [["whatsapp", "WhatsApp"], ["invoices", "Invoices"]];
@@ -56,12 +54,6 @@ export default function SubscriptionCard({ businessId }: { businessId: string })
           )}
         </div>
       ))}
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[12.5px] text-[#5a8a76]">Valid till</span>
-        {admin
-          ? <DateField value={sub.valid_until ?? ""} onChange={(v) => void save({ valid_until: v || null })} disabled={busy} className="max-w-[150px]" />
-          : <span className="text-[12.5px] text-[#0f3d2e]">{sub.valid_until ? fmtDate(sub.valid_until) : "—"}</span>}
-      </div>
       {error && <p className="text-[12px] text-red-600">{error}</p>}
     </div>
   );
