@@ -57,6 +57,8 @@ const COLS = "id, created_at, name, mobile, pincode, city, state, monthly_bill, 
 const CK = "dash.gzb";
 const th = "px-3 py-3 font-medium text-[12px] uppercase tracking-wide";
 const inDays = (n: number) => localIsoDate(new Date(Date.now() + n * 86_400_000));
+// The form's choice keys as words: "premium_solar_system_with_expert_installation" → "Premium solar system with expert installation".
+const words = (v: string | null) => (v ? v.replace(/_+/g, " ").trim().replace(/^./, (c) => c.toUpperCase()) : v);
 const tel = (m: string) => `tel:+91${m}`;
 
 type Tab = "leads" | "myday" | "calls";
@@ -226,7 +228,7 @@ function Inner() {
                           <p className="text-[12px] text-[#5a8a76]">{[r.city, r.pincode, r.state].filter(Boolean).join(" · ")}</p>
                         </td>
                         <td className="px-3 py-3 text-[13px] text-[#0f3d2e]">{r.monthly_bill || "—"}</td>
-                        <td className="px-3 py-3 text-[13px] text-[#0f3d2e]">{r.looking_for || "—"}</td>
+                        <td className="px-3 py-3 text-[13px] text-[#0f3d2e] max-w-[220px] break-words">{words(r.looking_for) || "—"}</td>
                         <td className="px-3 py-3 text-[13px] text-[#0f3d2e]">
                           <div>{r.utm_source || "—"}</div>
                           {r.utm_campaign && <div className="text-[12px] text-[#5a8a76]">{r.utm_campaign}</div>}
@@ -321,7 +323,7 @@ function DaySection({ title, tone, rows, today, onOpen, onLog }: {
               <div className="min-w-0">
                 <p className="text-[15px] font-semibold text-[#0f3d2e]">{r.name || "—"} <span className="text-[13px] font-normal text-[#185fa5]">+91 {r.mobile}</span></p>
                 <p className="text-[12.5px] text-[#5a8a76]">
-                  {[r.city, r.monthly_bill && `Bill ${r.monthly_bill}`, r.looking_for].filter(Boolean).join(" · ") || "—"}
+                  {[r.city, r.monthly_bill && `Bill ${r.monthly_bill}`, words(r.looking_for)].filter(Boolean).join(" · ") || "—"}
                 </p>
                 {(r.last_call_at || r.follow_up_at) && (
                   <p className="text-[12.5px] text-[#0f3d2e] mt-0.5">
@@ -356,7 +358,7 @@ function LeadWindow({ lead, added, busy, onUpdate, onLog, onClose }: {
     if (added && added.lead_id === lead.id) setCalls((cs) => (cs && !cs.some((x) => x.id === added.id) ? [added, ...cs] : cs));
   }, [added, lead.id]);
   const row = (l: string, v: string | null | undefined) => (
-    <div><div className="text-[11.5px] text-[#5a8a76]">{l}</div><div className="text-[14px] text-[#0f3d2e]">{v || "—"}</div></div>
+    <div className="min-w-0"><div className="text-[11.5px] text-[#5a8a76]">{l}</div><div className="text-[14px] text-[#0f3d2e] break-words">{v || "—"}</div></div>
   );
   return (
     <div className="fixed inset-0 z-50 bg-black/30 grid place-items-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -372,8 +374,8 @@ function LeadWindow({ lead, added, busy, onUpdate, onLog, onClose }: {
           {row("City", [lead.city, lead.pincode].filter(Boolean).join(" · "))}
           {row("State", lead.state)}
           {row("Monthly bill", lead.monthly_bill)}
-          {row("Looking for", lead.looking_for)}
-          {row("Timeline", lead.timeline)}
+          {row("Looking for", words(lead.looking_for))}
+          {row("Timeline", words(lead.timeline))}
           {row("Source", [lead.utm_source, lead.utm_campaign].filter(Boolean).join(" · "))}
           {row("Received", fmtDateTime(lead.created_at))}
         </div>
