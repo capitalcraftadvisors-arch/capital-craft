@@ -9,6 +9,8 @@
 //   My Day    — follow-ups overdue / due today and the new leads not called yet,
 //               each with Call, WhatsApp and Log call
 //   Calls     — every call logged, newest first (read when the tab opens)
+//   Traffic   — the website's visits (gzb_events, 0134): the last 14 days, one
+//               line a day (read when the tab opens); a day opens its visits
 // A logged call (outcome, note, next follow-up) updates its lead in the
 // database (trigger) and here in place — the list is one query on open, cached
 // like the other lists; nothing is fetched again.
@@ -24,7 +26,7 @@ import DateField from "@/components/ui/DateField";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { getCached, setCached, invalidate } from "@/lib/list-cache";
-import { fmtDate, fmtDateTime, localIsoDate } from "@/lib/dates";
+import { fmtDate, fmtDateTime, fmtTime, localIsoDate } from "@/lib/dates";
 import { waUrl } from "@/lib/wa-link";
 import { LEAD_STATUS_OPTIONS, LEAD_STATUS_PILL } from "@/lib/lead-status";
 
@@ -61,7 +63,7 @@ const inDays = (n: number) => localIsoDate(new Date(Date.now() + n * 86_400_000)
 const words = (v: string | null) => (v ? v.replace(/_+/g, " ").trim().replace(/^./, (c) => c.toUpperCase()) : v);
 const tel = (m: string) => `tel:+91${m}`;
 
-type Tab = "leads" | "myday" | "calls";
+type Tab = "leads" | "myday" | "calls" | "traffic";
 
 export default function GozerobilsLeadsPage() {
   return (
@@ -150,7 +152,7 @@ function Inner() {
     if (!needle) return true;
     return [r.name, r.mobile, r.city, r.pincode].some((v) => (v ?? "").toLowerCase().includes(needle));
   });
-  const tabs: [Tab, string, number | null][] = [["myday", "My Day", dayCount], ["leads", "All leads", rows?.length ?? null], ["calls", "Calls", null]];
+  const tabs: [Tab, string, number | null][] = [["myday", "My Day", dayCount], ["leads", "All leads", rows?.length ?? null], ["calls", "Calls", null], ["traffic", "Traffic", null]];
 
   return (
     <div className="min-h-screen lg:flex" style={themeStyle("gzb")}>
@@ -286,11 +288,150 @@ function Inner() {
               </table>
             </Card>
           )}
+
+          {tab === "traffic" && <Traffic />}
         </main>
       </div>
 
       {open && <LeadWindow lead={open} added={lastCall} busy={busy === open.id} onUpdate={(p) => update(open, p)} onLog={() => setLogFor(open)} onClose={() => setOpen(null)} />}
       {logFor && <LogCall lead={logFor} onLogged={(c, s) => { logged(logFor, c, s); setLogFor(null); }} onClose={() => setLogFor(null)} />}
+    </div>
+  );
+}
+
+type TrafficDay = {
+  day: string; visitors: number; visits: number; page_views: number; clicks: number; dead_taps: number; rage_taps: number;
+  leads: number; pixel_events: number; capi_ok: number; capi_failed: number;
+};
+type Visit = {
+  visit_id: string; started: string; source: string | null; campaign: string | null; referrer: string | null; device: string | null;
+  pages: number; max_scroll: number | null; engaged_seconds: number | null; clicks: number;
+  pixel_events: string | null; capi_ok: string | null; capi_failed: string | null; lead: boolean | null;
+};
+const TRAFFIC_DAYS = 14;
+const TK = "dash.gzb.traffic";
+const TRAFFIC_TTL = 300_000;
+const DAY_COLS: [Exclude<keyof TrafficDay, "day">, string][] = [
+  ["visitors", "Visitors"], ["visits", "Visits"], ["page_views", "Page views"], ["clicks", "Clicks"], ["dead_taps", "Dead taps"],
+  ["rage_taps", "Rage taps"], ["leads", "Leads"], ["pixel_events", "Pixel events"], ["capi_ok", "CAPI ok"], ["capi_failed", "CAPI failed"],
+];
+const NO_TRAFFIC = Object.fromEntries(DAY_COLS.map(([k]) => [k, 0])) as Omit<TrafficDay, "day">;
+const dayTone = (k: string, n: number) =>
+  !n ? "text-[#9bb5aa]" : k === "capi_failed" ? "text-[#dc2626] font-semibold" : k === "leads" ? "text-[#178a5c] font-semibold" : "text-[#0f3d2e]";
+const host = (u: string | null) => { if (!u) return null; try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; } };
+const dur = (s: number | null) => (s == null ? "—" : s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`);
+
+// The website's traffic: one request when the tab opens (the last 14 days), one when a
+// day is opened (its visits). Both kept 5 minutes, so switching tabs reads nothing again.
+function Traffic() {
+  const [days, setDays] = useState<TrafficDay[] | null>(null);
+  const [pick, setPick] = useState<string | null>(null);
+  const [visits, setVisits] = useState<Record<string, Visit[]>>({});
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const cached = getCached<TrafficDay[]>(TK, TRAFFIC_TTL);
+    if (cached) { setDays(cached); return; }
+    void supabase().rpc("gzb_traffic_days", { p_days: TRAFFIC_DAYS }).then(({ data, error: e }) => {
+      if (e) setError(e.message); else setCached(TK, data ?? []);
+      setDays((data ?? []) as TrafficDay[]);
+    });
+  }, []);
+
+  function openDay(day: string) {
+    if (pick === day) { setPick(null); return; }
+    setPick(day);
+    if (visits[day]) return;
+    const key = `${TK}.${day}`;
+    const cached = getCached<Visit[]>(key, TRAFFIC_TTL);
+    if (cached) { setVisits((v) => ({ ...v, [day]: cached })); return; }
+    void supabase().rpc("gzb_traffic_visits", { p_day: day }).then(({ data, error: e }) => {
+      if (e) setError(e.message); else setCached(key, data ?? []);
+      setVisits((v) => ({ ...v, [day]: (data ?? []) as Visit[] }));
+    });
+  }
+
+  // Every one of the 14 days, a day with no visits as zeros.
+  const byDay = new Map((days ?? []).map((d) => [d.day, d]));
+  const list = Array.from({ length: TRAFFIC_DAYS }, (_, i) => inDays(-i)).map((day) => byDay.get(day) ?? { day, ...NO_TRAFFIC });
+  const shown = pick ? visits[pick] ?? null : null;
+  const td = "px-3 py-3 text-[13px] text-[#0f3d2e]";
+
+  return (
+    <div className="flex flex-col gap-5">
+      {error && <p className="text-[13px] text-red-600">{error}</p>}
+      <Card className="overflow-x-auto cc-table-card">
+        <table className="w-full text-[14px] cc-table">
+          <thead className="text-left">
+            <tr>
+              <th className={th}>Day</th>
+              {DAY_COLS.map(([k, l]) => <th key={k} className={th + " text-center"}>{l}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {!days ? (
+              <tr><td colSpan={DAY_COLS.length + 1} className="px-5 py-10 text-center text-[#5a8a76]">Loading…</td></tr>
+            ) : list.map((d) => (
+              <tr key={d.day} onClick={() => { if (d.visits > 0) openDay(d.day); }}
+                className={["border-b border-[#eaf3ee]", d.visits > 0 ? "cursor-pointer hover:bg-[#f7fcfa]" : "", pick === d.day ? "bg-[#f0f8f4]" : ""].join(" ")}>
+                <td className={td + " font-semibold whitespace-nowrap"}>{fmtDate(d.day)}</td>
+                {DAY_COLS.map(([k]) => <td key={k} className={["px-3 py-3 text-center text-[13px]", dayTone(k, d[k])].join(" ")}>{d[k]}</td>)}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+
+      {pick && (
+        <section>
+          <div className="text-[13px] font-semibold mb-2 text-[#0f3d2e]">
+            {fmtDate(pick)} {shown && <span className="text-[#5a8a76] font-normal">{shown.length}</span>}
+          </div>
+          <Card className="overflow-x-auto cc-table-card">
+            <table className="w-full text-[14px] cc-table">
+              <thead className="text-left">
+                <tr>
+                  <th className={th}>Started</th>
+                  <th className={th}>Source</th>
+                  <th className={th}>Device</th>
+                  <th className={th + " text-center"}>Pages</th>
+                  <th className={th + " text-center"}>Scroll</th>
+                  <th className={th + " text-center"}>Time</th>
+                  <th className={th + " text-center"}>Clicks</th>
+                  <th className={th}>Pixel events</th>
+                  <th className={th}>CAPI</th>
+                  <th className={th + " text-center"}>Lead</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!shown || !shown.length ? (
+                  <tr><td colSpan={10} className="px-5 py-10 text-center text-[#5a8a76]">{!shown ? "Loading…" : "No visits."}</td></tr>
+                ) : shown.map((v) => (
+                  <tr key={v.visit_id} className="border-b border-[#eaf3ee] align-top">
+                    <td className={td + " whitespace-nowrap"}>{fmtTime(v.started)}</td>
+                    <td className={td + " max-w-[200px] break-words"}>
+                      <div>{v.source || host(v.referrer) || "—"}</div>
+                      {v.campaign && <div className="text-[12px] text-[#5a8a76]">{v.campaign}</div>}
+                    </td>
+                    <td className={td}>{v.device || "—"}</td>
+                    <td className={td + " text-center"}>{v.pages}</td>
+                    <td className={td + " text-center"}>{v.max_scroll != null ? `${v.max_scroll}%` : "—"}</td>
+                    <td className={td + " text-center whitespace-nowrap"}>{dur(v.engaged_seconds)}</td>
+                    <td className={td + " text-center"}>{v.clicks}</td>
+                    <td className={td + " max-w-[200px] break-words"}>{v.pixel_events || "—"}</td>
+                    <td className={td + " max-w-[200px] break-words"}>
+                      {v.capi_ok && <div className="text-[#178a5c]">{v.capi_ok}</div>}
+                      {v.capi_failed && <div className="text-[#dc2626] font-semibold">{v.capi_failed}</div>}
+                      {!v.capi_ok && !v.capi_failed && "—"}
+                    </td>
+                    <td className={td + " text-center"}>{v.lead ? <span className="text-[#178a5c] font-semibold">Yes</span> : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
+        </section>
+      )}
     </div>
   );
 }

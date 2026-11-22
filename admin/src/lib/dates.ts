@@ -48,12 +48,17 @@ export function withLocalDate(ts: DateInput, iso: string): string {
   return new Date(y, m - 1, d, t.getHours(), t.getMinutes(), t.getSeconds(), t.getMilliseconds()).toISOString();
 }
 
+/** "5:52 am" — local time of day. "—" when empty/invalid. */
+export function fmtTime(v: DateInput): string {
+  const d = parseLocal(v);
+  return d ? d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }) : "—";
+}
+
 /** "05/07/2026, 5:52 am" — date (DD/MM/YYYY) + local time. */
 export function fmtDateTime(v: DateInput): string {
   const d = parseLocal(v);
   if (!d) return "—";
-  const time = d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true });
-  return `${fmtDate(d)}, ${time}`;
+  return `${fmtDate(d)}, ${fmtTime(d)}`;
 }
 
 // ── Date of birth as read by OCR ────────────────────────────────────────────
