@@ -23,6 +23,7 @@ import {
   MODULE_BRANDS, INVERTER_BRANDS, ROOF_TYPES, MOUNTS_BY_ROOF,
   ACDB_DCDB_OPTIONS, CABLE_OPTIONS, BATTERY_OPTIONS, SYSTEM_TYPES, BRAND_FIELDS, BIJLEE, SARVATRA,
   SARVATRA_ENERGY, SARVATRA_ENERGY_BOQ, boqField, sarvatraEnergyBoq, sarvatraEnergyTotals, RVS, RVS_BOM, rvsBom, rvsFigures, rvsNoSubsidy,
+  POTALIYA, POTALIYA_BOM, potaliyaBom, potaliyaFigures,
   type BoqRow, type BoqCells, type BoqColumn,
 } from "@/lib/quotation-brands";
 
@@ -80,6 +81,7 @@ function Builder() {
   if (tpl?.storage_path === BIJLEE.key) return <BijleeForm serialNext={tpl.serial_next} />;
   if (tpl?.storage_path === SARVATRA_ENERGY.key) return <SarvatraEnergyForm serialNext={tpl.serial_next} />;
   if (tpl?.storage_path === RVS.key) return <RvsForm />;
+  if (tpl?.storage_path === POTALIYA.key) return <PotaliyaForm serialNext={tpl.serial_next} />;
   return <Inner />;
 }
 
@@ -534,6 +536,63 @@ function RvsForm() {
               : <input className={input} inputMode="decimal" value={f.subsidy} onChange={(e) => set("subsidy", decimal(e.target.value))} placeholder={inr(rvsFigures(kw, price, null).subsidy)} />}
           </Field>
           <Field l="Effective cost after subsidy ₹"><input className={input + " bg-bg-soft font-semibold"} readOnly value={inr(fig.effective)} /></Field>
+        </Section>
+
+        <DownloadBar busy={busy} error={error} onClick={() => void download()} />
+      </div>
+    </div>
+  );
+}
+
+// Potaliya Enterprises — their solar proposal: the customer, the bill of material
+// (every cell a dropdown, prefilled as in their sample) and the price with GST;
+// the subsidies default (central by kW, state ₹17,000), savings and the chart are
+// worked out. Date automatic, reference no. auto-numbered.
+type PotaliyaFields = { serial: string; customer_name: string; mobile: string; address: string; kw: string; price: string; central_subsidy: string; state_subsidy: string };
+
+function PotaliyaForm({ serialNext }: { serialNext: number | null }) {
+  const [f, setF] = useState<PotaliyaFields>({
+    serial: serialNext ? POTALIYA.serial(serialNext) : "", customer_name: "", mobile: "", address: "", kw: "", price: "", central_subsidy: "", state_subsidy: "",
+  });
+  const [bom, setBom] = useState<Record<string, string>>({}); // picked cells, `<row>_<column>`
+  const { formRef, onFormKey } = useKeyNav();
+  const { busy, error, setError, run } = useQuotationDownload();
+  const set = (k: keyof PotaliyaFields, v: string) => setF((p) => ({ ...p, [k]: v }));
+  const kw = Number(f.kw) || 0;
+  const price = Number(f.price) || 0;
+  const auto = potaliyaFigures(kw, price, null, null);
+  const cells = potaliyaBom(bom, kw);
+
+  async function download() {
+    if (!f.customer_name.trim()) { setError("Customer name is required."); return; }
+    if (!(kw > 0)) { setError("Enter the system size (kW)."); return; }
+    if (!(price > 0)) { setError("Enter the project cost."); return; }
+    const next = await run({ ...f, kw, price, bom });
+    if (next) set("serial", next);
+  }
+
+  return (
+    <div className="min-h-screen bg-bg-soft">
+      <BackHeader />
+      <div className="max-w-[900px] mx-auto px-5 sm:px-7 py-8" ref={formRef} onKeyDown={onFormKey}>
+        <h1 className="font-display text-[24px] sm:text-[28px] font-bold text-text">Quotation builder</h1>
+
+        <Section title="Customer">
+          <Field l="Proposal reference no."><input className={input} value={f.serial} onChange={(e) => set("serial", e.target.value)} placeholder={POTALIYA.serial(1)} /></Field>
+          <Field l="Customer name" req><input className={input} value={f.customer_name} onChange={(e) => set("customer_name", e.target.value)} placeholder="Full name" /></Field>
+          <Field l="Mobile"><input className={input} inputMode="numeric" value={f.mobile} onChange={(e) => set("mobile", digits(e.target.value).slice(0, 10))} placeholder="10-digit mobile" /></Field>
+          <Field l="Address"><input className={input} value={f.address} onChange={(e) => set("address", e.target.value)} placeholder="e.g. Jaipur Division" /></Field>
+          <Field l="System size (kW)" req><input className={input} inputMode="decimal" value={f.kw} onChange={(e) => set("kw", decimal(e.target.value))} placeholder="e.g. 10" /></Field>
+        </Section>
+
+        <BoqTable title="Bill of material" rows={POTALIYA_BOM} cells={cells}
+          columns={[["spec", "Specifications"], ["make", "Make / Brand"], ["qty", "Qty"]]} grid="sm:grid-cols-[1fr_2fr_1fr_0.8fr]"
+          onPick={(cell, v) => setBom((p) => ({ ...p, [cell]: v }))} />
+
+        <Section title="Domestic offer">
+          <Field l="Project cost (including GST) ₹" req><input className={input} inputMode="decimal" value={f.price} onChange={(e) => set("price", decimal(e.target.value))} placeholder="e.g. 480000" /></Field>
+          <Field l="Central subsidy ₹"><input className={input} inputMode="decimal" value={f.central_subsidy} onChange={(e) => set("central_subsidy", decimal(e.target.value))} placeholder={inr(auto.central)} /></Field>
+          <Field l="State subsidy ₹"><input className={input} inputMode="decimal" value={f.state_subsidy} onChange={(e) => set("state_subsidy", decimal(e.target.value))} placeholder={inr(auto.state)} /></Field>
         </Section>
 
         <DownloadBar busy={busy} error={error} onClick={() => void download()} />

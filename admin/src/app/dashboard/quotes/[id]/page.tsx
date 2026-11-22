@@ -25,7 +25,10 @@ import { INDIA_STATES, stateOfGstin } from "@/lib/india-states";
 import { amountInput, fmtRupees } from "@/lib/money";
 import { rupeesInWords } from "@/lib/numberToWords";
 import { getBusiness } from "@/lib/auth";
-import { canWork } from "@/lib/epc-roles";
+import { canWork, portalV2 } from "@/lib/epc-roles";
+import { fetchWhatsAppOn } from "@/lib/subscription";
+import { createProposal, whatsAppProposal } from "@/lib/proposals";
+import WhatsAppButton from "@/components/partner/WhatsAppButton";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -41,10 +44,16 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
   const [subsidy, setSubsidy] = useState("");
   const [stateSub, setStateSub] = useState("");
   const [dirty, setDirty] = useState(false);
-  const [busy, setBusy] = useState<"save" | "pdf" | "delete" | "status" | null>(null);
+  const [busy, setBusy] = useState<"save" | "pdf" | "delete" | "status" | "link" | "wa" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const merge = useBrandOptions();
+  // Partner Portal v2: the customer's proposal link — copy, or WhatsApp (paid).
+  const v2 = portalV2(getBusiness()) && work;
+  const [wa, setWa] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [shownLink, setShownLink] = useState<string | null>(null); // when the browser wouldn't copy it
+  useEffect(() => { if (v2) fetchWhatsAppOn().then(setWa, () => {}); }, [v2]);
   // Undo: earlier versions of the quotation (a burst of typing = one step; a
   // removed or added row always its own). Ctrl+Z outside a text box too.
   const [past, setPast] = useState<QuoteDoc[]>([]);
@@ -188,6 +197,29 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
     catch (e) { setError((e as Error).message); setBusy(null); }
   }
 
+  // The saved quotation for a proposal link (saving first when there are changes).
+  const savedFor = (kind: "link" | "wa") => async () => {
+    const saved = dirty || !row ? await save() : row;
+    if (!saved) return null;
+    setBusy(kind); setError(null);
+    return { id: saved.id, doc: doc! };
+  };
+
+  async function proposalLink() {
+    try {
+      const q = await savedFor("link")();
+      if (!q) return;
+      const url = await createProposal(q.id, q.doc);
+      const ok = await (navigator.clipboard?.writeText(url).then(() => true, () => false) ?? false);
+      setShownLink(ok ? null : url);
+      if (ok) { setCopied(true); setTimeout(() => setCopied(false), 2000); }
+    } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+  }
+
+  async function shareWa() {
+    try { await whatsAppProposal(savedFor("wa")); } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+  }
+
   const bomOf = (key?: string) => STANDARD_BOM.find((r) => r.key === key);
   const lines = totals.lines;
   // "+ Add item": the standard rows not on the quotation (e.g. one removed by
@@ -223,6 +255,15 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
           )}
           {row && work && <button type="button" onClick={() => router.push(`/dashboard/quotes/new?from=${row.id}` as any)} className={ghost}>Copy</button>}
           {row && work && <button type="button" onClick={() => void remove()} disabled={busy !== null} className={ghost + " text-red-600"}>Delete</button>}
+          {row && v2 && (
+            <>
+              {shownLink && <input readOnly autoFocus value={shownLink} onFocus={(e) => e.target.select()} className={input + " w-[240px]"} />}
+              <button type="button" onClick={() => void proposalLink()} disabled={busy !== null} className={ghost}>
+                {busy === "link" ? "Preparing…" : copied ? "Link copied" : "Proposal link"}
+              </button>
+              <WhatsAppButton on={wa} busy={busy === "wa"} onClick={() => void shareWa()} className="px-2" />
+            </>
+          )}
           {/* A viewer downloads the saved quotation as it is. */}
           <button type="button" onClick={() => void (work ? pdf() : row && downloadQuotePdf(row.id).catch((e) => setError((e as Error).message)))} disabled={busy !== null} className={ghost}>{busy === "pdf" ? "Preparing…" : "Download PDF"}</button>
           {work && (

@@ -12,6 +12,14 @@ export function waTel(mobile: string | null | undefined): string {
 /** The chat link for a 10-digit Indian mobile + message. */
 export const waUrl = (ten: string, text: string) => `https://wa.me/91${ten}?text=${encodeURIComponent(text)}`;
 
+/** Opens WhatsApp with the message — to this mobile, or the contact picker when there is none —
+ *  in `win` (a tab opened while the click still counted) or this tab. */
+export function openWhatsApp(win: Window | null, mobile: string | null | undefined, text: string) {
+  const ten = waTel(mobile);
+  const href = ten ? waUrl(ten, text) : `https://wa.me/?text=${encodeURIComponent(text)}`;
+  if (win) win.location.href = href; else window.location.href = href;
+}
+
 // The message body can be written in English, Hinglish, or easy Hindi.
 export type WaLang = "en" | "hinglish" | "hi";
 export const WA_LANGS: { key: WaLang; label: string }[] = [

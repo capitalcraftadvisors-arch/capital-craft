@@ -13,11 +13,12 @@ import { fetchEpcName, fetchEpcLogo, shortEpcName } from "@/lib/epc-name";
 import { orgImageUrl } from "@/lib/org-profile";
 import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template";
 import { SARVATRA } from "@/lib/quotation-brands";
-import { canManageOrg, epcRole, hasModule, personName, ROLE_LABEL } from "@/lib/epc-roles";
+import { canManageOrg, epcRole, hasModule, isSiteStaff, personName, portalV2, roleLabel } from "@/lib/epc-roles";
+import { watchDue } from "@/lib/leads";
 
 export const NAVY = "#14235c", NAVY_ACCENT = "#1e3a8a";
 
-export type PartnerSection = "home" | "loans" | "insurance" | "emi" | "documents" | "quotation" | "customers" | "settings";
+export type PartnerSection = "home" | "loans" | "insurance" | "emi" | "documents" | "quotation" | "customers" | "leads" | "projects" | "invoices" | "settings";
 export const PARTNER_SECTIONS: PartnerSection[] = ["home", "loans", "insurance", "emi", "documents", "customers"];
 
 const ICON: Record<PartnerSection, ReactNode> = {
@@ -28,6 +29,9 @@ const ICON: Record<PartnerSection, ReactNode> = {
   documents: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
   quotation: <><path d="M3 11V4a1 1 0 0 1 1-1h7l9 9-8 8-9-9Z" /><circle cx="7.5" cy="7.5" r="1.5" /></>,
   customers: <><circle cx="9" cy="8" r="3.5" /><path d="M2.5 20a6.5 6.5 0 0 1 13 0" /><path d="M16 4.5a3.5 3.5 0 0 1 0 7M21.5 20a6.5 6.5 0 0 0-4-6" /></>,
+  leads: <><path d="M3 5h18l-7 8v6l-4 2v-8z" /></>,
+  projects: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M3 9h18M8 4v16" /></>,
+  invoices: <><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" /><path d="M9 8h6M9 12h6" /></>,
   settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" /></>,
 };
 
@@ -53,14 +57,22 @@ export default function PartnerShell({ active, onSection, badge = 0, quoteTpl, t
   }, [quoteTpl]);
 
   const customers = tpl?.storage_path === SARVATRA.key;
-  const quotes = hasModule(me, "quotes"), manage = canManageOrg(me);
-  // A staff login sees only its modules (lib/epc-roles); Settings is the owner's / admins'.
+  const quotes = hasModule(me, "quotes"), manage = canManageOrg(me), v2 = portalV2(me), site = isSiteStaff(me);
+  // Leads: follow-ups due today or earlier (lib/leads — this browser's copy, no read of its own).
+  const [due, setDue] = useState(0);
+  useEffect(() => (v2 && !site ? watchDue(setDue) : undefined), [v2, site]);
+  const badgeOf = (k: PartnerSection) => (k === "documents" ? badge : k === "leads" ? due : 0);
+  // A staff login sees only its modules (lib/epc-roles); Settings is the owner's / admins';
+  // Site staff (0128) only their projects.
   const nav: { key: PartnerSection; label: string; show: boolean; href?: string }[] = [
-    { key: "home", label: "Dashboard", show: true },
+    { key: "home", label: "Dashboard", show: !site },
+    { key: "leads", label: "Leads", show: v2 && !site, href: "/dashboard/leads" },
+    { key: "projects", label: "Projects", show: v2, href: "/dashboard/projects" },
+    { key: "invoices", label: "Invoices", show: v2 && !site, href: "/dashboard/invoices" },
     { key: "loans", label: "Loans", show: loanAccess(me) && hasModule(me, "loans") },
     { key: "insurance", label: "Insurance", show: insuranceAccess(me) && hasModule(me, "insurance") },
-    { key: "documents", label: "Document pending", show: true },
-    { key: "emi", label: "EMI calculator", show: true },
+    { key: "documents", label: "Document pending", show: !site },
+    { key: "emi", label: "EMI calculator", show: !site },
     { key: "customers", label: "Customer applications", show: customers && quotes },
     // Quotations — "New quotation" there picks the Simple or the Custom template.
     { key: "quotation", label: "Quotations", show: !customers && quotes, href: "/dashboard/quotes" },
@@ -93,7 +105,7 @@ export default function PartnerShell({ active, onSection, badge = 0, quoteTpl, t
           <nav className="flex flex-col gap-1 flex-1">
             {items.map((n) => {
               const on = active === n.key;
-              const b = n.key === "documents" ? badge : 0;
+              const b = badgeOf(n.key);
               return (
                 <button key={n.key} onClick={() => go(n)} title={n.label}
                   className={["relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium transition-colors justify-center group-hover/side:justify-start", on ? "bg-white/15 text-white" : "text-white/70 hover:bg-white/10 hover:text-white"].join(" ")}>
@@ -125,8 +137,8 @@ export default function PartnerShell({ active, onSection, badge = 0, quoteTpl, t
           {items.map((n) => (
             <button key={n.key} onClick={() => go(n)} className={["relative text-[13px] whitespace-nowrap px-2 py-1 rounded-lg", active === n.key ? "bg-white/20" : "text-white/70"].join(" ")}>
               {n.label}
-              {n.key === "documents" && badge > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-1 grid place-items-center rounded-full bg-[#dc2626] text-white text-[9px] font-bold leading-none">{countPill(badge)}</span>
+              {badgeOf(n.key) > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-1 grid place-items-center rounded-full bg-[#dc2626] text-white text-[9px] font-bold leading-none">{countPill(badgeOf(n.key))}</span>
               )}
             </button>
           ))}
@@ -134,7 +146,7 @@ export default function PartnerShell({ active, onSection, badge = 0, quoteTpl, t
 
         <header className="px-5 sm:px-8 pt-6 pb-2 flex items-start justify-between gap-3">
           <div className="min-w-0">{title}</div>
-          <OrgMenu name={name} logo={logo} person={me?.member ? `${personName(me)} · ${ROLE_LABEL[epcRole(me)]}` : null}
+          <OrgMenu name={name} logo={logo} person={me?.member ? `${personName(me)} · ${roleLabel(epcRole(me), me)}` : null}
             onSettings={manage ? () => router.push(SETTINGS_HREF as any) : null} onLogout={() => { logout(); router.replace("/login"); }} />
         </header>
 

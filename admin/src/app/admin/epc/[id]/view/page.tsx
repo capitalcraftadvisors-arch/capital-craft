@@ -39,6 +39,7 @@ import ActivityLog from "@/components/ActivityLog";
 import DeleteEpcModal from "@/components/DeleteEpcModal";
 import EpcPasswordEmailModal from "@/components/EpcPasswordEmailModal";
 import CustomTemplateCard from "@/components/CustomTemplateCard";
+import SubscriptionCard from "@/components/SubscriptionCard";
 import { epcLoginPassword } from "@/lib/passwords";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import { invalidate } from "@/lib/list-cache";
@@ -876,6 +877,12 @@ function Inner() {
             {biz.business_type !== "admin" && (
               <Section card dropdown icon={I.files} title="Custom quotation">
                 <CustomTemplateCard businessId={biz.id} />
+              </Section>
+            )}
+            {/* Paid features (0128) — the demo EPC first (Partner Portal v2). */}
+            {biz.business_type !== "admin" && (biz as { is_demo?: boolean }).is_demo && (
+              <Section card dropdown icon={I.lock} title="Subscription">
+                <SubscriptionCard businessId={biz.id} />
               </Section>
             )}
             <Section card icon={I.lock} title="Comments">

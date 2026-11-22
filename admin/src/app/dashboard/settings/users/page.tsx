@@ -13,7 +13,7 @@ import { input, Toggle } from "@/components/quotation/form-kit";
 import { CopyButton } from "@/components/view/ViewKit";
 import { getBusiness } from "@/lib/auth";
 import { fetchKyc } from "@/lib/org-settings";
-import { EPC_MODULES, ROLE_LABEL, STAFF_ROLES, epcRole, type EpcModule, type StaffRole } from "@/lib/epc-roles";
+import { EPC_MODULES, epcRole, roleLabel, staffRoles, type EpcModule, type StaffRole } from "@/lib/epc-roles";
 import { addMember, fetchMembers, removeMember, setMemberPassword, updateMember, type MemberRow } from "@/lib/members";
 import { generateStrongPassword } from "@/lib/password-gen";
 import { fmtDateTime } from "@/lib/dates";
@@ -42,13 +42,13 @@ export default function UsersSettings() {
 
   // An admin manages Sales / Viewer only; the owner manages everyone.
   const canTouch = (m: MemberRow) => myRole === "OWNER" || (myRole === "ADMIN" && m.member_role !== "ADMIN");
-  const roles = STAFF_ROLES.filter((r) => myRole === "OWNER" || r !== "ADMIN");
+  const roles = staffRoles(me).filter((r) => myRole === "OWNER" || r !== "ADMIN");
 
   async function save() {
     if (!draft) return;
     if (!draft.name.trim()) { setError("Enter the name."); return; }
     if (!/^[6-9]\d{9}$/.test(draft.mobile)) { setError("Enter a 10-digit mobile number."); return; }
-    if (!draft.modules.length) { setError("Choose at least one module."); return; }
+    if (draft.role !== "SITE" && !draft.modules.length) { setError("Choose at least one module."); return; }
     setBusy(true); setError(null);
     try {
       const fields = { name: draft.name.trim(), mobile: draft.mobile, email: draft.email.trim() || null, member_role: draft.role, modules: draft.modules };
@@ -106,9 +106,9 @@ export default function UsersSettings() {
           <Row label="Mobile"><input className={input} inputMode="numeric" value={draft.mobile} onChange={(e) => setD({ mobile: e.target.value.replace(/\D/g, "").slice(0, 10) })} /></Row>
           <Row label="Email"><input className={input} type="email" value={draft.email} onChange={(e) => setD({ email: e.target.value.trim() })} /></Row>
           <Row label="Role">
-            <div className="flex gap-2 flex-wrap">{roles.map((r) => <Toggle key={r} label={ROLE_LABEL[r]} on={draft.role === r} onClick={() => setD({ role: r })} />)}</div>
+            <div className="flex gap-2 flex-wrap">{roles.map((r) => <Toggle key={r} label={roleLabel(r, me)} on={draft.role === r} onClick={() => setD({ role: r })} />)}</div>
           </Row>
-          <Row label="Modules">
+          {draft.role !== "SITE" && <Row label="Modules">
             <div className="flex gap-4 flex-wrap pt-1.5">
               {EPC_MODULES.map((m) => (
                 <label key={m.key} className="flex items-center gap-2 text-[14px] text-text cursor-pointer">
@@ -118,7 +118,7 @@ export default function UsersSettings() {
                 </label>
               ))}
             </div>
-          </Row>
+          </Row>}
           {!draft.id && (
             <Row label="Password">
               <div className="flex items-center gap-2">
@@ -158,7 +158,7 @@ export default function UsersSettings() {
                 <tr className="border-b border-line">
                   <td className="px-5 sm:px-6 py-3"><div className="font-semibold text-text">{owner.name || "—"}</div>{owner.email && <div className="text-[12px] text-text-muted">{owner.email}</div>}</td>
                   <td className="px-3 py-3 whitespace-nowrap">{owner.mobile ? `+91 ${owner.mobile}` : "—"}</td>
-                  <td className="px-3 py-3"><Pill on>{ROLE_LABEL.OWNER}</Pill></td>
+                  <td className="px-3 py-3"><Pill on>{roleLabel("OWNER", me)}</Pill></td>
                   <td className="px-3 py-3 text-text-mid">All</td>
                   <td className="px-3 py-3 text-text-muted">—</td>
                   <td className="px-5 sm:px-6 py-3" />
@@ -168,8 +168,8 @@ export default function UsersSettings() {
                 <tr key={m.id} className={"border-b border-line last:border-0" + (m.active ? "" : " opacity-60")}>
                   <td className="px-5 sm:px-6 py-3"><div className="font-semibold text-text">{m.name}</div>{m.email && <div className="text-[12px] text-text-muted">{m.email}</div>}</td>
                   <td className="px-3 py-3 whitespace-nowrap">+91 {m.mobile}</td>
-                  <td className="px-3 py-3"><Pill on={m.active}>{m.active ? ROLE_LABEL[m.member_role] : "Switched off"}</Pill></td>
-                  <td className="px-3 py-3 text-text-mid">{EPC_MODULES.filter((x) => m.modules.includes(x.key)).map((x) => x.label).join(", ")}</td>
+                  <td className="px-3 py-3"><Pill on={m.active}>{m.active ? roleLabel(m.member_role, me) : "Switched off"}</Pill></td>
+                  <td className="px-3 py-3 text-text-mid">{m.member_role === "SITE" ? "Projects" : EPC_MODULES.filter((x) => m.modules.includes(x.key)).map((x) => x.label).join(", ")}</td>
                   <td className="px-3 py-3 text-text-muted whitespace-nowrap">{m.last_login_at ? fmtDateTime(m.last_login_at) : "—"}</td>
                   <td className="px-5 sm:px-6 py-3 text-right whitespace-nowrap">
                     {canTouch(m) && m.id !== me?.member?.id && (

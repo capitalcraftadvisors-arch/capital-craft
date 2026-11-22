@@ -38,6 +38,8 @@ type Run = {
 type FontMeta = { map: Record<number, string>; rev: Map<string, number>; width: number; fm: number; advance: (code: number) => number };
 type ImageDraw = { start: number; end: number; x: number; y: number }; // "/Name Do", bottom-left corner
 const BS = String.fromCharCode(92);
+// WinAnsiEncoding codes 128–159 (the rest are Latin-1).
+const WIN_ANSI = "€\u0081‚ƒ„…†‡ˆ‰Š‹Œ\u008DŽ\u008F\u0090‘’“”•–—˜™š›œ\u009DžŸ";
 const mul = (a: number[], b: number[]) => [a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3], a[2] * b[0] + a[3] * b[2], a[2] * b[1] + a[3] * b[3], a[4] * b[0] + a[5] * b[2] + b[4], a[4] * b[1] + a[5] * b[3] + b[5]];
 
 function look<T>(doc: PDFDocument, v: unknown): T { return (v instanceof PDFRef ? doc.context.lookup(v) : v) as T; }
@@ -60,6 +62,12 @@ function fontMeta(doc: PDFDocument, f: PDFDict): FontMeta {
   }
   const rev = new Map<string, number>();
   for (const [c, ch] of Object.entries(map)) if (ch.length === 1 && !rev.has(ch)) rev.set(ch, Number(c));
+  // A simple font without ToUnicode (e.g. Word's) reads by its WinAnsi encoding. Not
+  // in `rev`: a subset's glyphs for unused codes are missing, so no native writing.
+  if (!tu && String(f.get(PDFName.of("Encoding")) ?? "") === "/WinAnsiEncoding") {
+    const first = Number(String(f.get(PDFName.of("FirstChar")) ?? 32)), last = Number(String(f.get(PDFName.of("LastChar")) ?? 255));
+    for (let c = first; c <= last; c++) map[c] = c >= 128 && c < 160 ? WIN_ANSI[c - 128] : String.fromCharCode(c);
+  }
   const fmArr = f.get(PDFName.of("FontMatrix"));
   const fm = fmArr instanceof PDFArray ? Number(String(fmArr.get(0))) : 0.001;
   const n = (v: unknown) => Number(String(look(doc, v)));
@@ -211,12 +219,16 @@ type AddEdit = { kind: "add"; x: number; y: number; text: string; bold?: boolean
 // to `to`) — replaced by `text` word-wrapped onto up to `rows` lines `width` wide,
 // centred where the original was. A last line still too long shrinks to fit.
 type CellEdit = { kind: "cell"; lines: At[]; to: number; text: string; width: number; rows?: number; bold?: boolean };
+// Area: every run starting inside a box (a table cell, x0..x1 × y0..y1) replaced by
+// `text` wrapped onto up to `rows` lines, each centred across the box, the block
+// centred on the original lines — in the size and colour of the box's first run.
+type AreaEdit = { kind: "area"; box: [x0: number, y0: number, x1: number, y1: number]; text: string; rows?: number; bold?: boolean };
 type HideEdit = { kind: "hide"; image: At };
 // Box: a filled rectangle — e.g. to cover a drawn underline — painted in order with the new text.
 type BoxEdit = { kind: "box"; x: number; y: number; width: number; height: number; color: [number, number, number] };
 // Check: a printed HTML-form checkbox (`at` = its bottom-left corner) redrawn ticked or empty.
 type CheckEdit = { kind: "check"; at: At; on: boolean };
-export type Edit = TextEdit | AmountEdit | LineEdit | AddEdit | CellEdit | HideEdit | BoxEdit | CheckEdit;
+export type Edit = TextEdit | AmountEdit | LineEdit | AddEdit | CellEdit | AreaEdit | HideEdit | BoxEdit | CheckEdit;
 
 const BOX = 9.75, BOX_BLUE = rgb(27 / 255, 62 / 255, 200 / 255), BOX_GREY = rgb(118 / 255, 118 / 255, 118 / 255);
 const BOX_PATH = `M 1.6 0 H 8.15 Q 9.75 0 9.75 1.6 V 8.15 Q 9.75 9.75 8.15 9.75 H 1.6 Q 0 9.75 0 8.15 V 1.6 Q 0 0 1.6 0 Z`;
@@ -294,6 +306,22 @@ export function editPage(doc: PDFDocument, page: PDFPage, edits: Edit[], fonts: 
       lines.forEach((l, n) => {
         const w = textWidth(f, l, pt);
         draw(l, x, mid + ((lines.length - 1) / 2 - n) * lead, w > e.width ? (pt * e.width) / w : pt, color, e.bold);
+      });
+      continue;
+    }
+    if (e.kind === "area") {
+      const [x0, y0, x1, y1] = e.box;
+      const inside = runs.filter((q) => q.x >= x0 && q.x < x1 && q.y >= y0 && q.y <= y1);
+      if (!inside.length) throw new Error(`Quotation template changed: no text in ${e.box.join(",")}`);
+      for (const q of inside) cut.push([q.start, q.end]);
+      const ys = inside.map((q) => q.y).sort((a, b) => b - a).filter((y, n, all) => n === 0 || all[n - 1] - y > 1.5);
+      const first = inside.filter((q) => q.y > ys[0] - 1.5).sort((a, b) => a.x - b.x)[0];
+      const f = e.bold ? fonts.bold : fonts.reg, width = x1 - x0 - 8;
+      const lines = wrap(clean(e.text), (t) => textWidth(f, t, first.pt), width, e.rows ?? 1);
+      const mid = ys.reduce((s, y) => s + y, 0) / ys.length, lead = first.pt * 1.16;
+      lines.forEach((l, n) => {
+        const w = textWidth(f, l, first.pt), pt = w > width ? (first.pt * width) / w : first.pt;
+        draw(l, (x0 + x1) / 2 - Math.min(w, width) / 2, mid + ((lines.length - 1) / 2 - n) * lead, pt, first.color, e.bold);
       });
       continue;
     }

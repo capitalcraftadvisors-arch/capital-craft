@@ -1,9 +1,10 @@
 "use client";
 
 // EPC PORTAL — the partner cockpit. A navy sidebar shell over five sections:
-//   Dashboard (KPI band + unified attention + pipeline + today's activity + RM)
+//   Dashboard (KPI band + unified attention + pipeline + today's activity + RM;
+//              Partner Portal v2 — the demo EPC — gets DashboardV2 instead)
 //   Loans (8-column table → per-application timeline drawer)
-//   Insurance (the EPC's own policies)
+//   Insurance (the EPC's own policies; v2 adds Due for renewal + Renew)
 //   EMI calculator (PM Surya Ghar subsidy + live EMI, reusing lib/emi)
 //   Documents (download center — first pass)
 // All reads are RLS-scoped to the logged-in EPC (own_applications / own_insurance).
@@ -14,7 +15,8 @@ import AuthGuard from "@/components/AuthGuard";
 import LoginWelcome from "@/components/LoginWelcome";
 import PartnerShell, { NAVY, NAVY_ACCENT, PARTNER_SECTIONS, type PartnerSection } from "@/components/partner/PartnerShell";
 import { getBusiness, getToken, greetingName, loanAccess, insuranceAccess } from "@/lib/auth";
-import { canWork, hasModule } from "@/lib/epc-roles";
+import { canWork, hasModule, isSiteStaff, portalV2 } from "@/lib/epc-roles";
+import DashboardV2, { Donut } from "@/components/partner/DashboardV2";
 import { fetchEpcName, shortEpcName } from "@/lib/epc-name";
 import { supabase } from "@/lib/supabase";
 import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template";
@@ -68,6 +70,8 @@ const INS_STATUS_PILL: Record<string, string> = {
 type Stage4 = "under_review" | "updated" | "approved" | "rejected";
 // Loan-table filter chips: the 4 stages + "all" + the 2nd-tranche-pending view.
 type FilterKey = "all" | Stage4 | "tranche_pending";
+// Insurance-table filter chips ("renewal" = Due for renewal, Partner Portal v2 only).
+type InsFilter = "all" | "under_review" | "issued" | "hold" | "rejected" | "expiring" | "renewal";
 const STAGE4_LABEL: Record<Stage4, string> = { under_review: "Under review", updated: "Updated", approved: "Approved", rejected: "Rejected" };
 const STAGE4_PILL: Record<Stage4, string> = {
   under_review: "bg-[#fef0d6] text-[#854f0b]", updated: "bg-[#e8effc] text-[#1e3a8a]",
@@ -121,9 +125,17 @@ const appliedAmount = (r: AppRow) => fmtRupees(r.loan_amount_required ?? r.loan_
 export default function DashboardPage() {
   return (
     <AuthGuard allow={["approved"]}>
-      <DashboardInner />
+      <SiteStaffToProjects><DashboardInner /></SiteStaffToProjects>
     </AuthGuard>
   );
+}
+
+// Site staff (0128) work only on their projects — straight there, nothing else loads.
+function SiteStaffToProjects({ children }: { children: ReactNode }) {
+  const router = useRouter();
+  const site = isSiteStaff(getBusiness());
+  useEffect(() => { if (site) router.replace("/dashboard/projects" as any); }, [site, router]);
+  return site ? null : <>{children}</>;
 }
 
 function DashboardInner() {
@@ -144,7 +156,12 @@ function DashboardInner() {
   const canLoan = loanAccess(me) && hasModule(me, "loans");
   const canInsurance = insuranceAccess(me) && hasModule(me, "insurance");
   const work = canWork(me);
+  const v2 = portalV2(me);
   const [section, setSection] = useState<Section>("home");
+  // The filter a section opens with (a v2 dashboard tile); the menu opens it unfiltered.
+  const [loanFilter, setLoanFilter] = useState<FilterKey>("all");
+  const [insFilter, setInsFilter] = useState<InsFilter>("all");
+  const open = (s: Section) => { setLoanFilter("all"); setInsFilter("all"); setSection(s); };
   // Opened from another partner page's nav (/dashboard?s=loans).
   useEffect(() => {
     const s = new URLSearchParams(window.location.search).get("s") as Section | null;
@@ -195,13 +212,21 @@ function DashboardInner() {
   const sortedLoans = useMemo(() => [...rows].sort((a, b) => lastChangeTs(b) - lastChangeTs(a)), [rows]);
 
   return (
-    <PartnerShell active={section} onSection={setSection} badge={attnCount} quoteTpl={quoteTpl}
+    <PartnerShell active={section} onSection={open} badge={attnCount} quoteTpl={quoteTpl}
       title={<h1 className="font-display text-[22px] sm:text-[28px] font-bold text-[#0f3d2e]">नमस्ते, {epcName}</h1>}>
       <LoginWelcome />
 
         <main className="px-5 sm:px-8 pb-12 pt-3">
           {section === "home" && hasModule(me, "quotes") && <CustomTemplateBanner tpl={quoteTpl} />}
-          {section === "home" && (
+          {section === "home" && v2 && (
+            <DashboardV2 rms={RMS}
+              onQuotation={() => (customers ? setSection("customers") : router.push("/dashboard/quotes" as any))}
+              onLoans={(f) => { setLoanFilter(f); setSection("loans"); }}
+              onInsurance={(due) => { setInsFilter(due ? "renewal" : "all"); setSection("insurance"); }}
+              onRenew={() => void startInsurance()} renewing={insBusy}
+              onOpenMessage={(id) => router.push(`/dashboard/messages/loan/${id}` as any)} />
+          )}
+          {section === "home" && !v2 && (
             <HomeSection loans={rows} loading={loading} attnCount={attnCount}
               canLoan={canLoan && work} canInsurance={canInsurance && work}
               onApplyLoan={() => router.push("/dashboard/apply/chat" as any)}
@@ -210,13 +235,14 @@ function DashboardInner() {
               canQuote={hasModule(me, "quotes")} onQuotation={() => (customers ? setSection("customers") : router.push("/dashboard/quotes" as any))} onAttention={() => setSection("documents")} />
           )}
           {section === "loans" && (
-            <LoansSection loans={sortedLoans} loading={loading} canLoan={canLoan && work} readOnly={!work}
+            <LoansSection loans={sortedLoans} loading={loading} canLoan={canLoan && work} readOnly={!work} initial={loanFilter}
               onOpenCase={(r) => setOpenCase(r)} onApply={() => router.push("/dashboard/apply/chat" as any)}
               onEdit={(r) => router.push(`/dashboard/apply/chat?id=${r.id}&edit=1` as any)}
               onTranche={(r) => router.push(`/dashboard/${r.id}/disbursement` as any)} />
           )}
           {section === "insurance" && (
             <InsuranceSection insRows={insRows} loading={loading} onApply={work ? () => void startInsurance() : null} applying={insBusy}
+              v2={v2} initial={insFilter} onRenew={v2 && work ? () => void startInsurance() : null}
               // A draft continues in the chat; a sent one opens its form to view / change.
               onOpen={(id) => router.push(`/dashboard/insurance/${id}/${insRows.find((r) => r.id === id)?.status === "draft" ? "chat" : "step-1"}` as any)} />
           )}
@@ -258,44 +284,7 @@ function periodRange(p: Period): { from: number; prevFrom: number; prevTo: numbe
   }
 }
 
-// Premium dependency-free donut: separated rounded segments, hover to focus a
-// slice (others dim + the centre swaps to that slice's count/label).
-function Donut({ segments, size = 176, stroke = 22 }: { segments: { label: string; value: number; color: string }[]; size?: number; stroke?: number }) {
-  const [hover, setHover] = useState<number | null>(null);
-  const total = segments.reduce((s, x) => s + x.value, 0);
-  const r = (size - stroke) / 2;
-  const C = 2 * Math.PI * r;
-  const nonZero = segments.filter((s) => s.value > 0).length;
-  const gap = nonZero > 1 ? stroke + 6 : 0; // clean separation that survives round caps
-  let acc = 0;
-  const centre = hover != null && segments[hover] ? { big: String(segments[hover].value), small: segments[hover].label } : { big: String(total), small: "Files" };
-  return (
-    <div className="relative shrink-0" style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
-          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#eef1f0" strokeWidth={stroke} />
-          {total > 0 && segments.map((s, i) => {
-            if (s.value <= 0) return null;
-            const frac = s.value / total;
-            const len = Math.max(0.01, frac * C - gap);
-            const el = (
-              <circle key={i} cx={size / 2} cy={size / 2} r={r} fill="none" stroke={s.color}
-                strokeWidth={hover === i ? stroke + 4 : stroke} strokeDasharray={`${len} ${C - len}`} strokeDashoffset={-acc} strokeLinecap="round"
-                style={{ transition: "stroke-width .15s ease, opacity .15s ease", opacity: hover == null || hover === i ? 1 : 0.35, cursor: "pointer" }}
-                onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)} />
-            );
-            acc += frac * C;
-            return el;
-          })}
-        </g>
-      </svg>
-      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <div className="text-[28px] font-bold text-[#0f3d2e] leading-none tabular-nums">{centre.big}</div>
-        <div className="text-[11px] text-text-muted mt-1 max-w-[90px] text-center truncate">{centre.small}</div>
-      </div>
-    </div>
-  );
-}
+// (Donut — the shared ring chart — lives in components/partner/DashboardV2.)
 
 function homeMetrics(list: AppRow[]) {
   return {
@@ -478,12 +467,12 @@ function HomeSection({ loans, loading, attnCount, canLoan, canInsurance, onApply
 }
 
 // ── Loans ─────────────────────────────────────────────────────────────────────
-function LoansSection({ loans, loading, canLoan, readOnly, onOpenCase, onApply, onEdit, onTranche }: {
-  loans: AppRow[]; loading: boolean; canLoan: boolean; readOnly: boolean;
+function LoansSection({ loans, loading, canLoan, readOnly, initial = "all", onOpenCase, onApply, onEdit, onTranche }: {
+  loans: AppRow[]; loading: boolean; canLoan: boolean; readOnly: boolean; initial?: FilterKey;
   onOpenCase: (r: AppRow) => void; onApply: () => void; onEdit: (r: AppRow) => void; onTranche: (r: AppRow) => void;
 }) {
   const [q, setQ] = useState("");
-  const [sf, setSf] = useState<FilterKey>("all");
+  const [sf, setSf] = useState<FilterKey>(initial);
   // Approved file with the 1st tranche released but the 2nd still pending.
   const isTranchePending = (r: AppRow) => stage4(r) === "approved" && r.first_disbursement_amount != null && r.second_disbursement_amount == null;
   const matchesFilter = (r: AppRow) => sf === "all" ? true : sf === "tranche_pending" ? isTranchePending(r) : stage4(r) === sf;
@@ -574,25 +563,31 @@ function LoansSection({ loans, loading, canLoan, readOnly, onOpenCase, onApply, 
 }
 
 // ── Insurance ─────────────────────────────────────────────────────────────────
-function InsuranceSection({ insRows, loading, onApply, applying, onOpen }: {
+function InsuranceSection({ insRows, loading, onApply, applying, onOpen, v2 = false, initial = "all", onRenew = null }: {
   insRows: InsRow[]; loading: boolean; onApply: (() => void) | null; applying: boolean; onOpen: (id: string) => void;
+  v2?: boolean; initial?: InsFilter; onRenew?: (() => void) | null; // Partner Portal v2: Due for renewal + Renew
 }) {
   const [q, setQ] = useState("");
-  const [sf, setSf] = useState<"all" | "under_review" | "issued" | "hold" | "rejected" | "expiring">("all");
+  const [sf, setSf] = useState<InsFilter>(v2 || initial !== "renewal" ? initial : "all");
   const daysLeft = (r: InsRow) => policyValidityParts(r.policy_from_date, r.policy_to_date)?.daysLeft ?? null;
   const isExpiring = (r: InsRow) => { const d = daysLeft(r); return d !== null && d >= 0 && d <= 30; };
-  const count = (k: typeof sf) => (k === "all" ? insRows.length : k === "expiring" ? insRows.filter(isExpiring).length : insRows.filter((r) => r.status === k).length);
+  // An issued policy ending within 30 days either side of today (the dashboard's Insurance due).
+  const isRenewal = (r: InsRow) => { const d = daysLeft(r); return r.status === "issued" && d !== null && d >= -30 && d <= 30; };
+  const canRenew = (r: InsRow) => { const d = daysLeft(r); return !!onRenew && r.status === "issued" && d !== null && d <= 30; };
+  const matches = (r: InsRow, k: InsFilter) => (k === "all" ? true : k === "expiring" ? isExpiring(r) : k === "renewal" ? isRenewal(r) : r.status === k);
+  const count = (k: InsFilter) => insRows.filter((r) => matches(r, k)).length;
   const needle = q.trim().toLowerCase();
   const filtered = [...insRows]
     .sort((a, b) => (b.attention_status === "open" ? 1 : 0) - (a.attention_status === "open" ? 1 : 0))
     .filter((r) => {
-      if (sf === "expiring" ? !isExpiring(r) : sf !== "all" && r.status !== sf) return false;
+      if (!matches(r, sf)) return false;
       if (needle && !((r.aadhaar_name || "").toLowerCase().includes(needle) || (r.insurance_display_id || "").toLowerCase().includes(needle))) return false;
       return true;
     });
-  const CHIPS: { key: typeof sf; label: string }[] = [
+  const CHIPS: { key: InsFilter; label: string }[] = [
     { key: "all", label: "All" }, { key: "under_review", label: "Under review" }, { key: "issued", label: "Issued" },
     { key: "hold", label: "Hold" }, { key: "rejected", label: "Rejected" }, { key: "expiring", label: "Expiring soon" },
+    ...(v2 ? [{ key: "renewal" as const, label: "Due for renewal" }] : []),
   ];
   return (
     <div className="flex flex-col gap-4">
@@ -639,7 +634,17 @@ function InsuranceSection({ insRows, loading, onApply, applying, onOpen }: {
                   <td className="px-5 py-4 font-semibold text-[#0f3d2e]">{fmtRupees(r.sum_insured ?? r.invoice_confirmed_amount)}</td>
                   <td className="px-5 py-4">{r.insurance_partner || "—"}</td>
                   <td className="px-5 py-4"><span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${INS_STATUS_PILL[r.status] ?? INS_STATUS_PILL.draft}`}>{INS_STATUS_LABEL[r.status] ?? r.status}</span></td>
-                  <td className="px-5 py-4">{(() => { const v = policyValidityParts(r.policy_from_date, r.policy_to_date); return v ? <span className={`text-[12px] font-medium ${VALIDITY_TEXT[v.tone]}`}>{v.text}</span> : <span className="text-text-muted">—</span>; })()}</td>
+                  <td className="px-5 py-4">
+                    {(() => { const v = policyValidityParts(r.policy_from_date, r.policy_to_date); return v ? <span className={`text-[12px] font-medium ${VALIDITY_TEXT[v.tone]}`}>{v.text}</span> : <span className="text-text-muted">—</span>; })()}
+                    {canRenew(r) && (
+                      <div className="mt-1.5">
+                        <button type="button" disabled={applying} onClick={(e) => { e.stopPropagation(); onRenew?.(); }}
+                          className="px-3 py-1 rounded-lg border border-[#1e3a8a] text-[#1e3a8a] text-[12px] font-semibold hover:bg-[#1e3a8a]/[0.06] disabled:opacity-60">
+                          {applying ? "Starting…" : "Renew"}
+                        </button>
+                      </div>
+                    )}
+                  </td>
                   <td className="px-5 py-4 text-text-muted whitespace-nowrap">{fmtDateTime(r.created_at)}</td>
                 </tr>
               ))}

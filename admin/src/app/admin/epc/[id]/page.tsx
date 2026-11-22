@@ -331,7 +331,7 @@ function Inner() {
           </div>
           <div className="mt-3">
             <p className="text-[13px] font-medium text-text-mid mb-2">Last 12 months&rsquo; bank statements</p>
-            <FileUpload businessId={params.id} table="epc_documents" category="bank_statement" maxFiles={12} dedupe uploadedBy="admin" uploadHint="PDF or image — 12 monthly statements" />
+            <FileUpload businessId={params.id} table="epc_documents" category="bank_statement" maxFiles={Infinity} dedupe uploadedBy="admin" uploadHint="PDF or image" />
           </div>
         </Section>
 

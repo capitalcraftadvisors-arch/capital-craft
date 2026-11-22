@@ -15,12 +15,17 @@
 //
 // table=stakeholder_docs (0106, main admin): a team member's (team_id) or a
 // partner's (partner_id) document; `category` is the document's label.
+//
+// table=epc_project_documents (0129, Partner Portal v2): a file of one project
+// (project_id, required) in its document vault — RLS decides who may (Site
+// staff on their own projects too). No replace; the reply carries a 1-hour link.
 
 import { NextRequest, NextResponse } from "next/server";
-import sharp from "sharp";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { uploadBuffer, deleteObject } from "@/lib/gcs";
+import { uploadBuffer, deleteObject, getSignedReadUrl } from "@/lib/gcs";
 import { verifyJwt, getBearerToken, type JwtClaims } from "@/lib/jwt";
+import { compressUpload } from "@/lib/image-compress";
+import { isProjectDocCategory } from "@/lib/project-docs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,7 +37,6 @@ const SUPABASE_ANON =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
 
-const MAX_DIMENSION = 2000;
 const ACCEPTED = new Set([
   "image/jpeg",
   "image/png",
@@ -40,7 +44,8 @@ const ACCEPTED = new Set([
   "application/pdf",
 ]);
 
-type AllowedTable = "epc_documents" | "user_application_docs" | "stakeholder_docs";
+type AllowedTable = "epc_documents" | "user_application_docs" | "stakeholder_docs" | "epc_project_documents";
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function err(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -67,7 +72,7 @@ export async function POST(req: NextRequest) {
     const table = (form.get("table") as string) || "";
     const category = (form.get("category") as string) || "";
     if (!table || !category) return err("missing_table_or_category");
-    if (table !== "epc_documents" && table !== "user_application_docs" && table !== "stakeholder_docs") {
+    if (table !== "epc_documents" && table !== "user_application_docs" && table !== "stakeholder_docs" && table !== "epc_project_documents") {
       return err("bad_table");
     }
     const allowedTable = table as AllowedTable;
@@ -109,6 +114,13 @@ export async function POST(req: NextRequest) {
     if (allowedTable === "stakeholder_docs") {
       if (claims.business_type !== "admin") return err("admin_only", 403);
       if (!teamId === !partnerId) return err("missing_owner");
+    }
+    // A project document (0129) belongs to ONE project of the company.
+    const projectId = (form.get("project_id") as string) || null;
+    if (allowedTable === "epc_project_documents") {
+      if (!projectId || !UUID_RE.test(projectId)) return err("missing_project_id");
+      if (!isProjectDocCategory(category)) return err("bad_category");
+      if ((form.get("replace") as string) === "true") return err("bad_replace");
     }
 
     // ── replace=true: delete-existing-then-insert ────────────────────
@@ -156,6 +168,8 @@ export async function POST(req: NextRequest) {
         : `${targetBusinessId}/${category}/${docUuid}_${safeFileName}`;
     } else if (allowedTable === "stakeholder_docs") {
       finalPath = `stakeholders/${teamId ? `team/${teamId}` : `partner/${partnerId}`}/${docUuid}_${safeFileName}`;
+    } else if (allowedTable === "epc_project_documents") {
+      finalPath = `projects/${targetBusinessId}/${projectId}/docs/${docUuid}_${safeFileName}`;
     } else {
       finalPath = `applications/${applicationId}/${category}/${docUuid}_${safeFileName}`;
     }
@@ -165,22 +179,7 @@ export async function POST(req: NextRequest) {
     const input = Buffer.from(ab);
     const originalSize = input.length;
 
-    let output: Buffer = input;
-    let outMime: string = file.type;
-
-    if (file.type.startsWith("image/")) {
-      const pipeline = sharp(input).rotate();
-      output = await pipeline
-        .resize({
-          width: MAX_DIMENSION,
-          height: MAX_DIMENSION,
-          fit: "inside",
-          withoutEnlargement: true,
-        })
-        .jpeg({ quality: 75, mozjpeg: true })
-        .toBuffer();
-      outMime = "image/jpeg";
-    }
+    const { output, mime: outMime } = await compressUpload(input, file.type);
 
     // ── upload to GCS ──────────────────────────────────────────────────
     await uploadBuffer(finalPath, output, outMime);
@@ -204,6 +203,9 @@ export async function POST(req: NextRequest) {
       if (stakeholderId) row.stakeholder_id = stakeholderId;
     } else if (allowedTable === "stakeholder_docs") {
       if (teamId) row.team_id = teamId; else row.partner_id = partnerId;
+    } else if (allowedTable === "epc_project_documents") {
+      row.business_id = targetBusinessId;
+      row.project_id = projectId;
     } else {
       row.application_id = applicationId;
       row.uploaded_by =
@@ -218,6 +220,11 @@ export async function POST(req: NextRequest) {
 
     if (insertErr || !inserted) {
       await deleteObject(finalPath);
+      // A project document refused by RLS / a missing project → plain words.
+      if (allowedTable === "epc_project_documents") {
+        return err(/row-level|42501|foreign key|23503/.test(`${insertErr?.message} ${insertErr?.code}`)
+          ? "You don't have access to add documents to this project." : "Couldn't save the document.", 403);
+      }
       return err(insertErr?.message || "db_insert_failed", 403);
     }
 
@@ -243,6 +250,10 @@ export async function POST(req: NextRequest) {
       mime_type: outMime,
       original_size_bytes: originalSize,
       stored_size_bytes: output.length,
+      // A project document shows in its vault straight away (1-hour link).
+      ...(allowedTable === "epc_project_documents"
+        ? { url: await getSignedReadUrl(finalPath, 3600).catch(() => "") }
+        : {}),
     });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);

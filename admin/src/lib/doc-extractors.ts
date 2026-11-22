@@ -12,6 +12,8 @@ import { isValidPan, isValidGstin, isValidIfsc } from "./doc-validation";
 import type { PanFields } from "./pan-parser";
 import type { BankStatementFields } from "./bank-statement";
 import type { ProformaFields, EbillFields } from "./loan-docs";
+import type { BillQuoteFields } from "./bill-quote";
+import { INDIA_STATES, STATE_CODES } from "./india-states";
 
 const STR = { type: "STRING", nullable: true } as const;
 const NUM = { type: "NUMBER", nullable: true } as const;
@@ -272,4 +274,61 @@ export async function geminiExtractQuotation(images: GeminiImage[]): Promise<Quo
     inverter_brand: s(g.inverter_brand), battery: s(g.battery),
   };
   return Object.values(r).some(Boolean) ? r : null;
+}
+
+// ── Electricity bill → solar quotation (Partner Portal v2, lib/bill-quote) ────
+// Units and the bill come back a MONTH each: a bi-monthly bill is halved, and a
+// printed consumption history (up to 12 bills) is averaged instead of the latest.
+export async function geminiExtractBillForQuote(images: GeminiImage[]): Promise<BillQuoteFields | null> {
+  const g = await geminiExtract<{
+    units_latest?: unknown; units_history?: unknown; period_months?: unknown; bill_amount?: unknown;
+    sanctioned_load?: unknown; sanctioned_load_unit?: unknown; category?: unknown;
+    consumer_name?: unknown; billing_address?: unknown; pincode?: unknown; discom?: unknown; state?: unknown; k_number?: unknown;
+  }>({
+    images, label: "bill_quote",
+    schema: obj({
+      units_latest: NUM, units_history: { type: "ARRAY", nullable: true, items: { type: "NUMBER" } },
+      period_months: NUM, bill_amount: NUM, sanctioned_load: NUM, sanctioned_load_unit: STR, category: STR,
+      consumer_name: STR, billing_address: STR, pincode: STR, discom: STR, state: STR, k_number: STR,
+    }),
+    prompt:
+      "Read this Indian electricity bill. Extract ONLY what is literally printed; if a field is absent, return null — never guess or invent. " +
+      "units_latest = the units (kWh) consumed in this bill's period. " +
+      "units_history = the units of each past bill / month from the consumption history table if one is printed, newest first, at most 12 numbers; an empty list if no history is printed. " +
+      "period_months = how many months this bill's period covers (1 for monthly, 2 for bi-monthly), from the billing period printed. " +
+      "bill_amount = this bill's own amount for the period in rupees (the current bill, without arrears) as a plain number. " +
+      "sanctioned_load = the sanctioned / connected / contract load as a plain number; sanctioned_load_unit = its unit as printed (kW, kVA, HP or W). " +
+      "category = 'domestic' if the connection / tariff category printed is domestic or residential, 'non_domestic' if it is commercial, industrial, agricultural or any other category; null if none is printed. " +
+      "consumer_name = the name the connection is in. billing_address = the consumer's address as printed. pincode = the 6-digit PIN of that address. " +
+      "discom = the electricity distribution company's short name if printed (e.g. JVVNL, MSEDCL, BESCOM), else its full name. " +
+      "state = the Indian state printed in the address or the company's details; null if no state is printed. " +
+      "k_number = the consumer number / K number / CA number / account number.",
+  });
+  if (!g) return null;
+  const months = Math.min(6, Math.max(1, Math.round(n(g.period_months) ?? 1)));
+  const history = (Array.isArray(g.units_history) ? g.units_history : []).map(n).filter((v): v is number => v != null && v > 0).slice(0, 12);
+  const latest = n(g.units_latest);
+  const units = history.length >= 2 ? history.reduce((a, b) => a + b, 0) / history.length : latest ?? history[0] ?? null;
+  const bill = n(g.bill_amount);
+  const load = n(g.sanctioned_load);
+  const unit = (s(g.sanctioned_load_unit) || "").toLowerCase();
+  const kw = load == null || load <= 0 ? null : unit.includes("hp") ? load * 0.746 : !unit.includes("k") && unit.includes("w") ? load / 1000 : load;
+  const cat = (s(g.category) || "").toLowerCase();
+  const pin = (s(g.pincode) || "").replace(/\D/g, "").slice(0, 6);
+  const addr = s(g.billing_address);
+  const key = (v: string) => v.toLowerCase().replace(/&/g, "and").replace(/[^a-z]/g, "");
+  const st = key(s(g.state) || "");
+  const f: BillQuoteFields = {
+    units: units != null && units > 0 ? Math.round(units / months) : null,
+    bill: bill != null && bill > 0 ? Math.round((bill / months) * 100) / 100 : null,
+    sanctioned_kw: kw != null ? Math.round(kw * 100) / 100 : null,
+    domestic: cat.includes("non") ? false : cat.includes("domestic") || cat.includes("resid") ? true : null,
+    name: s(g.consumer_name),
+    address: addr && pin.length === 6 && !addr.replace(/\s/g, "").includes(pin) ? `${addr} - ${pin}` : addr,
+    pincode: pin.length === 6 ? pin : null,
+    discom: s(g.discom),
+    state: st ? INDIA_STATES.find((x) => key(x) === st || key(STATE_CODES[x]) === st) ?? null : null,
+    k_number: s(g.k_number),
+  };
+  return Object.values(f).some((v) => v != null) ? f : null;
 }

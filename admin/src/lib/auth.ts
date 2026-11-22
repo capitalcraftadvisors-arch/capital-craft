@@ -40,7 +40,9 @@ export type Business = {
   // An EPC staff login (0119) — the person signed in to this company; null /
   // absent = the company's owner. AuthGuard refreshes it (role / modules) on
   // every page; lib/epc-roles reads it.
-  member?: { id: string; name: string; role: "ADMIN" | "SALES" | "VIEWER"; modules: string[] } | null;
+  member?: { id: string; name: string; role: "ADMIN" | "SALES" | "VIEWER" | "SITE"; modules: string[] } | null;
+  // The hidden demo EPC (0081) — Partner Portal v2 is switched on here first (lib/epc-roles portalV2).
+  is_demo?: boolean;
 };
 
 // The six admin console module keys (match AdminSidebar tab keys).

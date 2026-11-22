@@ -10,8 +10,9 @@
 // When no row exists yet it falls back to the bundled GHANPRIYA template.
 //
 // Bijlee Solar (bundled:bijlee), Sarvatra Energy (bundled:sarvatra-energy), RVS
-// Technologies (bundled:rvs) and gozerobils (bundled:sarvatra) are their own PDFs
-// filled directly — always a PDF. Bijlee's and Sarvatra Energy's serial no. auto-advances here
+// Technologies (bundled:rvs), Potaliya Enterprises (bundled:potaliya) and gozerobils
+// (bundled:sarvatra) are their own PDFs filled directly — always a PDF. Bijlee's,
+// Sarvatra Energy's and Potaliya's serial no. auto-advances here
 // (X-Next-Serial tells the form the next one). gozerobils is the Customer
 // applications flow: `doc` picks the quotation, PCR or agreement, `date` is when
 // that document was made (the saved customer_quotations row; its insert trigger
@@ -30,8 +31,9 @@ import { buildBijleeQuotation } from "@/lib/quotation-bijlee";
 import { buildSarvatraFile, safeFileName as safeName } from "@/lib/quotation-sarvatra";
 import { buildSarvatraEnergyQuotation, sarvatraEnergyInput } from "@/lib/quotation-sarvatra-energy";
 import { buildRvsQuotation, rvsInput } from "@/lib/quotation-rvs";
+import { buildPotaliyaQuotation, potaliyaInput } from "@/lib/quotation-potaliya";
 import { num } from "@/lib/pdf-template";
-import { BIJLEE, SARVATRA, SARVATRA_ENERGY, RVS } from "@/lib/quotation-brands";
+import { BIJLEE, SARVATRA, SARVATRA_ENERGY, RVS, POTALIYA } from "@/lib/quotation-brands";
 import { fmtDateIST } from "@/lib/dates";
 
 export const runtime = "nodejs";
@@ -74,7 +76,7 @@ export async function POST(req: NextRequest) {
     // (0122). Sustera's customer builder never locks.
     if (claims.business_type !== "admin" && storagePath !== SARVATRA.key && customState(tpl) === "locked") return err(CUSTOM_LOCKED_MSG, 403);
 
-    if ([BIJLEE.key, SARVATRA.key, SARVATRA_ENERGY.key, RVS.key].includes(storagePath)) {
+    if ([BIJLEE.key, SARVATRA.key, SARVATRA_ENERGY.key, RVS.key, POTALIYA.key].includes(storagePath)) {
       const b = body as unknown as Record<string, unknown>;
       const s = (k: string) => String(b[k] ?? "").trim();
       const n = (k: string) => Number(b[k]) || 0;
@@ -82,8 +84,9 @@ export async function POST(req: NextRequest) {
       const today = fmtDateIST(new Date()); // DD/MM/YYYY, India time
       let file: { name: string; pdf: Uint8Array };
       let next = "";
-      // Auto-numbered (Bijlee, Sarvatra Energy): the next suggested serial moves past the one just used.
-      const numbered = storagePath === BIJLEE.key ? BIJLEE : storagePath === SARVATRA_ENERGY.key ? SARVATRA_ENERGY : null;
+      // Auto-numbered (Bijlee, Sarvatra Energy, Potaliya): the next suggested serial moves past the one just used.
+      const numbered = storagePath === BIJLEE.key ? BIJLEE : storagePath === SARVATRA_ENERGY.key ? SARVATRA_ENERGY
+        : storagePath === POTALIYA.key ? POTALIYA : null;
       if (storagePath === BIJLEE.key) {
         if (n("rate_per_kw") <= 0) return err("Price per kW is required.", 400);
         const pdf = await buildBijleeQuotation({
@@ -104,6 +107,11 @@ export async function POST(req: NextRequest) {
         const input = rvsInput(b);
         const pdf = await buildRvsQuotation(input, await readBundledTemplate(storagePath));
         file = { name: `Proposal_${name}_${safeName(`${num(input.kw)}kW`)}.pdf`, pdf };
+      } else if (storagePath === POTALIYA.key) {
+        if (n("price") <= 0) return err("Project cost is required.", 400);
+        const input = potaliyaInput(b, today);
+        const pdf = await buildPotaliyaQuotation(input, await readBundledTemplate(storagePath));
+        file = { name: `Solar_Proposal_${name}_${safeName(`${num(input.kw)}kW`)}.pdf`, pdf };
       } else {
         if (n("price") <= 0) return err("System price is required.", 400);
         const built = await buildSarvatraFile(s("doc"), b, s("date") || new Date());

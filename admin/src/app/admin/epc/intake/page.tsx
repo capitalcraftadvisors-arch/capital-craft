@@ -158,7 +158,7 @@ const SCRIPT: Turn[] = [
   { id: "cheque_doc", kind: "docs", bot: "Upload a cancelled cheque — I'll read the account number, IFSC & bank name.", docLabel: "Cancelled cheque", step: 5,
     uploads: [{ name: "file", label: "Cancelled cheque", category: "cancelled_cheque" }], replace: true, ocr: "cheque", filledCats: ["cancelled_cheque"] },
   { id: "confirm_acct", kind: "confirmacct", bot: "Please re-enter the bank account number to confirm it.", step: 5 },
-  { id: "bank_statements", kind: "bankstatements", bot: "Upload the last 12 months' bank statements — all 12 (duplicate files are skipped automatically).", step: 5 },
+  { id: "bank_statements", kind: "bankstatements", bot: "Upload the last 12 months' bank statements — one file or as many as needed (duplicate files are skipped automatically).", step: 5 },
   { id: "gst_username", kind: "text", bot: "GST username (their GST portal login)?", field: "gst_username", placeholder: "GST portal username", step: 5,
     write: (v) => ({ gst_username: v.trim() || null }) },
 
@@ -361,7 +361,7 @@ function Inner() {
       case "text":
       case "choice": return !!((form[t.filledBy ?? t.field ?? ""] ?? "").trim());
       case "confirmacct": return !!((form.bank_account_number ?? "").trim());
-      case "bankstatements": return bankStmtCount >= 12;
+      case "bankstatements": return bankStmtCount >= 1;
       case "docs": return (t.filledCats ?? []).length > 0 && (t.filledCats ?? []).every((c) => docCats.has(c));
       case "stakeholders": return stakeholders.length > 0 && stakeholders.every((s) => !!s.name?.trim());
       case "references": return initCustomers.length + initSuppliers.length > 0;
@@ -463,7 +463,7 @@ function Inner() {
   // ── 12-month bank statements ──
   function submitBankStatements() {
     const t = active; if (!t) return;
-    if (bankStmtCount < 12) { setError("Please upload all 12 monthly bank statements."); return; }
+    if (bankStmtCount < 1) { setError("Please upload the last 12 months' bank statements."); return; }
     pushUser(`${bankStmtCount} bank statements uploaded`, { turnId: t.id });
     if (t.step) maybeBumpStep(t.step);
     if (editing) setEditing(null); else advance();
@@ -848,12 +848,12 @@ function Inner() {
 
             {active.kind === "bankstatements" && epcId && (
               <div className="flex flex-col gap-2">
-                <FileUpload businessId={epcId} table="epc_documents" category="bank_statement" maxFiles={12} dedupe uploadedBy="admin" onCountChange={setBankStmtCount} uploadHint="PDF or image — 12 monthly statements" />
+                <FileUpload businessId={epcId} table="epc_documents" category="bank_statement" maxFiles={Infinity} dedupe uploadedBy="admin" onCountChange={setBankStmtCount} uploadHint="PDF or image" />
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-[12px] text-text-muted">{bankStmtCount}/12 uploaded</span>
+                  <span className="text-[12px] text-text-muted">{bankStmtCount} uploaded</span>
                   <div className="flex items-center gap-2">
                     {!editing && <button onClick={skipBankStatements} className="px-3 py-2 text-[13px] text-text-muted hover:text-text">Skip</button>}
-                    <button onClick={submitBankStatements} disabled={bankStmtCount < 12} className="px-4 py-2 rounded-xl bg-[#185fa5] text-white text-[14px] font-semibold hover:bg-[#124a82] disabled:opacity-50">{editing ? "Done" : "Continue →"}</button>
+                    <button onClick={submitBankStatements} disabled={bankStmtCount < 1} className="px-4 py-2 rounded-xl bg-[#185fa5] text-white text-[14px] font-semibold hover:bg-[#124a82] disabled:opacity-50">{editing ? "Done" : "Continue →"}</button>
                   </div>
                 </div>
               </div>

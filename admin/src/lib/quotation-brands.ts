@@ -261,6 +261,76 @@ export function rvsFigures(kw: number, price: number, subsidy: number | null, dc
   };
 }
 
+// Potaliya Enterprises (template bundled:potaliya) — their 10-page solar proposal.
+// Figures as in their 10 kW / ₹4,80,000 sample: 1,500 units per kW a year at ₹7.5
+// a unit; trees = units × 332 ÷ 15,000; CO₂ 1 kg a unit (tonnes); the monthly
+// savings chart splits the year by the sample's own bars. The price includes GST;
+// the subsidies are printed under it (central by kW, state ₹17,000 unless changed).
+// Proposal reference no. as in their sample (POT-760/P/1.1).
+export const POTALIYA = {
+  key: "bundled:potaliya",
+  unitsPerKw: 1500,
+  tariff: 7.5,
+  treesPerUnit: 332 / 15000,
+  stateSubsidy: 17000,
+  months: [9135, 9480, 11100, 11826, 12208, 9871, 6490, 6798, 9331, 10057, 8371, 6798], // the sample's bars (₹)
+  serial: (n: number) => `POT-${n}/P/1.1`,
+  serialNo: (s: string) => Number(/\d+/.exec(s)?.[0]),
+};
+
+// Bill of material: specifications / make / qty; each first option is the sample's own text.
+const SITE = "As per Site Required";
+export const POTALIYA_BOM: BoqRow[] = [
+  { key: "pot_inverter", product: "Inverter", spec: [], // <kW>KW
+    make: ["Polycab/", "Polycab", "Havells", "Sungrow", "Growatt", "Solis", "GoodWe", "Deye", "Microtek", "Luminous"], qty: ["1 No", "2 No"] },
+  { key: "pot_module", product: "Solar Panel",
+    spec: ["620 Wp Solar Module High Efficiency >21% BIFICIAL DCR / Non DCR PANEL ( 535 TO 620 WP)",
+      "620 Wp Solar Module High Efficiency >21% BIFICIAL DCR PANEL", "620 Wp Solar Module High Efficiency >21% BIFICIAL Non DCR PANEL",
+      "590 Wp Solar Module High Efficiency >21% BIFICIAL DCR PANEL", "550 Wp Mono PERC BIFICIAL DCR PANEL"],
+    make: ["Adani", "Waaree", "Rayzon", "Premier", "Goldi", "Vikram", "Tata Power", "Renewsys", "Saatvik", "Emmvee"], qty: [] }, // from the kW and the module's watts
+  { key: "pot_structure", product: "Module Mounting Structures", spec: ["GI structure of reputed brand as per Approved Drawing."],
+    make: ["As per Aproved Drawing"], qty: [SITE] },
+  { key: "pot_fasteners", product: "Fasteners/Nut Bolt", spec: ["Fasteners- SS-304 /GI with anti-theft for PV module and Structure"], make: ["Approved"], qty: [SITE] },
+  { key: "pot_solar_cable", product: "Solar Cable", spec: ["1C x 4 SQMM, 1.8KV, multi-stranded, tinned CU flexible cable- (Module to both AJB)"],
+    make: ["polycab/Havells", "Polycab", "Havells", "KEI", "RR Kabel"], qty: ["As per Site Requirement."] },
+  { key: "pot_dc_cable", product: "DC cable", spec: ["As per design single core 1, 1.1KV, CU flexible cable"], make: ["Polycab", "Havells", "KEI", "RR Kabel"], qty: ["As Per Site Required"] },
+  { key: "pot_ajb", product: "Array Junction Box (AJB)",
+    spec: ["1. Multiple MC4 type input (as per site) with 1 Output, DC SPD, 25 Amp. Fuses, DC disconnector, IP 67/68 enclosure box etc. AJB-1 2. 2 Input with 1 output for aux. solar inverter. AJB-2"],
+    make: ["SPD-SPD-HAVELLS/SIBBAS/EMEX"], qty: [SITE] },
+  { key: "pot_mc4", product: "MC4-Module connectors", spec: ["DC-1500V, 25 A, IEC/TUV approved, 4 SQMM cable"], make: ["Reputated"], qty: [SITE] },
+  { key: "pot_earthing", product: "Earthing Rod with Chemical",
+    spec: ["4G type-CBR-17.2 mm dia-3, Cu coating->250µ, high quality chemical compound with pit chamber / cover"], make: ["Reputated"], qty: [SITE] },
+  { key: "pot_arrestor", product: "Lighting Arrestor (LA)", spec: ["Conventional Type Día 1.25”, 1 meter long, Cu coated fitted 5 spikes on top"], make: ["Approved Make"], qty: [SITE] },
+  { key: "pot_strip", product: "GI earthing Strip/Wire", spec: ["25 x 3 mm GI strip/wire with GI coating > 85u"], make: ["Polycab"], qty: [SITE] },
+  { key: "pot_ties", product: "Plastic cable ties", spec: ["UV rated high performance >4mm x 300 mm length (100 pcs/pkt)"], make: ["Reputated"], qty: [SITE] },
+  { key: "pot_ferrules", product: "Ferrules", spec: ["UV protected, A-Z,0-9, Size-Suitable for 4/6 sqmm solar cable"], make: ["Reputated"], qty: [SITE] },
+  { key: "pot_foam", product: "PU foam spray", spec: ["High performance, self-expanding PU foam"], make: ["Reputated"], qty: [SITE] },
+];
+
+/** Potaliya's bill of material — the inverter line = the plant kW; the module qty from the kW and the module's watts. */
+export function potaliyaBom(picked: Record<string, unknown>, kw: number): BoqCells {
+  return boqCells(POTALIYA_BOM, picked, (row, col, c) =>
+    row === "pot_inverter" && col === "spec" ? (kw > 0 ? `${kwText(kw)}KW` : "")
+    : row === "pot_module" && col === "qty" ? (panelsFor(kw, c.spec) ? `${panelsFor(kw, c.spec)} Nos.` : "")
+    : undefined);
+}
+
+/** Potaliya proposal figures from the kW and the price (GST included); a blank subsidy (null) = the default. */
+export function potaliyaFigures(kw: number, price: number, central: number | null, state: number | null) {
+  const units = Math.round(kw * POTALIYA.unitsPerKw);
+  const savings = units * POTALIYA.tariff;
+  const year = POTALIYA.months.reduce((s, m) => s + m, 0);
+  return {
+    units, savings,
+    payback: savings > 0 ? (price / savings).toFixed(1) : "-",
+    trees: Math.round(units * POTALIYA.treesPerUnit),
+    co2: Math.round(units / 1000),
+    central: central ?? centralSubsidyFor(kw, false),
+    state: state ?? POTALIYA.stateSubsidy,
+    months: POTALIYA.months.map((m) => (savings * m) / year),
+  };
+}
+
 // Standard quotation — Capital Craft's own proposal for every EPC without a
 // builder of its own (saved quotations, epc_quotes 0118), in two kinds, with
 // defaults taken from the EPCs' own quotations:

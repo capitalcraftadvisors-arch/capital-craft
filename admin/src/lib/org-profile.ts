@@ -29,9 +29,13 @@ export type OrgProfile = {
   accent: string | null;
   quote_prefix: string; quote_next: number; gst_mode: "blended" | "lines";
   quote_defaults: QuoteDefaults;
+  // Partner Portal v2 (0129) — read with ORG_V2_COLS only where v2 needs them.
+  invoice_prefix?: string; upi_id?: string | null; whatsapp_number?: string | null;
 };
 export const ORG_COLS = "business_id, logo_path, signature_path, stamp_path, display_name, address_line, city, state, pincode, " +
   "phone, email, website, accent, quote_prefix, quote_next, gst_mode, quote_defaults";
+/** The v2 settings (0129): invoice series prefix, UPI ID, the company's WhatsApp number. */
+export const ORG_V2_COLS = "invoice_prefix, upi_id, whatsapp_number";
 
 /** An EPC that hasn't saved anything yet. */
 export const emptyOrgProfile = (business_id: string): OrgProfile => ({

@@ -3,6 +3,9 @@
 //
 // Access control: we look up the doc using the user's JWT, so RLS decides
 // whether they're allowed to see it (own data, or admin).
+//
+// Project documents (epc_project_documents, 0129 — the Partner Portal v2 vault)
+// are found too; ?in=project looks there first (one read instead of four).
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
@@ -22,9 +25,24 @@ type FoundRow = { id: string; storage_path: string; category: string; business_i
 type Found =
   | ({ table: "epc_documents" } & FoundRow)
   | ({ table: "user_application_docs" } & FoundRow)
-  | ({ table: "stakeholder_docs" } & FoundRow);
+  | ({ table: "stakeholder_docs" } & FoundRow)
+  | ({ table: "epc_project_documents" } & FoundRow);
 
-async function findDoc(supabase: SupabaseClient, id: string): Promise<Found | null> {
+async function findProjectDoc(supabase: SupabaseClient, id: string): Promise<Found | null> {
+  const p = await supabase
+    .from("epc_project_documents")
+    .select("id, storage_path, category")
+    .eq("id", id)
+    .maybeSingle();
+  return p.data ? { table: "epc_project_documents", ...(p.data as FoundRow) } : null;
+}
+
+async function findDoc(supabase: SupabaseClient, id: string, projectFirst = false): Promise<Found | null> {
+  if (projectFirst) {
+    const p = await findProjectDoc(supabase, id);
+    if (p) return p;
+  }
+
   const e = await supabase
     .from("epc_documents")
     .select("id, storage_path, category, business_id")
@@ -47,7 +65,8 @@ async function findDoc(supabase: SupabaseClient, id: string): Promise<Found | nu
     .maybeSingle();
   if (s.data) return { table: "stakeholder_docs", ...(s.data as FoundRow) };
 
-  return null;
+  // A project's document (0129) — whoever sees the project, by RLS.
+  return projectFirst ? null : findProjectDoc(supabase, id);
 }
 
 // Admin-only categories (defense-in-depth alongside RLS).
@@ -94,7 +113,7 @@ export async function GET(
     const claims = await verifyJwt(token);
 
     const supabase = client(token);
-    const doc = await findDoc(supabase, params.id);
+    const doc = await findDoc(supabase, params.id, req.nextUrl.searchParams.get("in") === "project");
     if (!doc) return err("not_found", 404);
 
     // Defense in depth alongside RLS: even if a future RLS change ever
@@ -129,11 +148,24 @@ export async function DELETE(
     const claims = await verifyJwt(token);
 
     const supabase = client(token);
-    const doc = await findDoc(supabase, params.id);
+    const doc = await findDoc(supabase, params.id, req.nextUrl.searchParams.get("in") === "project");
     if (!doc) return err("not_found", 404);
 
     const denial = requireAdminForCategory(doc, claims.business_type);
     if (denial) return denial;
+
+    // A project document: RLS lets only the Owner / Admin or whoever added it
+    // delete — a refused delete removes no row, so the file stays too.
+    if (doc.table === "epc_project_documents") {
+      const { data: gone, error: pErr } = await supabase
+        .from("epc_project_documents")
+        .delete()
+        .eq("id", params.id)
+        .select("id");
+      if (pErr || !gone?.length) return err("You can delete only the documents you added.", 403);
+      await deleteObject(doc.storage_path);
+      return NextResponse.json({ ok: true });
+    }
 
     // Delete the row first; RLS decides whether they may.
     const { error: dbErr } = await supabase

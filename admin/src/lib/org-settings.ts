@@ -5,7 +5,7 @@
 import { supabase } from "./supabase";
 import { getBusiness } from "./auth";
 import { setEpcLogo } from "./epc-name";
-import { ORG_COLS, ORG_IMAGE_COLUMN, emptyOrgProfile, type OrgImageKind, type OrgProfile } from "./org-profile";
+import { ORG_COLS, ORG_V2_COLS, ORG_IMAGE_COLUMN, emptyOrgProfile, type OrgImageKind, type OrgProfile } from "./org-profile";
 
 // The KYC details CC verified (epc_business) — read-only in Settings.
 export const KYC_COLS = "id, epc_display_id, trade_name, legal_name, business_type, pan_number, gstin_number, gst_address, " +
@@ -52,6 +52,28 @@ export async function saveOrgSettings(patch: Partial<Omit<OrgProfile, "business_
   if (error) throw error;
   const next = { ...cur, ...patch };
   org.set(cur.business_id, next);
+  return next;
+}
+
+// ── Partner Portal v2 (0129): invoice prefix, UPI ID, WhatsApp number ─────────
+// Read and saved apart from the rest (ORG_V2_COLS), so Settings keeps working
+// where 0129 isn't applied yet.
+export type OrgV2 = { invoice_prefix: string; upi_id: string | null; whatsapp_number: string | null };
+const orgV2 = cachedRead<OrgV2>(async (id) => {
+  const { data, error } = await supabase().from("epc_org_profile").select(ORG_V2_COLS).eq("business_id", id).maybeSingle();
+  if (error) throw error;
+  return { invoice_prefix: "INV/", upi_id: null, whatsapp_number: null, ...((data ?? {}) as Partial<OrgV2>) };
+});
+export const fetchOrgV2 = () => orgV2.get();
+
+/** Saves the v2 settings (upsert — the row is made on the first save). */
+export async function saveOrgV2(patch: Partial<OrgV2>): Promise<OrgV2> {
+  const cur = await orgV2.get();
+  const id = getBusiness()?.id as string;
+  const { error } = await supabase().from("epc_org_profile").upsert({ business_id: id, ...patch, updated_at: new Date().toISOString() });
+  if (error) throw error;
+  const next = { ...cur, ...patch };
+  orgV2.set(id, next);
   return next;
 }
 

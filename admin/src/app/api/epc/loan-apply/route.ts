@@ -28,7 +28,7 @@
 // scopes every read/write to the EPC's own rows; no service-role.
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { getBearerToken, verifyJwt } from "@/lib/jwt";
 import { DEFAULT_INDICATIVE_ROI } from "@/lib/emi";
 import { isUndefinedColumn, omitKeys, UNDEFINED_COLUMN } from "@/lib/optional-column";
@@ -65,6 +65,16 @@ const missingColumn = (e: { code?: string; message?: string } | null, col?: stri
 
 function err(message: string, status: number) {
   return NextResponse.json({ ok: false, error: message }, { status });
+}
+
+// Duplicate customer (0127): another EPC already filed a loan for this mobile / PAN
+// → stop, without saying which. Only the demo EPC for now (`demo` — Partner Portal
+// v2); before 0127 the call fails and nothing is blocked.
+const TAKEN_MSG = "This customer has already applied through another partner.";
+async function customerCheck(db: SupabaseClient, mobile: string | null, pan: string | null): Promise<{ taken: boolean; v2: boolean }> {
+  const { data } = await db.rpc("epc_customer_taken", { p_mobile: mobile, p_pan: pan });
+  const t = data as { mobile?: boolean; pan?: boolean; demo?: boolean } | null;
+  return { taken: !!t?.demo && (!!t.mobile || !!t.pan), v2: !!t?.demo };
 }
 function strOrNull(v: unknown): string | null {
   if (v == null) return null;
@@ -129,6 +139,7 @@ export async function POST(req: NextRequest) {
         return err("Choose Residential or Commercial.", 400);
       }
       const consented = b.consented === true;
+      if ((await customerCheck(supabase, borrower_mobile, null)).taken) return err(TAKEN_MSG, 409);
 
       // Duplicate warning (NON-blocking): other loan applications already on file
       // for this EPC with the SAME mobile (RLS scopes the query to the caller's
@@ -232,6 +243,10 @@ export async function POST(req: NextRequest) {
       // was registered under the customer's mobile. Written only when sent.
       const borrower_mobile = String(b.borrower_mobile ?? "").replace(/\D/g, "") || null;
       if (borrower_mobile && !MOBILE_RE.test(borrower_mobile)) return err("Enter a valid 10-digit mobile.", 400);
+      // First submit only: the final applicant's mobile / PAN filed by another EPC → stop.
+      const firstSubmit = !(app as any).submitted_at;
+      const check = firstSubmit ? await customerCheck(supabase, borrower_mobile ?? (app as any).borrower_mobile ?? null, borrower_pan) : null;
+      if (check?.taken) return err(TAKEN_MSG, 409);
 
       // Co-applicant contact. Must NOT duplicate the applicant's own
       // email / phone (same rule the admin flow enforces client-side) —
@@ -500,6 +515,12 @@ export async function POST(req: NextRequest) {
           file_name: strOrNull(b.borrower_pan_file_name), mime_type: strOrNull(b.borrower_pan_mime), uploaded_by: "epc",
         });
         if (docErr) console.warn("[epc/loan-apply] applicant PAN doc row:", docErr.message);
+      }
+
+      // Partner Portal v2: a filed loan is a project (0129) — made on its first submit.
+      if (check?.v2) {
+        const { error: pErr } = await supabase.rpc("epc_projects_from_loans", { p_business: claims.business_id });
+        if (pErr) console.warn("[epc/loan-apply] project for the loan:", pErr.message);
       }
 
       return NextResponse.json({ ok: true, id: appId });

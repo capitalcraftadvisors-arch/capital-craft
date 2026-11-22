@@ -56,7 +56,7 @@ export default function AuthGuard({ children, allow, requireModule }: Props) {
     // permission decisions). An EPC staff login (0119) also re-reads its own
     // role / modules in the same request.
     const member = biz.member ?? null;
-    const cols = "id, status, business_type, current_step, contact_name, epc_self_edited, epc_self_edited_at, loan_app_unlocked, service_type, role, allowed_modules, parent_user_id";
+    const cols = "id, status, business_type, current_step, contact_name, epc_self_edited, epc_self_edited_at, loan_app_unlocked, service_type, role, allowed_modules, parent_user_id, is_demo";
     const sel: string = member ? `${cols}, epc_members(id, name, member_role, modules, active)` : cols;
     let q = supabase().from("epc_business").select(sel).eq("id", biz.id);
     if (member) q = q.eq("epc_members.id", member.id);
@@ -74,7 +74,7 @@ export default function AuthGuard({ children, allow, requireModule }: Props) {
         const { epc_members: _members, ...row } = data ?? ({} as Business & { epc_members?: unknown });
         // Merge so login-only fields (is_owner) survive the refresh.
         const latest: Business = data
-          ? { ...biz, ...(row as Business), ...(m ? { member: { id: m.id, name: m.name, role: m.member_role as "ADMIN" | "SALES" | "VIEWER", modules: m.modules } } : {}) }
+          ? { ...biz, ...(row as Business), ...(m ? { member: { id: m.id, name: m.name, role: m.member_role as "ADMIN" | "SALES" | "VIEWER" | "SITE", modules: m.modules } } : {}) }
           : biz;
         if (data) setBusiness(latest);
         if (!matches(latest, allow)) {

@@ -3,11 +3,13 @@
 // Quotations — every quotation the company made, newest first, in Residential /
 // Commercial tabs: search, status filter, open (edit), download. "New quotation"
 // asks for the template — Simple (standard) or the company's Custom one.
+// "From bill photo" (Partner Portal v2) drafts one from the customer's electricity bill.
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { NAVY } from "@/components/partner/PartnerShell";
 import NewQuoteChooser from "@/components/partner/NewQuoteChooser";
+import BillToQuote from "@/components/partner/BillToQuote";
 import CustomTemplateBanner from "@/components/partner/CustomTemplateBanner";
 import { input } from "@/components/quotation/form-kit";
 import { fetchQuotes, downloadQuotePdf, QUOTE_STATUSES, QUOTE_STATUS_LABEL, QUOTE_STATUS_PILL, type QuoteRow, type QuoteStatus } from "@/lib/quotes";
@@ -15,7 +17,10 @@ import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template
 import { fmtDate } from "@/lib/dates";
 import { fmtRupees } from "@/lib/money";
 import { getBusiness } from "@/lib/auth";
-import { canWork } from "@/lib/epc-roles";
+import { canWork, portalV2 } from "@/lib/epc-roles";
+import { fetchWhatsAppOn } from "@/lib/subscription";
+import { whatsAppQuote } from "@/lib/wa-share";
+import WhatsAppButton from "@/components/partner/WhatsAppButton";
 
 type Segment = "residential" | "commercial";
 const SEGMENTS: [Segment, string][] = [["residential", "Residential"], ["commercial", "Commercial"]];
@@ -33,9 +38,18 @@ export default function QuotesList() {
   const [busy, setBusy] = useState<string | null>(null);
   const [tpl, setTpl] = useState<QuoteTemplate | null | undefined>(undefined); // the custom template (cached read)
   const [choose, setChoose] = useState(false);
+  const [fromBill, setFromBill] = useState(false); // "From bill photo" (Partner Portal v2)
 
   useEffect(() => { fetchQuotes().then(setRows, () => setFailed(true)); }, []);
   useEffect(() => { fetchQuoteTemplate().then(setTpl, () => setTpl(null)); }, []);
+  // One-tap WhatsApp share (Partner Portal v2, paid).
+  const v2 = portalV2(me);
+  const [wa, setWa] = useState(false);
+  useEffect(() => { if (v2) fetchWhatsAppOn().then(setWa, () => {}); }, [v2]);
+  async function share(id: string) {
+    setBusy(`wa:${id}`);
+    try { await whatsAppQuote(id); } catch (e) { alert((e as Error).message); } finally { setBusy(null); }
+  }
 
   const inSegment = useMemo(() => (rows ?? []).filter((r) => r.segment === segment), [rows, segment]);
   const shown = useMemo(() => {
@@ -66,10 +80,18 @@ export default function QuotesList() {
           ))}
         </div>
         {work && (
-          <button type="button" onClick={() => setChoose(true)}
-            className="ml-auto px-4 py-2.5 rounded-xl text-white text-[13.5px] font-semibold" style={{ background: NAVY }}>
-            + New quotation
-          </button>
+          <div className="ml-auto flex items-center gap-2 flex-wrap">
+            {v2 && (
+              <button type="button" onClick={() => setFromBill(true)}
+                className="px-4 py-2.5 rounded-xl border border-line bg-white text-[13.5px] font-semibold text-[#0f3d2e] hover:bg-bg-soft">
+                From bill photo
+              </button>
+            )}
+            <button type="button" onClick={() => setChoose(true)}
+              className="px-4 py-2.5 rounded-xl text-white text-[13.5px] font-semibold" style={{ background: NAVY }}>
+              + New quotation
+            </button>
+          </div>
         )}
       </div>
 
@@ -87,6 +109,7 @@ export default function QuotesList() {
       </div>
 
       {choose && <NewQuoteChooser segment={segment} tpl={tpl ?? null} onClose={() => setChoose(false)} />}
+      {fromBill && <BillToQuote quotes={rows ?? []} onClose={() => setFromBill(false)} />}
 
       {failed ? (
         <p className="text-[13px] text-red-600">Couldn&apos;t load your quotations. Please refresh.</p>
@@ -120,7 +143,8 @@ export default function QuotesList() {
                   <td className="px-4 py-3 text-right font-semibold whitespace-nowrap">{fmtRupees(r.total)}</td>
                   <td className="px-4 py-3"><span className={`px-2.5 py-1 rounded-full text-[12px] font-semibold ${QUOTE_STATUS_PILL[r.status]}`}>{QUOTE_STATUS_LABEL[r.status]}</span></td>
                   <td className="px-4 py-3 text-text-mid whitespace-nowrap">{r.created_by?.name || ownerName}</td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="px-4 py-3 text-right whitespace-nowrap">
+                    {v2 && <WhatsAppButton on={wa} busy={busy === `wa:${r.id}`} onClick={() => void share(r.id)} className="mr-4" />}
                     <button type="button" onClick={(e) => { e.stopPropagation(); void download(r.id); }} disabled={busy === r.id}
                       className="text-[13px] font-semibold text-[#1e3a8a] hover:underline disabled:opacity-60 whitespace-nowrap">
                       {busy === r.id ? "Preparing…" : "PDF"}

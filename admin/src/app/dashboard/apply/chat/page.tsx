@@ -43,6 +43,7 @@ import { CATEGORY_LABEL } from "@/lib/loan-form";
 import { amountInput } from "@/lib/money";
 import { supabase } from "@/lib/supabase";
 import { clearChatDraft, loadChatDraft, saveChatDraft, withoutThumbs } from "@/lib/chat-draft";
+import { fetchLeads, linkLeadLoan } from "@/lib/leads";
 
 const MOBILE_RE = /^[6-9]\d{9}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -358,6 +359,7 @@ function ChatInner() {
   const pushUser = (text: string, files?: Msg["files"], turnId?: string, value?: string) =>
     setMsgs((m) => [...m, { id: uidGen(), from: "user", text, time: nowLabel(), files, turnId, pass: form._pass, value }]);
   const prefillRef = useRef("");
+  const leadRef = useRef<string | null>(null); // ?lead=<id> — the lead this application comes from
 
   // Warm greeting on mount, then the first question. In edit mode (?id&edit=1)
   // we adopt the existing application first (hydrate every field + which docs are
@@ -385,6 +387,11 @@ function ChatInner() {
         } else {
           setScript(EDIT_INTRO);
         }
+      } else if (q.get("lead")) {
+        // Applied from a lead (Partner Portal v2): a new application, its mobile
+        // ready in the box; the loan is linked back to the lead once it starts.
+        const lead = (await fetchLeads().catch(() => [])).find((l) => l.id === q.get("lead"));
+        if (lead) { leadRef.current = lead.id; prefillRef.current = lead.mobile ?? ""; }
       } else {
         // An application left half-way (refresh, slow OCR, closed tab) — continue
         // it where it stopped, while it's still a draft.
@@ -564,6 +571,7 @@ function ChatInner() {
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't start the application."); return false; }
       setAppId(j.id);
+      if (leadRef.current) void linkLeadLoan(leadRef.current, j.id).catch(() => {});
       if (j.loan_display_id) merge({ loan_display_id: j.loan_display_id });
       // Non-blocking duplicate warning — a profile with this mobile already exists.
       if (Array.isArray(j.duplicates) && j.duplicates.length) {
