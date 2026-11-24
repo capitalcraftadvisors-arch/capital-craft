@@ -2,8 +2,8 @@
 
 // Admin EPC profile → "Custom quotation" (0122): the sample quotation(s) the EPC
 // uploaded, where its custom template stands, and — for the main admin — Mark
-// ready (the EPC is told; 3 free months start) and the On / Off switch (on = it
-// never locks, e.g. once the EPC pays). The template itself is built in code and
+// ready (the EPC is told it's ready and to buy the premium subscription) and the
+// Unlocked switch (the EPC can use it — once it pays). The template itself is built in code and
 // added as an epc_quotation_templates row, as for Bijlee / Sarvatra Energy / RVS.
 // Reads once, when the card is opened.
 
@@ -13,10 +13,16 @@ import { supabase } from "@/lib/supabase";
 import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { fmtDate } from "@/lib/dates";
 import { askConfirm } from "@/lib/confirm";
-import { customState, freeUntil } from "@/lib/custom-template";
+import { customState, READY_CONFIRM } from "@/lib/custom-template";
 import { HAction } from "@/components/view/ViewKit";
 
-type Tpl = { id: string; name: string | null; ready_at: string | null; unlocked: boolean | null };
+export type Tpl = { id: string; name: string | null; ready_at: string | null; unlocked: boolean | null };
+
+/** Saves Ready / Unlock on a template (main admin; RLS 0122). Answers the error, or null. */
+export async function saveCustomTemplate(id: string, patch: Partial<Pick<Tpl, "ready_at" | "unlocked">>): Promise<string | null> {
+  const { error } = await supabase().from("epc_quotation_templates").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
+  return error ? error.message : null;
+}
 
 export default function CustomTemplateCard({ businessId }: { businessId: string }) {
   const admin = isMainAdmin(getBusiness());
@@ -33,15 +39,13 @@ export default function CustomTemplateCard({ businessId }: { businessId: string 
   async function save(patch: Partial<Tpl>) {
     if (!tpl || busy) return;
     setBusy(true); setError(null);
-    const { error: e } = await supabase().from("epc_quotation_templates").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", tpl.id);
+    const e = await saveCustomTemplate(tpl.id, patch);
     setBusy(false);
-    if (e) { setError(e.message); return; }
+    if (e) { setError(e); return; }
     setTpl({ ...tpl, ...patch });
   }
   const markReady = async () => {
-    if (await askConfirm("Mark the custom template ready?\n\nThe EPC sees \"Your custom template is ready\" and its 3 free months start today.")) {
-      void save({ ready_at: new Date().toISOString() });
-    }
+    if (await askConfirm(READY_CONFIRM)) void save({ ready_at: new Date().toISOString() });
   };
 
   const state = tpl ? customState(tpl) : null;
@@ -49,9 +53,8 @@ export default function CustomTemplateCard({ businessId }: { businessId: string 
     tpl === undefined ? "Loading…" :
     !tpl ? "Not built yet" :
     state === "making" ? `${tpl.name || "Template"} · not marked ready` :
-    tpl.unlocked ? `${tpl.name || "Template"} · On` :
-    state === "ready" ? `${tpl.name || "Template"} · free till ${fmtDate(freeUntil(tpl.ready_at!).toISOString())}` :
-    `${tpl.name || "Template"} · locked since ${fmtDate(freeUntil(tpl.ready_at!).toISOString())}`;
+    state === "ready" ? `${tpl.name || "Template"} · unlocked` :
+    `${tpl.name || "Template"} · ready · locked`;
   const tone = state === "locked" ? "text-warn-ink" : state === "ready" ? "text-cc-green" : "text-cc-ink";
 
   return (
@@ -65,7 +68,7 @@ export default function CustomTemplateCard({ businessId }: { businessId: string 
           <label className="inline-flex items-center gap-2 text-[12.5px] font-semibold text-cc-ink cursor-pointer select-none">
             <input type="checkbox" className="w-4 h-4 accent-cc-green" checked={!!tpl.unlocked} disabled={busy}
               onChange={(e) => void save({ unlocked: e.target.checked })} />
-            On
+            Unlocked
           </label>
         )}
       </div>

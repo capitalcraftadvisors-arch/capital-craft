@@ -62,7 +62,7 @@ function Builder() {
   const [failed, setFailed] = useState(false);
   useEffect(() => { fetchQuoteTemplate().then(setTpl, () => setFailed(true)); }, []);
   const customers = tpl?.storage_path === SARVATRA.key;
-  // No custom template, or it's locked (free months over, not switched on) →
+  // No custom template, or it's locked (ready but not unlocked yet) →
   // Quotations, whose "New quotation" says so.
   const locked = !!tpl && customState(tpl) === "locked";
   useEffect(() => {

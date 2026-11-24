@@ -6,7 +6,7 @@
 import { supabase } from "./supabase";
 import { getBusiness } from "./auth";
 
-// ready_at / unlocked: the custom template's free months + CC's switch (0122, lib/custom-template).
+// ready_at / unlocked: CC's Ready + Unlock of the custom template (0122, lib/custom-template).
 export type QuoteTemplate = { storage_path: string; serial_next: number | null; ready_at: string | null; unlocked: boolean | null };
 
 let cached: { id: string; tpl: QuoteTemplate | null } | null = null;

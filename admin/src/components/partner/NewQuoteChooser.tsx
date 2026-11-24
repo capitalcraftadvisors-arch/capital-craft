@@ -13,8 +13,7 @@ import FileUpload from "@/components/FileUpload";
 import Modal from "@/components/ui/Modal";
 import { getBusiness } from "@/lib/auth";
 import { canManageOrg } from "@/lib/epc-roles";
-import { fmtDate } from "@/lib/dates";
-import { customState, freeUntil, CUSTOM_LOCKED_MSG } from "@/lib/custom-template";
+import { customState, CUSTOM_LOCKED_MSG } from "@/lib/custom-template";
 import { markCustomTemplateSeen } from "@/components/partner/CustomTemplateBanner";
 import type { QuoteTemplate } from "@/lib/quotation-template";
 
@@ -60,7 +59,6 @@ export default function NewQuoteChooser({ segment, tpl, onClose }: {
 
           {state === "ready" && tpl ? (
             <>
-              {!tpl.unlocked && tpl.ready_at && <p className="text-[12.5px] text-text-muted">Free till {fmtDate(freeUntil(tpl.ready_at).toISOString())}</p>}
               <button type="button" onClick={() => { markCustomTemplateSeen(tpl); router.push("/dashboard/quotation"); }}
                 className={primary + " mt-auto"} style={{ background: NAVY }}>
                 Make quotation
