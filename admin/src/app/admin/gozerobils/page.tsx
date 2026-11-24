@@ -33,24 +33,10 @@ import { fmtDate, fmtDateTime, fmtTime, localIsoDate } from "@/lib/dates";
 import { notify } from "@/lib/notify";
 import { waUrl } from "@/lib/wa-link";
 import { LEAD_STATUS_OPTIONS, LEAD_STATUS_PILL } from "@/lib/lead-status";
+import { GZB_LEAD_COLS as COLS, OUTCOMES, OUTCOME_LABEL, tel, words, type GzbLead as Lead, type Outcome } from "@/lib/gozerobils";
 
-type Lead = {
-  id: string; created_at: string;
-  name: string | null; mobile: string;
-  pincode: string | null; city: string | null; state: string | null;
-  monthly_bill: string | null; looking_for: string | null; timeline: string | null;
-  utm_source: string | null; utm_campaign: string | null;
-  status: string; notes: string | null;
-  follow_up_at: string | null; last_call_at: string | null; last_outcome: string | null; call_count: number;
-};
 type Call = { id: string; lead_id: string; called_at: string; outcome: Outcome; note: string | null; next_follow_up: string | null; lead?: { name: string | null; mobile: string } | null };
 
-const OUTCOMES = ["connected", "interested", "call_back", "not_interested", "no_answer", "busy", "switched_off", "wrong_number"] as const;
-type Outcome = (typeof OUTCOMES)[number];
-const OUTCOME_LABEL: Record<Outcome, string> = {
-  connected: "Connected", interested: "Interested", call_back: "Call back", not_interested: "Not interested",
-  no_answer: "No answer", busy: "Busy", switched_off: "Switched off", wrong_number: "Wrong number",
-};
 // The next follow-up a call suggests (days from today; null = none) and the status it suggests.
 const NEXT_IN: Record<Outcome, number | null> = {
   connected: 3, interested: 2, call_back: 1, not_interested: null, no_answer: 1, busy: 1, switched_off: 1, wrong_number: null,
@@ -58,14 +44,9 @@ const NEXT_IN: Record<Outcome, number | null> = {
 const CLOSES: Outcome[] = ["not_interested", "wrong_number"];
 const OPEN = (s: string) => s !== "converted" && s !== "closed";
 
-const COLS = "id, created_at, name, mobile, pincode, city, state, monthly_bill, looking_for, timeline, utm_source, utm_campaign, status, notes, " +
-  "follow_up_at, last_call_at, last_outcome, call_count";
 const CK = "dash.gzb";
 const th = "px-3 py-3 font-medium text-[12px] uppercase tracking-wide";
 const inDays = (n: number) => localIsoDate(new Date(Date.now() + n * 86_400_000));
-// The form's choice keys as words: "premium_solar_system_with_expert_installation" → "Premium solar system with expert installation".
-const words = (v: string | null) => (v ? v.replace(/_+/g, " ").trim().replace(/^./, (c) => c.toUpperCase()) : v);
-const tel = (m: string) => `tel:+91${m}`;
 
 type Tab = "leads" | "myday" | "followups" | "calls" | "traffic";
 

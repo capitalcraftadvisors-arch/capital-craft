@@ -3,7 +3,11 @@
 // Leads — the company's prospects and their follow-ups (epc_leads, 0127): filter
 // by follow-up due or status, search, add / edit / delete. Sales see only the
 // leads they own; Owner / Admin see everyone's and pick each lead's owner.
-// Partner Portal v2 — the demo EPC only for now (portalV2).
+// Partner Portal v2 (portalV2).
+// Sustera Ventures (gozerobils — its quotation template is the gozerobils builder)
+// has three tabs (0141): Meta = the gozerobils.com enquiries, read only (CC works
+// them in its gozerobils page) with Call / WhatsApp; Cold call / Reference = its own
+// leads by where they came from (the lead form asks; a reference names whose).
 
 import { useEffect, useId, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -18,6 +22,10 @@ import { fetchEpcName } from "@/lib/epc-name";
 import { fetchWhatsAppOn } from "@/lib/subscription";
 import { whatsAppLead } from "@/lib/wa-share";
 import { fetchProjects, projectFromLead } from "@/lib/projects";
+import { fetchQuoteTemplate } from "@/lib/quotation-template";
+import { SARVATRA } from "@/lib/quotation-brands";
+import { fetchMetaLeads, tel, words, OUTCOME_LABEL, type GzbLead, type Outcome } from "@/lib/gozerobils";
+import { LEAD_STATUS_OPTIONS, LEAD_STATUS_PILL as GZB_STATUS_PILL } from "@/lib/lead-status";
 import { fetchMembers, type MemberRow } from "@/lib/members";
 import { fmtDate, localIsoDate } from "@/lib/dates";
 import { fmtRupees } from "@/lib/money";
@@ -25,10 +33,13 @@ import { MOBILE_RE } from "@/lib/validators";
 import { askConfirm } from "@/lib/confirm";
 import {
   fetchLeads, saveLead, deleteLead, leadsChanged, filedElsewhere, isDue,
-  LEAD_STATUSES, LEAD_STATUS_LABEL, LEAD_STATUS_PILL, type LeadRow, type LeadStatus,
+  LEAD_STATUSES, LEAD_STATUS_LABEL, LEAD_STATUS_PILL, LEAD_SOURCES, LEAD_SOURCE_LABEL, type LeadRow, type LeadStatus, type LeadSource,
 } from "@/lib/leads";
 
 type Filter = "all" | "due" | LeadStatus;
+type Tab = "meta" | LeadSource;
+// A lead saved before the source was asked counts as a cold call.
+const sourceOf = (r: Pick<LeadRow, "source">): LeadSource => r.source ?? "cold_call";
 
 export default function LeadsPage() {
   const router = useRouter();
@@ -50,6 +61,16 @@ export default function LeadsPage() {
   useEffect(() => { if (v2) { fetchWhatsAppOn().then(setWa, () => {}); void fetchEpcName().then(setOrg); } }, [v2]);
   const canLoan = loanAccess(me) && hasModule(me, "loans");
   useEffect(() => { fetchLeads().then(setRows, () => setFailed(true)); }, []);
+  // Sustera (the gozerobils company): the Meta / Cold call / Reference tabs — its
+  // template is a cached read the portal already makes.
+  const [gzb, setGzb] = useState(false);
+  const [tab, setTab] = useState<Tab>("meta");
+  useEffect(() => { fetchQuoteTemplate().then((t) => setGzb(t?.storage_path === SARVATRA.key), () => {}); }, []);
+  const [meta, setMeta] = useState<GzbLead[] | null>(null);
+  const [metaFailed, setMetaFailed] = useState(false);
+  useEffect(() => { if (gzb && tab === "meta" && !meta) fetchMetaLeads().then(setMeta, () => setMetaFailed(true)); }, [gzb, tab, meta]);
+  const onMeta = gzb && tab === "meta";
+  const inTab = (r: LeadRow) => !gzb || tab === "meta" || sourceOf(r) === tab;
   // Opened from a dashboard tile: ?f=due | ?f=<status> filters, ?owner=<member id | company>
   // shows one lead owner's leads, ?new=1 adds a lead.
   const [owner, setOwner] = useState<string | null>(null);
@@ -69,21 +90,38 @@ export default function LeadsPage() {
   }, [open, assign, members.length]);
 
   const today = localIsoDate(new Date());
-  const count = (f: Filter) => (rows ?? []).filter((r) => (f === "all" ? true : f === "due" ? isDue(r, today) : r.status === f)).length;
+  const count = (f: Filter) => (rows ?? []).filter((r) => inTab(r) && (f === "all" ? true : f === "due" ? isDue(r, today) : r.status === f)).length;
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
-    const list = (rows ?? []).filter((r) => (filter === "all" || (filter === "due" ? isDue(r, today) : r.status === filter))
+    const list = (rows ?? []).filter((r) => (!gzb || sourceOf(r) === tab)
+      && (filter === "all" || (filter === "due" ? isDue(r, today) : r.status === filter))
       && (!owner || (owner === "company" ? !r.owner_member_id : r.owner_member_id === owner))
       && (!s || [r.name, r.mobile, r.city].some((v) => String(v ?? "").toLowerCase().includes(s))));
     return filter === "due" ? [...list].sort((a, b) => String(a.follow_up_at).localeCompare(String(b.follow_up_at))) : list;
-  }, [rows, filter, q, today, owner]);
+  }, [rows, filter, q, today, owner, gzb, tab]);
+  const tabCount = (t: Tab) => (t === "meta" ? meta?.length ?? null : (rows ?? []).filter((r) => sourceOf(r) === t).length);
+  const showRef = gzb && tab === "reference";
 
   function apply(next: LeadRow[]) { setRows(next); leadsChanged(next); }
 
   return (
     <div className="max-w-[1150px]">
+      {gzb && (
+        <div className="inline-flex rounded-xl border border-line bg-white p-1 mb-4">
+          {(["meta", ...LEAD_SOURCES] as Tab[]).map((t) => {
+            const n = tabCount(t);
+            return (
+              <button key={t} type="button" onClick={() => setTab(t)} aria-pressed={tab === t}
+                className={["px-4 py-2 rounded-lg text-[13.5px] font-semibold", tab === t ? "text-white" : "text-text-mid hover:bg-bg-soft"].join(" ")}
+                style={tab === t ? { background: NAVY } : undefined}>
+                {t === "meta" ? "Meta" : LEAD_SOURCE_LABEL[t]}{n != null && <span className="ml-1.5 opacity-70">{n}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div className="flex items-center gap-3 flex-wrap mb-4">
-        <div className="flex gap-1.5 flex-wrap">
+        {!onMeta && <div className="flex gap-1.5 flex-wrap">
           {(["all", "due", ...LEAD_STATUSES] as Filter[]).map((k) => (
             <button key={k} type="button" onClick={() => setFilter(k)}
               className={["px-3.5 py-1.5 rounded-full text-[13px] font-semibold border", filter === k ? "text-white border-transparent" : "bg-white border-line text-text-mid"].join(" ")}
@@ -92,8 +130,8 @@ export default function LeadsPage() {
               <span className={k === "due" && count(k) > 0 && filter !== k ? "text-red-600" : "opacity-70"}>{count(k)}</span>
             </button>
           ))}
-        </div>
-        {owner && (
+        </div>}
+        {!onMeta && owner && (
           <button type="button" onClick={() => setOwner(null)}
             className="px-3.5 py-1.5 rounded-full text-[13px] font-semibold text-white" style={{ background: NAVY }}>
             {owner === "company" ? ownerName : rows?.find((r) => r.owner_member_id === owner)?.owner?.name ?? "—"} ×
@@ -107,7 +145,9 @@ export default function LeadsPage() {
         )}
       </div>
 
-      {failed ? (
+      {onMeta ? (
+        <MetaLeads rows={meta} failed={metaFailed} q={q} wa={wa} org={org} today={today} />
+      ) : failed ? (
         <p className="text-[13px] text-red-600">Couldn&apos;t load your leads. Please refresh.</p>
       ) : !rows ? (
         <p className="text-[13px] text-text-muted">Loading…</p>
@@ -122,6 +162,7 @@ export default function LeadsPage() {
                 <th className="px-4 py-3 font-semibold text-right">Project cost</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-4 py-3 font-semibold">Follow-up</th>
+                {showRef && <th className="px-4 py-3 font-semibold">Reference from</th>}
                 {seeOwners && <th className="px-4 py-3 font-semibold">Lead owner</th>}
               </tr>
             </thead>
@@ -140,12 +181,13 @@ export default function LeadsPage() {
                     <td className="px-4 py-3 text-right whitespace-nowrap">{r.project_cost ? fmtRupees(r.project_cost) : "—"}</td>
                     <td className="px-4 py-3"><span className={`px-2.5 py-1 rounded-full text-[12px] font-semibold whitespace-nowrap ${LEAD_STATUS_PILL[r.status]}`}>{LEAD_STATUS_LABEL[r.status]}</span></td>
                     <td className={`px-4 py-3 whitespace-nowrap ${tone}`}>{r.follow_up_at ? fmtDate(r.follow_up_at) : "—"}</td>
+                    {showRef && <td className="px-4 py-3 text-text-mid">{r.referred_by || "—"}</td>}
                     {seeOwners && <td className="px-4 py-3 text-text-mid whitespace-nowrap">{r.owner?.name || ownerName}</td>}
                   </tr>
                 );
               })}
               {shown.length === 0 && (
-                <tr><td colSpan={seeOwners ? 7 : 6} className="px-4 py-10 text-center text-[13px] text-text-muted">No leads.</td></tr>
+                <tr><td colSpan={6 + (seeOwners ? 1 : 0) + (showRef ? 1 : 0)} className="px-4 py-10 text-center text-[13px] text-text-muted">No leads.</td></tr>
               )}
             </tbody>
           </table>
@@ -154,6 +196,7 @@ export default function LeadsPage() {
 
       {open && rows && (
         <LeadEditor lead={open === "new" ? null : open} rows={rows} members={members} ownerName={ownerName}
+          source={gzb ? (tab === "meta" ? "cold_call" : tab) : null}
           assign={assign} readOnly={!work} wa={wa} org={org} canLoan={canLoan && work}
           onGo={(href) => router.push(href)}
           onSaved={(r) => { apply(open === "new" ? [r, ...rows] : rows.map((x) => (x.id === r.id ? r : x))); setOpen(null); }}
@@ -164,10 +207,12 @@ export default function LeadsPage() {
   );
 }
 
-type Draft = { name: string; mobile: string; city: string; kw: string; project_cost: string; status: LeadStatus; follow_up_at: string; notes: string; owner_member_id: string };
+type Draft = { name: string; mobile: string; city: string; kw: string; project_cost: string; status: LeadStatus; follow_up_at: string; notes: string; owner_member_id: string;
+  source: LeadSource | null; referred_by: string };
 
-function LeadEditor({ lead, rows, members, ownerName, assign, readOnly, wa, org, canLoan, onGo, onSaved, onDeleted, onClose }: {
-  lead: LeadRow | null; rows: LeadRow[]; members: MemberRow[]; ownerName: string;
+// `source`: Sustera asks where the lead came from (a new one starts on the open tab); null = not asked.
+function LeadEditor({ lead, rows, members, ownerName, source, assign, readOnly, wa, org, canLoan, onGo, onSaved, onDeleted, onClose }: {
+  lead: LeadRow | null; rows: LeadRow[]; members: MemberRow[]; ownerName: string; source: LeadSource | null;
   assign: boolean; readOnly: boolean;
   wa: boolean; org: string; canLoan: boolean; onGo: (href: string) => void;
   onSaved: (r: LeadRow) => void; onDeleted: (id: string) => void; onClose: () => void;
@@ -177,6 +222,7 @@ function LeadEditor({ lead, rows, members, ownerName, assign, readOnly, wa, org,
     kw: lead?.kw != null ? String(lead.kw) : "", project_cost: lead?.project_cost != null ? String(lead.project_cost) : "",
     status: lead?.status ?? "new", follow_up_at: lead?.follow_up_at ?? "", notes: lead?.notes ?? "",
     owner_member_id: lead ? lead.owner_member_id ?? "" : getBusiness()?.member?.id ?? "", // a new lead: the person adding it
+    source: source && lead ? sourceOf(lead) : source, referred_by: lead?.referred_by ?? "",
   }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -189,6 +235,7 @@ function LeadEditor({ lead, rows, members, ownerName, assign, readOnly, wa, org,
   async function save() {
     if (!d.name.trim()) { setError("Enter the customer's name."); return; }
     if (d.mobile && !MOBILE_RE.test(d.mobile)) { setError("Enter a valid 10-digit mobile."); return; }
+    if (d.source === "reference" && !d.referred_by.trim()) { setError("Enter whose reference it is."); return; }
     setBusy(true); setError(null);
     try {
       if (d.mobile && d.mobile !== (lead?.mobile ?? "")) {
@@ -202,6 +249,7 @@ function LeadEditor({ lead, rows, members, ownerName, assign, readOnly, wa, org,
         kw: d.kw ? Number(d.kw) : null, project_cost: d.project_cost ? Number(d.project_cost) : null,
         status: d.status, follow_up_at: d.follow_up_at || null, notes: d.notes || null,
         owner_member_id: assign ? d.owner_member_id || null : lead?.owner_member_id ?? null,
+        source: d.source ?? lead?.source ?? null, referred_by: d.source ? d.referred_by : lead?.referred_by ?? null,
       }));
     } catch (e) { setError((e as Error).message || "Couldn't save the lead."); }
     finally { setBusy(false); }
@@ -228,6 +276,24 @@ function LeadEditor({ lead, rows, members, ownerName, assign, readOnly, wa, org,
     <Modal onClose={onClose} closeOnBackdrop="mousedown" busy={busy} overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[640px] max-h-[92vh] overflow-y-auto p-6" aria-labelledby={titleId}>
       <div id={titleId} className="text-[17px] font-display font-bold text-cc-ink mb-4">{lead ? lead.name : "New lead"}</div>
       <fieldset disabled={readOnly || busy} className="grid sm:grid-cols-2 gap-3">
+        {d.source && (
+          <>
+            <Field l="Source" req>
+              <div className="flex gap-1.5">
+                {LEAD_SOURCES.map((x) => (
+                  <button key={x} type="button" onClick={() => set("source", x)} aria-pressed={d.source === x}
+                    className={["flex-1 px-3 py-2.5 rounded-xl text-[13.5px] font-semibold border", d.source === x ? "text-white border-transparent" : "bg-white border-line text-text-mid"].join(" ")}
+                    style={d.source === x ? { background: NAVY } : undefined}>
+                    {LEAD_SOURCE_LABEL[x]}
+                  </button>
+                ))}
+              </div>
+            </Field>
+            {d.source === "reference"
+              ? <Field l="Reference from" req><input className={input} value={d.referred_by} onChange={(e) => set("referred_by", e.target.value)} placeholder="Name" /></Field>
+              : <div className="hidden sm:block" />}
+          </>
+        )}
         <Field l="Customer name" req><input className={input} value={d.name} onChange={(e) => set("name", e.target.value)} /></Field>
         <Field l="Mobile"><input className={input} inputMode="numeric" value={d.mobile} onChange={(e) => set("mobile", digits(e.target.value).slice(0, 10))} placeholder="10-digit mobile" /></Field>
         <Field l="City"><input className={input} value={d.city} onChange={(e) => set("city", e.target.value)} /></Field>
@@ -275,5 +341,65 @@ function LeadEditor({ lead, rows, members, ownerName, assign, readOnly, wa, org,
         )}
       </div>
     </Modal>
+  );
+}
+
+// Sustera's Meta tab: the gozerobils.com enquiries, read only — CC works them (status,
+// follow-ups, calls) in its gozerobils page; here they can be called or WhatsApped.
+function MetaLeads({ rows, failed, q, wa, org, today }: {
+  rows: GzbLead[] | null; failed: boolean; q: string; wa: boolean; org: string; today: string;
+}) {
+  const t = q.trim().toLowerCase();
+  const shown = (rows ?? []).filter((r) => !t || [r.name, r.mobile, r.city, r.pincode].some((v) => String(v ?? "").toLowerCase().includes(t)));
+  const statusLabel = (v: string) => LEAD_STATUS_OPTIONS.find((o) => o.value === v)?.label ?? v;
+  if (failed) return <p className="text-[13px] text-red-600">Couldn&apos;t load the Meta leads. Please refresh.</p>;
+  if (!rows) return <p className="text-[13px] text-text-muted">Loading…</p>;
+  return (
+    <div className="bg-white rounded-2xl border border-line overflow-x-auto">
+      <table className="w-full text-[13.5px] min-w-[860px]">
+        <thead>
+          <tr className="text-left text-[12px] uppercase tracking-wide text-text-muted border-b border-line">
+            <th className="px-4 py-3 font-semibold">Customer</th>
+            <th className="px-4 py-3 font-semibold">City</th>
+            <th className="px-4 py-3 font-semibold">Monthly bill</th>
+            <th className="px-4 py-3 font-semibold">Status</th>
+            <th className="px-4 py-3 font-semibold">Follow-up</th>
+            <th className="px-4 py-3 font-semibold">Last call</th>
+            <th className="px-4 py-3 font-semibold">Received</th>
+            <th className="px-4 py-3" />
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((r) => (
+            <tr key={r.id} className="border-b border-line last:border-0">
+              <td className="px-4 py-3">
+                <div className="font-medium text-text">{r.name || "—"}</div>
+                <div className="text-[12px] text-text-muted">+91 {r.mobile}</div>
+                {r.looking_for && <div className="text-[12px] text-text-muted">{words(r.looking_for)}</div>}
+              </td>
+              <td className="px-4 py-3 text-text-mid">{[r.city, r.pincode].filter(Boolean).join(" · ") || "—"}</td>
+              <td className="px-4 py-3 text-text-mid">{words(r.monthly_bill) || "—"}</td>
+              <td className="px-4 py-3"><span className={`px-2.5 py-1 rounded-full text-[12px] font-semibold whitespace-nowrap ${GZB_STATUS_PILL[r.status] ?? ""}`}>{statusLabel(r.status)}</span></td>
+              <td className={`px-4 py-3 whitespace-nowrap ${r.follow_up_at && r.follow_up_at < today ? "text-red-600 font-semibold" : r.follow_up_at === today ? "text-amber-700 font-semibold" : "text-text-mid"}`}>
+                {r.follow_up_at ? fmtDate(r.follow_up_at) : "—"}
+              </td>
+              <td className="px-4 py-3 text-text-mid whitespace-nowrap">
+                {r.last_call_at ? <>{OUTCOME_LABEL[r.last_outcome as Outcome] ?? r.last_outcome}<div className="text-[12px] text-text-muted">{fmtDate(r.last_call_at)}</div></> : "—"}
+              </td>
+              <td className="px-4 py-3 text-text-mid whitespace-nowrap">{fmtDate(r.created_at)}</td>
+              <td className="px-4 py-3">
+                <div className="flex items-center gap-3 justify-end text-[13px] font-semibold whitespace-nowrap">
+                  <a href={tel(r.mobile)} className="text-navy hover:underline">Call</a>
+                  <WhatsAppButton on={wa} onClick={() => whatsAppLead(r.name || "", r.mobile, org)} />
+                </div>
+              </td>
+            </tr>
+          ))}
+          {shown.length === 0 && (
+            <tr><td colSpan={8} className="px-4 py-10 text-center text-[13px] text-text-muted">No leads.</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
   );
 }

@@ -21,17 +21,23 @@ export const LEAD_STATUS_PILL: Record<LeadStatus, string> = {
   won: "bg-cc-tint text-cc-green", lost: "bg-grey-chip text-[#475569]",
 };
 
+// Where a lead came from — Sustera Ventures only (0141); other companies leave it empty.
+export type LeadSource = "cold_call" | "reference";
+export const LEAD_SOURCES: LeadSource[] = ["cold_call", "reference"];
+export const LEAD_SOURCE_LABEL: Record<LeadSource, string> = { cold_call: "Cold call", reference: "Reference" };
+
 export type LeadRow = {
   id: string; name: string; mobile: string | null; city: string | null;
   kw: number | null; project_cost: number | null; status: LeadStatus;
   follow_up_at: string | null; notes: string | null;
   owner_member_id: string | null; owner: { name: string } | null; // null = the owner
   application_id: string | null; // the loan applied for from this lead
+  source: LeadSource | null; referred_by: string | null; // 0141 (Sustera)
   created_at: string;
 };
-export type LeadInput = Pick<LeadRow, "name" | "mobile" | "city" | "kw" | "project_cost" | "status" | "follow_up_at" | "notes" | "owner_member_id">;
+export type LeadInput = Pick<LeadRow, "name" | "mobile" | "city" | "kw" | "project_cost" | "status" | "follow_up_at" | "notes" | "owner_member_id" | "source" | "referred_by">;
 
-const COLS = "id, name, mobile, city, kw, project_cost, status, follow_up_at, notes, owner_member_id, application_id, created_at, " +
+const COLS = "id, name, mobile, city, kw, project_cost, status, follow_up_at, notes, owner_member_id, application_id, source, referred_by, created_at, " +
   "owner:epc_members!epc_leads_owner_member_id_fkey(name)";
 const who = () => `${getBusiness()?.id ?? ""}.${getBusiness()?.member?.id ?? ""}`;
 const LIST_TTL = 5 * 60_000;
@@ -81,7 +87,8 @@ export async function fetchLeads(): Promise<LeadRow[]> {
 }
 
 export async function saveLead(id: string | null, v: LeadInput): Promise<LeadRow> {
-  const cols = { ...v, name: v.name.trim(), mobile: v.mobile || null, city: v.city?.trim() || null, notes: v.notes?.trim() || null };
+  const cols = { ...v, name: v.name.trim(), mobile: v.mobile || null, city: v.city?.trim() || null, notes: v.notes?.trim() || null,
+    referred_by: v.source === "reference" ? v.referred_by?.trim() || null : null };
   const q = id
     ? supabase().from("epc_leads").update(cols).eq("id", id).select(COLS).single()
     : supabase().from("epc_leads").insert({ ...cols, business_id: getBusiness()?.id }).select(COLS).single();
