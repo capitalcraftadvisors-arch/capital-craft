@@ -15,7 +15,7 @@ import { downloadBuffer } from "@/lib/gcs";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { rupees } from "@/lib/money";
-import { fmtDate } from "@/lib/dates";
+import { fmtDob } from "@/lib/dates";
 import { baseName, zipResponse } from "@/lib/zip-response";
 
 export const runtime = "nodejs";
@@ -71,7 +71,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       ["Applicant Name (as per electricity bill)", dash(bill.ebill_name || loan?.ebill_name || app.aadhaar_name)],
       ["PAN", dash(app.pan_number)],
       ["Aadhaar", dash(app.aadhaar_number_masked)],
-      ["DOB", app.aadhaar_dob ? fmtDate(app.aadhaar_dob) : "—"],
+      ["DOB", fmtDob(app.aadhaar_dob)],
       ["Gender", dash(app.aadhaar_gender)],
       ["Address as per Aadhaar", dash(app.aadhaar_address)],
       ["Risk Location Address (as per electricity bill)", dash(app.plant_address || bill.ebill_address_line || loan?.ebill_address_line)],

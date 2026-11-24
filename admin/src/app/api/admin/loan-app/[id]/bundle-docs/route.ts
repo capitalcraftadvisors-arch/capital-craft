@@ -32,7 +32,7 @@ import sharp from "sharp";
 import { PDFDocument } from "pdf-lib";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { err, dbAs, requireLogin } from "@/lib/api";
-import { UUID_RE } from "@/lib/validators";
+import { UUID_RE, EMAIL_RE } from "@/lib/validators";
 import { ACCEPTED, safeName } from "@/lib/upload-rules";
 import { uploadBuffer, getSignedReadUrl, downloadBuffer } from "@/lib/gcs";
 import { geminiExtract } from "@/lib/gemini-extract";
@@ -198,7 +198,8 @@ function applyDoc(
       if (f.ifsc) { setDb("bank_ifsc", f.ifsc); form.bank_ifsc = f.ifsc; }
       if (f.account_type) { setDb("bank_account_type", f.account_type); form.bank_account_type = f.account_type; }
       if (f.mobile) { setDb("bank_mobile", f.mobile); form.bank_mobile = f.mobile; }
-      if (f.email) { setDb("bank_email", f.email); form.bank_email = f.email; }
+      // Only a real email: step 4 refuses to save a malformed one.
+      if (f.email && EMAIL_RE.test(f.email.trim())) { setDb("bank_email", f.email.trim()); form.bank_email = f.email.trim(); }
       return `Bank ${f.bank_name || "—"}${f.account_no ? " · A/C " + f.account_no : ""}`;
     }
     case "rooftop_photo": return "Rooftop photo";

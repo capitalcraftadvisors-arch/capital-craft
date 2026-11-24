@@ -145,6 +145,14 @@ export function toIsoDate(raw: string | null | undefined): string | null {
   return parseDob(raw)?.iso ?? null;
 }
 
+/** A DOB shown as DD/MM/YYYY, however it was stored (OCR text "05/07/1990" or
+ *  "1990-07-05"). Year-only or unreadable text is shown as printed; "—" when empty. */
+export function fmtDob(raw: string | null | undefined): string {
+  const iso = toIsoDate(raw);
+  if (iso) return fmtDate(iso);
+  return String(raw ?? "").trim() || "—";
+}
+
 /** Age in completed years. Exact DOB → min === max; year-only → { min: Y-y-1, max: Y-y }; null when unparseable. */
 export function ageRange(raw: string | null | undefined, today: Date = new Date()): { min: number; max: number } | null {
   const p = parseDobAt(raw, today);

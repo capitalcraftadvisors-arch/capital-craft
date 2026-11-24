@@ -449,10 +449,20 @@ function Inner() {
   // Change review — undo the current lender decision (and any abort) and move
   // the application back to Docs Sent so the admin can Approve/Reject again.
   // Fixes cases mistakenly marked Approved/Rejected by lender.
-  const changeReview = () => {
+  const changeReview = async () => {
+    if (!loan || statusBusy) return;
     if (!window.confirm(
       "Change the review?\n\nThis undoes the current lender decision (and any abort) and moves the application back to Docs Sent, where you can Approve or Reject again.",
     )) return;
+    // The lenders' own rows carry the decision too: clear them first, or the
+    // Lenders box keeps the old decision and the next lender action puts the
+    // status straight back. Docs-sent times and approval details stay.
+    if (lenderRows.some((r) => r.approved_at || r.rejected_at)) {
+      const cleared = { approved_at: null, rejected_at: null, rejection_reason: null, approval_recorded_at: null };
+      const { error } = await supabase().from("loan_application_lenders").update(cleared).eq("application_id", loan.id);
+      if (error) { setStatusMsg("Couldn't change the review — " + reviewError(error.message)); return; }
+      setLenderRows((rows) => rows.map((r) => ({ ...r, ...cleared })));
+    }
     void changeStatus("docs_sent", {
       approved_lender: null, approved_at: null,
       rejected_lender: null, rejected_at: null,

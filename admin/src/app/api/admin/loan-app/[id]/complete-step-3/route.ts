@@ -219,7 +219,9 @@ export async function POST(
         coapp_aadhaar_face_path,
         rooftop_photo_path,
         rooftop_photo_uploaded_at,
-        rooftop_photo_gps,
+        // GPS is written when the caller sends it, or when there's no rooftop
+        // photo any more. A caller that doesn't send it (the intake chat) keeps it.
+        ...("rooftop_photo_gps" in b || !rooftop_photo_path ? { rooftop_photo_gps } : {}),
         step3_completed_at: new Date().toISOString(),
         current_step: nextStep,
       })

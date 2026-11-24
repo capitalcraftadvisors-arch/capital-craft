@@ -417,7 +417,7 @@ function Inner() {
       if (rooftopDoc) {
         body.rooftop_photo_path = rooftopDoc.storage_path;
         body.rooftop_photo_uploaded_at = rooftopDoc.uploaded_at;
-        if (rooftopGps) body.rooftop_photo_gps = rooftopGps;
+        body.rooftop_photo_gps = rooftopGps; // null = this photo has no GPS
       }
       const error = await saveStep(loan.id, 3, body);
       if (error) {

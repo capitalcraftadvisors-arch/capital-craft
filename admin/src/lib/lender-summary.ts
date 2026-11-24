@@ -7,18 +7,9 @@
 // document-forwarding text used for Solfin / Aerem.
 
 import { rupees } from "@/lib/money";
-import { fmtDateTimeIST } from "@/lib/dates";
+import { fmtDateTimeIST, fmtDob } from "@/lib/dates";
 import { SYSTEM_LABEL } from "@/lib/loan-labels";
 
-// rupees imported from @/lib/money
-function ddmmyyyy(s: unknown): string {
-  if (!s) return "—";
-  const str = String(s);
-  const d = new Date(str.length <= 10 ? str + "T00:00:00" : str);
-  if (Number.isNaN(d.getTime())) return str;
-  const p = (x: number) => String(x).padStart(2, "0");
-  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
-}
 function kwOf(loan: Record<string, any>): string {
   const s = Number(loan.project_size);
   if (!s) return "—";
@@ -129,7 +120,7 @@ export function creditFairEmailRows(loan: Record<string, any>, epcName?: string 
   const name = loan.aadhaar_name || loan.borrower_name || "—";
   return [
     ["Name", name],
-    ["DOB", ddmmyyyy(loan.aadhaar_dob)],
+    ["DOB", fmtDob(loan.aadhaar_dob)],
     ["Mobile number", loan.borrower_mobile ? `+91 ${loan.borrower_mobile}` : "—"],
     ["Email", loan.borrower_email ?? "—"],
     ["PAN", loan.borrower_pan ?? "—"],
