@@ -63,9 +63,9 @@ function Inner() {
   const [busy, setBusy] = useState(false);
   const [touches, setTouches] = useState(0);
   const sla = 1; // fixed at ≤1 day (backend only — no UI control, per spec)
-  const [target, setTarget] = useState<number>(() => (typeof window !== "undefined" ? Number(localStorage.getItem("opsboard.target")) : 0) || 65);
+  const [target, setTarget] = useState<number>(() => { try { return (typeof window !== "undefined" ? Number(localStorage.getItem("opsboard.target")) : 0) || 65; } catch { return 65; } });
   // The EPC tab's own target — a NUMBER of EPCs onboarded (approved) in the period.
-  const [epcTarget, setEpcTarget] = useState<number>(() => (typeof window !== "undefined" ? Number(localStorage.getItem("opsboard.epcTarget")) : 0) || 10);
+  const [epcTarget, setEpcTarget] = useState<number>(() => { try { return (typeof window !== "undefined" ? Number(localStorage.getItem("opsboard.epcTarget")) : 0) || 10; } catch { return 10; } });
   const [q, setQ] = useState(() => tmState().q ?? "");
   // Period filter (by the case's boardDate — active cases carry into the current
   // month automatically). Default "Current Month"; persisted; "custom" uses
@@ -135,8 +135,8 @@ function Inner() {
     } catch { /* non-blocking */ }
   }, [me, reload]);
 
-  useEffect(() => { if (typeof window !== "undefined") localStorage.setItem("opsboard.target", String(target)); }, [target]);
-  useEffect(() => { if (typeof window !== "undefined") localStorage.setItem("opsboard.epcTarget", String(epcTarget)); }, [epcTarget]);
+  useEffect(() => { try { localStorage.setItem("opsboard.target", String(target)); } catch { /* ignore */ } }, [target]);
+  useEffect(() => { try { localStorage.setItem("opsboard.epcTarget", String(epcTarget)); } catch { /* ignore */ } }, [epcTarget]);
   // Restore + persist the period choice (sticks until changed).
   useEffect(() => {
     try {
@@ -152,19 +152,22 @@ function Inner() {
   const changeBoardFrom = (f: string) => { setBoardFrom(f); saveBoardPeriod(boardPeriod, f, boardTo); };
   const changeBoardTo = (t: string) => { setBoardTo(t); saveBoardPeriod(boardPeriod, boardFrom, t); };
 
-  // Load the selected case's comments (per-source table).
+  // Load the selected case's comments (per-source table) — once per opened card,
+  // not on every board reload; a reply for a card no longer open is ignored.
+  const selSource = cases.find((x) => x.id === sel)?.source ?? null;
   useEffect(() => {
     setShowCmtHist(false); setCommentText("");
-    const c = cases.find((x) => x.id === sel);
-    const meta = c ? COMMENT_TBL[c.source] : null;
+    const meta = selSource ? COMMENT_TBL[selSource] : null;
     if (!sel || !meta) { setComments([]); return; }
+    let cancelled = false;
     void (async () => {
       const { data } = await supabase().from(meta.table)
         .select("id, author_name, comment_text, created_at").eq(meta.key, sel)
         .order("created_at", { ascending: false }).limit(50);
-      setComments((data ?? []) as typeof comments);
+      if (!cancelled) setComments((data ?? []) as typeof comments);
     })();
-  }, [sel, cases]);
+    return () => { cancelled = true; };
+  }, [sel, selSource]);
 
   async function addComment() {
     const c = cases.find((x) => x.id === sel);
@@ -333,9 +336,17 @@ function Inner() {
     try {
       const now = new Date().toISOString();
       const existing = rows.find((r) => r.lender_key === lender.key);
-      if (existing) { if (!existing.docs_sent_at) await supabase().from("loan_application_lenders").update({ docs_sent_at: now }).eq("id", existing.id); }
-      else await supabase().from("loan_application_lenders").insert({ application_id: c.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: now });
-      await supabase().from("epc_applications").update({ status: "docs_sent", docs_sent_at: now, last_updated_by_user_id: me?.id ?? null }).eq("id", c.id);
+      if (existing) {
+        if (!existing.docs_sent_at) {
+          const { error } = await supabase().from("loan_application_lenders").update({ docs_sent_at: now }).eq("id", existing.id);
+          if (error) throw new Error(error.message);
+        }
+      } else {
+        const { error } = await supabase().from("loan_application_lenders").insert({ application_id: c.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: now });
+        if (error) throw new Error(error.message);
+      }
+      const { error } = await supabase().from("epc_applications").update({ status: "docs_sent", docs_sent_at: now, last_updated_by_user_id: me?.id ?? null }).eq("id", c.id);
+      if (error) throw new Error(error.message);
       await logLoanActivity(c.id, "status_change", { detail: `Docs sent to ${lender.label}` });
       setPicker(null); setTouches((t) => t + 1); await reload(true);
     } catch (e) { alert("Couldn’t record: " + (e as Error).message); }
@@ -351,9 +362,12 @@ function Inner() {
       const rejectedAt = date ? new Date(`${date}T00:00:00`).toISOString() : now;
       const existing = rows.find((r) => r.lender_key === lender.key);
       const lp = { rejected_at: rejectedAt, rejection_reason: reason || null, approved_at: null, approval_details: null };
-      if (existing) await supabase().from("loan_application_lenders").update(lp).eq("id", existing.id);
-      else await supabase().from("loan_application_lenders").insert({ application_id: c.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: now, ...lp });
-      await supabase().from("epc_applications").update({ status: "rejected", rejected_at: rejectedAt, rejected_lender: lender.key, rejection_reason: reason || null, last_updated_by_user_id: me?.id ?? null }).eq("id", c.id);
+      const { error: lErr } = existing
+        ? await supabase().from("loan_application_lenders").update(lp).eq("id", existing.id)
+        : await supabase().from("loan_application_lenders").insert({ application_id: c.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: now, ...lp });
+      if (lErr) throw new Error(lErr.message);
+      const { error } = await supabase().from("epc_applications").update({ status: "rejected", rejected_at: rejectedAt, rejected_lender: lender.key, rejection_reason: reason || null, last_updated_by_user_id: me?.id ?? null }).eq("id", c.id);
+      if (error) throw new Error(error.message);
       await logLoanActivity(c.id, "rejected", { detail: `Rejected by ${lender.label}${reason ? ` — ${reason}` : ""}` });
       setPicker(null); setTouches((t) => t + 1); await reload(true);
     } catch (e) { alert("Couldn’t record: " + (e as Error).message); }

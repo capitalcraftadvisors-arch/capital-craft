@@ -59,13 +59,15 @@ export async function POST(
     // the classic Step-1 upload does. Mirror that here so chatbot-built profiles
     // aren't missing the Applicant PAN card. (Co-applicant PAN uses the
     // coapp_pan_path column instead, so it needs no row.) Best-effort.
+    // Insert the new row FIRST, then drop the older ones — a failed insert
+    // must never leave the applicant without a PAN row.
     if (isApplicant) {
-      await supabase.from("user_application_docs").delete().eq("application_id", appId).eq("category", "borrower_pan");
       const { error: docErr } = await supabase.from("user_application_docs").insert({
         application_id: appId, category: "borrower_pan", storage_path: path,
         file_name: file.name, mime_type: mime, uploaded_by: "admin",
       });
       if (docErr) console.warn("[extract-coapp-pan] applicant PAN doc row:", docErr.message);
+      else await supabase.from("user_application_docs").delete().eq("application_id", appId).eq("category", "borrower_pan").neq("storage_path", path);
     }
 
     // OCR + parse. Gemini reads the PAN faithfully (primary); on any failure

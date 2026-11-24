@@ -47,16 +47,21 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       { buffer: b.buf, mime: b.mime },
     ]);
     if (!fields) {
-      const [fr, bk] = await Promise.all([extractAadhaar(f.buf, f.mime), extractAadhaar(b.buf, b.mime)]);
-      fields = {
-        name:           fr.fields.name           ?? bk.fields.name,
-        dob:            fr.fields.dob            ?? bk.fields.dob,
-        gender:         fr.fields.gender         ?? bk.fields.gender,
-        aadhaar_number: fr.fields.aadhaar_number ?? bk.fields.aadhaar_number,
-        aadhaar_masked: fr.fields.aadhaar_masked ?? bk.fields.aadhaar_masked,
-        care_of:        bk.fields.care_of        ?? fr.fields.care_of,
-        address:        bk.fields.address        ?? fr.fields.address,
-      };
+      fields = { name: null, dob: null, gender: null, aadhaar_number: null, aadhaar_masked: null, care_of: null, address: null };
+      try {
+        const [fr, bk] = await Promise.all([extractAadhaar(f.buf, f.mime), extractAadhaar(b.buf, b.mime)]);
+        fields = {
+          name:           fr.fields.name           ?? bk.fields.name,
+          dob:            fr.fields.dob            ?? bk.fields.dob,
+          gender:         fr.fields.gender         ?? bk.fields.gender,
+          aadhaar_number: fr.fields.aadhaar_number ?? bk.fields.aadhaar_number,
+          aadhaar_masked: fr.fields.aadhaar_masked ?? bk.fields.aadhaar_masked,
+          care_of:        bk.fields.care_of        ?? fr.fields.care_of,
+          address:        bk.fields.address        ?? fr.fields.address,
+        };
+      } catch (e) {
+        console.warn("[insurance/extract-aadhaar] vision failed:", e);
+      }
     }
 
     let facePath: string | null = null;

@@ -61,7 +61,7 @@ type Loan = {
 
 type BankDoc = {
   path: string;
-  uploaded_at: string;
+  uploaded_at: string | null;
   signed_url: string | null;
   file_name: string;
   method: "manual_epdf" | "scanned_pdf";
@@ -127,7 +127,7 @@ function Inner() {
           "aadhaar_name, aadhaar_dob, aadhaar_address, aadhaar_number_masked, " +
           "employment_type, profession, profession_other, organization_name, annual_income, " +
           "bank_statement_method, bank_statement_path, bank_statement_uploaded_at, step4_completed_at, " +
-          "bank_account_holder, bank_name, bank_account_no, bank_ifsc, bank_account_type, bank_mobile, " +
+          "bank_account_holder, bank_name, bank_account_no, bank_ifsc, bank_account_type, bank_mobile, bank_email, " +
           EPC_JOIN,
         )
         .eq("id", params.id)
@@ -177,6 +177,9 @@ function Inner() {
         if (row.bank_ifsc)           setIfsc(row.bank_ifsc);
         if (row.bank_account_type)   setAccountType(row.bank_account_type);
         if (row.bank_mobile)         setBankMobile(row.bank_mobile);
+        // No field on screen — kept so a save doesn't wipe it (a malformed one,
+        // which the save would reject, is dropped).
+        setBankEmail(validEmailOrEmpty(row.bank_email));
         // Only treat the bank as pre-confirmed when there IS saved bank data —
         // otherwise a blank first visit would skip confirmation.
         if (row.bank_statement_path || row.bank_account_no) setBankConfirmed(true);
@@ -191,6 +194,8 @@ function Inner() {
 
   async function uploadBankStatement(file: File) {
     if (!loan || !method) return;
+    // A statement already on screen → this upload replaces it (read below).
+    const replacing = !!bankDoc;
     setUploadError(null);
     setUploading(true);
     // On re-upload we blow away the previously-shown retrieved fields
@@ -210,19 +215,22 @@ function Inner() {
         file_name: file.name,
         method,
       });
-      // Prefill retrieved bank info — never blow away what admin
-      // already typed manually.
+      // Prefill retrieved bank info. Replacing a statement: this one's read
+      // values replace the old one's, and a field it didn't read is cleared
+      // for the team to fill. First statement: only empty fields are filled.
       const f = data.fields as BankStatementFields;
+      const fill = (cur: string, read: string | null) => (replacing ? read || "" : cur || read || "");
       // Account-holder NAME is deliberately NOT auto-filled — OCR gets it wrong
       // too often, so the admin types it manually. (The parser still extracts it
       // into ocr_raw_text/debug; we just don't populate the form field.)
-      if (!bankName      && f.bank_name)      setBankName(f.bank_name);
-      if (f.account_no) setOcrAccountNo(f.account_no);
-      if (!accountNo     && f.account_no)     setAccountNo(f.account_no);
-      if (!ifsc          && f.ifsc)           setIfsc(f.ifsc);
-      if (!accountType   && f.account_type)   setAccountType(f.account_type);
-      if (!bankMobile    && f.mobile)         setBankMobile(f.mobile);
-      if (!bankEmail     && f.email)          setBankEmail(f.email);
+      setBankName(fill(bankName, f.bank_name));
+      setOcrAccountNo(f.account_no || null);
+      setAccountNo(fill(accountNo, f.account_no));
+      setIfsc(fill(ifsc, f.ifsc));
+      setAccountType(fill(accountType, f.account_type));
+      setBankMobile(fill(bankMobile, f.mobile));
+      // No email field on screen — an OCR email the save would reject is dropped.
+      setBankEmail(fill(bankEmail, validEmailOrEmpty(f.email)));
     } catch (e) {
       setUploadError((e as Error)?.message || "Network error.");
     } finally {
@@ -571,6 +579,12 @@ function Inner() {
 }
 
 // ── Small helpers ────────────────────────────────────────────────────
+
+// The email when it passes complete-step-4's check, else "".
+function validEmailOrEmpty(v: string | null | undefined): string {
+  const s = (v ?? "").trim();
+  return EMAIL_RE.test(s) ? s : "";
+}
 
 // The bank statement slot: the shared "file on record" box once uploaded,
 // otherwise this page's own large upload tile (with an upload icon).

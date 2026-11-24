@@ -60,9 +60,10 @@ export default function AddNewApplicationModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset to the chooser every time the modal opens.
+  // Back to the chooser whenever the modal closes, so the next open starts there
+  // (resetting on open ran alongside the classic-form load and re-read the EPC list).
   useEffect(() => {
-    if (!open || !hasChooser) return;
+    if (open || !hasChooser) return;
     setMode("choose");
     setError(null);
     setSelected("");

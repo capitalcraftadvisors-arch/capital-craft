@@ -105,7 +105,8 @@ function Inner() {
 
   // Rooftop photo — geo-tagged. Reuses the GeoOfficeUpload pipeline that
   // the EPC office photos use (exifr + camera GPS).
-  const [rooftopDoc,       setRooftopDoc]       = useState<{ id: string; storage_path: string; file_name: string | null } | null>(null);
+  // uploaded_at: the stored time on reload, the pick time on a fresh upload.
+  const [rooftopDoc,       setRooftopDoc]       = useState<{ id: string; storage_path: string; file_name: string | null; uploaded_at: string | null } | null>(null);
   const [rooftopGps,       setRooftopGps]       = useState<{ lat: number; lng: number; captured_at: string } | null>(null);
 
   // Bill ownership + co-applicant
@@ -125,7 +126,7 @@ function Inner() {
         .select(
           "id, current_step, created_at, " +
           "install_pincode, install_state, install_city, step3_completed_at, " +
-          "borrower_mobile, borrower_email, rooftop_photo_path, system_type, " +
+          "borrower_mobile, borrower_email, rooftop_photo_path, rooftop_photo_uploaded_at, rooftop_photo_gps, system_type, " +
           "proforma_invoice_path, proforma_uploaded_at, ebill_path, ebill_uploaded_at, " +
           "project_size, project_size_unit, total_project_cost, loan_amount_required, " +
           "monthly_bill_amount, discom_name, ca_number, ebill_address_line, ebill_name, " +
@@ -168,13 +169,16 @@ function Inner() {
           });
         }
         // Re-hydrate an already-uploaded rooftop photo so the (now mandatory)
-        // Next gate isn't re-blocked on reopen.
+        // Next gate isn't re-blocked on reopen. Its stored upload time + GPS
+        // come along so a re-save keeps them (only a fresh upload changes them).
         if (l.rooftop_photo_path) {
           setRooftopDoc({
             id: "",
             storage_path: l.rooftop_photo_path,
             file_name: String(l.rooftop_photo_path).split("/").pop() ?? "Rooftop photo",
+            uploaded_at: l.rooftop_photo_uploaded_at ?? null,
           });
+          if (l.rooftop_photo_gps) setRooftopGps(l.rooftop_photo_gps);
         }
         if (l.project_size != null)         setProjectSize(String(l.project_size));
         if (l.project_size_unit === "mw")   setProjectUnit("mw");
@@ -205,7 +209,7 @@ function Inner() {
             mobile:      l.coapp_mobile ?? "",
             email:       l.coapp_email ?? "",
             pan_path:        l.coapp_pan_path ?? null,
-            pan_uploaded_at: l.step3_completed_at,
+            pan_uploaded_at: null, // no PAN upload time is stored for the co-applicant
             pan_signed_url:  coappPanU,
             aadhaar_name:    l.coapp_aadhaar_name ?? "",
             aadhaar_dob:     l.coapp_aadhaar_dob ?? "",
@@ -412,7 +416,7 @@ function Inner() {
       // Rooftop photo — optional (spec adds it under installation address).
       if (rooftopDoc) {
         body.rooftop_photo_path = rooftopDoc.storage_path;
-        body.rooftop_photo_uploaded_at = new Date().toISOString();
+        body.rooftop_photo_uploaded_at = rooftopDoc.uploaded_at;
         if (rooftopGps) body.rooftop_photo_gps = rooftopGps;
       }
       const error = await saveStep(loan.id, 3, body);
@@ -628,7 +632,10 @@ function Inner() {
                   id: info.docId,
                   storage_path: info.storagePath,
                   file_name: info.file?.name ?? null,
+                  uploaded_at: new Date().toISOString(),
                 });
+                // The previous photo's GPS doesn't belong to this one.
+                setRooftopGps(null);
                 // Capture live GPS in parallel (best-effort) so we can save it
                 // to rooftop_photo_gps. FileUpload also stores gps in doc.metadata
                 // server-side via /api/upload; this local copy is what

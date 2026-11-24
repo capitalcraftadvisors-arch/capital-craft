@@ -16,7 +16,8 @@ export function UploadedDoc({
   fileName, uploadedAt, viewUrl, onView, onReupload, uploading,
 }: {
   fileName: string;
-  uploadedAt: string;
+  /** null / "" → no upload time on record, so no date line. */
+  uploadedAt: string | null;
   viewUrl?: string | null;
   onView?: () => void;
   onReupload: () => void;
@@ -26,9 +27,11 @@ export function UploadedDoc({
   return (
     <div className="rounded-input border-2 border-[#178a5c] bg-[#f0faf5] p-4 space-y-2">
       <p className="text-[13px] font-semibold text-[#0f3d2e]">{fileName}</p>
-      <p className="text-[11px] text-[#5a8a76]">
-        Uploaded on {fmtDateTime(new Date(uploadedAt))}
-      </p>
+      {uploadedAt && (
+        <p className="text-[11px] text-[#5a8a76]">
+          Uploaded on {fmtDateTime(uploadedAt)}
+        </p>
+      )}
       <div className="flex items-center gap-2 pt-1">
         {viewUrl ? (
           <a

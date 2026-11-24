@@ -200,7 +200,8 @@ function Inner() {
   }
 
   const epcName = useMemo(() => {
-    if (!epc) return "";
+    // EPC row missing / not readable — the loan still shows so Change EPC works.
+    if (!epc) return "—";
     return epc.trade_name || epc.legal_name || epc.contact_name || "(unnamed EPC)";
   }, [epc]);
 
@@ -259,7 +260,7 @@ function Inner() {
   }
 
   if (loading) return <StepLoading />;
-  if (!loan || !epc) return <StepNotFound />;
+  if (!loan) return <StepNotFound />;
 
   return (
     <main className="min-h-screen bg-bg-soft">
@@ -280,7 +281,7 @@ function Inner() {
             <p className="text-[11px] uppercase tracking-wide text-[#5a8a76] font-semibold">Selected EPC</p>
             <p className="font-display text-[16px] font-bold text-[#0f3d2e] mt-0.5">
               {epcName}
-              {epc.epc_display_id && (
+              {epc?.epc_display_id && (
                 <span className="ml-2 text-[12px] font-mono font-normal text-[#5a8a76]">{epc.epc_display_id}</span>
               )}
             </p>

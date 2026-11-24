@@ -2,7 +2,6 @@
 
 // Clickable choice cards with a round "selected" dot in the top-right corner —
 // solar system type, residential/commercial, employment type, statement source.
-// The partner's registration page draws them a little smaller (`compact`).
 
 export const SYSTEM_OPTIONS = [
   { value: "on_grid",  title: "On-Grid Solar System",  desc: "Connected to electricity grid, can sell excess power" },
@@ -32,17 +31,15 @@ export function RadioDot({ active, fade }: { active: boolean; fade?: boolean }) 
   );
 }
 
-/** One choice card: title + one-line description. `compact` = smaller text and
- *  no keyboard-focus ring (the partner page). */
+/** One choice card: title + one-line description. */
 export function ChoiceTile({
-  active, onClick, title, desc, fadeDot, compact,
+  active, onClick, title, desc, fadeDot,
 }: {
   active: boolean;
   onClick: () => void;
   title: string;
   desc: string;
   fadeDot?: boolean;
-  compact?: boolean;
 }) {
   return (
     <button
@@ -50,28 +47,27 @@ export function ChoiceTile({
       onClick={onClick}
       className={[
         "text-left rounded-input border-2 p-4 transition-colors relative",
-        ...(compact ? [] : ["focus:outline-none focus-visible:ring-2 focus-visible:ring-[#185fa5]"]),
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-[#185fa5]",
         active
           ? "border-[#178a5c] bg-[#f0faf5]"
           : "border-line bg-white hover:border-[#185fa5]",
       ].join(" ")}
     >
       <RadioDot active={active} fade={fadeDot} />
-      <p className={`font-display font-semibold ${compact ? "text-[13px]" : "text-[14px]"} pr-6 ` + (active ? "text-[#0f3d2e]" : "text-text")}>
+      <p className={"font-display font-semibold text-[14px] pr-6 " + (active ? "text-[#0f3d2e]" : "text-text")}>
         {title}
       </p>
-      <p className={`${compact ? "text-[11px]" : "text-[12px]"} text-text-muted mt-1`}>{desc}</p>
+      <p className="text-[12px] text-text-muted mt-1">{desc}</p>
     </button>
   );
 }
 
 /** On-grid / off-grid / hybrid, three cards in a row. */
 export function SystemChoice({
-  value, onPick, compact,
+  value, onPick,
 }: {
   value: string;
   onPick: (v: SystemType) => void;
-  compact?: boolean;
 }) {
   return (
     <div className="grid sm:grid-cols-3 gap-3">
@@ -82,8 +78,7 @@ export function SystemChoice({
           onClick={() => onPick(opt.value)}
           title={opt.title}
           desc={opt.desc}
-          fadeDot={!compact}
-          compact={compact}
+          fadeDot
         />
       ))}
     </div>
@@ -93,11 +88,10 @@ export function SystemChoice({
 /** "Is the solar plant for Residential or Commercial use?" + its two cards.
  *  `className` is the wrapper's classes (e.g. a divider above it). */
 export function PlantUseChoice({
-  value, onPick, compact, className,
+  value, onPick, className,
 }: {
   value: string;
   onPick: (v: PlantUse) => void;
-  compact?: boolean;
   className?: string;
 }) {
   return (
@@ -113,7 +107,6 @@ export function PlantUseChoice({
             onClick={() => onPick(opt.value)}
             title={opt.label}
             desc={opt.desc}
-            compact={compact}
           />
         ))}
       </div>

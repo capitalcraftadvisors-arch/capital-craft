@@ -25,6 +25,7 @@ import { downloadBuffer } from "@/lib/gcs";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { fetchLenders, lenderLabelIn } from "@/lib/loan-lenders";
 import { BUSINESS_TYPE_LABEL } from "@/lib/epc-labels";
+import { todayIST } from "@/lib/dates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -116,7 +117,7 @@ export async function GET(
       (biz.contact_name as string) ||
       String(biz.id).slice(0, 8),
     );
-    const dateStr = new Date().toISOString().slice(0, 10);
+    const dateStr = todayIST(); // India date (the server clock is UTC)
     const filename = `EPC_${nameForFile}_${lenderLabel}_${dateStr}.zip`;
 
     // ── Archive ───────────────────────────────────────────────────────

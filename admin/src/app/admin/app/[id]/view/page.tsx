@@ -555,7 +555,8 @@ function Inner() {
       patch.rejected_at = latestRej?.rejected_at ?? new Date().toISOString();
       patch.rejection_reason = latestRej?.rejection_reason ?? null;
     }
-    await supabase().from("epc_applications").update(patch).eq("id", loan.id);
+    const { error } = await supabase().from("epc_applications").update(patch).eq("id", loan.id);
+    if (error) throw new Error(reviewError(error.message)); // callers show it as "Couldn't record: …"
     setLoan((prev) => (prev ? ({ ...prev, ...patch } as Loan) : prev));
     invalidateLoanBoards(); // docs-sent / approve / reject reflect on next board/list open
   }
@@ -567,10 +568,12 @@ function Inner() {
       const existing = lenderRows.find((r) => r.lender_key === lender.key);
       if (existing) {
         if (!existing.docs_sent_at) {
-          await supabase().from("loan_application_lenders").update({ docs_sent_at: new Date().toISOString() }).eq("id", existing.id);
+          const { error } = await supabase().from("loan_application_lenders").update({ docs_sent_at: new Date().toISOString() }).eq("id", existing.id);
+          if (error) throw new Error(error.message);
         }
       } else {
-        await supabase().from("loan_application_lenders").insert({ application_id: loan.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: new Date().toISOString() });
+        const { error } = await supabase().from("loan_application_lenders").insert({ application_id: loan.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: new Date().toISOString() });
+        if (error) throw new Error(error.message);
       }
       const rows = await reloadLenders();
       await logLoanActivity(loan.id, "status_change", { detail: `Docs sent to ${lender.label}` });
@@ -606,8 +609,10 @@ function Inner() {
       const rejectedAt = date ? new Date(`${date}T00:00:00`).toISOString() : new Date().toISOString();
       const existing = lenderRows.find((r) => r.lender_key === lender.key);
       const patch = { rejected_at: rejectedAt, rejection_reason: reason || null, approved_at: null, approval_details: null };
-      if (existing) await supabase().from("loan_application_lenders").update(patch).eq("id", existing.id);
-      else await supabase().from("loan_application_lenders").insert({ application_id: loan.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: new Date().toISOString(), ...patch });
+      const { error } = existing
+        ? await supabase().from("loan_application_lenders").update(patch).eq("id", existing.id)
+        : await supabase().from("loan_application_lenders").insert({ application_id: loan.id, lender_key: lender.key, lender_label: lender.label, docs_sent_at: new Date().toISOString(), ...patch });
+      if (error) throw new Error(error.message);
       const rows = await reloadLenders();
       await logLoanActivity(loan.id, "rejected", { detail: `Rejected by ${lender.label}${reason ? ` — ${reason}` : ""}` });
       await syncHeadline(rows);

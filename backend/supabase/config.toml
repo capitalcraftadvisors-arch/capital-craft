@@ -56,13 +56,10 @@ enabled = false
 
 # ─── Edge Functions ───
 # Auth uses verify_jwt = false because it mints the JWT itself (login endpoint).
-# extract-cheque and store-document accept a Bearer JWT from the caller.
+# extract-cheque accepts a Bearer JWT from the caller.
 
 [functions.auth]
 verify_jwt = false
 
 [functions.extract-cheque]
-verify_jwt = true
-
-[functions.store-document]
 verify_jwt = true

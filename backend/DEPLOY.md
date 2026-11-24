@@ -78,17 +78,19 @@ You should see `FIXED_OTP`, `SUPABASE_JWT_SECRET`, `GOOGLE_VISION_API_KEY`.
 
 ---
 
-## 4. Deploy the three Edge Functions
+## 4. Deploy the Edge Functions
 
 ```powershell
 supabase functions deploy auth
 supabase functions deploy extract-cheque
-supabase functions deploy store-document
+supabase functions deploy extract-pan
+supabase functions deploy extract-gst-legalname
+supabase functions deploy extract-gst-r3b
 ```
 
 `auth` is configured with `verify_jwt = false` in `supabase/config.toml`
-because it's the login endpoint and mints the JWT itself. The other two
-require a Bearer JWT.
+because it's the login endpoint and mints the JWT itself. The `extract-*`
+functions require a Bearer JWT.
 
 ---
 
@@ -122,7 +124,7 @@ NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL=https://hpebydmrpimyuxgsgtmu.supabase.co/func
 
 ## 7. Before going to production
 
-- [ ] Replace `Access-Control-Allow-Origin: "*"` in all three Edge Functions
+- [ ] Replace `Access-Control-Allow-Origin: "*"` in all the Edge Functions
       with `https://app.capitalcraft.in`.
 - [ ] Rotate the admin mobile numbers in `0004_seed_admins.sql` to the real
       Ops team's phones (or `update epc_business set contact_mobile = ...`).

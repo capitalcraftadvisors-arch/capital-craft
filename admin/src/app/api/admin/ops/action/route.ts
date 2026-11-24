@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
+import { todayIST } from "@/lib/dates";
 import { logUserActivity } from "@/lib/user-activity-server";
 
 export const runtime = "nodejs";
@@ -158,11 +159,11 @@ export async function POST(req: NextRequest) {
       patch = { ...touch };
       if (tranche === 1) {
         patch.first_disbursement_amount = amount;
-        patch.first_disbursement_date = now.slice(0, 10);
+        patch.first_disbursement_date = todayIST(); // India date (the server clock is UTC)
         patch.status = "disbursed";
       } else {
         patch.second_disbursement_amount = amount;
-        patch.second_disbursement_date = now.slice(0, 10);
+        patch.second_disbursement_date = todayIST();
       }
       logAction = "disbursement";
       logValue = `Tranche ${tranche}: ₹${amount.toLocaleString("en-IN")}`;

@@ -27,7 +27,10 @@ export default function DocTable({ appId, form, rows, docRows = [], review = fal
   const [reads, setReads] = useState<Partial<Record<Unit, { status: "reading" | "done" | "error"; error?: string }>>>({});
   const filesRef = useRef<Partial<Record<Slot, SlotFile>>>({});
   const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
+  // Picked images preview via object URLs — free each one when its file is
+  // replaced, removed or the table goes away.
+  const revokeThumb = (s?: SlotFile) => { if (s?.thumb) URL.revokeObjectURL(s.thumb); };
+  useEffect(() => () => { mounted.current = false; Object.values(filesRef.current).forEach(revokeThumb); }, []);
 
   // The document already on file for a unit (View opens it, so editors can see
   // what they uploaded before). Path-based docs go via sign-doc; the PAN image is
@@ -159,6 +162,7 @@ export default function DocTable({ appId, form, rows, docRows = [], review = fal
   function pick(slot: Slot, unit: Unit, file: File) {
     if (!(file.type.startsWith("image/") || file.type.includes("pdf"))) return;
     const thumb = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+    revokeThumb(filesRef.current[slot]);
     const next = { ...filesRef.current, [slot]: { file, thumb } };
     filesRef.current = next; setFiles(next);
     if (skipped[slot]) setSkipped((s) => { const n = { ...s }; delete n[slot]; return n; });
@@ -168,12 +172,12 @@ export default function DocTable({ appId, form, rows, docRows = [], review = fal
   function toggleSkip(slot: Slot) {
     const now = !skipped[slot];
     setSkipped((s) => ({ ...s, [slot]: now }));
-    if (now) { const n = { ...filesRef.current }; delete n[slot]; filesRef.current = n; setFiles(n); }
+    if (now) { const n = { ...filesRef.current }; revokeThumb(n[slot]); delete n[slot]; filesRef.current = n; setFiles(n); }
   }
   function replace(slot: Slot, unit: Unit) {
     const parts = rows.find((r) => r.slot === slot)!.parts;
     const n = { ...filesRef.current };
-    for (const p of parts) delete n[p];
+    for (const p of parts) { revokeThumb(n[p]); delete n[p]; }
     filesRef.current = n; setFiles(n);
     setReads((s) => { const x = { ...s }; delete x[unit]; return x; });
     // Re-open the picker for every part of this unit (front + back for Aadhaar).

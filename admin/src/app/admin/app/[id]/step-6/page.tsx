@@ -91,7 +91,8 @@ function Inner() {
     }
   }, [loan, router]);
 
-  const epcName = customerNameOf(loan?.epc_business);
+  // A nameless EPC shows "—" here ("(customer)" is the tracker's fallback).
+  const epcName = customerNameOf(loan?.epc_business, "—");
 
   async function submit() {
     if (!loan || submitting) return;
@@ -173,7 +174,7 @@ function Inner() {
               <ReviewRow label="Address" value={loan.aadhaar_address ?? "—"} multiline />
             </div>
             {loan.aadhaar_face_path && (
-              <FaceThumbnail path={loan.aadhaar_face_path} />
+              <FaceThumbnail />
             )}
           </div>
         </ReviewSection>
@@ -450,40 +451,21 @@ function ReviewRow({
 }
 
 // ── Face thumbnail (KYC recap) ───────────────────────────────────────
-// Uses the /api/document/[id] pattern won't work here because the face
-// path isn't tied to a document row — it's a direct GCS object. We
-// ask the server for a signed URL via a lightweight fetch.
+// Shown when a face crop is on record. The crop itself is not loaded here
+// (signing its path would be one more request per visit) — the slot shows
+// the placeholder.
 
-function FaceThumbnail({ path }: { path: string }) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    void (async () => {
-      // Fallback: since we don't have a dedicated signed-url endpoint
-      // for arbitrary GCS paths, we render the path label as a hint
-      // when the URL can't be generated. Face crop was signed at
-      // Step 2 extraction time; on subsequent visits we don't have a
-      // fresh signed URL. The path is stored for Ops reference only.
-      // If a dedicated helper exists it goes here; otherwise the
-      // thumbnail slot degrades gracefully.
-      setUrl(null);
-    })();
-  }, [path]);
-
+function FaceThumbnail() {
   return (
     <div className="flex flex-col items-center">
       <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold mb-2">
         Detected face
       </p>
       <div className="w-[130px] h-[160px] rounded-input border-2 border-[#cdeadd] bg-white overflow-hidden flex items-center justify-center">
-        {url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={url} alt="Face" className="w-full h-full object-cover" />
-        ) : (
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#5a8a76" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-            <circle cx="12" cy="7" r="4" />
-          </svg>
-        )}
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#5a8a76" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+          <circle cx="12" cy="7" r="4" />
+        </svg>
       </div>
     </div>
   );

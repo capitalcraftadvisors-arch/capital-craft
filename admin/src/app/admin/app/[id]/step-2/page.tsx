@@ -31,7 +31,7 @@ import { signLoanPath, openLoanPath } from "@/lib/storage";
 import { AADHAAR_RE } from "@/lib/validators";
 import {
   StepHeader, StepLoading, StepNotFound, StepTracker, StepTitle,
-  FormSection, H18, FIELD_LABEL, ErrorBox, TickCircle, EyeIcon, TextAreaField,
+  FormSection, H18, FIELD_LABEL, ErrorBox, TickCircle, EyeIcon, TextAreaField, HiddenFileInput,
   EPC_JOIN, postLoanFiles, saveStep, nextStepPath, type EpcNames,
 } from "@/components/loan-form";
 
@@ -579,13 +579,8 @@ function UploadTile({
           </div>
         )}
       </button>
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*,application/pdf"
-        onChange={(e) => onSelect(e.target.files?.[0] ?? null)}
-        className="hidden"
-      />
+      {/* Clears itself after each pick, so the same file can be picked again after "Re-upload". */}
+      <HiddenFileInput ref={inputRef} onFile={onSelect} />
     </div>
   );
 }

@@ -6,8 +6,6 @@
 //   StepTracker   — the tracker card, fed straight from the loaded loan row
 //   StepTitle     — the big green page title + optional intro line
 //   StepNav       — the bottom "← Previous / Next" card (with the save error)
-// and, for the partner's classic application pages (dashboard/apply …):
-//   ApplyFrame    — the white "Capital Craft · Loan Application" bar + the page column
 
 import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
@@ -27,9 +25,9 @@ export type EpcNames = {
 /** The select fragment that joins those names onto an epc_applications read. */
 export const EPC_JOIN = "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)";
 
-/** Name shown on the tracker: trade name, else legal name, else contact, else "(customer)". */
-export function customerNameOf(e: EpcNames | null | undefined): string {
-  return e?.trade_name || e?.legal_name || e?.contact_name || "(customer)";
+/** Name shown on the tracker: trade name, else legal name, else contact, else `fallback`. */
+export function customerNameOf(e: EpcNames | null | undefined, fallback = "(customer)"): string {
+  return e?.trade_name || e?.legal_name || e?.contact_name || fallback;
 }
 
 /** Shown on Next while required fields are still empty (admins may continue anyway). */
@@ -65,24 +63,6 @@ export function StepHeader({
         {children}
       </div>
     </header>
-  );
-}
-
-/** The partner's classic application pages: the top bar and the 760px column holding `children`. */
-export function ApplyFrame({ children }: { children: ReactNode }) {
-  return (
-    <main className="min-h-screen bg-bg-soft">
-      <header className="border-b border-line bg-white">
-        <div className="max-w-container mx-auto px-7 h-16 flex items-center justify-between">
-          <a href="/dashboard" className="font-display font-bold text-[20px] grad-text">Capital Craft</a>
-          <span className="text-[13px] text-text-muted">Loan Application</span>
-        </div>
-      </header>
-
-      <section className="max-w-[760px] mx-auto px-5 sm:px-7 py-10 space-y-6">
-        {children}
-      </section>
-    </main>
   );
 }
 

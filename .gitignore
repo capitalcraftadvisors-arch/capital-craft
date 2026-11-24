@@ -54,6 +54,9 @@ build/
 out/
 .supabase/
 
+# Supabase CLI scratch (written by `supabase link` / `supabase db …`)
+supabase/.temp/
+
 # =============================================================================
 # OS / editor junk
 # =============================================================================

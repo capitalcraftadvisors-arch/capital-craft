@@ -8,7 +8,7 @@ import { FIELD_LABEL, EyeIcon, UploadedDoc, HiddenFileInput } from "@/components
 
 export type DocState = {
   path: string;
-  uploaded_at: string;
+  uploaded_at: string | null;
   signed_url: string | null;
   file_name: string;
 } | null;

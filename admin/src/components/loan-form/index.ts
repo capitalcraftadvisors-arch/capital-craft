@@ -1,5 +1,4 @@
-// Shared pieces of the loan forms — the team's 6-step form (admin/app/[id]/step-1..6)
-// and the partner's classic registration page (dashboard/apply). See each file:
+// Shared pieces of the team's 6-step loan form (admin/app/[id]/step-1..6). See each file:
 //   StepChrome — header, loading / not-found, tracker, title, Previous/Next bar
 //   Fields     — section card, error box, pill, icons, checkbox row, address box
 //   Choices    — the dot-in-the-corner choice cards (system type, plant use …)

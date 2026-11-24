@@ -1,8 +1,8 @@
 "use client";
 
-// Small building blocks used inside the loan-form pages (team steps 1-6 and the
-// partner's classic registration page). Each one is plain markup with its exact
-// classes, so a page reads the same as before — just shorter.
+// Small building blocks used inside the loan-form pages (team steps 1-6). Each
+// one is plain markup with its exact classes, so a page reads the same as
+// before — just shorter.
 
 import type { ReactNode } from "react";
 import Card from "@/components/ui/Card";
@@ -155,15 +155,14 @@ export function PincodeFields({
   );
 }
 
-/** Full-width (both grid columns) labelled text box (3 rows unless `rows`) — used for addresses. */
+/** Full-width (both grid columns) labelled 3-row text box — used for addresses. */
 export function TextAreaField({
-  label, value, onChange, placeholder, rows = 3,
+  label, value, onChange, placeholder,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
-  rows?: number;
 }) {
   return (
     <div className="sm:col-span-2">
@@ -174,7 +173,7 @@ export function TextAreaField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        rows={rows}
+        rows={3}
         className="w-full rounded-input border border-line bg-white px-3.5 py-2.5 text-[14px] outline-none focus:border-blue resize-y"
       />
     </div>

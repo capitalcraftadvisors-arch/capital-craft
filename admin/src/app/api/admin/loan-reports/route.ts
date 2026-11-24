@@ -15,7 +15,7 @@ import ExcelJS from "exceljs";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { fetchLenders, lenderLabelIn, type Lender } from "@/lib/loan-lenders";
 import { deadlineState, remainingAmount, firstCharges, FIRST_CHARGE_COLS } from "@/lib/disbursement";
-import { fmtDate } from "@/lib/dates";
+import { fmtDate, fmtDateIST, todayIST } from "@/lib/dates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
 
     const wb = new ExcelJS.Workbook();
     const buf = type === "monthly" ? await monthly(wb, loans, lenders, month) : await pending(wb, loans, lenders);
-    const name = type === "monthly" ? `Lender-wise disbursements ${month}.xlsx` : `2nd tranche pending ${fmtDate(new Date()).replace(/\//g, "-")}.xlsx`;
+    const name = type === "monthly" ? `Lender-wise disbursements ${month}.xlsx` : `2nd tranche pending ${fmtDateIST(new Date()).replace(/\//g, "-")}.xlsx`;
     return new NextResponse(buf, {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -200,14 +200,16 @@ async function monthly(wb: ExcelJS.Workbook, loans: Loan[], lenders: Lender[], m
 
 // ── 2nd tranche pending ──────────────────────────────────────────────────────
 async function pending(wb: ExcelJS.Workbook, loans: Loan[], lenders: Lender[]) {
-  const today = new Date();
   const start = (d: string) => new Date(`${d.slice(0, 10)}T00:00:00`);
+  // India calendar day — the server clock is UTC (still the previous day before 05:30 IST).
+  const todayIso = todayIST();
+  const today = start(todayIso);
   const rows = loans
     .filter((l) => l.first_disbursement_date && l.second_disbursement_amount == null)
     .map((l) => ({ l, days: Math.max(0, Math.floor((today.getTime() - start(l.first_disbursement_date!).getTime()) / DAY_MS)) }))
     .sort((a, b) => b.days - a.days);
   const ws = wb.addWorksheet("2nd tranche pending");
-  header(ws, `2nd tranche pending — as on ${fmtDate(today)}`, [
+  header(ws, `2nd tranche pending — as on ${fmtDateIST(todayIso)}`, [
     { label: "EPC name", width: 28 }, { label: "Borrower name", width: 24 }, { label: "Lender name", width: 16 },
     { label: "Project cost", width: 14 }, { label: "Approved loan", width: 14 },
     { label: "2nd disbursement", width: 14, pair: ["Due date", "Amount"] },
@@ -224,7 +226,7 @@ async function pending(wb: ExcelJS.Workbook, loans: Loan[], lenders: Lender[]) {
     ]);
     money(row, [4, 5, 7]);
     // Past the 45-day window → red.
-    if (due && today.getTime() > due.getTime()) row.getCell(8).font = { bold: true, color: { argb: RED } };
+    if (due && today.getTime() >= due.getTime()) row.getCell(8).font = { bold: true, color: { argb: RED } };
   }
   if (rows.length === 0) ws.addRow(["No 2nd tranche pending."]);
   else {

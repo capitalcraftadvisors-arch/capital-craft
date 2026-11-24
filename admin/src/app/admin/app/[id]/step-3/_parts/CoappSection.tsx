@@ -154,7 +154,7 @@ export default function CoappSection({ coapp, setCoapp, uploads, mobileConflict,
           label=""
           doc={coapp.pan_path ? {
             path: coapp.pan_path,
-            uploaded_at: coapp.pan_uploaded_at ?? "",
+            uploaded_at: coapp.pan_uploaded_at,
             signed_url: coapp.pan_signed_url,
             file_name: "Co-applicant PAN",
           } : null}

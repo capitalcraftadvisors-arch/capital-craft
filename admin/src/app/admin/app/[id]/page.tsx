@@ -66,7 +66,7 @@ function Inner() {
 
   async function transitionStatus(to: string, extra: Record<string, any> = {}) {
     if (!app) return;
-    setBusy(true);
+    setBusy(true); setError(null);
     const admin = getBusiness();
     const entry: StatusEntry = {
       from: app.status, to,
@@ -85,8 +85,9 @@ function Inner() {
     };
     if (to === "sent_to_nbfc") update.nbfc_submitted_at = new Date().toISOString();
     if (to === "disbursed") update.nbfc_decision = "approved";
-    await supabase().from("epc_applications").update(update).eq("id", params.id);
+    const { error } = await supabase().from("epc_applications").update(update).eq("id", params.id);
     setBusy(false);
+    if (error) { setError(error.message); return; }
     void load();
   }
 
@@ -119,7 +120,7 @@ function Inner() {
           </div>
           <div className="flex items-center gap-3">
             <StatusBadge status={app.status} />
-            {!editing && <Button variant="outline" onClick={() => setEditing(true)}>Edit</Button>}
+            {!editing && <Button variant="outline" onClick={() => { setEditing(true); setError(null); }}>Edit</Button>}
           </div>
         </div>
 
@@ -217,6 +218,7 @@ function Inner() {
               <Button variant="outline" loading={busy} onClick={() => transitionStatus("rejected", { nbfc_decision: "rejected", nbfc_decision_at: new Date().toISOString() })}>NBFC rejected</Button>
             </>}
           </div>
+          {error && !editing && <p className="mt-3 text-[13px] text-red-600">{error}</p>}
         </Card>
 
         <Card className="p-6">
