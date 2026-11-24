@@ -11,7 +11,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { logout, getToken } from "@/lib/auth";
+import { logout, getToken, sessionEnded } from "@/lib/auth";
 
 const IDLE_MS = 60 * 60 * 1000; // 1 hour
 const KEY = "cc.lastActivity";
@@ -34,6 +34,11 @@ export function useIdleLogout() {
     document.addEventListener("visibilitychange", onVis);
 
     const check = () => {
+      if (sessionEnded()) { // the 12-hour login ran out
+        logout();
+        router.replace("/login");
+        return;
+      }
       if (!getToken()) return; // already signed out
       let ts = 0;
       try { ts = Number(localStorage.getItem(KEY)) || 0; } catch { /* ignore */ }

@@ -14,6 +14,7 @@ import archiver from "archiver";
 import { sendMail, mailConfigured } from "@/lib/mailer";
 import { err } from "@/lib/api";
 import { EMAIL_RE } from "@/lib/validators";
+import { esc } from "@/lib/html";
 import { uploadBuffer, downloadBuffer } from "@/lib/gcs";
 import { fileLinkUrl } from "@/lib/file-links";
 import { publicOrigin } from "@/lib/login-password-server";
@@ -31,7 +32,6 @@ type SendFields = { to: string; cc: string[]; bcc: string[]; subject: string; to
 
 function extOf(p: string): string { const m = p.split("/").pop()?.match(/\.[a-z0-9]+$/i); return m ? m[0] : ""; }
 function safe(s: string): string { return s.replace(/[^\w .-]+/g, "_").slice(0, 80); }
-export function esc(s: string): string { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string)); }
 function cleanEmails(v: unknown): string[] {
   if (!Array.isArray(v)) return [];
   return Array.from(new Set(v.map((x) => String(x).trim().toLowerCase()).filter((x) => EMAIL_RE.test(x))));

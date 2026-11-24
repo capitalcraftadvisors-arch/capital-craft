@@ -13,7 +13,7 @@
 
 import { useEffect, useId, useState } from "react";
 import { generateStrongPassword, issuedPasswordOk, ISSUED_PASSWORD_RULE } from "@/lib/password-gen";
-import { loginPasswordStatus, sendPasswordDraft } from "@/lib/passwords";
+import { epcPasswordMail, loginPasswordStatus, sendPasswordDraft } from "@/lib/passwords";
 import { DEFAULT_MAIL_SENDER } from "@/lib/mail-sender";
 import { fmtDate } from "@/lib/dates";
 import { EMAIL_RE } from "@/lib/validators";
@@ -21,39 +21,6 @@ import { askConfirm } from "@/lib/confirm";
 import Modal from "@/components/ui/Modal";
 
 type Epc = { id: string; tradeName: string; contactName?: string | null; mobile?: string | null; email?: string | null };
-
-// First email (no password yet) → set your password; afterwards → reset it.
-function draftMail(epc: Epc, password: string, reset: boolean): { subject: string; body: string } {
-  const login = [
-    `Login: ${window.location.origin}/login`,
-    `Mobile number: ${epc.mobile ?? ""}`,
-    `One-time password: ${password}`,
-  ];
-  const close = ["", "Regards,", "Capital Craft Advisors"];
-  const hello = `Namaste ${epc.contactName || epc.tradeName},`;
-  if (reset) {
-    return {
-      subject: "Reset your Capital Craft partner portal password",
-      body: [
-        hello, "",
-        `Here is a one-time password to reset the password of your Capital Craft partner portal login (${epc.tradeName}).`, "",
-        ...login, "",
-        "Log in with this one-time password and the portal will ask you to set a new password. Please choose one you will remember. Your old password no longer works, and this one-time password works only once.",
-        ...close,
-      ].join("\n"),
-    };
-  }
-  return {
-    subject: "Your Capital Craft partner portal login",
-    body: [
-      hello, "",
-      `Your EPC partner account (${epc.tradeName}) has been approved by Capital Craft. Your partner portal login is ready.`, "",
-      ...login, "",
-      "Log in with this one-time password and the portal will ask you to set your own password. Please choose one you will remember — you'll use it every time you log in. This one-time password works only once.",
-      ...close,
-    ].join("\n"),
-  };
-}
 
 /** The password as written on the message's "One-time password:" (or "Password:") line. */
 const passwordIn = (body: string) => body.match(/^[ \t]*(?:one-time\s+)?password:[ \t]*(\S+)/im)?.[1] ?? "";
@@ -80,7 +47,7 @@ export default function EpcPasswordEmailModal({ open, epc, onClose }: { open: bo
     void loginPasswordStatus([epc.id]).then((m) => {
       const at = m.get(epc.id) ?? null;
       setSetAt(at);
-      const mail = draftMail(epc, otp, !!at);
+      const mail = epcPasswordMail(epc, otp, !!at);
       setSubject(mail.subject); setBody(mail.body);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

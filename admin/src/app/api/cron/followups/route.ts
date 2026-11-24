@@ -32,6 +32,7 @@ import { publicOrigin } from "@/lib/login-password-server";
 import { fmtDateIST } from "@/lib/dates";
 import { waTel } from "@/lib/wa-link";
 import { EMAIL_RE } from "@/lib/validators";
+import { esc } from "@/lib/html";
 import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
@@ -41,7 +42,6 @@ export const maxDuration = 180;
 type DueLead = { name: string; mobile: string | null; follow_up_at: string; overdue: boolean };
 type Person = { recipient_name: string | null; email: string; company_name: string | null; leads: DueLead[] | null };
 
-const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
 
 function mail(p: Person, leads: DueLead[], link: string): { subject: string; html: string; text: string } {
   const greet = (p.recipient_name || "").trim() || "there";

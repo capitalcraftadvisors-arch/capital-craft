@@ -21,6 +21,7 @@
 // =========================================================
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { signedIn } from "../_shared/caller.ts";
 
 const VISION_API_KEY = Deno.env.get("GOOGLE_VISION_API_KEY")!;
 const RAW_TEXT_CAP = 4000;
@@ -33,6 +34,7 @@ const CORS = {
 
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
+  if (!signedIn(req)) return json({ ok: false, error: "unauthorized" }, 401);
 
   try {
     const { imageBase64, mimeType } = await req.json();

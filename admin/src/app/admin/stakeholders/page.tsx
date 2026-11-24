@@ -4,13 +4,15 @@
 //   Team      the CC team's logins: email each member's login password
 //             (migration 0094); a name opens that member's profile.
 //   Partners  lenders + insurance partners (0106); add one, open its profile.
-// EPC passwords are generated from each EPC profile's ⋮ menu.
+//   EPCs      every EPC's Partner Portal logins (owner + team members) and a
+//             password reset sent by email / WhatsApp (components/EpcLoginsTab).
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import SetPasswordModal from "@/components/SetPasswordModal";
 import Modal, { OVERLAY } from "@/components/ui/Modal";
+import EpcLoginsTab from "@/components/EpcLoginsTab";
 import StakeholderShell from "@/components/StakeholderShell";
 import { FieldInput } from "@/components/StakeholderDetails";
 import { supabase } from "@/lib/supabase";
@@ -29,29 +31,33 @@ export default function StakeholdersPage() {
   );
 }
 
-type Tab = "team" | "partners";
+type Tab = "team" | "partners" | "epcs";
+const TABS: [Tab, string][] = [["team", "Team"], ["partners", "Partners"], ["epcs", "EPCs"]];
 const th = "px-4 py-2.5 font-semibold text-left whitespace-nowrap";
 const td = "px-4 py-2.5 text-text";
 
 function Inner() {
   const [tab, setTab] = useState<Tab>("team");
   // The open tab lives in the URL, so Back from a profile lands on it.
-  useEffect(() => { if (new URLSearchParams(window.location.search).get("tab") === "partners") setTab("partners"); }, []);
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t === "partners" || t === "epcs") setTab(t);
+  }, []);
   function pick(t: Tab) {
     setTab(t);
-    window.history.replaceState(null, "", t === "team" ? "/admin/stakeholders" : "/admin/stakeholders?tab=partners");
+    window.history.replaceState(null, "", t === "team" ? "/admin/stakeholders" : `/admin/stakeholders?tab=${t}`);
   }
   return (
     <StakeholderShell title="Stakeholders">
       <div role="tablist" className="inline-flex gap-1 p-1 mb-4 rounded-[10px] bg-white border border-line">
-        {(["team", "partners"] as Tab[]).map((t) => (
+        {TABS.map(([t, label]) => (
           <button key={t} role="tab" aria-selected={tab === t} onClick={() => pick(t)}
             className={["px-4 py-1.5 rounded-[8px] text-[13px] font-semibold", tab === t ? "bg-cc-green text-white" : "text-text-mid hover:bg-bg-tint"].join(" ")}>
-            {t === "team" ? "Team" : "Partners"}
+            {label}
           </button>
         ))}
       </div>
-      {tab === "team" ? <TeamTab /> : <PartnersTab />}
+      {tab === "team" ? <TeamTab /> : tab === "partners" ? <PartnersTab /> : <EpcLoginsTab />}
     </StakeholderShell>
   );
 }

@@ -10,6 +10,7 @@
 //            for now). This is the bridge that keeps already-issued tokens in
 //            users' localStorage working until they log out and back in after
 //            Step 4. Remove this branch once everyone has re-logged-in.
+//            (Since 0135 no old token passes anyway: every login needs an expiry.)
 
 import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify } from "jose";
 import { SUPABASE_URL } from "./supabase-config";
@@ -50,27 +51,29 @@ export function getBearerToken(req: Request): string | null {
   return auth.slice("bearer ".length).trim() || null;
 }
 
+// A person's login only: signed by us, not expired, with an expiry at all
+// (0135), role "authenticated" and a business. That refuses the public anon
+// key, the 15-minute password-change pass and the Claude connector's token.
 export async function verifyJwt(token: string): Promise<JwtClaims> {
   const { alg } = decodeProtectedHeader(token);
+  const opts = { requiredClaims: ["exp"] };
 
+  let payload;
   if (alg === "ES256") {
-    const { payload } = await jwtVerify(token, JWKS, {
-      algorithms: ["ES256"],
-    });
-    return payload as unknown as JwtClaims;
-  }
-
-  if (alg === "HS256") {
+    ({ payload } = await jwtVerify(token, JWKS, { ...opts, algorithms: ["ES256"] }));
+  } else if (alg === "HS256") {
     if (!HS256_SECRET) {
       throw new Error(
         "Token is HS256 but APP_JWT_SECRET is not set on this server",
       );
     }
-    const { payload } = await jwtVerify(token, HS256_SECRET, {
-      algorithms: ["HS256"],
-    });
-    return payload as unknown as JwtClaims;
+    ({ payload } = await jwtVerify(token, HS256_SECRET, { ...opts, algorithms: ["HS256"] }));
+  } else {
+    throw new Error(`Unsupported JWT alg: ${alg ?? "(missing)"}`);
   }
 
-  throw new Error(`Unsupported JWT alg: ${alg ?? "(missing)"}`);
+  if (payload.role !== "authenticated" || typeof payload.business_id !== "string" || !payload.business_id) {
+    throw new Error("Not a login token");
+  }
+  return payload as unknown as JwtClaims;
 }

@@ -11,7 +11,8 @@ import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { epcSummaryRows } from "@/lib/lender-summary";
 import { fetchLenders, lenderLabelIn } from "@/lib/loan-lenders";
-import { esc, readSendFields, sendLenderPack, titleCaseCategory, type ComposerBody } from "@/lib/lender-pack";
+import { readSendFields, sendLenderPack, titleCaseCategory, type ComposerBody } from "@/lib/lender-pack";
+import { esc } from "@/lib/html";
 import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";

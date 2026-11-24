@@ -10,7 +10,8 @@ vi.mock("@/lib/mailer", () => ({
   MAIL_SENDER: "sender@example.com",
 }));
 
-import { esc, readSendFields, titleCaseCategory, type ComposerBody } from "../lender-pack";
+import { readSendFields, titleCaseCategory, type ComposerBody } from "../lender-pack";
+import { esc } from "../html";
 
 beforeEach(() => { mail.configured = true; });
 

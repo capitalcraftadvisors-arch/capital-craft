@@ -4,8 +4,11 @@
 //
 // Passwords (migration 0094): an account CC has set a password for must send
 // it — otherwise { ok:false, password_required:true }. An account with no
-// password yet (new sign-ups, not-yet-set) logs in with the mobile only.
+// password yet (new sign-ups, not-yet-set) logs in with the mobile only —
+// except a team (admin) account, which always needs one (0135).
 // 5 wrong passwords lock the account for 15 minutes.
+//
+// A session token lasts SESSION_HOURS (0135: the API refuses tokens without an expiry).
 //
 // Issued EPC passwords must be changed at first login (0103): the right
 // password then gives no session, only { must_change_password, change_token }
@@ -107,6 +110,7 @@ async function sha256Hex(s: string): Promise<string> {
 }
 
 const CHANGE_TOKEN_MINUTES = 15;
+const SESSION_HOURS = 12;
 const BIZ_COLS = "id, status, business_type, current_step, contact_name, loan_app_unlocked, service_type, role, allowed_modules, parent_user_id";
 // An EPC staff login (0119) — logs in to its company with its own mobile + password.
 const MEMBER_COLS = "id, business_id, name, member_role, modules, active";
@@ -177,7 +181,7 @@ async function session(biz: Record<string, any>, member?: Member): Promise<Respo
     ...(member ? { member_id: member.id, member_role: member.member_role } : {}),
   };
 
-  const token = await sign(claims);
+  const token = await sign(claims, new Date(Date.now() + SESSION_HOURS * 3600000));
 
   // is_owner drives the Pri portal's visibility (0096); the server re-checks it.
   return json({
@@ -269,6 +273,10 @@ serve(async (req) => {
       // Password check. PGRST202 = function not deployed yet → no passwords exist.
       const { data: pw, error: pwErr } = await supabase.rpc("verify_login_password", { p_business_id: biz.id, p_password: typed });
       if (pwErr && pwErr.code !== "PGRST202") return json({ ok: false, error: pwErr.message }, 500);
+      // A team login never opens with the mobile alone.
+      if (biz.business_type === "admin" && (pw === "none" || pwErr)) {
+        return json({ ok: false, error: "This login needs a password. Ask the main admin to set one." }, 403);
+      }
       const stop = await passwordGate(pw, { sub: biz.id });
       if (stop) return stop;
     }

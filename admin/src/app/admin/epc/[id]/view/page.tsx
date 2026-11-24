@@ -59,7 +59,6 @@ import { useStacked } from "@/components/view/hooks";
 import { DocumentsBySteps, expectedEpcSlots, missingEpcDocs, roleLabel, type Doc, type Stakeholder } from "./_parts/EpcDocuments";
 import { EpcHealthPanel } from "./_parts/EpcHealth";
 import LenderLines, { type LenderRow } from "./_parts/LenderLines";
-import PasswordKV from "./_parts/PasswordKV";
 import RejectEpcModal from "./_parts/RejectEpcModal";
 import { SERVICE_LABEL, cap, fmtCapacity, fmtTeam, fmtTurnover, type AdminInfo } from "./_parts/format";
 
@@ -545,9 +544,7 @@ function Inner() {
               <div className="grid gap-x-6 gap-y-4 pt-6 xl:grid-cols-2 items-start">
                 <div className="flex flex-col gap-4 min-w-0">
                   <Section card dropdown inline={stacked} icon={I.user} title="Contact" summary={fillOf(contactRows)}>
-                    <FieldCol title="Contact" rows={contactRows}>
-                      {mainAdmin && biz.business_type !== "admin" && <PasswordKV key={String(pwOpen)} businessId={biz.id} />}
-                    </FieldCol>
+                    <FieldCol title="Contact" rows={contactRows} />
                   </Section>
                   <Section card dropdown inline={stacked} icon={I.building} title="Business details" summary={fillOf(businessRows)}>
                     <FieldCol title="Business details" rows={businessRows} />

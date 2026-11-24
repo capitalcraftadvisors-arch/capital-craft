@@ -3,19 +3,20 @@
 // Settings → Users & roles — the company's logins (Zoho-style). The owner (the
 // KYC contact) is always there; it — or an admin, for Sales / Viewer — adds
 // staff with a role and the modules they use, resets passwords and switches
-// logins off. A new password is shown once here (to pass on inside the team)
-// and must be changed at the first login; nobody can read it back, CC included.
+// logins off. A new password is shown once here (copy it, or send it by email /
+// WhatsApp) and must be changed at the first login; nobody can read it back, CC included.
 
 import { useEffect, useState } from "react";
 import { Card, Row } from "@/components/partner/SettingsKit";
 import { NAVY } from "@/components/partner/PartnerShell";
 import { input, Toggle } from "@/components/quotation/form-kit";
-import { CopyButton } from "@/components/view/ViewKit";
+import NewPasswordBox from "@/components/NewPasswordBox";
 import { getBusiness } from "@/lib/auth";
 import { fetchKyc } from "@/lib/org-settings";
 import { EPC_MODULES, epcRole, roleLabel, staffRoles, type EpcModule, type StaffRole } from "@/lib/epc-roles";
-import { addMember, fetchMembers, removeMember, setMemberPassword, updateMember, type MemberRow } from "@/lib/members";
+import { addMember, emailMemberPassword, fetchMembers, removeMember, setMemberPassword, updateMember, type MemberRow } from "@/lib/members";
 import { generateStrongPassword } from "@/lib/password-gen";
+import { loginShareText } from "@/lib/passwords";
 import { fmtDateTime } from "@/lib/dates";
 import { MOBILE_RE } from "@/lib/validators";
 import { askConfirm } from "@/lib/confirm";
@@ -30,7 +31,7 @@ export default function UsersSettings() {
   const [owner, setOwner] = useState<{ name: string; mobile: string; email: string } | null>(null);
   const [failed, setFailed] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
-  const [shown, setShown] = useState<{ name: string; mobile: string; password: string } | null>(null); // a new password, once
+  const [shown, setShown] = useState<{ id: string; name: string; mobile: string; email: string | null; password: string } | null>(null); // a new password, once
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,7 +62,7 @@ export default function UsersSettings() {
         const saved = await addMember(me!.id, fields);
         await setMemberPassword(saved.id, draft.password);
         setRows((r) => [...r!, saved]);
-        setShown({ name: saved.name, mobile: saved.mobile, password: draft.password });
+        setShown({ id: saved.id, name: saved.name, mobile: saved.mobile, email: saved.email, password: draft.password });
       }
       setDraft(null);
     } catch (e) { setError((e as Error).message); }
@@ -75,7 +76,7 @@ export default function UsersSettings() {
       if (what === "reset") {
         const pw = generateStrongPassword(10);
         await setMemberPassword(m.id, pw);
-        setShown({ name: m.name, mobile: m.mobile, password: pw });
+        setShown({ id: m.id, name: m.name, mobile: m.mobile, email: m.email, password: pw });
       } else if (what === "toggle") {
         const saved = await updateMember(m.id, { active: !m.active });
         setRows((r) => r!.map((x) => (x.id === saved.id ? saved : x)));
@@ -92,14 +93,12 @@ export default function UsersSettings() {
   return (
     <>
       {shown && (
-        <section className="rounded-2xl border border-cc-line bg-cc-wash p-5 mb-5">
-          <div className="text-[14px] font-semibold text-cc-ink mb-2">Login for {shown.name}</div>
-          <div className="grid gap-1.5 text-[14px]">
-            <div className="flex items-center gap-3"><span className="w-24 text-text-mid">Mobile</span><span className="font-semibold">{shown.mobile}</span><CopyButton value={shown.mobile} /></div>
-            <div className="flex items-center gap-3"><span className="w-24 text-text-mid">Password</span><span className="font-mono font-semibold">{shown.password}</span><CopyButton value={shown.password} /></div>
-          </div>
-          <div className="mt-3"><button type="button" onClick={() => setShown(null)} className="text-[13px] font-semibold text-navy hover:underline">Done</button></div>
-        </section>
+        <NewPasswordBox
+          key={shown.id + shown.password}
+          login={{ ...shown, shareText: loginShareText(shown) }}
+          onEmail={(to) => emailMemberPassword(shown.id, to, shown.password)}
+          onDone={() => setShown(null)}
+        />
       )}
 
       {draft && (

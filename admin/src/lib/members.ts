@@ -3,6 +3,7 @@
 // (a hash only — nobody can read one back).
 
 import { supabase } from "./supabase";
+import { authHeaders } from "./auth";
 import type { EpcModule, StaffRole } from "./epc-roles";
 
 export type MemberRow = {
@@ -44,6 +45,17 @@ export async function updateMember(id: string, patch: Partial<Pick<MemberRow, "n
 export async function removeMember(id: string) {
   const { error } = await supabase().from("epc_members").delete().eq("id", id);
   if (error) throw friendly(error);
+}
+
+/** Emails a member its password from the Capital Craft Gmail (saved again first, so it's the one that works). */
+export async function emailMemberPassword(id: string, email: string, password: string): Promise<{ ok: boolean; sentTo?: string; error?: string }> {
+  const res = await fetch(`/api/epc/members/${id}/password-email`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ email, password }),
+  });
+  const d = await res.json().catch(() => ({}));
+  return res.ok && d?.ok ? { ok: true, sentTo: d.sentTo } : { ok: false, error: d?.error || `HTTP ${res.status}` };
 }
 
 /** Sets a member's password (to be changed at its first login). */

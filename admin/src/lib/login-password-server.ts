@@ -6,6 +6,8 @@
 //                        that carries the password (the issued one, or one the
 //                        admin typed instead), and wrote any CC; we send
 //                        exactly that.
+//   emailMemberPassword — an EPC's staff login (0119): a fixed email; saved
+//                        first (see the function).
 //
 // Order matters: the mail goes out FIRST and the password is saved only after
 // it was sent — a failed email never leaves the account with a password nobody
@@ -17,6 +19,7 @@ import { generateStrongPassword, issuedPasswordOk, ISSUED_PASSWORD_RULE } from "
 import { sendMail, mailConfigured } from "./mailer";
 import { EMAIL_RE } from "./validators";
 import { errText } from "./errors";
+import { esc } from "./html";
 
 /** The portal's public origin as the browser saw it (Cloud Run sits behind a
  *  proxy, so the forwarded host wins over the container's own address). */
@@ -49,7 +52,6 @@ export async function emailLoginPassword(
   const isTeam = acc.business_type === "admin";
   const greet = acc.contact_name || acc.trade_name || acc.legal_name || "there";
   const loginUrl = `${opts.origin}/login`;
-  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
   const intro = isTeam
     ? "Your Capital Craft team login is ready."
     : `Your EPC partner account${acc.trade_name || acc.legal_name ? ` (${esc(acc.trade_name || acc.legal_name)})` : ""} has been approved by Capital Craft. Your partner portal login is ready.`;
@@ -82,6 +84,53 @@ async function savePassword(db: ReturnType<typeof dbAs>,accountId: string, passw
   return { ok: true, sentTo: to };
 }
 
+/** An EPC staff login's password by email — from the Partner Portal (the EPC's owner / admin) or
+ *  Stakeholders → EPCs (main admin). Saved FIRST here: set_member_password under the caller's JWT
+ *  decides who may (and refuses a weak one) before any mail goes out; the password is on the
+ *  sender's screen too, so a failed email can still go by WhatsApp. */
+export async function emailMemberPassword(
+  token: string,
+  memberId: string,
+  opts: { email: string; password: string; origin: string },
+): Promise<PasswordMailResult> {
+  const to = opts.email.trim();
+  if (!EMAIL_RE.test(to)) return { ok: false, error: "Enter a valid email.", status: 400 };
+  if (!mailConfigured()) return { ok: false, error: "Email isn't configured yet (app password missing).", status: 500 };
+
+  const db = dbAs(token);
+  const { data: m } = await db.from("epc_members")
+    .select("id, name, mobile, epc_business(trade_name, legal_name)").eq("id", memberId).maybeSingle();
+  if (!m) return { ok: false, error: "Login not found.", status: 404 };
+  const { error: setErr } = await db.rpc("set_member_password", { p_member_id: memberId, p_password: opts.password });
+  if (setErr) {
+    const weak = /password_not_strong/.test(setErr.message);
+    return { ok: false, error: weak ? "Use at least 8 characters with a letter and a number." : "You don't have access to do this.", status: weak ? 400 : 403 };
+  }
+
+  const biz = (Array.isArray(m.epc_business) ? m.epc_business[0] : m.epc_business) as { trade_name: string | null; legal_name: string | null } | null;
+  const company = biz?.trade_name || biz?.legal_name || "";
+  const loginUrl = `${opts.origin}/login`;
+  try {
+    await sendMail({
+      to,
+      subject: "Your Capital Craft partner portal login",
+      html: `<div style="font-family:Arial,sans-serif;font-size:14px;color:#0f3d2e;line-height:1.55">
+        <p>Namaste ${esc(m.name)},</p>
+        <p>Your Capital Craft partner portal login${company ? ` for ${esc(company)}` : ""} is ready.</p>
+        <p style="margin:12px 0 4px"><span style="color:#5a8a76">Login:</span> <a href="${esc(loginUrl)}">${esc(loginUrl)}</a></p>
+        <p style="margin:4px 0"><span style="color:#5a8a76">Mobile number:</span> <b>${esc(m.mobile)}</b></p>
+        <p style="margin:12px 0 4px;color:#5a8a76">One-time password:</p>
+        <div style="display:inline-block;font-family:monospace;font-size:16px;font-weight:bold;background:#f0faf5;border:1px solid #cdeadd;border-radius:6px;padding:6px 12px">${esc(opts.password)}</div>
+        <p>Log in with this one-time password and the portal will ask you to set your own password. Please keep it private.</p>
+        <p style="margin-top:18px">Regards,<br/>Capital Craft Advisors</p>
+      </div>`,
+    });
+  } catch (e) {
+    return { ok: false, error: "Couldn't send the email — " + errText(e), status: 502 };
+  }
+  return { ok: true, sentTo: to };
+}
+
 /** Sends the main admin's reviewed draft (it must still contain the password), then saves the password. */
 export async function sendPasswordDraft(
   token: string,
@@ -102,7 +151,6 @@ export async function sendPasswordDraft(
   const { data: acc } = await db.from("epc_business").select("id").eq("id", accountId).maybeSingle();
   if (!acc) return { ok: false, error: "Account not found.", status: 404 };
 
-  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
   try {
     await sendMail({
       to,

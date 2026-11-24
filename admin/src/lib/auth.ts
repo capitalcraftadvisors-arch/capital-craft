@@ -1,4 +1,5 @@
-import { FUNCTIONS_URL } from "./supabase";
+import { decodeJwt } from "jose";
+import { FUNCTIONS_URL } from "./supabase-config";
 
 // Shape returned by the `auth` Edge Function (plus epc_self_edited which
 // AuthGuard re-fetches on every page mount so we can gate the wizard).
@@ -159,9 +160,28 @@ export function onSessionChangeElsewhere(cb: () => void): () => void {
   return () => window.removeEventListener("storage", h);
 }
 
+// A login lasts 12 hours (auth function); one made before logins expired has no
+// expiry and is refused by the server (0135). Either way it counts as signed out.
+function expired(token: string): boolean {
+  try {
+    const { exp } = decodeJwt(token);
+    return !exp || exp * 1000 <= Date.now();
+  } catch {
+    return true;
+  }
+}
+
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
-  return localStorage.getItem(TOKEN_KEY);
+  const token = localStorage.getItem(TOKEN_KEY);
+  return token && !expired(token) ? token : null;
+}
+
+/** A login is still stored but has run out → sign out. */
+export function sessionEnded(): boolean {
+  if (typeof window === "undefined") return false;
+  const token = localStorage.getItem(TOKEN_KEY);
+  return !!token && expired(token);
 }
 
 /** Headers for a call to our own API as the signed-in user: `extra` (e.g.
