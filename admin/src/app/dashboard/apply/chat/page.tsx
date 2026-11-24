@@ -21,6 +21,9 @@
 // Capital Craft team's (admin profile), not the EPC's. All uploads/OCR run
 // against the EPC's own token; RLS scopes writes. Roles are decided here and
 // written in the ONE submit.
+//
+// The header, typing bubble, text input and the document table's look come from
+// the chat kit (src/components/chat), drawn in the navy PARTNER_THEME.
 
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -31,7 +34,7 @@ import { deleteDocument, getDocumentUrl } from "@/lib/storage";
 import { nameDocument } from "@/lib/ocr";
 import { locateUpload, LOCATION_OFF_MSG } from "@/components/GeoOfficeUpload";
 import { hydrateLoanForm, type LoanDocRow } from "@/lib/loan-form";
-import { numberToWordsIndian } from "@/lib/numberToWords";
+import { amountInWords } from "@/lib/numberToWords";
 import { nameReadable } from "@/lib/name-match";
 import { fmtDate, toIsoDate } from "@/lib/dates";
 import { coappReasonText, decideRoles, eligibility, idNamesMatch, isBillOwner, personName, type IneligibleReason, type PersonFacts, type RoleDecision } from "@/lib/loan-roles";
@@ -44,14 +47,16 @@ import { amountInput } from "@/lib/money";
 import { supabase } from "@/lib/supabase";
 import { clearChatDraft, loadChatDraft, saveChatDraft, withoutThumbs } from "@/lib/chat-draft";
 import { fetchLeads, linkLeadLoan } from "@/lib/leads";
+import { MOBILE_RE, EMAIL_RE, PINCODE_RE } from "@/lib/validators";
+// The chat kit (src/components/chat) — this chat's navy palette is PARTNER_THEME.
+import { PARTNER_THEME as THEME } from "@/components/chat/theme";
+import type { Choice, FileReceipt, Form } from "@/components/chat/types";
+import { useScrollToBottom } from "@/components/chat/hooks";
+import { ChatDock, ChatError, ChatMessages } from "@/components/chat/ChatFrame";
+import { PartnerChatHeader, PartnerComposer, PartnerTypingBubble } from "@/components/chat/PartnerChrome";
+import { AddFileButton, ContinueRow, DocSlotTable, FieldRows, ReadingLine, SlotFileChip } from "@/components/chat/DocSlotTable";
 
-const MOBILE_RE = /^[6-9]\d{9}$/;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PIN_RE = /^[1-9]\d{5}$/;
-
-type Form = Record<string, string>;
-type Msg = { id: string; _id?: string; from: "bot" | "user"; text?: string; time: string; files?: { name: string; thumb: string | null }[]; turnId?: string; pass?: string; value?: string /* the answer as stored, for ✎ Edit */ };
-type Choice = { value: string; label: string; sub?: string };
+type Msg = { id: string; _id?: string; from: "bot" | "user"; text?: string; time: string; files?: FileReceipt[]; turnId?: string; pass?: string; value?: string /* the answer as stored, for ✎ Edit */ };
 // What an automatic (decision) turn does: an optional one-line bot message, the
 // next form, and the turn to jump to (none → the next turn).
 type Step = { say?: string; form: Form; goto?: string };
@@ -292,13 +297,8 @@ const PICK_LABEL: Record<string, string> = {
   other_docs: "Other documents", extra_bills: "More electricity bills", extra_rooftops: "More rooftop photos",
 };
 
-// Fields whose typed amount is echoed in Indian words under the input.
+// Fields whose typed amount is echoed in Indian words (amountInWords) under the input.
 const AMOUNT_FIELDS = new Set(["loan_amount_required"]);
-// Integer → Indian words (lakh / crore). Empty for non-positive / invalid.
-// Words only (no "Rupees Only" suffix — callers append " rupees" in the UI).
-function amountInWords(n: number): string {
-  return Number.isFinite(n) && n > 0 ? numberToWordsIndian(Math.floor(n)) : "";
-}
 
 const uidGen = () => "m" + Math.random().toString(36).slice(2, 9);
 const nowLabel = () => new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
@@ -346,7 +346,6 @@ function ChatInner() {
   const [centralSub, setCentralSub] = useState("");
   const [stateSub, setStateSub] = useState("");
   const [tenure, setTenure] = useState<number | null>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const started = useRef(false);
   // The consent bubble is echoed at most once even across submit retries.
@@ -455,9 +454,7 @@ function ChatInner() {
   }, [idx, done, ready]);
 
   // Keep pinned to the newest message.
-  useEffect(() => {
-    const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [msgs, busy, done]);
+  const scrollRef = useScrollToBottom([msgs, busy, done]);
 
   // Every answer kept in this browser (no request) once the draft exists, so the
   // chat survives a refresh; cleared when the application is submitted.
@@ -630,7 +627,7 @@ function ChatInner() {
   async function submitPincode() {
     if (!turn) return;
     const pin = input.trim();
-    if (!PIN_RE.test(pin)) { setError("Enter a valid 6-digit pincode."); return; }
+    if (!PINCODE_RE.test(pin)) { setError("Enter a valid 6-digit pincode."); return; }
     setBusy(true); setError(null);
     try {
       const res = await fetch(`/api/admin/pincode-lookup?pin=${pin}`, { headers: auth() });
@@ -875,190 +872,158 @@ function ChatInner() {
   const showDock = !!turn && !busy;
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden" style={{ background: "linear-gradient(160deg,#f5f8fe 0%,#e9f0fc 100%)" }}>
-      {/* Header */}
-      <header className="shrink-0 px-4 sm:px-5 py-2.5 bg-[#14235c] text-white flex items-center gap-3 shadow-sm">
-        <button onClick={() => router.push("/dashboard")} className="p-1 -ml-1 text-white/80 hover:text-white text-[20px] leading-none" aria-label="Back">←</button>
-        <img src="/brand/capital-craft-mark.png" alt="" className="w-9 h-9 rounded-full bg-white object-contain p-1 shadow-sm" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
-        <div className="min-w-0 flex-1">
-          <div className="font-display font-bold text-[15px] leading-tight truncate">Capital Craft · {editMode ? "Edit loan application" : "New loan application"}</div>
-          <div className="text-[11.5px] text-white/70 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#93b4ff]" /> {editMode ? "updating the application" : "building the application"}</div>
-        </div>
-        <span className="text-[11px] text-white/60 tabular-nums">{progress}%</span>
+    <div className="h-screen flex flex-col overflow-hidden" style={THEME.canvas}>
+      <PartnerChatHeader hideBrokenLogo title={editMode ? "Edit loan application" : "New loan application"}
+        subtitle={editMode ? "updating the application" : "building the application"}
+        progress={progress} onBack={() => router.push("/dashboard")}>
         <button onClick={undo} disabled={!undoStack.length || busy || !!done}
           className="w-8 h-8 rounded-full hover:bg-white/10 grid place-items-center text-white/80 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent text-[17px] leading-none"
           aria-label="Undo last step" title="Undo last step">↶</button>
-      </header>
-      <div className="h-1.5 bg-black/15 shrink-0"><div className="h-1.5 bg-[#5b8def] rounded-r-full transition-all duration-500" style={{ width: progress + "%" }} /></div>
+      </PartnerChatHeader>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-4">
-        <div className="max-w-xl mx-auto py-4 flex flex-col gap-1.5">
-          {msgs.map((m) => (
-            <div key={m.id} className={m.from === "bot" ? "self-start max-w-[88%]" : "self-end max-w-[88%]"}>
-              <div className={[
-                "rounded-2xl px-3.5 py-2 text-[14px] shadow-sm whitespace-pre-wrap break-words",
-                m.from === "bot" ? "bg-white rounded-tl-md border border-[#c7d5f0] text-text" : "bg-[#1e3a8a] rounded-tr-md text-white",
-              ].join(" ")}>
-                {m.text}
-                {m.files && m.files.length > 0 && (
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {m.files.map((f, i) => f.thumb
-                      ? <img key={i} src={f.thumb} alt="" className="w-11 h-11 rounded-lg object-cover border border-white/30" />
-                      : <span key={i} className="text-[11px] px-2 py-1 rounded-md bg-white/15">{f.name}</span>)}
-                  </div>
-                )}
-              </div>
-              {m.from === "user" && m.turnId && !done && (
-                <div className="text-right mt-0.5 pr-1">
-                  <button onClick={() => editAnswer(m.turnId!, m.pass, m.value)} disabled={busy} className="text-[11px] text-text-muted hover:text-[#1e3a8a] disabled:opacity-40" title="Edit this answer">✎ Edit</button>
+      <ChatMessages scrollRef={scrollRef}>
+        {msgs.map((m) => (
+          <div key={m.id} className={m.from === "bot" ? "self-start max-w-[88%]" : "self-end max-w-[88%]"}>
+            <div className={[
+              "rounded-2xl px-3.5 py-2 text-[14px] shadow-sm whitespace-pre-wrap break-words",
+              m.from === "bot" ? "bg-white rounded-tl-md border border-[#c7d5f0] text-text" : "bg-[#1e3a8a] rounded-tr-md text-white",
+            ].join(" ")}>
+              {m.text}
+              {m.files && m.files.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {m.files.map((f, i) => f.thumb
+                    ? <img key={i} src={f.thumb} alt="" className="w-11 h-11 rounded-lg object-cover border border-white/30" />
+                    : <span key={i} className="text-[11px] px-2 py-1 rounded-md bg-white/15">{f.name}</span>)}
                 </div>
               )}
             </div>
-          ))}
-          {busy && (
-            <div className="self-start">
-              <div className="rounded-2xl rounded-tl-md bg-white border border-[#c7d5f0] px-4 py-3 shadow-sm flex gap-1">
-                <span className="w-2 h-2 rounded-full bg-[#1e3a8a]/40 animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-2 h-2 rounded-full bg-[#1e3a8a]/40 animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-2 h-2 rounded-full bg-[#1e3a8a]/40 animate-bounce" style={{ animationDelay: "300ms" }} />
+            {m.from === "user" && m.turnId && !done && (
+              <div className="text-right mt-0.5 pr-1">
+                <button onClick={() => editAnswer(m.turnId!, m.pass, m.value)} disabled={busy} className="text-[11px] text-text-muted hover:text-[#1e3a8a] disabled:opacity-40" title="Edit this answer">✎ Edit</button>
               </div>
-            </div>
-          )}
-          {error && <div className="self-center text-[12px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5 my-1">{error}</div>}
-          <div className="h-2" />
-        </div>
-      </div>
+            )}
+          </div>
+        ))}
+        {busy && <PartnerTypingBubble />}
+        {error && <ChatError text={error} />}
+      </ChatMessages>
 
       {/* Dock */}
       {showDock && turn && (
-        <div className="shrink-0 max-h-[75vh] overflow-y-auto bg-white/85 backdrop-blur border-t border-line">
-          <div className="max-w-xl mx-auto px-3 sm:px-4 py-3">
-            {(turn.kind === "text" || turn.kind === "pincode" || turn.kind === "number") && (() => {
-              const send = () => void (turn.kind === "pincode" ? submitPincode() : turn.kind === "number" ? submitNumber() : submitText());
-              const amt = turn.field && AMOUNT_FIELDS.has(turn.field) ? Number(amountInput(input)) : 0;
-              return (
-                <div className="flex flex-col gap-1.5">
-                  {/* Applied loan amount: 80 / 90 / 100 % of the project cost, or Custom. */}
-                  {turn.field === "loan_amount_required" && (
-                    <LoanShareChips cost={Number(form.total_project_cost) || 0} value={input} tone="#1e3a8a"
-                      onPick={setInput} onCustom={() => inputRef.current?.focus()} />
-                  )}
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1 flex items-center border border-line rounded-full bg-white overflow-hidden focus-within:border-[#1e3a8a] focus-within:ring-2 focus-within:ring-[#1e3a8a]/15">
-                      <input
-                        ref={inputRef} autoFocus value={input}
-                        inputMode={turn.kind === "text" ? "text" : "numeric"}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={(e) => { if (e.key === "Enter") send(); }}
-                        placeholder={turn.placeholder || "Type your answer…"}
-                        className="flex-1 min-w-0 px-4 py-2.5 text-[14px] bg-transparent focus:outline-none" />
-                    </div>
-                    <button onClick={send} className="w-11 h-11 shrink-0 rounded-full bg-[#1e3a8a] text-white grid place-items-center hover:bg-[#17307a] shadow-sm" aria-label="Send">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg>
-                    </button>
+        <ChatDock cap="max-h-[75vh]">
+          {(turn.kind === "text" || turn.kind === "pincode" || turn.kind === "number") && (() => {
+            const send = () => void (turn.kind === "pincode" ? submitPincode() : turn.kind === "number" ? submitNumber() : submitText());
+            const amt = turn.field && AMOUNT_FIELDS.has(turn.field) ? Number(amountInput(input)) : 0;
+            return (
+              <div className="flex flex-col gap-1.5">
+                {/* Applied loan amount: 80 / 90 / 100 % of the project cost, or Custom. */}
+                {turn.field === "loan_amount_required" && (
+                  <LoanShareChips cost={Number(form.total_project_cost) || 0} value={input} tone="#1e3a8a"
+                    onPick={setInput} onCustom={() => inputRef.current?.focus()} />
+                )}
+                <PartnerComposer inputRef={inputRef} value={input} onChange={setInput} onSend={send}
+                  inputMode={turn.kind === "text" ? "text" : "numeric"} placeholder={turn.placeholder || "Type your answer…"} />
+                {amt > 0 && amountInWords(amt) && (
+                  <div className="text-[11.5px] text-[#14235c] px-4">₹{amt.toLocaleString("en-IN")} — <span className="font-medium">{amountInWords(amt)} rupees</span></div>
+                )}
+                {/* The loan as a share of the project cost read from the quotation. */}
+                {amt > 0 && pctOf(amt, form.total_project_cost) && (
+                  <div className="text-[11.5px] text-[#14235c] px-4">
+                    <span className="font-semibold">{pctOf(amt, form.total_project_cost)}</span> of the project cost ({formatRupees(Number(form.total_project_cost))})
                   </div>
-                  {amt > 0 && amountInWords(amt) && (
-                    <div className="text-[11.5px] text-[#14235c] px-4">₹{amt.toLocaleString("en-IN")} — <span className="font-medium">{amountInWords(amt)} rupees</span></div>
-                  )}
-                  {/* The loan as a share of the project cost read from the quotation. */}
-                  {amt > 0 && pctOf(amt, form.total_project_cost) && (
-                    <div className="text-[11.5px] text-[#14235c] px-4">
-                      <span className="font-semibold">{pctOf(amt, form.total_project_cost)}</span> of the project cost ({formatRupees(Number(form.total_project_cost))})
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
-
-            {turn.kind === "choice" && (
-              <div className="grid sm:grid-cols-2 gap-2">
-                {turn.choices!.map((c) => {
-                  // In edit mode, highlight + tag the value already on the application.
-                  const current = !!turn.field && form[turn.field!] === c.value;
-                  return (
-                    <button key={c.value || c.label} onClick={() => void choose(c)} className={["text-left px-4 py-3 rounded-xl border bg-white hover:border-[#1e3a8a] hover:bg-[#f4f7fd] transition", current ? "border-[#1e3a8a] bg-[#f4f7fd]" : "border-line"].join(" ")}>
-                      <div className="text-[14px] font-semibold text-text flex items-center gap-2">{c.label}{current && <span className="text-[10px] font-semibold text-[#1e3a8a] bg-[#e8effc] rounded-full px-2 py-0.5">Current</span>}</div>{c.sub && <div className="text-[12px] text-text-muted">{c.sub}</div>}
-                    </button>
-                  );
-                })}
+                )}
               </div>
-            )}
+            );
+          })()}
 
-            {turn.kind === "consent" && (
-              <div className="flex gap-2 flex-wrap">
-                <button onClick={() => void giveConsent()} disabled={busy} className="flex-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a] disabled:opacity-60">Yes, the customer consents</button>
-                <button onClick={() => router.push("/dashboard")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">Cancel</button>
-              </div>
-            )}
+          {turn.kind === "choice" && (
+            <div className="grid sm:grid-cols-2 gap-2">
+              {turn.choices!.map((c) => {
+                // In edit mode, highlight + tag the value already on the application.
+                const current = !!turn.field && form[turn.field!] === c.value;
+                return (
+                  <button key={c.value || c.label} onClick={() => void choose(c)} className={["text-left px-4 py-3 rounded-xl border bg-white hover:border-[#1e3a8a] hover:bg-[#f4f7fd] transition", current ? "border-[#1e3a8a] bg-[#f4f7fd]" : "border-line"].join(" ")}>
+                    <div className="text-[14px] font-semibold text-text flex items-center gap-2">{c.label}{current && <span className="text-[10px] font-semibold text-[#1e3a8a] bg-[#e8effc] rounded-full px-2 py-0.5">Current</span>}</div>{c.sub && <div className="text-[12px] text-text-muted">{c.sub}</div>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
-            {turn.kind === "confirm_edit" && (
-              <div className="flex gap-2 flex-wrap">
-                <button onClick={() => { pushUser("Yes, edit this application"); advance(); }} className="flex-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a]">Yes, edit</button>
-                <button onClick={() => router.push("/dashboard")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">No, go back</button>
-              </div>
-            )}
+          {turn.kind === "consent" && (
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={() => void giveConsent()} disabled={busy} className="flex-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a] disabled:opacity-60">Yes, the customer consents</button>
+              <button onClick={() => router.push("/dashboard")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">Cancel</button>
+            </div>
+          )}
 
-            {turn.kind === "edit_picker" && appId && (
-              <EditPicker
-                appId={appId} form={form} docRows={docRows} preselect={editDocs}
-                onPick={(keys) => {
-                  const built = buildEditScript(keys);
-                  pushUndo();
-                  pushUser(`Editing: ${keys.map((k) => PICK_LABEL[k] ?? k).join(", ")}`);
-                  setScript(built);
-                  setIdx(2); // skip past the intro (confirm + picker) to the first chosen step
-                }}
-              />
-            )}
+          {turn.kind === "confirm_edit" && (
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={() => { pushUser("Yes, edit this application"); advance(); }} className="flex-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a]">Yes, edit</button>
+              <button onClick={() => router.push("/dashboard")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">No, go back</button>
+            </div>
+          )}
 
-            {turn.kind === "doc_table" && appId && (
-              <DocTable
-                key={"applicant-docs-" + idx} appId={appId} form={form} docRows={docRows} rows={rowsOf(turn, form) ?? APPLICANT_ROWS} onPatch={merge} onDone={finishDocTable}
-                // The first table (applying) also takes any other documents, and more bills /
-                // rooftop photos for commercial; an edit step opens just the granted ones.
-                extras={turn.extras ? { bills: form.plant_use_type === "commercial", only: turn.extras }
-                  : !editMode && turn.id === "doc_table" ? { bills: form.plant_use_type === "commercial" } : undefined}
-              />
-            )}
+          {turn.kind === "edit_picker" && appId && (
+            <EditPicker
+              appId={appId} form={form} docRows={docRows} preselect={editDocs}
+              onPick={(keys) => {
+                const built = buildEditScript(keys);
+                pushUndo();
+                pushUser(`Editing: ${keys.map((k) => PICK_LABEL[k] ?? k).join(", ")}`);
+                setScript(built);
+                setIdx(2); // skip past the intro (confirm + picker) to the first chosen step
+              }}
+            />
+          )}
 
-            {turn.kind === "coapp_docs" && appId && (
-              <DocTable key={"coapp-docs-" + idx} appId={appId} form={form} docRows={docRows} rows={rowsOf(turn, form) ?? COAPP_ROWS} onPatch={merge} onDone={() => { pushUndo(); advance(); }} />
-            )}
+          {turn.kind === "doc_table" && appId && (
+            <DocTable
+              key={"applicant-docs-" + idx} appId={appId} form={form} docRows={docRows} rows={rowsOf(turn, form) ?? APPLICANT_ROWS} onPatch={merge} onDone={finishDocTable}
+              // The first table (applying) also takes any other documents, and more bills /
+              // rooftop photos for commercial; an edit step opens just the granted ones.
+              extras={turn.extras ? { bills: form.plant_use_type === "commercial", only: turn.extras }
+                : !editMode && turn.id === "doc_table" ? { bills: form.plant_use_type === "commercial" } : undefined}
+            />
+          )}
 
-            {turn.kind === "doc_review" && appId && (
-              <DocTable
-                key={"doc-review-" + idx} appId={appId} form={form} docRows={docRows}
-                rows={[
-                  ...APPLICANT_ROWS,
-                  ...(hasCoapp(form) ? COAPP_ROWS : []),
-                  QUOTATION_ROW,
-                ]}
-                review onPatch={merge} onDone={() => { pushUndo(); advance(); }}
-              />
-            )}
+          {turn.kind === "coapp_docs" && appId && (
+            <DocTable key={"coapp-docs-" + idx} appId={appId} form={form} docRows={docRows} rows={rowsOf(turn, form) ?? COAPP_ROWS} onPatch={merge} onDone={() => { pushUndo(); advance(); }} />
+          )}
 
-            {turn.kind === "quotation" && appId && (
-              <QuotationDock appId={appId} form={form} onPatch={merge} onDone={() => { pushUndo(); advance(); }} />
-            )}
+          {turn.kind === "doc_review" && appId && (
+            <DocTable
+              key={"doc-review-" + idx} appId={appId} form={form} docRows={docRows}
+              rows={[
+                ...APPLICANT_ROWS,
+                ...(hasCoapp(form) ? COAPP_ROWS : []),
+                QUOTATION_ROW,
+              ]}
+              review onPatch={merge} onDone={() => { pushUndo(); advance(); }}
+            />
+          )}
 
-            {turn.kind === "tenure" && (
-              <LoanConfigDock
-                loanAmt={Number(form.loan_amount_required) || 0}
-                subsidyCase={subsidyCase} setSubsidyCase={setSubsidyCase}
-                centralSub={centralSub} setCentralSub={setCentralSub}
-                stateSub={stateSub} setStateSub={setStateSub}
-                tenure={tenure} setTenure={setTenure}
-                onFinish={() => {
-                  const central = subsidyCase === "non_subsidy" ? 0 : (Number(centralSub) || 0);
-                  const st = subsidyCase === "non_subsidy" ? 0 : (Number(stateSub) || 0);
-                  merge({ selected_tenure_years: String(tenure), central_subsidy: String(central), state_subsidy: String(st) });
-                  pushUndo(); advance();
-                }}
-              />
-            )}
-          </div>
-        </div>
+          {turn.kind === "quotation" && appId && (
+            <QuotationDock appId={appId} form={form} onPatch={merge} onDone={() => { pushUndo(); advance(); }} />
+          )}
+
+          {turn.kind === "tenure" && (
+            <LoanConfigDock
+              loanAmt={Number(form.loan_amount_required) || 0}
+              subsidyCase={subsidyCase} setSubsidyCase={setSubsidyCase}
+              centralSub={centralSub} setCentralSub={setCentralSub}
+              stateSub={stateSub} setStateSub={setStateSub}
+              tenure={tenure} setTenure={setTenure}
+              onFinish={() => {
+                const central = subsidyCase === "non_subsidy" ? 0 : (Number(centralSub) || 0);
+                const st = subsidyCase === "non_subsidy" ? 0 : (Number(stateSub) || 0);
+                merge({ selected_tenure_years: String(tenure), central_subsidy: String(central), state_subsidy: String(st) });
+                pushUndo(); advance();
+              }}
+            />
+          )}
+        </ChatDock>
       )}
     </div>
   );
@@ -1144,7 +1109,7 @@ const UNIT_FIELDS: Partial<Record<Unit, (f: Form) => { label: string; field: str
 
 type SlotFile = { file: File; thumb: string | null };
 
-function DocTable({ appId, form, rows, docRows = [], review = false, extras, onPatch, onDone }: { appId: string; form: Form; rows: Row[]; docRows?: { id: string; category: string; storage_path: string | null }[]; review?: boolean; extras?: { bills: boolean; only?: ExtraKey[] }; onPatch: (p: Form) => void; onDone: (r: { name: string; thumb: string | null }[]) => void }) {
+function DocTable({ appId, form, rows, docRows = [], review = false, extras, onPatch, onDone }: { appId: string; form: Form; rows: Row[]; docRows?: { id: string; category: string; storage_path: string | null }[]; review?: boolean; extras?: { bills: boolean; only?: ExtraKey[] }; onPatch: (p: Form) => void; onDone: (r: FileReceipt[]) => void }) {
   const [extrasBusy, setExtrasBusy] = useState(false);
   const [files, setFiles] = useState<Partial<Record<Slot, SlotFile>>>({});
   const [skipped, setSkipped] = useState<Partial<Record<Slot, boolean>>>({});
@@ -1242,7 +1207,7 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
       const e = j.ebill?.fields ?? {}; const path = j.ebill?.storage_path ?? "";
       // The bill's pincode pre-fills the installation pincode question.
       const pin = String(e.pincode ?? "").trim();
-      return { ebill_path: path, monthly_bill_amount: e.monthly_bill_amount != null ? String(e.monthly_bill_amount) : "", discom_name: e.discom_name ?? "", ca_number: e.ca_number ?? "", ebill_address_line: e.ebill_address_line ?? "", ebill_name: e.ebill_name ?? "", ...(PIN_RE.test(pin) ? { install_pincode: pin } : {}) };
+      return { ebill_path: path, monthly_bill_amount: e.monthly_bill_amount != null ? String(e.monthly_bill_amount) : "", discom_name: e.discom_name ?? "", ca_number: e.ca_number ?? "", ebill_address_line: e.ebill_address_line ?? "", ebill_name: e.ebill_name ?? "", ...(PINCODE_RE.test(pin) ? { install_pincode: pin } : {}) };
     }
     // Quotation / proforma — extract-loan-docs (proforma side); reads project
     // size + total cost. Used in the review table's Replace.
@@ -1340,27 +1305,13 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
 
   function cell(r: Row) {
     if (skipped[r.slot]) return <span className="text-[11.5px] text-text-muted italic">skipped</span>;
-    if (rowOpen(r.slot, r.unit)) {
-      return (
-        <label onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) pick(r.slot, r.unit, f); }}
-          className="inline-flex items-center gap-1 rounded-lg border border-dashed border-line hover:border-[#1e3a8a] bg-white px-2.5 py-1.5 cursor-pointer text-[11.5px] font-semibold text-[#1e3a8a]">
-          <span className="text-[13px] leading-none">＋</span> Add
-          <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pick(r.slot, r.unit, f); e.currentTarget.value = ""; }} />
-        </label>
-      );
-    }
-    const live = files[r.slot];
-    return (
-      <span className="inline-flex items-center gap-1.5">
-        {live?.thumb ? <img src={live.thumb} alt="" className="w-8 h-8 rounded-md object-cover border border-line" /> : <span className="w-8 h-8 rounded-md bg-[#f4f7fd] border border-[#c7d5f0] grid place-items-center text-[13px]">📄</span>}
-        <button onClick={() => replace(r.slot, r.unit)} className="text-[#1e3a8a] text-[11px] font-semibold hover:underline">Replace</button>
-      </span>
-    );
+    if (rowOpen(r.slot, r.unit)) return <AddFileButton theme={THEME} onFile={(f) => pick(r.slot, r.unit, f)} />;
+    return <SlotFileChip theme={THEME} thumb={files[r.slot]?.thumb} onReplace={() => replace(r.slot, r.unit)} />;
   }
 
   function strip(unit: Unit) {
     const rd = reads[unit];
-    if (rd?.status === "reading") return <span className="flex items-center gap-2 text-[11.5px] text-text-muted"><span className="w-3.5 h-3.5 rounded-full border-2 border-[#1e3a8a]/30 border-t-[#1e3a8a] animate-spin" /> Reading…</span>;
+    if (rd?.status === "reading") return <ReadingLine theme={THEME} />;
     if (rd?.status === "error") {
       const canRetry = rows.find((r) => r.unit === unit)!.parts.every((p) => filesRef.current[p]);
       return <span className="flex flex-wrap items-center gap-2 text-[11.5px]"><span className="text-red-600">{rd.error || "Couldn't read that."}</span>{canRetry && <button onClick={() => void run(unit, filesRef.current)} className="text-[#1e3a8a] font-semibold hover:underline">Try again</button>}</span>;
@@ -1372,7 +1323,7 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
         ? <button onClick={() => void view(tgt.path, tgt.rowId, tgt.url)} className="text-[#1e3a8a] text-[11px] font-semibold hover:underline">View current file</button>
         : null;
       return build
-        ? <div className="flex flex-col gap-1.5">{viewLink}<FieldRows fields={build(form).map((x) => ({ ...x, value: form[x.field] || "" }))} onEdit={(field, value) => onPatch({ [field]: value })} /></div>
+        ? <div className="flex flex-col gap-1.5">{viewLink}<FieldRows theme={THEME} fields={build(form).map((x) => { const value = form[x.field] || ""; return { ...x, value, ok: !!value }; })} onEdit={(field, value) => onPatch({ [field]: value })} /></div>
         : <span className="flex items-center gap-2 text-[11.5px] text-[#1e3a8a] font-medium">Uploaded ✓{viewLink && <>· {viewLink}</>}</span>;
     }
     return null;
@@ -1381,37 +1332,9 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
   return (
     <div className="flex flex-col gap-2">
       {/* An edit step for the any-number uploads alone has no table rows. */}
-      {rows.length > 0 && <div className="rounded-xl border border-line bg-white overflow-hidden">
-        <table className="w-full border-collapse">
-          <thead>
-            <tr className="bg-[#eef3fc] border-b border-[#dbe4f6] text-[11px] font-semibold text-[#14235c]">
-              <th className="text-left font-semibold px-3 py-2 w-full">Document</th>
-              <th className="text-left font-semibold px-2 py-2 whitespace-nowrap">Upload</th>
-              <th className="text-right font-semibold px-3 py-2 whitespace-nowrap">Don&apos;t have it</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => {
-              const s = r.lastOfUnit ? strip(r.unit) : null;
-              return (
-                <Fragment key={r.slot}>
-                  <tr className={i > 0 ? "border-t border-line/70" : ""}>
-                    <td className="px-3 py-2 align-middle text-[12.5px] text-text leading-snug">{r.label}</td>
-                    <td className="px-2 py-2 align-middle whitespace-nowrap">{cell(r)}</td>
-                    <td className="px-3 py-2 align-middle text-right">{!r.required && <input type="checkbox" checked={!!skipped[r.slot]} onChange={() => toggleSkip(r.slot)} className="w-4 h-4 accent-[#1e3a8a] cursor-pointer align-middle" aria-label={`Don't have ${r.label}`} />}</td>
-                  </tr>
-                  {s && <tr><td colSpan={3} className="px-3 pb-2.5 pt-0">{s}</td></tr>}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>}
+      {rows.length > 0 && <DocSlotTable theme={THEME} rows={rows} skipped={skipped} onToggleSkip={toggleSkip} cell={cell} strip={(r) => strip(r.unit)} />}
       {extras && <ExtraDocs appId={appId} form={form} docRows={docRows} bills={extras.bills} only={extras.only} onPatch={onPatch} onBusy={setExtrasBusy} />}
-      <div className="flex items-center gap-2 flex-wrap">
-        <button onClick={done} disabled={!allSettled} className="px-4 py-2 rounded-lg bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-50">Continue →</button>
-        {!allSettled && <span className="text-[11px] text-text-muted">Add or tick “Don&apos;t have it” for every row to continue.</span>}
-      </div>
+      <ContinueRow theme={THEME} label="Continue →" onClick={done} disabled={!allSettled} hint="Add or tick “Don't have it” for every row to continue." />
     </div>
   );
 }
@@ -1559,38 +1482,9 @@ function EditPicker({ appId, form, docRows, preselect = [], onPick }: {
   return (
     <div className="flex flex-col gap-2">
       <EditTable appId={appId} form={form} docRows={docRows} value={sel} onChange={setSel} />
-      <div className="flex items-center gap-2 flex-wrap">
-        <button onClick={() => sel.length > 0 && onPick(sel)} disabled={sel.length === 0} className="px-4 py-2 rounded-lg bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-50">
-          Edit selected{sel.length ? ` (${sel.length})` : ""} →
-        </button>
-        {sel.length === 0 && <span className="text-[11px] text-text-muted">Tick the fields or documents you want to change.</span>}
-      </div>
-    </div>
-  );
-}
-
-// Inline editable read-out rows.
-function FieldRows({ fields, onEdit }: { fields: { label: string; field: string; value: string }[]; onEdit: (field: string, value: string) => void }) {
-  const [editKey, setEditKey] = useState<string | null>(null);
-  const [val, setVal] = useState("");
-  return (
-    <div className="flex flex-col gap-1.5">
-      {fields.map((f) => (
-        <div key={f.field} className="flex items-center justify-between gap-3 text-[12.5px] min-h-[22px]">
-          <span className="text-text-muted shrink-0">{f.label}</span>
-          {editKey === f.field ? (
-            <span className="flex items-center gap-1.5">
-              <input autoFocus value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { onEdit(f.field, val.trim()); setEditKey(null); } if (e.key === "Escape") setEditKey(null); }} className="border border-[#1e3a8a] rounded-lg px-2.5 py-1 text-[12.5px] w-40 text-right outline-none" />
-              <button onClick={() => { onEdit(f.field, val.trim()); setEditKey(null); }} className="text-[#1e3a8a] text-[11.5px] font-semibold">Save</button>
-            </span>
-          ) : (
-            <span className="flex items-center gap-2 min-w-0">
-              {f.value ? <span className="text-text font-medium text-right break-words">{f.value}</span> : <span className="text-amber-600 text-[11.5px] italic">not found</span>}
-              <button onClick={() => { setEditKey(f.field); setVal(f.value); }} className="opacity-60 hover:opacity-100 text-[#1e3a8a] text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>
-            </span>
-          )}
-        </div>
-      ))}
+      <ContinueRow theme={THEME} label={`Edit selected${sel.length ? ` (${sel.length})` : ""} →`}
+        onClick={() => { if (sel.length > 0) onPick(sel); }} disabled={sel.length === 0}
+        hint="Tick the fields or documents you want to change." />
     </div>
   );
 }
@@ -1635,17 +1529,15 @@ function QuotationDock({ appId, form, onPatch, onDone }: { appId: string; form: 
       {err && <div className="text-[11.5px] text-red-600">{err}</div>}
       <div className="rounded-xl border border-line bg-white p-3">
         <FieldRows
+          theme={THEME}
           fields={[
-            { label: "Project size (kW)", field: "project_size", value: form.project_size || "" },
-            { label: "Total project cost (₹)", field: "total_project_cost", value: form.total_project_cost || "" },
+            { label: "Project size (kW)", field: "project_size", value: form.project_size || "", ok: !!form.project_size },
+            { label: "Total project cost (₹)", field: "total_project_cost", value: form.total_project_cost || "", ok: !!form.total_project_cost },
           ]}
           onEdit={(field, value) => onPatch({ [field]: amountInput(value) })}
         />
       </div>
-      <div className="flex items-center gap-2 flex-wrap">
-        <button onClick={onDone} disabled={!canContinue} className="px-4 py-2 rounded-lg bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-50">Continue →</button>
-        {!canContinue && <span className="text-[11px] text-text-muted">Add the project size and cost to continue.</span>}
-      </div>
+      <ContinueRow theme={THEME} label="Continue →" onClick={onDone} disabled={!canContinue} hint="Add the project size and cost to continue." />
     </div>
   );
 }

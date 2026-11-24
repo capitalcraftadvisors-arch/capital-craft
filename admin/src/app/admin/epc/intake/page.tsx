@@ -5,7 +5,8 @@
 // collects) and submits it for verification. It MIRRORS the loan intake chatbot
 // (src/app/admin/app/intake/page.tsx): same canvas, bubbles, doc-upload turns,
 // "Read from the document" OCR card, editable typed answers (✎), and the
-// "Don't have it — skip" behaviour.
+// "Don't have it — skip" behaviour. Those shared pieces live in the chat kit
+// (src/components/chat); this chat draws them in its blue EPC_INTAKE_THEME.
 //
 // Unlike the loan intake (which drives the loan wizard's create + complete-step
 // routes), this writes epc_business columns DIRECTLY via the browser supabase()
@@ -22,11 +23,11 @@
 //   ?epc=<id>            resume / prefill an existing EPC (ask only what's missing)
 //   ?epc=<id>&edit=1     same, with an "Edit profile" header
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
-import { getToken, getBusiness } from "@/lib/auth";
+import { getToken } from "@/lib/auth";
 import { uploadDocument } from "@/lib/storage";
 import { extractPan, extractGstLegalName } from "@/lib/ocr";
 import FileUpload from "@/components/FileUpload";
@@ -34,6 +35,15 @@ import DateField from "@/components/ui/DateField";
 import { toIsoDate } from "@/lib/dates";
 import { MOBILE_RE, EMAIL_RE, PAN_RE, ACCOUNT_RE } from "@/lib/validators";
 import { clearChatDraft, loadChatDraft, saveChatDraft } from "@/lib/chat-draft";
+// The chat kit (src/components/chat) — this chat's blue palette is EPC_INTAKE_THEME.
+import { EPC_INTAKE_THEME as THEME } from "@/components/chat/theme";
+import type { ChatMsg, Choice, Fetched, Form, ReadConfirm } from "@/components/chat/types";
+import { useChatLog, useRmFirstName, useScrollToBottom } from "@/components/chat/hooks";
+import { ChatDock, ChatError, ChatMessages, EditingBanner } from "@/components/chat/ChatFrame";
+import { AdminChatHeader, AdminChatLoading, AdminComposer, ChoiceGrid, DonePanel } from "@/components/chat/AdminChrome";
+import { AdminTypingBubble, DateChip, MessageRow } from "@/components/chat/MessageRow";
+import { ConfirmCard, FetchedCard } from "@/components/chat/ReadCards";
+import { DocDock, useDocDockFiles, type UploadSlot } from "@/components/chat/DocDock";
 
 export default function EpcIntakePage() {
   return (
@@ -44,9 +54,6 @@ export default function EpcIntakePage() {
 }
 
 const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/;
-
-type Choice = { value: string; label: string; sub?: string };
-type Form = Record<string, string>;
 
 type Stakeholder = {
   id: string;
@@ -79,7 +86,7 @@ type Turn = {
   // abandoned profile lands on the board's "Doc Uploaded" column.
   step?: number;
   // docs turn:
-  uploads?: { name: string; label: string; category: string }[];
+  uploads?: (UploadSlot & { category: string })[];
   replace?: boolean;              // pass replace=true (unique-index categories)
   ocr?: "pan" | "gst" | "cheque"; // OCR run on the FIRST slot's file
   docLabel?: string;
@@ -177,67 +184,21 @@ const SCRIPT: Turn[] = [
   { id: "submit", kind: "submit", bot: "That's everything. Ready to submit this EPC for verification?" },
 ];
 
-type Fetched = { label: string; value: string; ok: boolean; field?: string };
-type Msg = {
-  id: string;
-  from: "bot" | "user";
-  text?: string;
-  time: string;
-  turnId?: string;
-  field?: string;
-  editable?: boolean;
-  edited?: boolean;
-  files?: { name: string; thumb: string | null }[];
-  fetched?: Fetched[];
-};
-
-// Subtle branded doodle canvas (WhatsApp-style texture, in our green) — copied
-// from the loan intake so the two chatbots are visually identical.
-const DOODLE = encodeURIComponent(
-  `<svg xmlns='http://www.w3.org/2000/svg' width='104' height='104' viewBox='0 0 104 104'>
-     <g fill='none' stroke='#0f3a66' stroke-opacity='0.045' stroke-width='1.4'>
-       <circle cx='22' cy='24' r='7'/>
-       <circle cx='78' cy='66' r='10'/>
-       <path d='M74 18 v9 M69.5 22.5 h9'/>
-       <path d='M14 78 q8 -10 16 0'/>
-       <rect x='58' y='16' width='10' height='10' rx='2'/>
-     </g>
-     <g fill='#0f3a66' fill-opacity='0.045'>
-       <circle cx='48' cy='50' r='1.8'/>
-       <circle cx='92' cy='30' r='1.8'/>
-       <circle cx='30' cy='96' r='1.8'/>
-     </g>
-   </svg>`,
-);
-const CANVAS_STYLE: React.CSSProperties = {
-  backgroundColor: "#e9f1fb",
-  backgroundImage: `url("data:image/svg+xml,${DOODLE}")`,
-};
-
-function nowLabel(): string {
-  return new Date().toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }).toLowerCase();
-}
-function todayLabel(): string {
-  return "Today · " + new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
-}
-
 function Inner() {
   const router = useRouter();
-  const rmName = useMemo(() => {
-    const full = (getBusiness()?.contact_name || "").trim();
-    return full ? full.split(" ")[0] : "You";
-  }, []);
+  const rmName = useRmFirstName();
 
-  const [msgs, setMsgs] = useState<Msg[]>([]);
+  // The message list + pushBot / pushUser / say (chat kit).
+  const { msgs, setMsgs, uid, pushBot, pushUser, say, pushFetched, updateFetched } = useChatLog();
   const [idx, setIdx] = useState(0);
   const [form, setForm] = useState<Form>({});
   const [epcId, setEpcId] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [files, setFiles] = useState<Record<string, File>>({});
-  const [thumbs, setThumbs] = useState<Record<string, string | null>>({});
-  const [confirm, setConfirm] = useState<{ fields: Fetched[]; note: string; thumbs: (string | null)[]; edit?: boolean } | null>(null);
+  // Files attached to the current docs turn's slots (chat kit).
+  const { files, thumbs, setFileFor, clearFileFor, fillNextSlot, clearFiles } = useDocDockFiles();
+  const [confirm, setConfirm] = useState<ReadConfirm | null>(null);
   const [donId, setDonId] = useState<string | null>(null);
   const [donDraft, setDonDraft] = useState(false);
   const [missing, setMissing] = useState<string[]>([]);
@@ -254,11 +215,8 @@ function Inner() {
   const [initReferral, setInitReferral] = useState("");
   const [initReferralOther, setInitReferralOther] = useState("");
 
-  const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const idRef = useRef(0);
   const stepReached = useRef(1);
-  const uid = () => "m" + ++idRef.current;
 
   const turn = SCRIPT[idx] ?? null;
   const editTurn = editing ? SCRIPT.find((t) => t.id === editing.turnId) ?? null : null;
@@ -267,11 +225,6 @@ function Inner() {
   function hdr() { return { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` }; }
   const advance = () => setIdx((i) => i + 1);
   const merge = (patch: Form) => setForm((f) => ({ ...f, ...patch }));
-  function say(from: "bot" | "user", text: string) { setMsgs((m) => [...m, { id: uid(), from, text, time: nowLabel() }]); }
-  function pushUser(text: string, meta: Partial<Msg> = {}) { setMsgs((m) => [...m, { id: uid(), from: "user", text, time: nowLabel(), ...meta }]); }
-  const pushBot = useCallback((text: string, turnId: string) => {
-    setMsgs((m) => (m.some((x) => x.from === "bot" && x.turnId === turnId) ? m : [...m, { id: uid(), from: "bot", text, time: nowLabel(), turnId }]));
-  }, []);
 
   // Direct column write on the target EPC — the same style the admin EPC detail
   // page uses. Best-effort; errors surface only where the RM is blocked.
@@ -329,18 +282,13 @@ function Inner() {
     if (editMode && turn.id !== "submit" && isTurnFilled(turn)) { replay(turn); setIdx((i) => i + 1); return; }
     pushBot(botText(turn), turn.id);
     if (turn.id === "office") pushBot("Geo-tagged on-site photos can be redone later from the classic form — plain images are fine here.", "office_note");
-    setInput(""); setError(null); setFiles({}); setThumbs({}); setConfirm(null); setEditing(null);
+    setInput(""); setError(null); clearFiles(); setConfirm(null); setEditing(null);
     if (turn.id === "mobile") { const p = new URLSearchParams(window.location.search).get("mobile"); if (p) setInput(p.replace(/\D/g, "").slice(0, 10)); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx, editMode, resuming]);
 
-  // Keep the view pinned to the newest message.
-  const didFirstScroll = useRef(false);
-  useEffect(() => {
-    const el = scrollRef.current; if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: didFirstScroll.current ? "smooth" : "auto" });
-    if (msgs.length) didFirstScroll.current = true;
-  }, [msgs, confirm, idx, busy]);
+  // Keep the view pinned to the newest message (the first scroll with messages jumps, later ones animate).
+  const scrollRef = useScrollToBottom([msgs, confirm, idx, busy], { instantFirst: true, hasMessages: msgs.length > 0 });
   useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
 
   // Paste-to-attach while on a document turn.
@@ -348,7 +296,7 @@ function Inner() {
     if (!active || active.kind !== "docs" || confirm) return;
     const h = (e: ClipboardEvent) => {
       const f = e.clipboardData?.files?.[0];
-      if (f) { e.preventDefault(); fillNextSlot(f); }
+      if (f) { e.preventDefault(); fillNextSlot(active?.uploads ?? [], f); }
     };
     window.addEventListener("paste", h);
     return () => window.removeEventListener("paste", h);
@@ -380,7 +328,7 @@ function Inner() {
   // earlier chat is there instead of a blank screen.
   function replay(t: Turn) {
     const f = (label: string, field: string): Fetched => ({ label, value: form[field] ?? "", ok: !!form[field], field });
-    let answer: Partial<Msg> | null = null;
+    let answer: Partial<ChatMsg> | null = null;
     let fetched: Fetched[] | null = null;
     switch (t.kind) {
       case "text":
@@ -406,29 +354,13 @@ function Inner() {
     const a = answer;
     setMsgs((m) => {
       if (m.some((x) => x.turnId === t.id)) return m;
-      const out: Msg[] = [...m,
+      const out: ChatMsg[] = [...m,
         { id: uid(), from: "bot", text: botText(t), time: "", turnId: t.id },
         { id: uid(), from: "user", time: "", turnId: t.id, field: t.field, ...a },
       ];
       if (fetched) out.push({ id: uid(), from: "bot", time: "", fetched });
       return out;
     });
-  }
-
-  // ── Files ──
-  function setFileFor(name: string, file: File) {
-    setFiles((s) => ({ ...s, [name]: file }));
-    const thumb = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
-    setThumbs((s) => ({ ...s, [name]: thumb }));
-  }
-  function clearFileFor(name: string) {
-    setFiles((s) => { const n = { ...s }; delete n[name]; return n; });
-    setThumbs((s) => { const n = { ...s }; delete n[name]; return n; });
-  }
-  function fillNextSlot(file: File) {
-    const slots = active?.uploads ?? [];
-    const empty = slots.find((u) => !files[u.name]);
-    if (empty) setFileFor(empty.name, file);
   }
 
   // ── Text / choice answers ──
@@ -476,14 +408,14 @@ function Inner() {
   }
 
   // ── Editing a previous answer ──
-  function startEdit(m: Msg) {
+  function startEdit(m: ChatMsg) {
     if (!m.turnId || !m.editable) return;
     const t = SCRIPT.find((x) => x.id === m.turnId);
     if (!t) return;
     setEditing({ index: msgs.findIndex((x) => x.id === m.id), turnId: m.turnId });
     setError(null);
     if (t.kind === "text" || t.kind === "confirmacct") setInput((t.field && form[t.field]) || "");
-    if (t.kind === "docs") { setFiles({}); setThumbs({}); setConfirm(null); }
+    if (t.kind === "docs") { clearFiles(); setConfirm(null); }
   }
   async function applyEdit(value: string, label: string) {
     if (!editing) return;
@@ -603,7 +535,7 @@ function Inner() {
     }
   }
 
-  function retryDocs() { setConfirm(null); setFiles({}); setThumbs({}); setError(null); }
+  function retryDocs() { setConfirm(null); clearFiles(); setError(null); }
   function skipDoc() {
     const t = active; if (!t) return;
     if (!t.optional) setMissing((s) => (s.includes(t.docLabel || t.id) ? s : [...s, t.docLabel || t.id]));
@@ -616,7 +548,7 @@ function Inner() {
   function saveFetchedField(msgId: string, field: string, value: string) {
     merge({ [field]: value });
     void patchBiz({ [field]: value });
-    setMsgs((m) => m.map((x) => (x.id === msgId ? { ...x, fetched: x.fetched!.map((ff) => (ff.field === field ? { ...ff, value, ok: !!value } : ff)) } : x)));
+    updateFetched(msgId, field, value);
   }
 
   // ── Mobile → create the EPC (or open the existing one) ──
@@ -713,309 +645,111 @@ function Inner() {
   const progress = Math.round((milestones.filter(Boolean).length / milestones.length) * 100);
   const showDock = !donId && !!active && !confirm && (editing ? true : turn === active);
 
-  if (resuming) {
-    return (
-      <div className="h-screen grid place-items-center" style={CANVAS_STYLE}>
-        <div className="flex flex-col items-center gap-3 text-[#0f3a66]">
-          <div className="w-10 h-10 rounded-full border-2 border-[#185fa5]/30 border-t-[#185fa5] animate-spin" />
-          <div className="text-[13px]">Loading the EPC…</div>
-        </div>
-      </div>
-    );
-  }
+  if (resuming) return <AdminChatLoading theme={THEME} label="Loading the EPC…" />;
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden" style={CANVAS_STYLE}>
-      {/* Chat header */}
-      <header className="shrink-0 px-3 sm:px-5 py-2.5 bg-[#0f3a66] text-white flex items-center gap-3 shadow-sm">
-        <button onClick={() => router.push("/admin")} className="p-1 -ml-1 text-white/80 hover:text-white text-[20px] leading-none">←</button>
-        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#2f86cf] to-[#0f3a66] ring-2 ring-white/15 flex items-center justify-center font-display font-bold text-[15px]">CC</div>
-        <div className="min-w-0 flex-1">
-          <div className="font-display font-bold text-[15px] leading-tight truncate">Capital Craft · {editMode ? "Edit EPC" : "New EPC"}</div>
-          <div className="text-[11.5px] text-white/70 flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#7cc5f5]" /> {editMode ? "completing the profile" : "building the profile"}
-          </div>
-        </div>
-        <span className="text-[11px] text-white/60 tabular-nums">{progress}%</span>
-        <button onClick={() => router.push("/admin")} className="w-8 h-8 -mr-1 rounded-full hover:bg-white/10 grid place-items-center text-white/80 hover:text-white text-[18px] leading-none" aria-label="Close chat" title="Close">✕</button>
-      </header>
-      <div className="h-2 bg-black/15 shrink-0"><div className="h-2 bg-[#3f9be8] rounded-r-full transition-all duration-500" style={{ width: progress + "%" }} /></div>
+    <div className="h-screen flex flex-col overflow-hidden" style={THEME.canvas}>
+      <AdminChatHeader theme={THEME} title={editMode ? "Edit EPC" : "New EPC"} subtitle={editMode ? "completing the profile" : "building the profile"}
+        progress={progress} onBack={() => router.push("/admin")} onClose={() => router.push("/admin")} />
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-4">
-        <div className="max-w-xl mx-auto py-4 flex flex-col gap-1.5">
-          <DateChip label={todayLabel()} />
+      <ChatMessages scrollRef={scrollRef}>
+        <DateChip theme={THEME} />
 
-          {msgs.map((m) => m.fetched
-            ? <FetchedCard key={m.id} m={m} onSave={saveFetchedField} />
-            : <MessageRow key={m.id} m={m} rmName={rmName} onEdit={() => startEdit(m)} editingId={editing ? msgs[editing.index]?.id : null} />
-          )}
+        {msgs.map((m) => m.fetched
+          ? <FetchedCard key={m.id} theme={THEME} m={m} onSave={saveFetchedField} />
+          : <MessageRow key={m.id} theme={THEME} m={m} rmName={rmName} onEdit={() => startEdit(m)} editingId={editing ? msgs[editing.index]?.id : null} />
+        )}
 
-          {busy && <TypingBubble />}
+        {busy && <AdminTypingBubble />}
 
-          {/* Read-from-document card */}
-          {confirm && (
-            <div className="self-start w-full max-w-[88%] rounded-2xl rounded-tl-md border border-[#c6ddf3] bg-white shadow-sm overflow-hidden">
-              <div className="px-3.5 py-2 bg-[#eaf2fb] border-b border-[#dbe8f7] flex items-center gap-2">
-                <span className="text-[12px]">📄</span>
-                <span className="text-[12.5px] font-semibold text-[#0f3a66]">Read from the document</span>
-              </div>
-              {confirm.thumbs.some(Boolean) && (
-                <div className="px-3.5 pt-3 flex gap-2">
-                  {confirm.thumbs.filter(Boolean).map((t, i) => (
-                    <img key={i} src={t as string} alt="" className="w-14 h-14 rounded-lg object-cover border border-line" />
-                  ))}
-                </div>
-              )}
-              <div className="p-3.5 flex flex-col gap-1.5">
-                {confirm.fields.map((f, i) => (
-                  <div key={i} className="flex items-baseline justify-between gap-3 text-[13px]">
-                    <span className="text-text-muted shrink-0">{f.label}</span>
-                    {f.ok
-                      ? <span className="text-text font-medium text-right break-words">{f.value}</span>
-                      : <span className="text-amber-600 text-[12px] italic">not found</span>}
-                  </div>
-                ))}
-                <p className="text-[11.5px] text-text-muted mt-1.5 leading-snug">{confirm.note}</p>
-                <div className="flex flex-wrap gap-2 mt-1.5">
-                  <button onClick={() => { const c = confirm; if (c) setMsgs((m) => [...m, { id: uid(), from: "bot", time: nowLabel(), fetched: c.fields }]); const wasEdit = c?.edit; setConfirm(null); if (wasEdit) setEditing(null); else advance(); }} className="px-3.5 py-1.5 rounded-lg bg-[#185fa5] text-white text-[12.5px] font-semibold hover:bg-[#124a82]">Looks good →</button>
-                  <button onClick={retryDocs} className="px-3 py-1.5 rounded-lg border border-line text-[12.5px] text-text-mid hover:bg-bg-soft">Re-attach</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {error && <div className="self-center text-[12px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5 my-1">{error}</div>}
-
-          {donId && (
-            <div className="self-stretch mt-3 flex flex-col items-center gap-2">
-              <div className="text-[13px] text-text-mid text-center">{donDraft ? "Draft saved — the EPC is on your Task Manager board." : "✓ EPC submitted — it's in “Review by CC”."}</div>
-              <button onClick={() => router.push(`/admin/epc/${donId}/view` as any)} className="px-5 py-2.5 rounded-xl bg-[#185fa5] text-white text-[14px] font-semibold shadow-sm hover:bg-[#124a82]">Open the EPC →</button>
-              <button onClick={() => router.push("/admin")} className="text-[12px] text-text-muted hover:text-text">Go to console</button>
-            </div>
-          )}
-          <div className="h-2" />
-        </div>
-      </div>
-
-      {/* Dock — the controls for the active question */}
-      {showDock && active && (
-        <div className="shrink-0 bg-white/85 backdrop-blur border-t border-line">
-          <div className="max-w-xl mx-auto px-3 sm:px-4 py-3">
-            {editing && (
-              <div className="flex items-center justify-between mb-2 text-[12px]">
-                <span className="text-[#185fa5] font-semibold">Editing your answer</span>
-                <button onClick={cancelEdit} className="text-text-muted hover:text-text">Cancel</button>
-              </div>
-            )}
-
-            {active.kind === "mobile" && (
-              <div className="flex items-center gap-2">
-                <input ref={inputRef} autoFocus value={input} onChange={(e) => setInput(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                  onKeyDown={(e) => { if (e.key === "Enter") void submitMobile(); }}
-                  inputMode="numeric" placeholder="10-digit mobile" className="flex-1 border border-line rounded-full px-4 py-2.5 text-[14px] bg-white focus:outline-none focus:border-[#185fa5] focus:ring-2 focus:ring-[#185fa5]/15" />
-                <button onClick={() => void submitMobile()} className="px-4 h-11 shrink-0 rounded-full bg-[#185fa5] text-white text-[13px] font-semibold grid place-items-center hover:bg-[#124a82] shadow-sm">Create EPC</button>
-              </div>
-            )}
-
-            {active.kind === "choice" && (
-              <div className="flex flex-col gap-2">
-                <div className="grid sm:grid-cols-2 gap-2">
-                  {active.choices!.map((c) => (
-                    <button key={c.value} onClick={() => chooseChoice(c)} className="text-left px-4 py-3 rounded-xl border border-line bg-white hover:border-[#185fa5] hover:bg-[#f5f9fe] transition">
-                      <div className="text-[14px] font-semibold text-text">{c.label}</div>{c.sub && <div className="text-[12px] text-text-muted">{c.sub}</div>}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {(active.kind === "text" || active.kind === "confirmacct") && (
-              <div className="flex items-center gap-2">
-                <input ref={inputRef} autoFocus value={input} onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") void (active.kind === "confirmacct" ? submitConfirmAcct() : submitText()); if (e.key === "Escape" && editing) cancelEdit(); }}
-                  placeholder={active.placeholder || "Type a message…"} className="flex-1 border border-line rounded-full px-4 py-2.5 text-[14px] bg-white focus:outline-none focus:border-[#185fa5] focus:ring-2 focus:ring-[#185fa5]/15" />
-                {!editing && active.kind === "text" && <button onClick={() => skipText()} className="px-3 py-2.5 text-[13px] text-text-muted hover:text-text whitespace-nowrap" title="Continue without this — you can add it later">{active.optional ? "Skip" : "Don't have it"}</button>}
-                <button onClick={() => void (active.kind === "confirmacct" ? submitConfirmAcct() : submitText())} className="w-11 h-11 shrink-0 rounded-full bg-[#185fa5] text-white grid place-items-center hover:bg-[#124a82] shadow-sm" aria-label="Send">
-                  {editing ? "✓" : <SendIcon />}
-                </button>
-              </div>
-            )}
-
-            {active.kind === "docs" && (
-              <DocDock active={active} files={files} thumbs={thumbs} onPick={setFileFor} onDrop={fillNextSlot} onClear={clearFileFor} onRun={() => void runDocs()} onSkip={skipDoc} replacing={!!editing} />
-            )}
-
-            {active.kind === "bankstatements" && epcId && (
-              <div className="flex flex-col gap-2">
-                <FileUpload businessId={epcId} table="epc_documents" category="bank_statement" maxFiles={Infinity} dedupe uploadedBy="admin" onCountChange={setBankStmtCount} uploadHint="PDF or image" />
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[12px] text-text-muted">{bankStmtCount} uploaded</span>
-                  <div className="flex items-center gap-2">
-                    {!editing && <button onClick={skipBankStatements} className="px-3 py-2 text-[13px] text-text-muted hover:text-text">Skip</button>}
-                    <button onClick={submitBankStatements} disabled={bankStmtCount < 1} className="px-4 py-2 rounded-xl bg-[#185fa5] text-white text-[14px] font-semibold hover:bg-[#124a82] disabled:opacity-50">{editing ? "Done" : "Continue →"}</button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {active.kind === "stakeholders" && epcId && (
-              <StakeholdersDock epcId={epcId} businessType={form.business_type} initial={stakeholders} busy={busy} onContinue={onStakeholdersDone} />
-            )}
-
-            {active.kind === "references" && (
-              <ReferencesDock initCustomers={initCustomers} initSuppliers={initSuppliers} initReferral={initReferral} initReferralOther={initReferralOther} onContinue={onReferencesDone} />
-            )}
-
-            {active.kind === "submit" && (
-              <div className="flex flex-col gap-2">
-                {missing.length > 0 && <div className="text-[12px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">Skipped so far: {missing.join(", ")}. Anything still required will keep it a draft.</div>}
-                <button onClick={() => void doSubmit()} className="px-4 py-2.5 rounded-xl bg-[#185fa5] text-white text-[14px] font-semibold hover:bg-[#124a82]">Submit for verification →</button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Presentational pieces (identical to the loan intake) ──
-
-function FetchedCard({ m, onSave }: { m: Msg; onSave: (msgId: string, field: string, value: string) => void }) {
-  const [editKey, setEditKey] = useState<string | null>(null);
-  const [val, setVal] = useState("");
-  return (
-    <div className="self-start w-full max-w-[88%] rounded-2xl rounded-tl-md border border-[#c6ddf3] bg-white shadow-sm overflow-hidden">
-      <div className="px-3.5 py-2 bg-[#eaf2fb] border-b border-[#dbe8f7] flex items-center gap-2">
-        <span className="text-[12px]">📄</span>
-        <span className="text-[12.5px] font-semibold text-[#0f3a66]">Read from the document</span>
-      </div>
-      <div className="p-3.5 flex flex-col gap-2">
-        {(m.fetched ?? []).map((f, i) => (
-          <div key={i} className="flex items-center justify-between gap-3 text-[13px] min-h-[24px]">
-            <span className="text-text-muted shrink-0">{f.label}</span>
-            {editKey === f.field && f.field ? (
-              <span className="flex items-center gap-1.5">
-                <input autoFocus value={val} onChange={(e) => setVal(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") { onSave(m.id, f.field!, val.trim()); setEditKey(null); } if (e.key === "Escape") setEditKey(null); }}
-                  className="border border-[#185fa5] rounded-lg px-2.5 py-1 text-[13px] w-44 text-right outline-none" />
-                <button onClick={() => { onSave(m.id, f.field!, val.trim()); setEditKey(null); }} className="text-[#185fa5] text-[12px] font-semibold">Save</button>
-              </span>
-            ) : (
-              <span className="flex items-center gap-2 min-w-0">
+        {/* Read-from-document card — this chat shows the values read-only */}
+        {confirm && (
+          <ConfirmCard theme={THEME} thumbs={confirm.thumbs} note={confirm.note} onReattach={retryDocs}
+            onLooksGood={() => { const c = confirm; if (c) pushFetched(c.fields); const wasEdit = c?.edit; setConfirm(null); if (wasEdit) setEditing(null); else advance(); }}>
+            {confirm.fields.map((f, i) => (
+              <div key={i} className="flex items-baseline justify-between gap-3 text-[13px]">
+                <span className="text-text-muted shrink-0">{f.label}</span>
                 {f.ok
                   ? <span className="text-text font-medium text-right break-words">{f.value}</span>
                   : <span className="text-amber-600 text-[12px] italic">not found</span>}
-                {f.field && (
-                  <button onClick={() => { setEditKey(f.field!); setVal(f.ok ? f.value : ""); }} className="opacity-60 hover:opacity-100 text-[#185fa5] text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>
-                )}
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function DateChip({ label }: { label: string }) {
-  return (
-    <div className="self-center my-2">
-      <span className="text-[11px] text-[#0f3a66]/70 bg-white/70 rounded-full px-3 py-1 shadow-sm">{label}</span>
-    </div>
-  );
-}
-
-function MessageRow({ m, rmName, onEdit, editingId }: { m: Msg; rmName: string; onEdit: () => void; editingId: string | null }) {
-  const isUser = m.from === "user";
-  const beingEdited = editingId === m.id;
-  return (
-    <div className={["group flex flex-col max-w-[82%]", isUser ? "self-end items-end" : "self-start items-start"].join(" ")}>
-      <div className={["relative px-3.5 py-2 rounded-2xl text-[14px] leading-snug shadow-sm break-words whitespace-pre-wrap w-fit max-w-full",
-        isUser ? "bg-[#185fa5] text-white rounded-br-md" : "bg-white text-[#0d2744] rounded-bl-md border border-black/5",
-        beingEdited ? "ring-2 ring-[#7cc5f5]" : ""].join(" ")}>
-        {m.files ? (
-          <div className="flex flex-col gap-1.5">
-            {m.files.map((f, i) => (
-              <div key={i} className="flex items-center gap-2">
-                {f.thumb ? <img src={f.thumb} alt="" className="w-10 h-10 rounded-md object-cover" />
-                  : <span className="w-10 h-10 rounded-md bg-white/20 grid place-items-center text-[16px]">📎</span>}
-                <span className="text-[13px] break-all">{f.name}</span>
               </div>
             ))}
-          </div>
-        ) : m.text}
-      </div>
-      <div className={["flex items-center gap-1.5 mt-0.5 px-1 text-[10.5px]", isUser ? "text-[#0f3a66]/60 flex-row-reverse" : "text-text-muted"].join(" ")}>
-        <span className="font-medium">{isUser ? rmName : "Capital Craft"}</span>
-        {m.time && <span>· {m.time}</span>}
-        {m.edited && <span>· edited</span>}
-        {isUser && !m.files && <span className="text-[#185fa5]">✓✓</span>}
-        {isUser && m.editable && (
-          <button onClick={onEdit} className="text-[#185fa5] font-semibold hover:underline" aria-label="Edit">{m.files ? "↺ replace" : "✎ edit"}</button>
+          </ConfirmCard>
         )}
-      </div>
-    </div>
-  );
-}
 
-function TypingBubble() {
-  return (
-    <div className="self-start">
-      <div className="px-4 py-3 rounded-2xl rounded-bl-md bg-white border border-black/5 shadow-sm inline-flex gap-1">
-        <Dot d="0" /><Dot d="150" /><Dot d="300" />
-      </div>
-    </div>
-  );
-}
-function Dot({ d }: { d: string }) {
-  return <span className="w-1.5 h-1.5 rounded-full bg-text-muted/60 animate-bounce" style={{ animationDelay: d + "ms" }} />;
-}
-function SendIcon() {
-  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 12l16-8-6 16-2.5-6.5L4 12z" fill="currentColor" /></svg>;
-}
+        {error && <ChatError text={error} />}
 
-function DocDock({ active, files, thumbs, onPick, onDrop, onClear, onRun, onSkip, replacing }: {
-  active: Turn; files: Record<string, File>; thumbs: Record<string, string | null>;
-  onPick: (name: string, f: File) => void; onDrop: (f: File) => void; onClear: (name: string) => void; onRun: () => void; onSkip: () => void; replacing?: boolean;
-}) {
-  const [drag, setDrag] = useState(false);
-  const runLabel = active.ocr ? (replacing ? "Re-read & replace" : "Read document") : (replacing ? "Replace" : "Upload & attach");
-  return (
-    <div className="flex flex-col gap-2">
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-        onDragLeave={() => setDrag(false)}
-        onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files?.[0]; if (f) onDrop(f); }}
-        className={["rounded-xl border-2 border-dashed p-2.5 transition", drag ? "border-[#185fa5] bg-[#eaf2fb]" : "border-line bg-white"].join(" ")}
-      >
-        <div className="grid gap-2" style={{ gridTemplateColumns: (active.uploads?.length || 1) > 1 ? "1fr 1fr" : "1fr" }}>
-          {active.uploads!.map((u) => {
-            const has = !!files[u.name];
-            return (
-              <label key={u.name} className={["relative flex items-center gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition", has ? "border-[#185fa5] bg-[#f5f9fe]" : "border-line bg-white hover:border-[#185fa5]/50"].join(" ")}>
-                {has && thumbs[u.name]
-                  ? <img src={thumbs[u.name] as string} alt="" className="w-9 h-9 rounded-md object-cover" />
-                  : <span className="w-9 h-9 rounded-md bg-bg-soft grid place-items-center text-[15px]">{has ? "📄" : "＋"}</span>}
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[13px] font-medium text-text truncate">{u.label}</span>
-                  <span className="block text-[11px] text-text-muted truncate">{has ? files[u.name].name : "Tap, drop, or paste"}</span>
-                </span>
-                {has
-                  ? <button type="button" onClick={(e) => { e.preventDefault(); onClear(u.name); }} className="text-text-muted hover:text-red-500 text-[15px] leading-none px-1">×</button>
-                  : <span className="text-[#185fa5] text-[12px] font-semibold">Add</span>}
-                <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(u.name, f); }} />
-              </label>
-            );
-          })}
-        </div>
-        <div className="text-[11px] text-text-muted mt-2 px-0.5">Attach by tapping, dragging a file in, or pasting a copied image (Ctrl+V).</div>
-      </div>
-      <div className="flex items-center gap-2">
-        <button onClick={onRun} className="px-4 py-2 rounded-lg bg-[#185fa5] text-white text-[13px] font-semibold hover:bg-[#124a82]">{runLabel}</button>
-        {!replacing && <button onClick={onSkip} className="px-3 py-2 rounded-lg text-[12.5px] text-text-muted hover:text-text hover:bg-bg-soft">Don&apos;t have it — skip</button>}
-      </div>
+        {donId && (
+          <DonePanel theme={THEME}
+            message={donDraft ? "Draft saved — the EPC is on your Task Manager board." : "✓ EPC submitted — it's in “Review by CC”."}
+            actionLabel="Open the EPC →" onAction={() => router.push(`/admin/epc/${donId}/view` as any)}
+            secondaryLabel="Go to console" onSecondary={() => router.push("/admin")} />
+        )}
+      </ChatMessages>
+
+      {/* Dock — the controls for the active question */}
+      {showDock && active && (
+        <ChatDock>
+          {editing && <EditingBanner theme={THEME} onCancel={cancelEdit} />}
+
+          {active.kind === "mobile" && (
+            <div className="flex items-center gap-2">
+              <input ref={inputRef} autoFocus value={input} onChange={(e) => setInput(e.target.value.replace(/\D/g, "").slice(0, 10))}
+                onKeyDown={(e) => { if (e.key === "Enter") void submitMobile(); }}
+                inputMode="numeric" placeholder="10-digit mobile" className="flex-1 border border-line rounded-full px-4 py-2.5 text-[14px] bg-white focus:outline-none focus:border-[#185fa5] focus:ring-2 focus:ring-[#185fa5]/15" />
+              <button onClick={() => void submitMobile()} className="px-4 h-11 shrink-0 rounded-full bg-[#185fa5] text-white text-[13px] font-semibold grid place-items-center hover:bg-[#124a82] shadow-sm">Create EPC</button>
+            </div>
+          )}
+
+          {active.kind === "choice" && (
+            <div className="flex flex-col gap-2">
+              <ChoiceGrid theme={THEME} choices={active.choices!} onPick={chooseChoice} />
+            </div>
+          )}
+
+          {(active.kind === "text" || active.kind === "confirmacct") && (
+            <AdminComposer theme={THEME} inputRef={inputRef} value={input} onChange={setInput}
+              onSend={() => void (active.kind === "confirmacct" ? submitConfirmAcct() : submitText())}
+              editing={!!editing} onCancelEdit={cancelEdit} placeholder={active.placeholder || "Type a message…"}
+              skipLabel={active.kind === "text" ? (active.optional ? "Skip" : "Don't have it") : undefined} onSkip={() => skipText()} />
+          )}
+
+          {active.kind === "docs" && (
+            <DocDock theme={THEME} uploads={active.uploads!} files={files} thumbs={thumbs} onPick={setFileFor}
+              onClear={clearFileFor} onRun={() => void runDocs()} onSkip={skipDoc} replacing={!!editing}
+              runLabel={active.ocr ? (editing ? "Re-read & replace" : "Read document") : (editing ? "Replace" : "Upload & attach")} />
+          )}
+
+          {active.kind === "bankstatements" && epcId && (
+            <div className="flex flex-col gap-2">
+              <FileUpload businessId={epcId} table="epc_documents" category="bank_statement" maxFiles={Infinity} dedupe uploadedBy="admin" onCountChange={setBankStmtCount} uploadHint="PDF or image" />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[12px] text-text-muted">{bankStmtCount} uploaded</span>
+                <div className="flex items-center gap-2">
+                  {!editing && <button onClick={skipBankStatements} className="px-3 py-2 text-[13px] text-text-muted hover:text-text">Skip</button>}
+                  <button onClick={submitBankStatements} disabled={bankStmtCount < 1} className="px-4 py-2 rounded-xl bg-[#185fa5] text-white text-[14px] font-semibold hover:bg-[#124a82] disabled:opacity-50">{editing ? "Done" : "Continue →"}</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {active.kind === "stakeholders" && epcId && (
+            <StakeholdersDock epcId={epcId} businessType={form.business_type} initial={stakeholders} busy={busy} onContinue={onStakeholdersDone} />
+          )}
+
+          {active.kind === "references" && (
+            <ReferencesDock initCustomers={initCustomers} initSuppliers={initSuppliers} initReferral={initReferral} initReferralOther={initReferralOther} onContinue={onReferencesDone} />
+          )}
+
+          {active.kind === "submit" && (
+            <div className="flex flex-col gap-2">
+              {missing.length > 0 && <div className="text-[12px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">Skipped so far: {missing.join(", ")}. Anything still required will keep it a draft.</div>}
+              <button onClick={() => void doSubmit()} className="px-4 py-2.5 rounded-xl bg-[#185fa5] text-white text-[14px] font-semibold hover:bg-[#124a82]">Submit for verification →</button>
+            </div>
+          )}
+        </ChatDock>
+      )}
     </div>
   );
 }

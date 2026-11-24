@@ -23,18 +23,30 @@
 // locally that needs ADC (`gcloud auth application-default login`); on prod
 // it's automatic.
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness } from "@/lib/auth";
 import { computeCentralSubsidy, computeEmi, formatRupees, DEFAULT_INDICATIVE_ROI, TENURES } from "@/lib/emi";
-import { numberToWordsIndian } from "@/lib/numberToWords";
+import { amountInWords } from "@/lib/numberToWords";
 import { amountInput } from "@/lib/money";
+import { MOBILE_RE, EMAIL_RE, PINCODE_RE } from "@/lib/validators";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import { professionsFor } from "@/lib/loan-form";
 import { withoutThumbs } from "@/lib/chat-draft";
 import LoanShareChips from "@/components/LoanShareChips";
+// The chat kit (src/components/chat) — this chat's green palette is LOAN_INTAKE_THEME.
+import { LOAN_INTAKE_THEME as THEME } from "@/components/chat/theme";
+import type { ChatMsg, Choice, Fetched, FileReceipt, Form, ReadConfirm } from "@/components/chat/types";
+import { nowLabel } from "@/components/chat/time";
+import { useChatLog, useRmFirstName, useScrollToBottom } from "@/components/chat/hooks";
+import { ChatDock, ChatError, ChatMessages, EditingBanner } from "@/components/chat/ChatFrame";
+import { AdminChatHeader, AdminChatLoading, AdminComposer, ChoiceGrid, DonePanel } from "@/components/chat/AdminChrome";
+import { AdminTypingBubble, DateChip, MessageRow } from "@/components/chat/MessageRow";
+import { ConfirmCard, EditableRows, FetchedCard, ReadCardFrame } from "@/components/chat/ReadCards";
+import { DocDock, useDocDockFiles, type UploadSlot } from "@/components/chat/DocDock";
+import { AddFileButton, ContinueRow, DocSlotTable, FieldRows, ReadingLine, SlotFileChip } from "@/components/chat/DocSlotTable";
 
 export default function IntakePage() {
   return (
@@ -43,9 +55,6 @@ export default function IntakePage() {
     </AuthGuard>
   );
 }
-
-type Choice = { value: string; label: string; sub?: string };
-type Form = Record<string, string>;
 
 // A turn is one thing the chat asks/does. `when` gates conditional turns
 // (co-applicant), `save` marks a step boundary that persists to the server.
@@ -60,7 +69,7 @@ type Turn = {
   validate?: (v: string) => string | null;
   when?: (f: Form) => boolean;
   // docs turn:
-  uploads?: { name: string; label: string }[];
+  uploads?: UploadSlot[];
   extractRoute?: string;
   extraForm?: Record<string, string>;
   docLabel?: string; // friendly name for the "skip / missing" note
@@ -75,8 +84,6 @@ type Turn = {
 
 const choicesOf = (t: Turn, f: Form): Choice[] => (typeof t.choices === "function" ? t.choices(f) : t.choices ?? []);
 
-const MOBILE_RE = /^[6-9]\d{9}$/;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // A co-applicant is present when the name-check / paste set the flag, OR the RM
 // answered the explicit "co-applicant required?" question with Yes. Either one
 // reveals the co-applicant document slots in the table and its detail turns.
@@ -258,8 +265,6 @@ const LEAD_SCRIPT: Turn[] = [
   { id: "lead_save", bot: "", kind: "leadsave" },
 ];
 
-type Fetched = { label: string; value: string; ok: boolean; field?: string };
-
 // ── Info-sheet paste parser (local, deterministic — no AI) ───────────────────
 // The RM pastes a labeled sheet; we split each line on the FIRST ":", normalize
 // the label, clean the value, and map it to a Form field. Everything the sheet
@@ -347,57 +352,13 @@ const SHEET_ROWS: { field: string; label: string; render?: (v: string) => string
   { field: "system_type", label: "System", render: (v) => ({ on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" }[v] || v) },
   { field: "install_city", label: "Place of installation" },
 ];
-type Msg = {
-  id: string;
-  from: "bot" | "user";
-  text?: string;
-  time: string;
-  turnId?: string;
-  field?: string;
-  editable?: boolean;
-  edited?: boolean;
-  files?: { name: string; thumb: string | null }[]; // user document receipt
-  fetched?: Fetched[]; // permanent, editable "read from the document" card
-  typing?: boolean; // bot "…" indicator
-};
-
-// Subtle branded doodle canvas (WhatsApp-style texture, but in our green).
-const DOODLE = encodeURIComponent(
-  `<svg xmlns='http://www.w3.org/2000/svg' width='104' height='104' viewBox='0 0 104 104'>
-     <g fill='none' stroke='#0f3d2e' stroke-opacity='0.045' stroke-width='1.4'>
-       <circle cx='22' cy='24' r='7'/>
-       <circle cx='78' cy='66' r='10'/>
-       <path d='M74 18 v9 M69.5 22.5 h9'/>
-       <path d='M14 78 q8 -10 16 0'/>
-       <rect x='58' y='16' width='10' height='10' rx='2'/>
-     </g>
-     <g fill='#0f3d2e' fill-opacity='0.045'>
-       <circle cx='48' cy='50' r='1.8'/>
-       <circle cx='92' cy='30' r='1.8'/>
-       <circle cx='30' cy='96' r='1.8'/>
-     </g>
-   </svg>`,
-);
-const CANVAS_STYLE: React.CSSProperties = {
-  backgroundColor: "#e7f0ea",
-  backgroundImage: `url("data:image/svg+xml,${DOODLE}")`,
-};
-
-function nowLabel(): string {
-  return new Date().toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true }).toLowerCase();
-}
-function todayLabel(): string {
-  return "Today · " + new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
-}
 
 function Inner() {
   const router = useRouter();
-  const rmName = useMemo(() => {
-    const full = (getBusiness()?.contact_name || "").trim();
-    return full ? full.split(" ")[0] : "You";
-  }, []);
+  const rmName = useRmFirstName();
 
-  const [msgs, setMsgs] = useState<Msg[]>([]);
+  // The message list + pushBot / pushUser / say (chat kit).
+  const { msgs, setMsgs, idRef, uid, pushBot, pushUser, say, pushFetched, updateFetched } = useChatLog();
   const [idx, setIdx] = useState(0);
   const [form, setForm] = useState<Form>({});
   const [appId, setAppId] = useState<string | null>(null);
@@ -405,9 +366,9 @@ function Inner() {
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [files, setFiles] = useState<Record<string, File>>({});
-  const [thumbs, setThumbs] = useState<Record<string, string | null>>({});
-  const [confirm, setConfirm] = useState<{ fields: Fetched[]; note: string; thumbs: (string | null)[]; edit?: boolean } | null>(null);
+  // Files attached to the current docs turn's slots (chat kit).
+  const { files, thumbs, setFileFor, clearFileFor, fillNextSlot, clearFiles } = useDocDockFiles();
+  const [confirm, setConfirm] = useState<ReadConfirm | null>(null);
   const [cfEdit, setCfEdit] = useState<string | null>(null); // which "Read from the document" field is being edited
   const [cfVal, setCfVal] = useState("");
   // Info-sheet paste → editable confirm card (raw parsed values).
@@ -436,13 +397,10 @@ function Inner() {
   const [epcSearch, setEpcSearch] = useState("");
   const [epcOpen, setEpcOpen] = useState(false);
   const [resuming, setResuming] = useState(false);
-  const [undoStack, setUndoStack] = useState<{ msgs: Msg[]; form: Form; idx: number; leadMode: boolean }[]>([]);
+  const [undoStack, setUndoStack] = useState<{ msgs: ChatMsg[]; form: Form; idx: number; leadMode: boolean }[]>([]);
 
-  const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const idRef = useRef(0);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const uid = () => "m" + ++idRef.current;
 
   // The turn whose controls the dock is showing: the edit target if editing,
   // else the current script turn.
@@ -493,7 +451,7 @@ function Inner() {
         const res = await fetch(`/api/admin/loan-app/${appParam}/intake-chat`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
         const j = await res.json().catch(() => ({}));
         const chat = j?.chat;
-        const savedMsgs: Msg[] = (chat && Array.isArray(chat.transcript)) ? (chat.transcript as Msg[]) : [];
+        const savedMsgs: ChatMsg[] = (chat && Array.isArray(chat.transcript)) ? (chat.transcript as ChatMsg[]) : [];
 
         // 1) EDIT session — prefill from the CURRENT profile and run the edit
         // Q1/Q2 flow, but KEEP the previous conversation visible above it as
@@ -514,7 +472,7 @@ function Inner() {
           if (pf.selected_tenure_years) setTenure(Number(pf.selected_tenure_years));
           idRef.current = savedMsgs.length + 1000; // avoid key collisions with restored ids
           const nm = pf.borrower_name || "this applicant";
-          const intro: Msg = { id: uid(), from: "bot", text: `Editing ${nm}'s profile.`, time: nowLabel(), turnId: "edit_intro" };
+          const intro: ChatMsg = { id: uid(), from: "bot", text: `Editing ${nm}'s profile.`, time: nowLabel(), turnId: "edit_intro" };
           // Show the earlier chat (if any) as history, then the edit intro. Drop
           // any prior edit_intro so re-editing doesn't stack duplicate headers.
           const hist = savedMsgs.filter((m) => m.turnId !== "edit_intro");
@@ -583,10 +541,6 @@ function Inner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [msgs, form, idx, appId, donId, resuming]);
 
-  const pushBot = useCallback((text: string, turnId: string) => {
-    setMsgs((m) => (m.some((x) => x.from === "bot" && x.turnId === turnId) ? m : [...m, { id: uid(), from: "bot", text, time: nowLabel(), turnId }]));
-  }, []);
-
   // Advance the script, running `when` skips and `save` boundaries.
   useEffect(() => {
     if (!turn) return;
@@ -603,7 +557,7 @@ function Inner() {
     // Bank statement already on file but never read → read it, don't ask for it.
     const bankOnFile = turn.id === "bank" && !!form.bank_statement_path;
     pushBot(bankOnFile ? "The bank statement is already uploaded — reading it." : turn.bot, turn.id);
-    setInput(""); setError(null); setFiles({}); setThumbs({}); setConfirm(null); setEditing(null); setSheetReview(null);
+    setInput(""); setError(null); clearFiles(); setConfirm(null); setEditing(null); setSheetReview(null);
     if (bankOnFile) void readStoredBank();
     // Re-editing a filled field → prefill the input with its current value.
     if (editMode && editStage === "selected" && (turn.kind === "text" || turn.kind === "pincode") && turn.field) setInput(form[turn.field] || "");
@@ -636,12 +590,7 @@ function Inner() {
   // instantly to the bottom (so opening an edit lands you at the edit prompt,
   // below the restored history — the user sees what's left to do); later updates
   // animate smoothly.
-  const didFirstScroll = useRef(false);
-  useEffect(() => {
-    const el = scrollRef.current; if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: didFirstScroll.current ? "smooth" : "auto" });
-    if (msgs.length) didFirstScroll.current = true;
-  }, [msgs, confirm, idx, busy]);
+  const scrollRef = useScrollToBottom([msgs, confirm, idx, busy], { instantFirst: true, hasMessages: msgs.length > 0 });
   useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
 
   // Paste-to-attach while on a single-doc turn (RM copies an image, hits Ctrl+V).
@@ -653,7 +602,7 @@ function Inner() {
       const pasted = e.clipboardData?.files;
       if (!pasted || pasted.length === 0) return;
       e.preventDefault();
-      fillNextSlot(pasted[0]);
+      fillNextSlot(active?.uploads ?? [], pasted[0]);
     };
     window.addEventListener("paste", h);
     return () => window.removeEventListener("paste", h);
@@ -675,25 +624,6 @@ function Inner() {
       setIdx(snap.idx); // re-renders that turn fresh (question re-appears)
       return s.slice(0, -1);
     });
-  }
-
-  function pushUser(text: string, meta: Partial<Msg> = {}) {
-    setMsgs((m) => [...m, { id: uid(), from: "user", text, time: nowLabel(), ...meta }]);
-  }
-
-  function setFileFor(name: string, file: File) {
-    setFiles((s) => ({ ...s, [name]: file }));
-    const thumb = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
-    setThumbs((s) => ({ ...s, [name]: thumb }));
-  }
-  function clearFileFor(name: string) {
-    setFiles((s) => { const n = { ...s }; delete n[name]; return n; });
-    setThumbs((s) => { const n = { ...s }; delete n[name]; return n; });
-  }
-  function fillNextSlot(file: File) {
-    const slots = active?.uploads ?? [];
-    const empty = slots.find((u) => !files[u.name]);
-    if (empty) setFileFor(empty.name, file);
   }
 
   // ── Answer the current (or edited) turn ──
@@ -771,7 +701,7 @@ function Inner() {
 
   async function submitPincode() {
     const pin = input.trim();
-    if (!/^[1-9]\d{5}$/.test(pin)) { setError("Enter a valid 6-digit pincode."); return; }
+    if (!PINCODE_RE.test(pin)) { setError("Enter a valid 6-digit pincode."); return; }
     setBusy(true); setError(null);
     try {
       const res = await fetch(`/api/admin/pincode-lookup?pin=${pin}`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
@@ -785,7 +715,7 @@ function Inner() {
   }
 
   // ── Editing a previous answer ──
-  function startEdit(m: Msg) {
+  function startEdit(m: ChatMsg) {
     if (!m.turnId || (!m.editable && m.turnId !== "epc")) return; // the EPC answer is always changeable
     const t = script.find((x) => x.id === m.turnId);
     if (!t) return;
@@ -793,7 +723,7 @@ function Inner() {
     setError(null);
     if (t.kind === "text" || t.kind === "pincode") setInput((t.field && form[t.field]) || "");
     if (t.kind === "epc") { setEpcSearch(""); setEpcOpen(true); } // re-open the partner list to pick another EPC
-    if (t.kind === "docs") { setFiles({}); setThumbs({}); setConfirm(null); } // re-attach fresh
+    if (t.kind === "docs") { clearFiles(); setConfirm(null); } // re-attach fresh
   }
   async function applyEdit(value: string, label: string, extra?: Form) {
     if (!editing) return;
@@ -878,7 +808,7 @@ function Inner() {
       setConfirm({ fields, note, thumbs: receipt.map((r) => r.thumb), edit: isDocEdit });
     } finally { setBusy(false); }
   }
-  function retryDocs() { setConfirm(null); setFiles({}); setThumbs({}); setError(null); }
+  function retryDocs() { setConfirm(null); clearFiles(); setError(null); }
   function skipDoc() {
     const t = active; if (!t) return;
     pushUndo();
@@ -907,7 +837,7 @@ function Inner() {
     setMissing((s) => (skipped ? (s.includes(label) ? s : [...s, label]) : s.filter((x) => x !== label)));
   }
   // "Done with documents" → drop a receipt of what was uploaded now, then advance.
-  function finishDocTable(receipt: { name: string; thumb: string | null }[]) {
+  function finishDocTable(receipt: FileReceipt[]) {
     pushUndo();
     if (receipt.length) pushUser(receipt.map((r) => r.name).join(" · "), { files: receipt, turnId: "doc_table", editable: false });
     advance();
@@ -1061,7 +991,6 @@ function Inner() {
       setDonId(appId);
     } finally { setBusy(false); }
   }
-  function say(from: "bot" | "user", text: string) { setMsgs((m) => [...m, { id: uid(), from, text, time: nowLabel() }]); }
 
   // ── Edit-in-chat Q1/Q2 ──
   function startFlow(stage: "selected" | "complete") { setEditStage(stage); setEditStep("flow"); setIdx(1); }
@@ -1095,7 +1024,7 @@ function Inner() {
     const nextForm = { ...form, [field]: value };
     setForm(nextForm);
     void persistForm(nextForm);
-    setMsgs((m) => m.map((x) => (x.id === msgId ? { ...x, fetched: x.fetched!.map((ff) => (ff.field === field ? { ...ff, value, ok: !!value } : ff)) } : x)));
+    updateFetched(msgId, field, value);
   }
   // Edit a field directly on the "Read from the document" confirm card (before
   // "Looks good") — so e.g. the bank statement can be corrected as soon as it's
@@ -1155,174 +1084,128 @@ function Inner() {
   const showEditIntro = editMode && (editStep === "q1" || editStep === "pick" || editStep === "q2");
   const showDock = !donId && !leadDoneId && !showEditIntro && active && !confirm && !sheetReview && active.kind !== "save" && active.kind !== "leadsave" && (editing ? true : turn === active);
 
-  if (resuming) {
-    return (
-      <div className="h-screen grid place-items-center" style={CANVAS_STYLE}>
-        <div className="flex flex-col items-center gap-3 text-[#0f3d2e]">
-          <div className="w-10 h-10 rounded-full border-2 border-[#178a5c]/30 border-t-[#178a5c] animate-spin" />
-          <div className="text-[13px]">Restoring your chat…</div>
-        </div>
-      </div>
-    );
-  }
+  if (resuming) return <AdminChatLoading theme={THEME} label="Restoring your chat…" />;
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden" style={CANVAS_STYLE}>
-      {/* Chat header */}
-      <header className="shrink-0 px-3 sm:px-5 py-2.5 bg-[#0f3d2e] text-white flex items-center gap-3 shadow-sm">
-        <button onClick={() => router.push("/admin")} className="p-1 -ml-1 text-white/80 hover:text-white text-[20px] leading-none">←</button>
-        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#2fbd82] to-[#0f3d2e] ring-2 ring-white/15 flex items-center justify-center font-display font-bold text-[15px]">CC</div>
-        <div className="min-w-0 flex-1">
-          <div className="font-display font-bold text-[15px] leading-tight truncate">Capital Craft · {leadMode ? "New lead" : editMode ? "Edit profile" : "New application"}</div>
-          <div className="text-[11.5px] text-white/70 flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#5df2ad]" /> {leadMode ? "capturing a lead" : editMode ? "completing the profile" : "building the profile"}
-          </div>
-        </div>
-        <span className="text-[11px] text-white/60 tabular-nums">{progress}%</span>
+    <div className="h-screen flex flex-col overflow-hidden" style={THEME.canvas}>
+      <AdminChatHeader theme={THEME} title={leadMode ? "New lead" : editMode ? "Edit profile" : "New application"}
+        subtitle={leadMode ? "capturing a lead" : editMode ? "completing the profile" : "building the profile"}
+        progress={progress} onBack={() => router.push("/admin")} onClose={() => void closeChat()}>
         <button onClick={undo} disabled={!undoStack.length || !!donId || !!leadDoneId} className="w-8 h-8 rounded-full hover:bg-white/10 grid place-items-center text-white/80 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent text-[17px] leading-none" aria-label="Undo last" title="Undo last">↶</button>
-        <button onClick={() => void closeChat()} className="w-8 h-8 -mr-1 rounded-full hover:bg-white/10 grid place-items-center text-white/80 hover:text-white text-[18px] leading-none" aria-label="Close chat" title="Close">✕</button>
-      </header>
-      <div className="h-2 bg-black/15 shrink-0"><div className="h-2 bg-[#34e39b] rounded-r-full transition-all duration-500" style={{ width: progress + "%" }} /></div>
+      </AdminChatHeader>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-4">
-        <div className="max-w-xl mx-auto py-4 flex flex-col gap-1.5">
-          <DateChip label={todayLabel()} />
+      <ChatMessages scrollRef={scrollRef}>
+        <DateChip theme={THEME} />
 
-          {msgs.map((m) => m.fetched
-            ? <FetchedCard key={m.id} m={m} onSave={saveFetchedField} />
-            : <MessageRow key={m.id} m={m} rmName={rmName} onEdit={() => startEdit(m)} editingId={editing ? msgs[editing.index]?.id : null} />
-          )}
+        {msgs.map((m) => m.fetched
+          ? <FetchedCard key={m.id} theme={THEME} m={m} onSave={saveFetchedField} />
+          : <MessageRow key={m.id} theme={THEME} m={m} rmName={rmName} onEdit={() => startEdit(m)} editingId={editing ? msgs[editing.index]?.id : null} canEdit={m.editable || m.turnId === "epc"} />
+        )}
 
-          {busy && <TypingBubble />}
+        {busy && <AdminTypingBubble />}
 
-          {/* Read-from-document card */}
-          {confirm && (
-            <div className="self-start w-full max-w-[88%] rounded-2xl rounded-tl-md border border-[#cdeadd] bg-white shadow-sm overflow-hidden">
-              <div className="px-3.5 py-2 bg-[#f0faf5] border-b border-[#e0f0e8] flex items-center gap-2">
-                <span className="text-[12px]">📄</span>
-                <span className="text-[12.5px] font-semibold text-[#0f3d2e]">Read from the document</span>
+        {/* Read-from-document card — every value with a field is editable before "Looks good" */}
+        {confirm && (
+          <ConfirmCard theme={THEME} thumbs={confirm.thumbs} note={confirm.note} onReattach={retryDocs}
+            onLooksGood={() => { const c = confirm; if (c) pushFetched(c.fields); const wasEdit = c?.edit; setConfirm(null); if (wasEdit) setEditing(null); else advance(); }}>
+            {confirm.fields.map((f, i) => (
+              <div key={i} className="flex items-center justify-between gap-3 text-[13px] min-h-[26px]">
+                <span className="text-text-muted shrink-0">{f.label}</span>
+                {cfEdit === f.field && f.field ? (
+                  <span className="flex items-center gap-1.5">
+                    <input autoFocus value={cfVal} onChange={(e) => setCfVal(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") { saveConfirmField(f.field!, cfVal.trim()); setCfEdit(null); } if (e.key === "Escape") setCfEdit(null); }}
+                      className="border border-[#178a5c] rounded-lg px-2.5 py-1 text-[13px] w-44 text-right outline-none" />
+                    <button onClick={() => { saveConfirmField(f.field!, cfVal.trim()); setCfEdit(null); }} className="text-[#178a5c] text-[11.5px] font-semibold">Save</button>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-2 min-w-0">
+                    {f.ok
+                      ? <span className="text-text font-medium text-right break-words">{f.value}</span>
+                      : <span className="text-amber-600 text-[12px] italic">not found</span>}
+                    {f.field && <button onClick={() => { setCfEdit(f.field!); setCfVal(f.ok ? f.value : ""); }} className="opacity-60 hover:opacity-100 text-[#178a5c] text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>}
+                  </span>
+                )}
               </div>
-              {confirm.thumbs.some(Boolean) && (
-                <div className="px-3.5 pt-3 flex gap-2">
-                  {confirm.thumbs.filter(Boolean).map((t, i) => (
-                    <img key={i} src={t as string} alt="" className="w-14 h-14 rounded-lg object-cover border border-line" />
-                  ))}
-                </div>
-              )}
-              <div className="p-3.5 flex flex-col gap-1.5">
-                {confirm.fields.map((f, i) => (
-                  <div key={i} className="flex items-center justify-between gap-3 text-[13px] min-h-[26px]">
-                    <span className="text-text-muted shrink-0">{f.label}</span>
-                    {cfEdit === f.field && f.field ? (
-                      <span className="flex items-center gap-1.5">
-                        <input autoFocus value={cfVal} onChange={(e) => setCfVal(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") { saveConfirmField(f.field!, cfVal.trim()); setCfEdit(null); } if (e.key === "Escape") setCfEdit(null); }}
-                          className="border border-[#178a5c] rounded-lg px-2.5 py-1 text-[13px] w-44 text-right outline-none" />
-                        <button onClick={() => { saveConfirmField(f.field!, cfVal.trim()); setCfEdit(null); }} className="text-[#178a5c] text-[11.5px] font-semibold">Save</button>
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-2 min-w-0">
-                        {f.ok
-                          ? <span className="text-text font-medium text-right break-words">{f.value}</span>
-                          : <span className="text-amber-600 text-[12px] italic">not found</span>}
-                        {f.field && <button onClick={() => { setCfEdit(f.field!); setCfVal(f.ok ? f.value : ""); }} className="opacity-60 hover:opacity-100 text-[#178a5c] text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>}
-                      </span>
-                    )}
-                  </div>
-                ))}
-                <p className="text-[11.5px] text-text-muted mt-1.5 leading-snug">{confirm.note}</p>
-                <div className="flex flex-wrap gap-2 mt-1.5">
-                  <button onClick={() => { const c = confirm; if (c) setMsgs((m) => [...m, { id: uid(), from: "bot", time: nowLabel(), fetched: c.fields }]); const wasEdit = c?.edit; setConfirm(null); if (wasEdit) setEditing(null); else advance(); }} className="px-3.5 py-1.5 rounded-lg bg-[#178a5c] text-white text-[12.5px] font-semibold hover:bg-[#12734c]">Looks good →</button>
-                  <button onClick={retryDocs} className="px-3 py-1.5 rounded-lg border border-line text-[12.5px] text-text-mid hover:bg-bg-soft">Re-attach</button>
-                </div>
-              </div>
-            </div>
-          )}
+            ))}
+          </ConfirmCard>
+        )}
 
-          {/* Info-sheet confirm card — parsed fields, every one editable */}
-          {sheetReview && (
-            <SheetConfirmCard parsed={sheetReview.parsed} onEdit={editSheetField} onConfirm={confirmSheet} onSkip={skipSheet} />
-          )}
+        {/* Info-sheet confirm card — parsed fields, every one editable */}
+        {sheetReview && (
+          <SheetConfirmCard parsed={sheetReview.parsed} onEdit={editSheetField} onConfirm={confirmSheet} onSkip={skipSheet} />
+        )}
 
-          {error && <div className="self-center text-[12px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5 my-1">{error}</div>}
+        {error && <ChatError text={error} />}
 
-          {editMode && !donId && !turn && !resuming && (
-            <div className="self-stretch mt-3 flex flex-col items-center gap-2">
-              <div className="text-[13px] text-text-mid text-center">All set — the profile is up to date.</div>
-              <button onClick={() => router.push(`/admin/app/${appId}/view`)} className="px-5 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold shadow-sm hover:bg-[#12734c]">Open the profile →</button>
-            </div>
-          )}
+        {editMode && !donId && !turn && !resuming && (
+          <DonePanel theme={THEME} message="All set — the profile is up to date."
+            actionLabel="Open the profile →" onAction={() => router.push(`/admin/app/${appId}/view`)} />
+        )}
 
-          {leadDoneId && (
-            <div className="self-stretch mt-3 flex flex-col items-center gap-2">
-              <div className="text-[13px] text-text-mid text-center">✓ Lead saved — it's in your Lead tab.</div>
-              <button onClick={() => router.push(`/admin/lead/${leadDoneId}/view`)} className="px-5 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold shadow-sm hover:bg-[#12734c]">Open the lead →</button>
-              <button onClick={() => router.push("/admin")} className="text-[12px] text-text-muted hover:text-text">Go to console</button>
-            </div>
-          )}
+        {leadDoneId && (
+          <DonePanel theme={THEME} message="✓ Lead saved — it's in your Lead tab."
+            actionLabel="Open the lead →" onAction={() => router.push(`/admin/lead/${leadDoneId}/view`)}
+            secondaryLabel="Go to console" onSecondary={() => router.push("/admin")} />
+        )}
 
-          {donId && (
-            <div className="self-stretch mt-3 flex flex-col items-center gap-2">
-              <div className="text-[13px] text-text-mid text-center">{donDraft ? "Draft saved — the profile is in your applications table." : "✓ Profile is ready — it's in your applications table."}</div>
-              <button onClick={() => router.push(`/admin/app/${donId}/view`)} className="px-5 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold shadow-sm hover:bg-[#12734c]">Open the profile →</button>
-              <button onClick={() => router.push("/admin")} className="text-[12px] text-text-muted hover:text-text">Go to applications table</button>
-            </div>
-          )}
-          <div className="h-2" />
-        </div>
-      </div>
+        {donId && (
+          <DonePanel theme={THEME}
+            message={donDraft ? "Draft saved — the profile is in your applications table." : "✓ Profile is ready — it's in your applications table."}
+            actionLabel="Open the profile →" onAction={() => router.push(`/admin/app/${donId}/view`)}
+            secondaryLabel="Go to applications table" onSecondary={() => router.push("/admin")} />
+        )}
+      </ChatMessages>
 
       {/* Edit-in-chat intro: Q1 (edit filled?) → pick list → Q2 (complete?) */}
       {showEditIntro && (
-        <div className="shrink-0 bg-white/85 backdrop-blur border-t border-line">
-          <div className="max-w-xl mx-auto px-3 sm:px-4 py-3">
-            {editStep === "q1" && (
-              <div className="flex gap-2">
-                <button onClick={() => answerQ1(true)} className="flex-1 px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c]">Yes — edit details</button>
-                <button onClick={() => answerQ1(false)} className="flex-1 px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">No</button>
-              </div>
-            )}
-            {editStep === "pick" && (() => {
-              const groups = editTableGroups(form);
-              return (
-                <div className="flex flex-col gap-2">
-                  <div className="text-[12px] text-text-muted">{pickSel.length} selected · tick documents to re-upload (re-read) or details to edit</div>
-                  <div className="rounded-xl border border-line bg-white overflow-hidden max-h-[46vh] overflow-y-auto">
-                    {groups.map((g) => (
-                      <div key={g.title}>
-                        <div className="px-3 py-1.5 bg-[#eef7f2] border-y border-[#d7ebe1] text-[11px] font-semibold text-[#0f3d2e]">{g.title}</div>
-                        {g.rows.map((r) => {
-                          const on = pickSel.includes(r.key);
-                          return (
-                            <div key={r.key} onClick={() => setPickSel((s) => (on ? s.filter((x) => x !== r.key) : [...s, r.key]))}
-                              className="flex items-center gap-2.5 px-3 py-2 border-b border-line/70 last:border-b-0 cursor-pointer hover:bg-[#f7fcf9]">
-                              <input type="checkbox" checked={on} onChange={() => {}} onClick={(e) => e.stopPropagation()} className="w-4 h-4 accent-[#178a5c] cursor-pointer shrink-0" aria-label={r.label} />
-                              <span className="flex-1 text-[12.5px] text-text leading-snug">{r.label}</span>
-                              {r.doc
-                                ? (r.on ? <span className="text-[11px] font-semibold text-[#178a5c] shrink-0">On file</span> : <span className="text-[11px] font-semibold text-amber-600 shrink-0">Missing</span>)
-                                : <span className="text-[11.5px] text-text-muted text-right max-w-[46%] truncate shrink-0">{r.value}</span>}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex gap-2 mt-1">
-                    <button onClick={editSelected} disabled={!pickSel.length} className="px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold disabled:opacity-50 hover:bg-[#12734c]">Edit selected{pickSel.length ? ` (${pickSel.length})` : ""} →</button>
-                    <button onClick={() => setEditStep("q1")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid">Back</button>
-                  </div>
+        <ChatDock>
+          {editStep === "q1" && (
+            <div className="flex gap-2">
+              <button onClick={() => answerQ1(true)} className="flex-1 px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c]">Yes — edit details</button>
+              <button onClick={() => answerQ1(false)} className="flex-1 px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">No</button>
+            </div>
+          )}
+          {editStep === "pick" && (() => {
+            const groups = editTableGroups(form);
+            return (
+              <div className="flex flex-col gap-2">
+                <div className="text-[12px] text-text-muted">{pickSel.length} selected · tick documents to re-upload (re-read) or details to edit</div>
+                <div className="rounded-xl border border-line bg-white overflow-hidden max-h-[46vh] overflow-y-auto">
+                  {groups.map((g) => (
+                    <div key={g.title}>
+                      <div className="px-3 py-1.5 bg-[#eef7f2] border-y border-[#d7ebe1] text-[11px] font-semibold text-[#0f3d2e]">{g.title}</div>
+                      {g.rows.map((r) => {
+                        const on = pickSel.includes(r.key);
+                        return (
+                          <div key={r.key} onClick={() => setPickSel((s) => (on ? s.filter((x) => x !== r.key) : [...s, r.key]))}
+                            className="flex items-center gap-2.5 px-3 py-2 border-b border-line/70 last:border-b-0 cursor-pointer hover:bg-[#f7fcf9]">
+                            <input type="checkbox" checked={on} onChange={() => {}} onClick={(e) => e.stopPropagation()} className="w-4 h-4 accent-[#178a5c] cursor-pointer shrink-0" aria-label={r.label} />
+                            <span className="flex-1 text-[12.5px] text-text leading-snug">{r.label}</span>
+                            {r.doc
+                              ? (r.on ? <span className="text-[11px] font-semibold text-[#178a5c] shrink-0">On file</span> : <span className="text-[11px] font-semibold text-amber-600 shrink-0">Missing</span>)
+                              : <span className="text-[11.5px] text-text-muted text-right max-w-[46%] truncate shrink-0">{r.value}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
                 </div>
-              );
-            })()}
-            {editStep === "q2" && (
-              <div className="flex gap-2">
-                <button onClick={() => answerQ2(true)} className="flex-1 px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c]">Yes — complete it</button>
-                <button onClick={() => answerQ2(false)} className="flex-1 px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">No, later</button>
+                <div className="flex gap-2 mt-1">
+                  <button onClick={editSelected} disabled={!pickSel.length} className="px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold disabled:opacity-50 hover:bg-[#12734c]">Edit selected{pickSel.length ? ` (${pickSel.length})` : ""} →</button>
+                  <button onClick={() => setEditStep("q1")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid">Back</button>
+                </div>
               </div>
-            )}
-          </div>
-        </div>
+            );
+          })()}
+          {editStep === "q2" && (
+            <div className="flex gap-2">
+              <button onClick={() => answerQ2(true)} className="flex-1 px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c]">Yes — complete it</button>
+              <button onClick={() => answerQ2(false)} className="flex-1 px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">No, later</button>
+            </div>
+          )}
+        </ChatDock>
       )}
 
       {/* Dock — the controls for the active question. Caps its height and scrolls
@@ -1330,272 +1213,113 @@ function Inner() {
           their extracted fields) can never overflow the fixed chat frame and
           strand the lower rows / the "Done" button out of reach. */}
       {showDock && active && (
-        <div className="shrink-0 max-h-[75vh] overflow-y-auto bg-white/85 backdrop-blur border-t border-line">
-          <div className="max-w-xl mx-auto px-3 sm:px-4 py-3">
-            {editing && (
-              <div className="flex items-center justify-between mb-2 text-[12px]">
-                <span className="text-[#178a5c] font-semibold">Editing your answer</span>
-                <button onClick={cancelEdit} className="text-text-muted hover:text-text">Cancel</button>
-              </div>
-            )}
+        <ChatDock cap="max-h-[75vh]">
+          {editing && <EditingBanner theme={THEME} onCancel={cancelEdit} />}
 
-            {active.kind === "epc" && (
-              <div className="flex flex-col gap-2">
-                {/* The list is hidden behind the "EPCs list" button and opens
-                    UPWARD (dropup). Inside: a search that also lets you type a
-                    brand-new EPC name (→ captured as a lead). */}
-                {epcOpen && (
-                  <div className="rounded-2xl border border-line bg-white shadow-lg overflow-hidden">
-                    <div className="p-2 border-b border-line">
-                      <input autoFocus value={epcSearch} onChange={(e) => setEpcSearch(e.target.value)} placeholder="Search, or type a new EPC name…" className="w-full border border-line rounded-lg px-3 py-2 text-[14px] bg-white focus:outline-none focus:border-[#178a5c]" />
-                    </div>
-                    <div className="max-h-[38vh] overflow-y-auto flex flex-col">
-                      {epcs.length === 0 ? (
-                        <div className="text-[13px] text-text-muted px-3 py-3">Loading partners…</div>
-                      ) : filteredEpcs.length === 0 ? (
-                        <div className="text-[13px] text-text-muted px-3 py-3">No approved EPC matches “{epcSearch.trim()}”.</div>
-                      ) : filteredEpcs.map((e) => (
-                        <button key={e.value} onClick={() => void answer(e.value, e.label, { createApp: true, editable: true })} className="text-left px-4 py-2.5 border-b border-line/60 last:border-0 hover:bg-[#f7fcf9] transition">
-                          <div className="text-[14px] font-semibold text-text">{e.label}</div>{e.sub && <div className="text-[12px] text-text-muted font-mono">{e.sub}</div>}
-                        </button>
-                      ))}
-                      {epcSearch.trim() && (
-                        <button onClick={() => startLead(epcSearch.trim())} className="text-left px-4 py-2.5 bg-[#f7fcf9] hover:bg-[#eef8f2] transition border-t border-line">
-                          <span className="text-[13px] font-semibold text-[#0f3d2e]">+ Use “{epcSearch.trim()}”</span>
-                          <span className="block text-[11px] text-text-muted">Not a registered partner — saved to your Leads to convert later.</span>
-                        </button>
-                      )}
-                    </div>
+          {active.kind === "epc" && (
+            <div className="flex flex-col gap-2">
+              {/* The list is hidden behind the "EPCs list" button and opens
+                  UPWARD (dropup). Inside: a search that also lets you type a
+                  brand-new EPC name (→ captured as a lead). */}
+              {epcOpen && (
+                <div className="rounded-2xl border border-line bg-white shadow-lg overflow-hidden">
+                  <div className="p-2 border-b border-line">
+                    <input autoFocus value={epcSearch} onChange={(e) => setEpcSearch(e.target.value)} placeholder="Search, or type a new EPC name…" className="w-full border border-line rounded-lg px-3 py-2 text-[14px] bg-white focus:outline-none focus:border-[#178a5c]" />
                   </div>
-                )}
-                {/* Dropup trigger */}
-                <button onClick={() => setEpcOpen((o) => !o)} className="flex items-center justify-between px-4 py-3 rounded-full border border-[#178a5c] bg-white text-[14px] font-semibold text-[#0f3d2e] hover:bg-[#f7fcf9] transition">
-                  <span>EPCs list</span>
-                  <span className="text-[12px] text-[#178a5c]">{epcOpen ? "▾" : "▴"}</span>
-                </button>
-                {/* Locked composer — the chat opens only after an EPC is chosen. */}
-                <div className="rounded-full border border-line bg-bg-soft px-4 py-2.5 text-[13px] text-text-muted select-none">Please select an EPC first</div>
-              </div>
-            )}
-
-            {active.kind === "choice" && (
-              <div className="flex flex-col gap-2">
-                <div className="grid sm:grid-cols-2 gap-2">
-                  {choicesOf(active, form).map((c) => (
-                    <button key={c.value} onClick={() => void answer(c.value, c.label, { editable: true })} className="text-left px-4 py-3 rounded-xl border border-line bg-white hover:border-[#178a5c] hover:bg-[#f7fcf9] transition">
-                      <div className="text-[14px] font-semibold text-text">{c.label}</div>{c.sub && <div className="text-[12px] text-text-muted">{c.sub}</div>}
-                    </button>
-                  ))}
-                </div>
-                {!editing && <button onClick={() => void skipText()} className="self-start px-3 py-1.5 text-[13px] text-text-muted hover:text-text" title="Continue without this — you can add it later">Skip</button>}
-              </div>
-            )}
-
-            {(active.kind === "text" || active.kind === "pincode") && (
-              <div className="flex flex-col gap-1">
-                {/* Applied loan amount: 80 / 90 / 100 % of the project cost, or Custom. */}
-                {active.field === "loan_amount_required" && (
-                  <div className="mb-1">
-                    <LoanShareChips cost={Number(form.total_project_cost) || 0} value={input}
-                      onPick={setInput} onCustom={() => inputRef.current?.focus()} />
+                  <div className="max-h-[38vh] overflow-y-auto flex flex-col">
+                    {epcs.length === 0 ? (
+                      <div className="text-[13px] text-text-muted px-3 py-3">Loading partners…</div>
+                    ) : filteredEpcs.length === 0 ? (
+                      <div className="text-[13px] text-text-muted px-3 py-3">No approved EPC matches “{epcSearch.trim()}”.</div>
+                    ) : filteredEpcs.map((e) => (
+                      <button key={e.value} onClick={() => void answer(e.value, e.label, { createApp: true, editable: true })} className="text-left px-4 py-2.5 border-b border-line/60 last:border-0 hover:bg-[#f7fcf9] transition">
+                        <div className="text-[14px] font-semibold text-text">{e.label}</div>{e.sub && <div className="text-[12px] text-text-muted font-mono">{e.sub}</div>}
+                      </button>
+                    ))}
+                    {epcSearch.trim() && (
+                      <button onClick={() => startLead(epcSearch.trim())} className="text-left px-4 py-2.5 bg-[#f7fcf9] hover:bg-[#eef8f2] transition border-t border-line">
+                        <span className="text-[13px] font-semibold text-[#0f3d2e]">+ Use “{epcSearch.trim()}”</span>
+                        <span className="block text-[11px] text-text-muted">Not a registered partner — saved to your Leads to convert later.</span>
+                      </button>
+                    )}
                   </div>
-                )}
-                <div className="flex items-center gap-2">
-                  <input ref={inputRef} autoFocus value={input} onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") void (active.kind === "pincode" ? submitPincode() : submitText()); if (e.key === "Escape" && editing) cancelEdit(); }}
-                    placeholder={active.placeholder || "Type a message…"} className="flex-1 border border-line rounded-full px-4 py-2.5 text-[14px] bg-white focus:outline-none focus:border-[#178a5c] focus:ring-2 focus:ring-[#178a5c]/15" />
-                  {!editing && <button onClick={() => void skipText()} className="px-3 py-2.5 text-[13px] text-text-muted hover:text-text whitespace-nowrap" title="Continue without this — you can add it later">{active.optional ? "Skip" : "Don't have it"}</button>}
-                  <button onClick={() => void (active.kind === "pincode" ? submitPincode() : submitText())} className="w-11 h-11 shrink-0 rounded-full bg-[#178a5c] text-white grid place-items-center hover:bg-[#12734c] shadow-sm" aria-label="Send">
-                    {editing ? "✓" : <SendIcon />}
-                  </button>
                 </div>
-                {active.field && AMOUNT_FIELDS.has(active.field) && amountInWords(Number(input)) && (
-                  <div className="text-[11.5px] text-[#0f3d2e] px-3">₹{Number(input).toLocaleString("en-IN")} — <span className="font-medium">{amountInWords(Number(input))} rupees</span></div>
-                )}
-              </div>
-            )}
+              )}
+              {/* Dropup trigger */}
+              <button onClick={() => setEpcOpen((o) => !o)} className="flex items-center justify-between px-4 py-3 rounded-full border border-[#178a5c] bg-white text-[14px] font-semibold text-[#0f3d2e] hover:bg-[#f7fcf9] transition">
+                <span>EPCs list</span>
+                <span className="text-[12px] text-[#178a5c]">{epcOpen ? "▾" : "▴"}</span>
+              </button>
+              {/* Locked composer — the chat opens only after an EPC is chosen. */}
+              <div className="rounded-full border border-line bg-bg-soft px-4 py-2.5 text-[13px] text-text-muted select-none">Please select an EPC first</div>
+            </div>
+          )}
 
-            {active.kind === "consent" && (
-              <div className="flex gap-2">
-                <button onClick={() => void answer("yes", "Yes, consent given")} className="flex-1 px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c]">Yes, consent given</button>
-                {!editing && <button onClick={() => void skipText()} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft" title="Continue without this — you can record it later">Skip</button>}
-                <button onClick={() => router.push("/admin")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid">Cancel</button>
-              </div>
-            )}
+          {active.kind === "choice" && (
+            <div className="flex flex-col gap-2">
+              <ChoiceGrid theme={THEME} choices={choicesOf(active, form)} onPick={(c) => void answer(c.value, c.label, { editable: true })} />
+              {!editing && <button onClick={() => void skipText()} className="self-start px-3 py-1.5 text-[13px] text-text-muted hover:text-text" title="Continue without this — you can add it later">Skip</button>}
+            </div>
+          )}
 
-            {active.kind === "paste" && (
-              <div className="flex flex-col gap-2">
-                <textarea autoFocus value={input} onChange={(e) => setInput(e.target.value)} rows={6}
-                  placeholder={active.placeholder || "Paste the applicant's info sheet here…"}
-                  className="w-full border border-line rounded-xl px-3.5 py-2.5 text-[13.5px] leading-snug bg-white focus:outline-none focus:border-[#178a5c] focus:ring-2 focus:ring-[#178a5c]/15 resize-y" />
-                <div className="flex items-center gap-2">
-                  <button onClick={parseSheet} disabled={!input.trim()} className="px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">Read the sheet →</button>
-                  <button onClick={skipSheet} className="px-3 py-2 rounded-lg text-[12.5px] text-text-muted hover:text-text hover:bg-bg-soft">Skip</button>
+          {(active.kind === "text" || active.kind === "pincode") && (
+            <div className="flex flex-col gap-1">
+              {/* Applied loan amount: 80 / 90 / 100 % of the project cost, or Custom. */}
+              {active.field === "loan_amount_required" && (
+                <div className="mb-1">
+                  <LoanShareChips cost={Number(form.total_project_cost) || 0} value={input}
+                    onPick={setInput} onCustom={() => inputRef.current?.focus()} />
                 </div>
+              )}
+              <AdminComposer theme={THEME} inputRef={inputRef} value={input} onChange={setInput}
+                onSend={() => void (active.kind === "pincode" ? submitPincode() : submitText())}
+                editing={!!editing} onCancelEdit={cancelEdit} placeholder={active.placeholder || "Type a message…"}
+                skipLabel={active.optional ? "Skip" : "Don't have it"} onSkip={() => void skipText()} />
+              {active.field && AMOUNT_FIELDS.has(active.field) && amountInWords(Number(input)) && (
+                <div className="text-[11.5px] text-[#0f3d2e] px-3">₹{Number(input).toLocaleString("en-IN")} — <span className="font-medium">{amountInWords(Number(input))} rupees</span></div>
+              )}
+            </div>
+          )}
+
+          {active.kind === "consent" && (
+            <div className="flex gap-2">
+              <button onClick={() => void answer("yes", "Yes, consent given")} className="flex-1 px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c]">Yes, consent given</button>
+              {!editing && <button onClick={() => void skipText()} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft" title="Continue without this — you can record it later">Skip</button>}
+              <button onClick={() => router.push("/admin")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid">Cancel</button>
+            </div>
+          )}
+
+          {active.kind === "paste" && (
+            <div className="flex flex-col gap-2">
+              <textarea autoFocus value={input} onChange={(e) => setInput(e.target.value)} rows={6}
+                placeholder={active.placeholder || "Paste the applicant's info sheet here…"}
+                className="w-full border border-line rounded-xl px-3.5 py-2.5 text-[13.5px] leading-snug bg-white focus:outline-none focus:border-[#178a5c] focus:ring-2 focus:ring-[#178a5c]/15 resize-y" />
+              <div className="flex items-center gap-2">
+                <button onClick={parseSheet} disabled={!input.trim()} className="px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">Read the sheet →</button>
+                <button onClick={skipSheet} className="px-3 py-2 rounded-lg text-[12.5px] text-text-muted hover:text-text hover:bg-bg-soft">Skip</button>
               </div>
-            )}
+            </div>
+          )}
 
-            {active.kind === "docs" && (
-              <DocDock active={active} files={files} thumbs={thumbs} onPick={setFileFor} onDrop={fillNextSlot} onClear={clearFileFor} onRun={() => void runDocs()} onSkip={skipDoc} replacing={!!editing} />
-            )}
+          {active.kind === "docs" && (
+            <DocDock theme={THEME} uploads={active.uploads!} files={files} thumbs={thumbs} onPick={setFileFor}
+              onClear={clearFileFor} onRun={() => void runDocs()} onSkip={skipDoc} replacing={!!editing}
+              runLabel={editing ? "Re-read & replace" : `Read ${active.extractRoute ? "document" : "& attach"}`} />
+          )}
 
-            {active.kind === "doc_table" && appId && (
-              <DocTable key="doc_table" appId={appId} form={form}
-                onPatch={applyDocPatch} onSkipChange={docSkipChange} onDone={finishDocTable}
-                limitUnits={editMode && editStage === "selected" ? editUnits : undefined} />
-            )}
+          {active.kind === "doc_table" && appId && (
+            <DocTable key="doc_table" appId={appId} form={form}
+              onPatch={applyDocPatch} onSkipChange={docSkipChange} onDone={finishDocTable}
+              limitUnits={editMode && editStage === "selected" ? editUnits : undefined} />
+          )}
 
-            {active.kind === "loanconfig" && (
-              <LoanConfigDock loanAmt={loanAmt} subsidyCase={subsidyCase} setSubsidyCase={setSubsidyCase}
-                centralSub={centralSub} setCentralSub={setCentralSub} stateSub={stateSub} setStateSub={setStateSub}
-                tenure={tenure} setTenure={setTenure} onFinish={() => void finishLoanConfig()} finishLabel={editMode ? "Save changes" : "Create application →"} />
-            )}
-          </div>
-        </div>
+          {active.kind === "loanconfig" && (
+            <LoanConfigDock loanAmt={loanAmt} subsidyCase={subsidyCase} setSubsidyCase={setSubsidyCase}
+              centralSub={centralSub} setCentralSub={setCentralSub} stateSub={stateSub} setStateSub={setStateSub}
+              tenure={tenure} setTenure={setTenure} onFinish={() => void finishLoanConfig()} finishLabel={editMode ? "Save changes" : "Create application →"} />
+          )}
+        </ChatDock>
       )}
-    </div>
-  );
-}
-
-// ── Presentational pieces ──
-
-// A permanent "read from the document" card that stays in the chat. Every
-// fetched value with a form-field key is editable inline; nothing is masked
-// except the Aadhaar number (the OCR backend never returns the full digits).
-function FetchedCard({ m, onSave }: { m: Msg; onSave: (msgId: string, field: string, value: string) => void }) {
-  const [editKey, setEditKey] = useState<string | null>(null);
-  const [val, setVal] = useState("");
-  return (
-    <div className="self-start w-full max-w-[88%] rounded-2xl rounded-tl-md border border-[#cdeadd] bg-white shadow-sm overflow-hidden">
-      <div className="px-3.5 py-2 bg-[#f0faf5] border-b border-[#e0f0e8] flex items-center gap-2">
-        <span className="text-[12px]">📄</span>
-        <span className="text-[12.5px] font-semibold text-[#0f3d2e]">Read from the document</span>
-      </div>
-      <div className="p-3.5 flex flex-col gap-2">
-        {(m.fetched ?? []).map((f, i) => (
-          <div key={i} className="flex items-center justify-between gap-3 text-[13px] min-h-[24px]">
-            <span className="text-text-muted shrink-0">{f.label}</span>
-            {editKey === f.field && f.field ? (
-              <span className="flex items-center gap-1.5">
-                <input autoFocus value={val} onChange={(e) => setVal(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") { onSave(m.id, f.field!, val.trim()); setEditKey(null); } if (e.key === "Escape") setEditKey(null); }}
-                  className="border border-[#178a5c] rounded-lg px-2.5 py-1 text-[13px] w-44 text-right outline-none" />
-                <button onClick={() => { onSave(m.id, f.field!, val.trim()); setEditKey(null); }} className="text-[#178a5c] text-[12px] font-semibold">Save</button>
-              </span>
-            ) : (
-              <span className="flex items-center gap-2 min-w-0">
-                {f.ok
-                  ? <span className="text-text font-medium text-right break-words">{f.value}</span>
-                  : <span className="text-amber-600 text-[12px] italic">not found</span>}
-                {f.field && (
-                  <button onClick={() => { setEditKey(f.field!); setVal(f.ok ? f.value : ""); }} className="opacity-60 hover:opacity-100 text-[#178a5c] text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>
-                )}
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function DateChip({ label }: { label: string }) {
-  return (
-    <div className="self-center my-2">
-      <span className="text-[11px] text-[#0f3d2e]/70 bg-white/70 rounded-full px-3 py-1 shadow-sm">{label}</span>
-    </div>
-  );
-}
-
-function MessageRow({ m, rmName, onEdit, editingId }: { m: Msg; rmName: string; onEdit: () => void; editingId: string | null }) {
-  const isUser = m.from === "user";
-  const beingEdited = editingId === m.id;
-  return (
-    <div className={["group flex flex-col max-w-[82%]", isUser ? "self-end items-end" : "self-start items-start"].join(" ")}>
-      <div className={["relative px-3.5 py-2 rounded-2xl text-[14px] leading-snug shadow-sm break-words whitespace-pre-wrap w-fit max-w-full",
-        isUser ? "bg-[#178a5c] text-white rounded-br-md" : "bg-white text-[#12271f] rounded-bl-md border border-black/5",
-        beingEdited ? "ring-2 ring-[#5df2ad]" : ""].join(" ")}>
-        {/* document receipt */}
-        {m.files ? (
-          <div className="flex flex-col gap-1.5">
-            {m.files.map((f, i) => (
-              <div key={i} className="flex items-center gap-2">
-                {f.thumb ? <img src={f.thumb} alt="" className="w-10 h-10 rounded-md object-cover" />
-                  : <span className="w-10 h-10 rounded-md bg-white/20 grid place-items-center text-[16px]">📎</span>}
-                <span className="text-[13px] break-all">{f.name}</span>
-              </div>
-            ))}
-          </div>
-        ) : m.text}
-      </div>
-      <div className={["flex items-center gap-1.5 mt-0.5 px-1 text-[10.5px]", isUser ? "text-[#0f3d2e]/60 flex-row-reverse" : "text-text-muted"].join(" ")}>
-        <span className="font-medium">{isUser ? rmName : "Capital Craft"}</span>
-        <span>· {m.time}</span>
-        {m.edited && <span>· edited</span>}
-        {isUser && !m.files && <span className="text-[#178a5c]">✓✓</span>}
-        {isUser && (m.editable || m.turnId === "epc") && (
-          <button onClick={onEdit} className="text-[#178a5c] font-semibold hover:underline" aria-label="Edit">{m.files ? "↺ replace" : "✎ edit"}</button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TypingBubble() {
-  return (
-    <div className="self-start">
-      <div className="px-4 py-3 rounded-2xl rounded-bl-md bg-white border border-black/5 shadow-sm inline-flex gap-1">
-        <Dot d="0" /><Dot d="150" /><Dot d="300" />
-      </div>
-    </div>
-  );
-}
-function Dot({ d }: { d: string }) {
-  return <span className="w-1.5 h-1.5 rounded-full bg-text-muted/60 animate-bounce" style={{ animationDelay: d + "ms" }} />;
-}
-function SendIcon() {
-  return <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 12l16-8-6 16-2.5-6.5L4 12z" fill="currentColor" /></svg>;
-}
-
-function DocDock({ active, files, thumbs, onPick, onDrop, onClear, onRun, onSkip, replacing }: {
-  active: Turn; files: Record<string, File>; thumbs: Record<string, string | null>;
-  onPick: (name: string, f: File) => void; onDrop: (f: File) => void; onClear: (name: string) => void; onRun: () => void; onSkip: () => void; replacing?: boolean;
-}) {
-  const [drag, setDrag] = useState(false);
-  return (
-    <div className="flex flex-col gap-2">
-      <div
-        onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
-        onDragLeave={() => setDrag(false)}
-        onDrop={(e) => { e.preventDefault(); setDrag(false); const f = e.dataTransfer.files?.[0]; if (f) onDrop(f); }}
-        className={["rounded-xl border-2 border-dashed p-2.5 transition", drag ? "border-[#178a5c] bg-[#f0faf5]" : "border-line bg-white"].join(" ")}
-      >
-        <div className="grid gap-2" style={{ gridTemplateColumns: (active.uploads?.length || 1) > 1 ? "1fr 1fr" : "1fr" }}>
-          {active.uploads!.map((u) => {
-            const has = !!files[u.name];
-            return (
-              <label key={u.name} className={["relative flex items-center gap-2.5 rounded-lg border px-3 py-2.5 cursor-pointer transition", has ? "border-[#178a5c] bg-[#f7fcf9]" : "border-line bg-white hover:border-[#178a5c]/50"].join(" ")}>
-                {has && thumbs[u.name]
-                  ? <img src={thumbs[u.name] as string} alt="" className="w-9 h-9 rounded-md object-cover" />
-                  : <span className="w-9 h-9 rounded-md bg-bg-soft grid place-items-center text-[15px]">{has ? "📄" : "＋"}</span>}
-                <span className="min-w-0 flex-1">
-                  <span className="block text-[13px] font-medium text-text truncate">{u.label}</span>
-                  <span className="block text-[11px] text-text-muted truncate">{has ? files[u.name].name : "Tap, drop, or paste"}</span>
-                </span>
-                {has
-                  ? <button type="button" onClick={(e) => { e.preventDefault(); onClear(u.name); }} className="text-text-muted hover:text-red-500 text-[15px] leading-none px-1">×</button>
-                  : <span className="text-[#178a5c] text-[12px] font-semibold">Add</span>}
-                <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(u.name, f); }} />
-              </label>
-            );
-          })}
-        </div>
-        <div className="text-[11px] text-text-muted mt-2 px-0.5">Attach by tapping, dragging a file in, or pasting a copied image (Ctrl+V).</div>
-      </div>
-      <div className="flex items-center gap-2">
-        <button onClick={onRun} className="px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c]">{replacing ? "Re-read & replace" : `Read ${active.extractRoute ? "document" : "& attach"}`}</button>
-        {!replacing && <button onClick={onSkip} className="px-3 py-2 rounded-lg text-[12.5px] text-text-muted hover:text-text hover:bg-bg-soft">Don't have it — skip</button>}
-      </div>
     </div>
   );
 }
@@ -1735,35 +1459,6 @@ async function callDocRoute(unit: DocUnit, appId: string, files: Partial<Record<
   return patch;
 }
 
-// Small inline editor for a unit's read fields — same look/behaviour as the
-// permanent "read from the document" card; edits flow straight to the form.
-function DocFieldRows({ fields, onEdit }: { fields: Fetched[]; onEdit: (field: string, value: string) => void }) {
-  const [editKey, setEditKey] = useState<string | null>(null);
-  const [val, setVal] = useState("");
-  return (
-    <div className="flex flex-col gap-1.5">
-      {fields.map((f) => (
-        <div key={f.field || f.label} className="flex items-center justify-between gap-3 text-[12.5px] min-h-[22px]">
-          <span className="text-text-muted shrink-0">{f.label}</span>
-          {editKey === f.field && f.field ? (
-            <span className="flex items-center gap-1.5">
-              <input autoFocus value={val} onChange={(e) => setVal(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { onEdit(f.field!, val.trim()); setEditKey(null); } if (e.key === "Escape") setEditKey(null); }}
-                className="border border-[#178a5c] rounded-lg px-2.5 py-1 text-[12.5px] w-40 text-right outline-none" />
-              <button onClick={() => { onEdit(f.field!, val.trim()); setEditKey(null); }} className="text-[#178a5c] text-[11.5px] font-semibold">Save</button>
-            </span>
-          ) : (
-            <span className="flex items-center gap-2 min-w-0">
-              {f.ok ? <span className="text-text font-medium text-right break-words">{f.value}</span> : <span className="text-amber-600 text-[11.5px] italic">not found</span>}
-              {f.field && <button onClick={() => { setEditKey(f.field!); setVal(f.ok ? f.value : ""); }} className="opacity-60 hover:opacity-100 text-[#178a5c] text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>}
-            </span>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // The document-slot table shown inside the chat dock for the doc_table turn.
 // Column 1 = fixed label, Column 2 = upload box (tap / drop / paste) that reads
 // with the row's dedicated extractor the moment a file lands (in parallel; a
@@ -1776,7 +1471,7 @@ function DocFieldRows({ fields, onEdit }: { fields: Fetched[]; onEdit: (field: s
 function DocTable({ appId, form, onPatch, onSkipChange, onDone, limitUnits }: {
   appId: string; form: Form;
   onPatch: (patch: Form) => void; onSkipChange: (label: string, skipped: boolean) => void;
-  onDone: (receipt: { name: string; thumb: string | null }[]) => void;
+  onDone: (receipt: FileReceipt[]) => void;
   limitUnits?: Set<DocUnit>;   // edit mode: show only these document units
 }) {
   const [slotFiles, setSlotFiles] = useState<Partial<Record<DocSlot, DocSlotFile>>>({});
@@ -1899,39 +1594,15 @@ function DocTable({ appId, form, onPatch, onSkipChange, onDone, limitUnits }: {
   // field editor from remounting when a sibling row's read updates the parent).
   function cell(r: DocRow) {
     if (skipped[r.slot]) return <span className="text-[11.5px] text-text-muted italic">skipped</span>;
-    if (rowOpen(r.slot, r.unit)) {
-      return (
-        <label
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) pickFile(r.slot, r.unit, f); }}
-          className="inline-flex items-center gap-1 rounded-lg border border-dashed border-line hover:border-[#178a5c] bg-white px-2.5 py-1.5 cursor-pointer text-[11.5px] font-semibold text-[#178a5c]">
-          <span className="text-[13px] leading-none">＋</span> Add
-          <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) pickFile(r.slot, r.unit, f); e.currentTarget.value = ""; }} />
-        </label>
-      );
-    }
-    const live = slotFiles[r.slot];
-    return (
-      <span className="inline-flex items-center gap-1.5">
-        {live?.thumb
-          ? <img src={live.thumb} alt="" className="w-8 h-8 rounded-md object-cover border border-line" />
-          : <span className="w-8 h-8 rounded-md bg-[#f7fcf9] border border-[#cdeadd] grid place-items-center text-[13px]">📄</span>}
-        <button onClick={() => reopen(r.slot, r.unit)} className="text-[#178a5c] text-[11px] font-semibold hover:underline">Replace</button>
-      </span>
-    );
+    if (rowOpen(r.slot, r.unit)) return <AddFileButton theme={THEME} onFile={(f) => pickFile(r.slot, r.unit, f)} />;
+    return <SlotFileChip theme={THEME} thumb={slotFiles[r.slot]?.thumb} onReplace={() => reopen(r.slot, r.unit)} />;
   }
 
   // The read strip shown under a unit's last row: reading / error+retry / editable
   // fields / replacing. Returns null when the unit's boxes are still empty.
   function unitStrip(unit: DocUnit) {
     const rd = reads[unit];
-    if (rd?.status === "reading") {
-      return (
-        <span className="flex items-center gap-2 text-[11.5px] text-text-muted">
-          <span className="w-3.5 h-3.5 rounded-full border-2 border-[#178a5c]/30 border-t-[#178a5c] animate-spin" /> Reading…
-        </span>
-      );
-    }
+    if (rd?.status === "reading") return <ReadingLine theme={THEME} />;
     if (rd?.status === "error") {
       const canRetry = DOC_UNIT_PARTS[unit].every((p) => filesRef.current[p]);
       return (
@@ -1945,7 +1616,7 @@ function DocTable({ appId, form, onPatch, onSkipChange, onDone, limitUnits }: {
     if (unitDone(unit)) {
       const build = DOC_UNIT_FIELDS[unit];
       return build
-        ? <DocFieldRows fields={build(form)} onEdit={(field, value) => onPatch({ [field]: value })} />
+        ? <FieldRows theme={THEME} fields={build(form)} onEdit={(field, value) => onPatch({ [field]: value })} />
         : <span className="text-[11.5px] text-[#178a5c] font-medium">Uploaded ✓</span>;
     }
     if (replacing[unit] && unitPrefilled(unit)) {
@@ -1991,7 +1662,7 @@ function DocTable({ appId, form, onPatch, onSkipChange, onDone, limitUnits }: {
               return (
                 <div key={u} className="px-3 py-2.5">
                   <div className="text-[12px] font-semibold text-[#0f3d2e] mb-1">{UNIT_LABEL[u]} <span className="text-[#178a5c]">✓</span></div>
-                  {build ? <DocFieldRows fields={build(form)} onEdit={(field, value) => onPatch({ [field]: value })} /> : <span className="text-[11.5px] text-text-muted">Uploaded</span>}
+                  {build ? <FieldRows theme={THEME} fields={build(form)} onEdit={(field, value) => onPatch({ [field]: value })} /> : <span className="text-[11.5px] text-text-muted">Uploaded</span>}
                 </div>
               );
             })}
@@ -2003,10 +1674,7 @@ function DocTable({ appId, form, onPatch, onSkipChange, onDone, limitUnits }: {
           </div>
         )}
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={done} disabled={!canContinue} className="px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">Done with documents →</button>
-          {!canContinue && <span className="text-[11px] text-text-muted">Upload the combined PDF to continue.</span>}
-        </div>
+        <ContinueRow theme={THEME} label="Done with documents →" disabled={!canContinue} onClick={done} hint="Upload the combined PDF to continue." />
       </div>
     );
   }
@@ -2014,42 +1682,8 @@ function DocTable({ appId, form, onPatch, onSkipChange, onDone, limitUnits }: {
   // ── SEPARATE mode: the labeled-slot table (one box per document). ──
   return (
     <div className="flex flex-col gap-2">
-      <div className="rounded-xl border border-line bg-white overflow-hidden">
-        <table className="w-full border-collapse">
-          <thead>
-            <tr className="bg-[#f0faf5] border-b border-[#e0f0e8] text-[11px] font-semibold text-[#0f3d2e]">
-              <th className="text-left font-semibold px-3 py-2 w-full">Document</th>
-              <th className="text-left font-semibold px-2 py-2 whitespace-nowrap">Upload</th>
-              <th className="text-right font-semibold px-3 py-2 whitespace-nowrap">Don&apos;t have it</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => {
-              const strip = r.lastOfUnit ? unitStrip(r.unit) : null;
-              return (
-                <Fragment key={r.slot}>
-                  <tr className={i > 0 ? "border-t border-line/70" : ""}>
-                    <td className="px-3 py-2 align-middle text-[12.5px] text-text leading-snug">{r.label}</td>
-                    <td className="px-2 py-2 align-middle whitespace-nowrap">{cell(r)}</td>
-                    <td className="px-3 py-2 align-middle text-right">
-                      <input type="checkbox" checked={!!skipped[r.slot]} onChange={() => toggleSkip(r.slot)} className="w-4 h-4 accent-[#178a5c] cursor-pointer align-middle" aria-label={`Don't have ${r.label}`} />
-                    </td>
-                  </tr>
-                  {strip && (
-                    <tr>
-                      <td colSpan={3} className="px-3 pb-2.5 pt-0">{strip}</td>
-                    </tr>
-                  )}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <div className="flex items-center gap-2 flex-wrap">
-        <button onClick={done} disabled={!allSettled} className="px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">Done with documents →</button>
-        {!allSettled && <span className="text-[11px] text-text-muted">Add or tick “Don&apos;t have it” for every row to continue.</span>}
-      </div>
+      <DocSlotTable theme={THEME} rows={rows} skipped={skipped} onToggleSkip={toggleSkip} cell={cell} strip={(r) => unitStrip(r.unit)} />
+      <ContinueRow theme={THEME} label="Done with documents →" disabled={!allSettled} onClick={done} hint="Add or tick “Don't have it” for every row to continue." />
     </div>
   );
 }
@@ -2060,44 +1694,22 @@ function DocTable({ appId, form, onPatch, onSkipChange, onDone, limitUnits }: {
 function SheetConfirmCard({ parsed, onEdit, onConfirm, onSkip }: {
   parsed: Form; onEdit: (field: string, value: string) => void; onConfirm: () => void; onSkip: () => void;
 }) {
-  const [editKey, setEditKey] = useState<string | null>(null);
-  const [val, setVal] = useState("");
-  const rows = SHEET_ROWS.filter((r) => parsed[r.field] != null && String(parsed[r.field]).trim() !== "");
+  // Every row shown has a value (empty ones are left out), so none is "not found".
+  const rows = SHEET_ROWS.filter((r) => parsed[r.field] != null && String(parsed[r.field]).trim() !== "").map((r) => {
+    const raw = String(parsed[r.field]);
+    return { label: r.label, value: raw, ok: true, field: r.field, display: r.render ? r.render(raw) : raw };
+  });
   return (
-    <div className="self-start w-full max-w-[92%] rounded-2xl rounded-tl-md border border-[#cdeadd] bg-white shadow-sm overflow-hidden">
-      <div className="px-3.5 py-2 bg-[#f0faf5] border-b border-[#e0f0e8] flex items-center gap-2">
-        <span className="text-[12px]">📝</span>
-        <span className="text-[12.5px] font-semibold text-[#0f3d2e]">Read from the info sheet — check before continuing</span>
-      </div>
+    <ReadCardFrame theme={THEME} icon="📝" title="Read from the info sheet — check before continuing" width="max-w-[92%]">
       <div className="p-3.5 flex flex-col gap-2">
-        {rows.map((r) => {
-          const raw = String(parsed[r.field]);
-          return (
-            <div key={r.field} className="flex items-center justify-between gap-3 text-[13px] min-h-[24px]">
-              <span className="text-text-muted shrink-0">{r.label}</span>
-              {editKey === r.field ? (
-                <span className="flex items-center gap-1.5">
-                  <input autoFocus value={val} onChange={(e) => setVal(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") { onEdit(r.field, val.trim()); setEditKey(null); } if (e.key === "Escape") setEditKey(null); }}
-                    className="border border-[#178a5c] rounded-lg px-2.5 py-1 text-[13px] w-44 text-right outline-none" />
-                  <button onClick={() => { onEdit(r.field, val.trim()); setEditKey(null); }} className="text-[#178a5c] text-[12px] font-semibold">Save</button>
-                </span>
-              ) : (
-                <span className="flex items-center gap-2 min-w-0">
-                  <span className="text-text font-medium text-right break-words">{r.render ? r.render(raw) : raw}</span>
-                  <button onClick={() => { setEditKey(r.field); setVal(raw); }} className="opacity-60 hover:opacity-100 text-[#178a5c] text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>
-                </span>
-              )}
-            </div>
-          );
-        })}
+        <EditableRows theme={THEME} rows={rows} onSave={onEdit} />
         <p className="text-[11px] text-text-muted leading-snug mt-0.5">The EPC partner stays as you chose it — the merchant name is kept only for reference.</p>
         <div className="flex flex-wrap gap-2 mt-1">
           <button onClick={onConfirm} className="px-3.5 py-1.5 rounded-lg bg-[#178a5c] text-white text-[12.5px] font-semibold hover:bg-[#12734c]">Confirm & continue →</button>
           <button onClick={onSkip} className="px-3 py-1.5 rounded-lg border border-line text-[12.5px] text-text-mid hover:bg-bg-soft">Skip</button>
         </div>
       </div>
-    </div>
+    </ReadCardFrame>
   );
 }
 
@@ -2149,12 +1761,6 @@ function fieldLabel(t: Turn): string {
 
 // Fields where we show the typed amount in words (Indian format) for confirmation.
 const AMOUNT_FIELDS = new Set(["loan_amount_required", "annual_income", "total_project_cost", "monthly_bill_amount", "lead_loan_amount"]);
-
-// Integer → Indian words (lakh / crore). Empty for non-positive / invalid.
-// Words only (no "Rupees Only" suffix — callers append " rupees" in the UI).
-function amountInWords(num: number): string {
-  return Number.isFinite(num) && num > 0 ? numberToWordsIndian(Math.floor(num)) : "";
-}
 
 // The path column(s) that make a document turn "already present" in edit mode.
 const DOC_PATHS: Record<string, string[]> = {

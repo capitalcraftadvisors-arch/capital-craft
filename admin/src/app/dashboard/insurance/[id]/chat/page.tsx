@@ -18,6 +18,12 @@ import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
 import { fetchEpcName } from "@/lib/epc-name";
 import { fmtRupeesExact, amountInput } from "@/lib/money";
+// The chat kit (src/components/chat) — this chat's navy palette is PARTNER_THEME.
+import { PARTNER_THEME as THEME } from "@/components/chat/theme";
+import type { FileReceipt } from "@/components/chat/types";
+import { useScrollToBottom } from "@/components/chat/hooks";
+import { ChatMessages, ChatDock, ChatError, EditingBanner } from "@/components/chat/ChatFrame";
+import { PartnerChatHeader, PartnerTypingBubble, PartnerComposer } from "@/components/chat/PartnerChrome";
 
 export default function InsuranceChatPage() {
   return (
@@ -31,7 +37,7 @@ type App = Record<string, any>;
 type Gps = { lat: number; lng: number; captured_at: string };
 type Stage = "pan" | "aadhaar" | "gst" | "plant" | "ebill" | "address" | "invoice" | "amount" | "mismatch" | "review" | "done";
 type CardRow = { label: string; value: string | null; field?: "gst_legal_name" | "gst_trade_name" | "gstin" };
-type Msg = { id: string; from: "bot" | "user"; stage?: Stage; text?: string; files?: { name: string; thumb: string | null }[]; card?: CardRow[]; redo?: boolean };
+type Msg = { id: string; from: "bot" | "user"; stage?: Stage; text?: string; files?: FileReceipt[]; card?: CardRow[]; redo?: boolean };
 
 const ORDER: Stage[] = ["pan", "aadhaar", "gst", "plant", "ebill", "address", "invoice", "amount", "review"];
 const QUESTION: Record<Stage, string> = {
@@ -87,7 +93,6 @@ function Inner() {
   const [ocrAmount, setOcrAmount] = useState<number | null>(null);
   const [pendingAmount, setPendingAmount] = useState<number | null>(null);
   const seq = useRef(0);
-  const scrollRef = useRef<HTMLDivElement>(null);
   const uid = () => "m" + ++seq.current;
 
   const active: Stage | null = editing ?? stage;
@@ -303,158 +308,127 @@ function Inner() {
     return !!d;
   }
 
-  useEffect(() => {
-    const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [msgs, busy, active]);
+  const scrollRef = useScrollToBottom([msgs, busy, active]);
 
   const doneCount = ORDER.filter((s) => s !== "review" && ORDER.indexOf(s) < ORDER.indexOf((stage === "mismatch" ? "amount" : stage) ?? "pan")).length;
   const progress = stage === "done" ? 100 : Math.round((doneCount / (ORDER.length - 1)) * 100);
   const pick = (k: string, f: File | undefined) => { if (f) setFiles((x) => ({ ...x, [k]: f })); };
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden" style={{ background: "linear-gradient(160deg,#f5f8fe 0%,#e9f0fc 100%)" }}>
-      <header className="shrink-0 px-4 sm:px-5 py-2.5 bg-[#14235c] text-white flex items-center gap-3 shadow-sm">
-        <button onClick={() => router.push("/dashboard")} className="p-1 -ml-1 text-white/80 hover:text-white text-[20px] leading-none" aria-label="Back">←</button>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/brand/capital-craft-mark.png" alt="" className="w-9 h-9 rounded-full bg-white object-contain p-1 shadow-sm" />
-        <div className="min-w-0 flex-1">
-          <div className="font-display font-bold text-[15px] leading-tight truncate">Capital Craft · Insurance application</div>
-          <div className="text-[11.5px] text-white/70 flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-[#93b4ff]" /> {stage === "done" ? "submitted" : "building the application"}</div>
-        </div>
-        <span className="text-[11px] text-white/60 tabular-nums">{progress}%</span>
-      </header>
-      <div className="h-1.5 bg-black/15 shrink-0"><div className="h-1.5 bg-[#5b8def] rounded-r-full transition-all duration-500" style={{ width: progress + "%" }} /></div>
+    <div className="h-screen flex flex-col overflow-hidden" style={THEME.canvas}>
+      <PartnerChatHeader
+        title="Insurance application"
+        subtitle={stage === "done" ? "submitted" : "building the application"}
+        progress={progress}
+        onBack={() => router.push("/dashboard")}
+      />
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 sm:px-4">
-        <div className="max-w-xl mx-auto py-4 flex flex-col gap-1.5">
-          {msgs.map((m) => m.card
-            ? <ReadCard key={m.id} rows={m.card} onSave={saveCardField} />
-            : (
-              <div key={m.id} className={m.from === "bot" ? "self-start max-w-[88%]" : "self-end max-w-[88%]"}>
-                <div className={[
-                  "rounded-2xl px-3.5 py-2 text-[14px] shadow-sm whitespace-pre-wrap break-words",
-                  m.from === "bot" ? "bg-white rounded-tl-md border border-[#c7d5f0] text-text" : "bg-[#1e3a8a] rounded-tr-md text-white",
-                  editing && m.from === "user" && m.stage === editing ? "ring-2 ring-[#93b4ff]" : "",
-                ].join(" ")}>
-                  {m.text}
-                  {m.files && m.files.length > 0 && (
-                    <div className={["flex flex-wrap gap-1.5", m.text ? "mt-1.5" : ""].join(" ")}>
-                      {m.files.map((f, i) => f.thumb
-                        // eslint-disable-next-line @next/next/no-img-element
-                        ? <img key={i} src={f.thumb} alt="" className="w-11 h-11 rounded-lg object-cover border border-white/30" />
-                        : <span key={i} className="text-[12px] px-2 py-1 rounded-md bg-white/15">📎 {f.name}</span>)}
-                    </div>
-                  )}
-                </div>
-                {m.from === "user" && m.redo && m.stage && stage !== "done" && (
-                  <div className="text-right mt-0.5 pr-1">
-                    <button onClick={() => redo(m.stage!)} disabled={busy} className="text-[11px] text-text-muted hover:text-[#1e3a8a] disabled:opacity-40">
-                      {m.files ? "↺ Replace" : "✎ Edit"}
-                    </button>
+      <ChatMessages scrollRef={scrollRef}>
+        {msgs.map((m) => m.card
+          ? <ReadCard key={m.id} rows={m.card} onSave={saveCardField} />
+          : (
+            <div key={m.id} className={m.from === "bot" ? "self-start max-w-[88%]" : "self-end max-w-[88%]"}>
+              <div className={[
+                "rounded-2xl px-3.5 py-2 text-[14px] shadow-sm whitespace-pre-wrap break-words",
+                m.from === "bot" ? "bg-white rounded-tl-md border border-[#c7d5f0] text-text" : "bg-[#1e3a8a] rounded-tr-md text-white",
+                editing && m.from === "user" && m.stage === editing ? "ring-2 ring-[#93b4ff]" : "",
+              ].join(" ")}>
+                {m.text}
+                {m.files && m.files.length > 0 && (
+                  <div className={["flex flex-wrap gap-1.5", m.text ? "mt-1.5" : ""].join(" ")}>
+                    {m.files.map((f, i) => f.thumb
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? <img key={i} src={f.thumb} alt="" className="w-11 h-11 rounded-lg object-cover border border-white/30" />
+                      : <span key={i} className="text-[12px] px-2 py-1 rounded-md bg-white/15">📎 {f.name}</span>)}
                   </div>
                 )}
               </div>
-            ))}
-          {busy && (
-            <div className="self-start">
-              <div className="rounded-2xl rounded-tl-md bg-white border border-[#c7d5f0] px-4 py-3 shadow-sm flex gap-1">
-                <span className="w-2 h-2 rounded-full bg-[#1e3a8a]/40 animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-2 h-2 rounded-full bg-[#1e3a8a]/40 animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-2 h-2 rounded-full bg-[#1e3a8a]/40 animate-bounce" style={{ animationDelay: "300ms" }} />
-              </div>
+              {m.from === "user" && m.redo && m.stage && stage !== "done" && (
+                <div className="text-right mt-0.5 pr-1">
+                  <button onClick={() => redo(m.stage!)} disabled={busy} className="text-[11px] text-text-muted hover:text-[#1e3a8a] disabled:opacity-40">
+                    {m.files ? "↺ Replace" : "✎ Edit"}
+                  </button>
+                </div>
+              )}
             </div>
-          )}
-          {error && <div className="self-center text-[12px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5 my-1">{error}</div>}
-          {stage === "review" && !editing && <Summary app={app} />}
-          <div className="h-2" />
-        </div>
-      </div>
+          ))}
+        {busy && <PartnerTypingBubble />}
+        {error && <ChatError text={error} />}
+        {stage === "review" && !editing && <Summary app={app} />}
+      </ChatMessages>
 
       {/* Dock — the controls for the active step */}
       {active && !busy && (
-        <div className="shrink-0 max-h-[60vh] overflow-y-auto bg-white/85 backdrop-blur border-t border-line">
-          <div className="max-w-xl mx-auto px-3 sm:px-4 py-3">
-            {editing && (
-              <div className="flex items-center justify-between mb-2 text-[12px]">
-                <span className="text-[#1e3a8a] font-semibold">Changing your answer</span>
-                <button onClick={() => {
-                  // A half-done amount change goes back to the saved amount.
-                  if (editing === "mismatch" || editing === "amount") answer("amount", [user("amount", { text: fmtRupeesExact(app.invoice_confirmed_amount), redo: true })]);
-                  setEditing(null); setError(null); setFiles({}); setPendingAmount(null);
-                }} className="text-text-muted hover:text-text">Cancel</button>
-              </div>
-            )}
+        <ChatDock cap="max-h-[60vh]">
+          {editing && (
+            <EditingBanner theme={THEME} label="Changing your answer" onCancel={() => {
+              // A half-done amount change goes back to the saved amount.
+              if (editing === "mismatch" || editing === "amount") answer("amount", [user("amount", { text: fmtRupeesExact(app.invoice_confirmed_amount), redo: true })]);
+              setEditing(null); setError(null); setFiles({}); setPendingAmount(null);
+            }} />
+          )}
 
-            {(active === "pan" || active === "gst" || active === "ebill" || active === "invoice") && (
-              <div className="flex flex-col gap-2">
-                <FileSlot label={{ pan: "PAN card", gst: "GST certificate", ebill: "Electricity bill", invoice: "Tax invoice / Quotation" }[active]} file={files.file} onPick={(f) => pick("file", f)} />
-                <div className="flex items-center gap-2">
-                  <button onClick={() => void sendDoc(active)} disabled={!files.file} className="px-4 py-2 rounded-xl bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-40">Upload &amp; read →</button>
-                  {active === "gst" && !editing && <button onClick={skipGst} className="px-3 py-2 rounded-xl text-[13px] text-text-muted hover:text-text hover:bg-bg-soft">Don&apos;t have it</button>}
-                </div>
-              </div>
-            )}
-
-            {active === "aadhaar" && (
-              <div className="flex flex-col gap-2">
-                <div className="grid grid-cols-2 gap-2">
-                  <FileSlot label="Aadhaar — front" file={files.front} onPick={(f) => pick("front", f)} />
-                  <FileSlot label="Aadhaar — back" file={files.back} onPick={(f) => pick("back", f)} />
-                </div>
-                <div>
-                  <button onClick={() => void sendDoc("aadhaar")} disabled={!files.front || !files.back} className="px-4 py-2 rounded-xl bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-40">Upload &amp; read →</button>
-                </div>
-              </div>
-            )}
-
-            {active === "plant" && (
-              <GeoOfficeUpload
-                key={editing ? "plant-redo" : "plant"}
-                category="insurance_plant_photo"
-                label=""
-                uploadOnly
-                compact
-                uploadFn={uploadPlant}
-              />
-            )}
-
-            {(active === "address" || active === "amount") && (
+          {(active === "pan" || active === "gst" || active === "ebill" || active === "invoice") && (
+            <div className="flex flex-col gap-2">
+              <FileSlot label={{ pan: "PAN card", gst: "GST certificate", ebill: "Electricity bill", invoice: "Tax invoice / Quotation" }[active]} file={files.file} onPick={(f) => pick("file", f)} />
               <div className="flex items-center gap-2">
-                <div className="flex-1 flex items-center border border-line rounded-full bg-white overflow-hidden focus-within:border-[#1e3a8a] focus-within:ring-2 focus-within:ring-[#1e3a8a]/15">
-                  <input
-                    autoFocus value={input}
-                    inputMode={active === "amount" ? "decimal" : "text"}
-                    onChange={(e) => setInput(active === "amount" ? amountInput(e.target.value) : e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") (active === "address" ? void sendAddress() : sendAmount()); }}
-                    placeholder={active === "address" ? "Where the plant is installed" : "Amount in ₹"}
-                    className="flex-1 min-w-0 px-4 py-2.5 text-[14px] bg-transparent focus:outline-none" />
-                </div>
-                <button onClick={() => (active === "address" ? void sendAddress() : sendAmount())} className="w-11 h-11 shrink-0 rounded-full bg-[#1e3a8a] text-white grid place-items-center hover:bg-[#17307a] shadow-sm" aria-label="Send">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg>
-                </button>
+                <button onClick={() => void sendDoc(active)} disabled={!files.file} className="px-4 py-2 rounded-xl bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-40">Upload &amp; read →</button>
+                {active === "gst" && !editing && <button onClick={skipGst} className="px-3 py-2 rounded-xl text-[13px] text-text-muted hover:text-text hover:bg-bg-soft">Don&apos;t have it</button>}
               </div>
-            )}
+            </div>
+          )}
 
-            {active === "mismatch" && pendingAmount != null && (
-              <div className="flex gap-2 flex-wrap">
-                <button onClick={() => void confirmAmount(pendingAmount)} className="flex-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a]">Use {fmtRupeesExact(pendingAmount)}</button>
-                <button onClick={reenterAmount} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">Re-enter</button>
+          {active === "aadhaar" && (
+            <div className="flex flex-col gap-2">
+              <div className="grid grid-cols-2 gap-2">
+                <FileSlot label="Aadhaar — front" file={files.front} onPick={(f) => pick("front", f)} />
+                <FileSlot label="Aadhaar — back" file={files.back} onPick={(f) => pick("back", f)} />
               </div>
-            )}
-
-            {active === "review" && (
-              <div className="flex gap-2 flex-wrap">
-                <button onClick={() => void submit()} className="flex-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a]">Submit application</button>
-                <button onClick={() => router.push("/dashboard")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">Later</button>
+              <div>
+                <button onClick={() => void sendDoc("aadhaar")} disabled={!files.front || !files.back} className="px-4 py-2 rounded-xl bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-40">Upload &amp; read →</button>
               </div>
-            )}
+            </div>
+          )}
 
-            {active === "done" && (
-              <button onClick={() => router.push("/dashboard")} className="w-full px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a]">Back to dashboard</button>
-            )}
-          </div>
-        </div>
+          {active === "plant" && (
+            <GeoOfficeUpload
+              key={editing ? "plant-redo" : "plant"}
+              category="insurance_plant_photo"
+              label=""
+              uploadOnly
+              compact
+              uploadFn={uploadPlant}
+            />
+          )}
+
+          {(active === "address" || active === "amount") && (
+            <PartnerComposer
+              value={input}
+              onChange={(v) => setInput(active === "amount" ? amountInput(v) : v)}
+              onSend={() => (active === "address" ? void sendAddress() : sendAmount())}
+              inputMode={active === "amount" ? "decimal" : "text"}
+              placeholder={active === "address" ? "Where the plant is installed" : "Amount in ₹"} />
+          )}
+
+          {active === "mismatch" && pendingAmount != null && (
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={() => void confirmAmount(pendingAmount)} className="flex-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a]">Use {fmtRupeesExact(pendingAmount)}</button>
+              <button onClick={reenterAmount} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">Re-enter</button>
+            </div>
+          )}
+
+          {active === "review" && (
+            <div className="flex gap-2 flex-wrap">
+              <button onClick={() => void submit()} className="flex-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a]">Submit application</button>
+              <button onClick={() => router.push("/dashboard")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">Later</button>
+            </div>
+          )}
+
+          {active === "done" && (
+            <button onClick={() => router.push("/dashboard")} className="w-full px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a]">Back to dashboard</button>
+          )}
+        </ChatDock>
       )}
     </div>
   );

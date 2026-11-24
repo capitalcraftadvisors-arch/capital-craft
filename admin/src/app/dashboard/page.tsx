@@ -24,7 +24,7 @@ import { SARVATRA } from "@/lib/quotation-brands";
 import CustomerApplications from "@/components/quotation/CustomerApplications";
 import CustomTemplateBanner from "@/components/partner/CustomTemplateBanner";
 import { fmtRupees, fmtDateShort, deadlineState, DEADLINE_PILL } from "@/lib/disbursement";
-import { numberToWordsIndian } from "@/lib/numberToWords";
+import { amountInWords } from "@/lib/numberToWords";
 import { fmtDateTime as fmtDateTimeLib } from "@/lib/dates";
 import { policyValidityParts, VALIDITY_TEXT } from "@/lib/insurance-validity";
 import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES, formatRupees } from "@/lib/emi";
@@ -80,11 +80,6 @@ const STAGE4_PILL: Record<Stage4, string> = {
 
 type Section = PartnerSection;
 
-// Integer → Indian words (Lakh / Crore) for the EMI calculator amount bars.
-// Words only (no "Rupees Only" suffix — callers append " rupees" in the UI).
-function amountInWords(n: number): string {
-  return Number.isFinite(n) && n > 0 ? numberToWordsIndian(Math.floor(n)) : "";
-}
 function compactRupees(n: number | null | undefined): string {
   const v = Number(n) || 0;
   if (v >= 1e7) return `₹${(v / 1e7).toFixed(2).replace(/\.?0+$/, "")}Cr`;

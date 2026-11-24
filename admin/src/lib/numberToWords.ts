@@ -66,6 +66,13 @@ export function rupeesInWords(value: number | null | undefined): string {
     + (paise ? ` and ${numberToWordsIndian(paise)} Paise` : "") + " Only";
 }
 
+// Whole rupees in words, no suffix — "" for zero / negative / not a number. The
+// chats and the Partner Portal dashboard's EMI calculator show it under a typed
+// amount and append " rupees" themselves.
+export function amountInWords(n: number): string {
+  return Number.isFinite(n) && n > 0 ? numberToWordsIndian(Math.floor(n)) : "";
+}
+
 // "Five years" / "One year"
 export function yearsInWords(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(Number(value))) return "";
