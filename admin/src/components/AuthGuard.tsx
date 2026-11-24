@@ -2,7 +2,7 @@
 
 import { ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Business, ModuleKey, getBusiness, getToken, routeForBusiness, setBusiness, portalAccess, canAccessModule, onSessionChangeElsewhere, logout } from "@/lib/auth";
+import { Business, ModuleKey, getBusiness, getToken, routeForBusiness, setBusiness, portalAccess, canAccessModule, onSessionChangeElsewhere, logout, loginHref, currentPath, pageOpened } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { useIdleLogout } from "@/lib/use-idle-logout";
 
@@ -46,7 +46,8 @@ export default function AuthGuard({ children, allow, requireModule }: Props) {
     const token = getToken();
     const biz = getBusiness();
     if (!token || !biz) {
-      router.replace("/login");
+      // Signed out (or the 12-hour login ran out): after signing in, come back here.
+      router.replace(loginHref(currentPath()));
       return;
     }
 
@@ -95,6 +96,7 @@ export default function AuthGuard({ children, allow, requireModule }: Props) {
           router.replace("/admin");
           return;
         }
+        pageOpened(latest); // this tab's account; the login welcome plays on the home page only
         setReady(true);
       });
   }, [router, allow, requireModule]);

@@ -16,7 +16,7 @@
 // Names come from the signed-in account (never hard-coded).
 
 import { useEffect, useState } from "react";
-import { getBusiness, greetingName } from "@/lib/auth";
+import { GREET_KEY, getBusiness, greetingName } from "@/lib/auth";
 import { fetchEpcName } from "@/lib/epc-name";
 import WelcomeScreen, { PartnerLine, PartnerLockup, WelcomePhoto } from "./WelcomeScreen";
 
@@ -35,8 +35,8 @@ export default function LoginWelcome() {
   useEffect(() => {
     let show = false;
     try {
-      show = sessionStorage.getItem("cc_greet") === "1";
-      if (show) sessionStorage.removeItem("cc_greet");
+      show = sessionStorage.getItem(GREET_KEY) === "1";
+      if (show) sessionStorage.removeItem(GREET_KEY);
     } catch { return; }
     const b = show ? getBusiness() : null;
     if (b) setKind(b.business_type === "admin" ? "team" : "partner");

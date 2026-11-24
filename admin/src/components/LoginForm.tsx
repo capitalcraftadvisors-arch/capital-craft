@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Button from "./ui/Button";
 import Input from "./ui/Input";
-import { login, changePassword, routeForBusiness } from "@/lib/auth";
+import { login, changePassword, afterLoginRoute } from "@/lib/auth";
 import { MOBILE_RE } from "@/lib/validators";
 
 // Mobile first. An account CC has set a password for (migration 0094) is
@@ -33,7 +33,7 @@ export default function LoginForm() {
     const r = await changePassword(changeToken!, pw);
     setLoading(false);
     if (!r.ok) { setPwError(r.error); return; }
-    router.replace(routeForBusiness(r.business));
+    router.replace(afterLoginRoute(r.business));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -59,10 +59,11 @@ export default function LoginForm() {
       setError(r.error);
       return;
     }
-    // Route straight to the destination. The "Namaste" welcome (login sets the
-    // cc_greet flag) now plays ON the dashboard via <LoginWelcome/>, so it covers
-    // the dashboard as it loads — no flash of the login page in between.
-    router.replace(routeForBusiness(r.business));
+    // Route straight to the destination: the page that sent the user here
+    // (?next=, e.g. an email link), else their home. The "Namaste" welcome (login
+    // sets the cc_greet flag) plays ON the home page via <LoginWelcome/>, so it
+    // covers it as it loads — no flash of the login page in between.
+    router.replace(afterLoginRoute(r.business));
   }
 
   if (changeToken) {

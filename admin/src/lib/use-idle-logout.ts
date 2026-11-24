@@ -11,7 +11,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { logout, getToken, sessionEnded } from "@/lib/auth";
+import { logout, getToken, sessionEnded, loginHref, currentPath } from "@/lib/auth";
 
 const IDLE_MS = 60 * 60 * 1000; // 1 hour
 const KEY = "cc.lastActivity";
@@ -36,7 +36,7 @@ export function useIdleLogout() {
     const check = () => {
       if (sessionEnded()) { // the 12-hour login ran out
         logout();
-        router.replace("/login");
+        router.replace(loginHref(currentPath())); // signing in again comes back to this page
         return;
       }
       if (!getToken()) return; // already signed out
@@ -44,7 +44,7 @@ export function useIdleLogout() {
       try { ts = Number(localStorage.getItem(KEY)) || 0; } catch { /* ignore */ }
       if (ts && Date.now() - ts > IDLE_MS) {
         logout();
-        router.replace("/login");
+        router.replace(loginHref(currentPath())); // signing in again comes back to this page
       }
     };
     const t = setInterval(check, 60000); // re-check every minute

@@ -104,6 +104,13 @@ export function portalAccess(b: Business | null | undefined): boolean {
 const TOKEN_KEY = "cc_token";
 const BUSINESS_KEY = "cc_business";
 const IMPERSONATE_KEY = "cc_admin_impersonating";
+/** sessionStorage: set by every login, played once by <LoginWelcome/> on the home page. */
+export const GREET_KEY = "cc_greet";
+/** sessionStorage: the account this tab's last guarded page opened as (pageOpened). */
+const TAB_ACCOUNT_KEY = "cc_tab_account";
+
+// The company + the person (an EPC staff login of the same company is someone else).
+const accountKey = (b: Business) => `${b.id}:${b.member?.id ?? ""}`;
 
 // password: required once CC has set one for the account (migration 0094) —
 // the server then answers passwordRequired until it's given and correct.
@@ -133,7 +140,7 @@ async function authCall(payload: Record<string, unknown>): Promise<LoginResult> 
   localStorage.removeItem(IMPERSONATE_KEY);
   // Signal the dashboard to play the Namaste greeting once — set on EVERY
   // login so it fires for whoever just signed in (not once per browser).
-  try { sessionStorage.setItem("cc_greet", "1"); } catch { /* ignore */ }
+  try { sessionStorage.setItem(GREET_KEY, "1"); } catch { /* ignore */ }
   return { ok: true, business: data.business };
 }
 
@@ -148,9 +155,8 @@ export function logout() {
 // never keeps acting (marking messages seen, saving) under a name it no longer
 // shows. A refresh of the same account's row is ignored.
 export function onSessionChangeElsewhere(cb: () => void): () => void {
-  // The company + the person (an EPC staff login of the same company is someone else).
   const idOf = (v: string | null) => {
-    try { const b = v ? (JSON.parse(v) as Business) : null; return b ? `${b.id}:${b.member?.id ?? ""}` : null; } catch { return null; }
+    try { const b = v ? (JSON.parse(v) as Business) : null; return b ? accountKey(b) : null; } catch { return null; }
   };
   const h = (e: StorageEvent) => {
     if (e.key === TOKEN_KEY && e.newValue === null) cb();
@@ -250,4 +256,57 @@ export function routeForBusiness(b: Business): string {
   // the dashboard itself shows whichever apply buttons the EPC is entitled to.
   if (portalAccess(b)) return "/dashboard";
   return "/status";
+}
+
+// ── Back to the page that asked for a login ─────────────────────────────────
+// A signed-out visit to a portal page (an email link, a bookmark, a login that
+// ran out) goes to /login?next=<that page>, and the login lands there. Only a
+// path inside this app counts — never another site, an API route or /login.
+const NEXT_BASE = "https://app.invalid";
+
+/** `raw` as a safe in-app path ("/dashboard/leads?f=due"), or null. */
+export function safeNext(raw: string | null | undefined): string | null {
+  if (!raw || raw.length > 1000 || !raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return null;
+  let u: URL;
+  try { u = new URL(raw, NEXT_BASE); } catch { return null; }
+  // Checked after parsing: "/\t/evil.com" parses as another host, "/.//evil.com" cleans up to "//evil.com".
+  if (u.origin !== NEXT_BASE || u.pathname.startsWith("//")) return null;
+  if (u.pathname === "/" || u.pathname.startsWith("/login") || u.pathname.startsWith("/api/")) return null;
+  return u.pathname + u.search + u.hash;
+}
+
+/** "/login", or "/login?next=<path>" so the login comes back to `path`. */
+export function loginHref(path?: string | null): string {
+  const next = safeNext(path);
+  return next ? `/login?next=${encodeURIComponent(next)}` : "/login";
+}
+
+/** The current page as a `next` target (browser only). */
+export function currentPath(): string | null {
+  return typeof window === "undefined" ? null : window.location.pathname + window.location.search;
+}
+
+function tabAccount(): string | null {
+  try { return sessionStorage.getItem(TAB_ACCOUNT_KEY); } catch { return null; }
+}
+
+/** Where a fresh login lands: the page that asked for it (?next=), else the account's home.
+ *  A tab last open as another account goes home: its page was someone else's. A new tab
+ *  (an email link) has no account yet, so its page is followed. */
+export function afterLoginRoute(
+  b: Business,
+  search: string = typeof window === "undefined" ? "" : window.location.search,
+  lastAccount: string | null = tabAccount(),
+): string {
+  const next = safeNext(new URLSearchParams(search).get("next"));
+  return next && (!lastAccount || lastAccount === accountKey(b)) ? next : routeForBusiness(b);
+}
+
+/** A guarded page has opened for `b` (AuthGuard): remember the tab's account, and drop
+ *  the login welcome unless this is the account's home (a login bounced home keeps it). */
+export function pageOpened(b: Business, pathname: string = window.location.pathname): void {
+  try {
+    sessionStorage.setItem(TAB_ACCOUNT_KEY, accountKey(b));
+    if (pathname !== routeForBusiness(b)) sessionStorage.removeItem(GREET_KEY);
+  } catch { /* storage blocked */ }
 }
