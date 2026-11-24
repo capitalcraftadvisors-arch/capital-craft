@@ -18,6 +18,7 @@ import AppsTab from "./_console/AppsTab";
 import InsuranceTab from "./_console/InsuranceTab";
 import OtherInsuranceTab from "./_console/OtherInsuranceTab";
 import LeadsTab from "./_console/LeadsTab";
+import { clearReturn } from "@/components/view/hooks";
 
 type Tab = "epcs" | "apps" | "loanleads" | "insurance" | "otherins" | "leads";
 
@@ -44,10 +45,14 @@ function Inner() {
     if (isMainAdminUser(getBusiness())) tabs.push("otherins");
     return tabs;
   });
-  // Initialise to the LAST tab the user was on (persisted below), so returning
-  // to the console from anywhere lands where they left — not the default tab.
+  // Initialise to the tab a "back to <tab>" hand-off asked for ("adminList.tab",
+  // removed by consume() below), else the LAST tab the user was on (persisted
+  // below), so returning to the console from anywhere lands where they left —
+  // and the previous tab never mounts (and reads its list) first.
   const [tab, setTab] = useState<Tab>(() => {
     try {
+      const asked = sessionStorage.getItem("adminList.tab") as Tab | null;
+      if (asked && allowedTabs.includes(asked)) return asked;
       const saved = sessionStorage.getItem("adminList.activeTab") as Tab | null;
       if (saved && allowedTabs.includes(saved)) return saved;
     } catch { /* sessionStorage may be unavailable */ }
@@ -68,9 +73,11 @@ function Inner() {
   // The ⌘K palette also signals it ("adminList.tab" event) when already on /admin.
   useEffect(() => {
     const consume = () => {
-      const t = sessionStorage.getItem("adminList.tab") as Tab | null;
-      if (t && allowedTabs.includes(t)) setTab(t);
-      sessionStorage.removeItem("adminList.tab");
+      try {
+        const t = sessionStorage.getItem("adminList.tab") as Tab | null;
+        if (t && allowedTabs.includes(t)) setTab(t);
+        sessionStorage.removeItem("adminList.tab");
+      } catch { /* sessionStorage may be unavailable */ }
     };
     consume();
     window.addEventListener("adminList.tab", consume);
@@ -83,6 +90,10 @@ function Inner() {
   useEffect(() => {
     try { sessionStorage.setItem("adminList.activeTab", tab); } catch { /* ignore */ }
   }, [tab]);
+
+  // On the console, a Task Manager return key a case left behind (browser Back)
+  // is spent — the next case opened from here goes back here.
+  useEffect(() => { clearReturn(); }, []);
 
   // Restore the saved period for this tab (persists the user's choice across
   // navigation — opening a case and returning keeps it, until they change it),

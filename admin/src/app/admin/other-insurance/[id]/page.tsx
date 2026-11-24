@@ -8,7 +8,7 @@
 // view profile (/view).
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, usePathname, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import DateField from "@/components/ui/DateField";
 import { I, SectionCard } from "@/components/view/ViewKit";
@@ -33,9 +33,15 @@ type Row = Record<string, any>;
 
 function Inner() {
   const params = useParams<{ id: string }>();
+  const pathname = usePathname();
   const router = useRouter();
   const allowed = isMainAdmin(getBusiness());
-  const [rowId, setRowId] = useState<string | null>(params.id === "new" ? null : params.id);
+  // The file this page opened on — from the address, not useParams: after a "new"
+  // file is created (ensureId's replaceState), browser Back / Forward to this
+  // address still restores params.id === "new", which would show a blank form
+  // and insert a duplicate row on Save.
+  const [openId] = useState(() => pathname.split("/")[3] || params.id);
+  const [rowId, setRowId] = useState<string | null>(openId === "new" ? null : openId);
   const [row, setRow] = useState<Row | null>(null);
   const [name, setName] = useState("");
   const [sumInsured, setSumInsured] = useState("");
@@ -43,7 +49,7 @@ function Inner() {
   const [companies, setCompanies] = useState<string[]>([]);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [loading, setLoading] = useState(params.id !== "new");
+  const [loading, setLoading] = useState(openId !== "new");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,8 +64,8 @@ function Inner() {
 
   useEffect(() => {
     if (!allowed) { router.replace("/admin"); return; }
-    if (params.id === "new") return;
-    void loadRow(params.id).then((data) => {
+    if (openId === "new") return;
+    void loadRow(openId).then((data) => {
       if (data) {
         setName(data.customer_name ?? "");
         setSumInsured(data.sum_insured != null ? String(data.sum_insured) : "");
@@ -70,7 +76,7 @@ function Inner() {
       setLoading(false);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allowed, params.id]);
+  }, [allowed, openId]);
 
   useEffect(() => { if (allowed) void otherInsCompanies().then(setCompanies); }, [allowed]);
 
@@ -112,7 +118,7 @@ function Inner() {
 
   function back() {
     if (rowId) { router.push(`/admin/other-insurance/${rowId}/view`); return; }
-    sessionStorage.setItem("adminList.tab", "otherins");
+    try { sessionStorage.setItem("adminList.tab", "otherins"); } catch { /* storage blocked */ }
     router.push("/admin");
   }
 

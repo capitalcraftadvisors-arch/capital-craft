@@ -120,7 +120,7 @@ function Inner() {
 
   return (
     <main className="min-h-screen bg-bg-soft">
-      <InsuranceStepHeader step={2} />
+      <InsuranceStepHeader step={2} id={params.id} />
       <section className="max-w-2xl mx-auto px-5 sm:px-7 py-8">
         <h1 className="font-display text-[24px] sm:text-[28px] font-bold text-cc-ink mb-1">Plant &amp; invoice</h1>
         <p className="text-text-mid mb-6">A geo-tagged photo of the installed plant, its address, and the final invoice.</p>

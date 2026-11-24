@@ -71,6 +71,14 @@ export default function ProjectsPage() {
   const seeCrew = !site && role !== "SALES";
 
   const replace = (r: ProjectRow) => setRows((all) => (all ?? []).map((x) => (x.id === r.id ? r : x)));
+  // The project opened from ?open=<id> is closed → out of the address, so Back doesn't reopen it.
+  const dropOpen = () => {
+    const u = new URLSearchParams(window.location.search);
+    if (!u.has("open")) return;
+    u.delete("open");
+    const s = u.toString();
+    window.history.replaceState(null, "", `/dashboard/projects${s ? `?${s}` : ""}`);
+  };
 
   return (
     <div className="max-w-[1150px]">
@@ -139,8 +147,8 @@ export default function ProjectsPage() {
         <ProjectEditor project={open === "new" ? null : open} crew={crew} assign={assign} site={site}
           canEdit={work} canDelete={assign} onGo={(href) => router.push(href)}
           onSaved={(r, isNew) => { if (isNew) setRows([r, ...rows]); else replace(r); setOpen(r); }}
-          onDeleted={(id) => { setRows(rows.filter((x) => x.id !== id)); setOpen(null); }}
-          onClose={() => setOpen(null)} />
+          onDeleted={(id) => { setRows(rows.filter((x) => x.id !== id)); setOpen(null); dropOpen(); }}
+          onClose={() => { setOpen(null); dropOpen(); }} />
       )}
     </div>
   );

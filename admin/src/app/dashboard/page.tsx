@@ -73,7 +73,9 @@ function DashboardInner() {
   // The filter a section opens with (a v2 dashboard tile); the menu opens it unfiltered.
   const [loanFilter, setLoanFilter] = useState<FilterKey>("all");
   const [insFilter, setInsFilter] = useState<InsFilter>("all");
-  const open = (s: Section) => { setLoanFilter("all"); setInsFilter("all"); setSection(s); };
+  // The section is kept in the address (?s=<section>), so Back from a page opened here returns to it.
+  const show = (s: Section) => { setSection(s); window.history.replaceState(null, "", s === "home" ? "/dashboard" : `/dashboard?s=${s}`); };
+  const open = (s: Section) => { setLoanFilter("all"); setInsFilter("all"); show(s); };
   // Opened from another partner page's nav (/dashboard?s=loans).
   useEffect(() => {
     const s = new URLSearchParams(window.location.search).get("s") as Section | null;
@@ -132,9 +134,9 @@ function DashboardInner() {
         {section === "home" && hasModule(me, "quotes") && <CustomTemplateBanner tpl={quoteTpl} />}
         {section === "home" && v2 && (
           <DashboardV2 rms={RMS}
-            onQuotation={() => (customers ? setSection("customers") : router.push("/dashboard/quotes"))}
-            onLoans={(f) => { setLoanFilter(f); setSection("loans"); }}
-            onInsurance={(due) => { setInsFilter(due ? "renewal" : "all"); setSection("insurance"); }}
+            onQuotation={() => (customers ? show("customers") : router.push("/dashboard/quotes"))}
+            onLoans={(f) => { setLoanFilter(f); show("loans"); }}
+            onInsurance={(due) => { setInsFilter(due ? "renewal" : "all"); show("insurance"); }}
             onRenew={() => void startInsurance()} renewing={insBusy}
             onOpenMessage={(id) => router.push(`/dashboard/messages/loan/${id}`)} />
         )}
@@ -143,8 +145,8 @@ function DashboardInner() {
             canLoan={canLoan && work} canInsurance={canInsurance && work}
             onApplyLoan={() => router.push("/dashboard/apply/chat")}
             onApplyInsurance={() => void startInsurance()} applyingInsurance={insBusy}
-            onOpenCase={(r) => setOpenCase(r)} onEmi={() => setSection("emi")}
-            canQuote={hasModule(me, "quotes")} onQuotation={() => (customers ? setSection("customers") : router.push("/dashboard/quotes"))} onAttention={() => setSection("documents")} />
+            onOpenCase={(r) => setOpenCase(r)} onEmi={() => show("emi")}
+            canQuote={hasModule(me, "quotes")} onQuotation={() => (customers ? show("customers") : router.push("/dashboard/quotes"))} onAttention={() => show("documents")} />
         )}
         {section === "loans" && (
           <LoansSection loans={sortedLoans} loading={loading} canLoan={canLoan && work} readOnly={!work} initial={loanFilter}

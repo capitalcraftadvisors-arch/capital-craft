@@ -422,10 +422,11 @@ function Inner() {
     router.push("/admin");
   }
   // Header ← — a save still waiting on the autosave timer goes out first, so
-  // the last edits aren't lost (no request when nothing is waiting).
+  // the last edits aren't lost (no request when nothing is waiting). An edit
+  // chat goes back to the profile it was opened from.
   async function goBack() {
     if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; await saveChat(); }
-    router.push("/admin");
+    router.push(editMode && appId ? `/admin/app/${appId}/view` : "/admin");
   }
 
   async function submitPincode() {
@@ -690,6 +691,12 @@ function Inner() {
     } finally { setBusy(false); }
   }
 
+  // A finished create chat → its address becomes an edit of the saved profile, so
+  // browser Back / a refresh opens the edit flow, not the stale last create step.
+  function markEditUrl(id: string) {
+    window.history.replaceState(null, "", `${window.location.pathname}?app=${id}&edit=1`);
+  }
+
   // Step 5 → save config → submit (step 6) unless something's missing → draft.
   async function finishLoanConfig() {
     if (!appId || tenure == null) { setError("Pick a tenure to continue."); return; }
@@ -712,11 +719,13 @@ function Inner() {
         // Something required was skipped → keep it as a draft to finish later.
         pushUser("Create the application", {});
         say("bot", `Saved to your applications table as a draft — still pending: ${missing.join(", ")}. Open it anytime from the table to add what's left.`);
+        markEditUrl(appId);
         setDonDraft(true); setDonId(appId); setBusy(false); return;
       }
       if (!(await submitApp())) { setBusy(false); return; }
       pushUser("Create the application", {});
       say("bot", "All done — the profile is ready and now in your applications table. You can open it to review or edit anytime.");
+      markEditUrl(appId);
       setDonId(appId);
     } finally { setBusy(false); }
   }

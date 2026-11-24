@@ -55,7 +55,7 @@ import {
   HAction, ProgressTabs, Section, StatCards,
   type FieldRow, type StageState,
 } from "@/components/view/ViewKit";
-import { useStacked } from "@/components/view/hooks";
+import { returnFor, takeReturn, useStacked } from "@/components/view/hooks";
 import { DocumentsBySteps, expectedEpcSlots, missingEpcDocs, roleLabel, type Doc, type Stakeholder } from "./_parts/EpcDocuments";
 import { EpcHealthPanel } from "./_parts/EpcHealth";
 import LenderLines, { type LenderRow } from "./_parts/LenderLines";
@@ -77,6 +77,8 @@ type EpcStage = "submitted" | "review" | "docs" | "lender" | "active";
 function Inner() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
+  // Back → the Task Manager when it opened this EPC (components/view/hooks), else the console.
+  const [returnTo] = useState(() => returnFor(`/admin/epc/${params.id}/`));
   const [biz, setBiz] = useState<Biz | null>(null);
   const [loans, setLoans] = useState<{ status: string; aborted_at: string | null; plant_use_type: string | null; loan_display_id: string | null; sanctioned_amount: number | null; first_disbursement_amount: number | null; second_disbursement_amount: number | null; created_at: string | null; borrower_pan: string | null; borrower_mobile: string | null }[]>([]);
   // EPC Health period filter ("all" = every application this EPC has, ever).
@@ -469,9 +471,9 @@ function Inner() {
         <div className="w-full px-5 sm:px-8 py-4 flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3.5 min-w-0">
             <button
-              onClick={() => router.push("/admin")}
-              title="Back to console"
-              aria-label="Back to console"
+              onClick={() => router.push(takeReturn(`/admin/epc/${params.id}/`) ?? "/admin")}
+              title={returnTo === "/admin/board" ? "Back to Task Manager" : "Back to console"}
+              aria-label={returnTo === "/admin/board" ? "Back to Task Manager" : "Back to console"}
               className="w-9 h-9 -ml-2 rounded-full grid place-items-center text-cc-muted hover:bg-cc-icon-hover hover:text-cc-ink shrink-0"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
@@ -757,7 +759,7 @@ function Inner() {
         onDeleted={() => {
           setDeleteOpen(false);
           invalidate("dash.epcs");
-          router.push("/admin");
+          router.replace("/admin"); // replace: browser Back never reopens the deleted profile
         }}
         endpoint="/api/admin/delete-epc"
         body={{ businessId: biz.id }}

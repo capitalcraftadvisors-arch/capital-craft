@@ -188,7 +188,7 @@ export default function AdminSidebar({
     } else {
       // Coming from a routed page (Analytics) → return to the console with the
       // chosen tab pre-selected (the console restores from this key on mount).
-      sessionStorage.setItem("adminList.tab", key);
+      try { sessionStorage.setItem("adminList.tab", key); } catch { /* storage blocked */ }
       router.push("/admin");
     }
   }

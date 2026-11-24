@@ -50,7 +50,7 @@ import {
   I, DocViewer, FillCount, fillText, fillTone, HAction, ProgressTabs, CopyButton, Section, StatCards,
   type ViewDocSlot, type ViewerItem, type StageState,
 } from "@/components/view/ViewKit";
-import { useStacked } from "@/components/view/hooks";
+import { returnFor, takeReturn, useStacked } from "@/components/view/hooks";
 import LoanApprovalForm from "@/components/LoanApprovalForm";
 import ApprovalSummary from "@/components/ApprovalSummary";
 import ReviewBar from "@/components/ReviewBar";
@@ -84,17 +84,16 @@ function Inner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const didAutoOpen = useRef(false);
-  // Where "Back" should go. When you arrive from the Task Manager, we stash
-  // "/admin/board" in sessionStorage so Back returns there, not the console.
+  // Where "Back" should go: the Task Manager when it opened THIS loan
+  // (components/view/hooks), else the console.
   const [returnTo, setReturnTo] = useState<string | null>(null);
   const lenders = useLenders();
-  useEffect(() => { if (typeof window !== "undefined") setReturnTo(sessionStorage.getItem("ccReturnTo")); }, []);
+  const caseBase = `/admin/app/${params.id}/`;
+  useEffect(() => { setReturnTo(returnFor(caseBase)); }, [caseBase]);
   // Under xl the Submitted cards stack ABOVE Documents (their details open in place).
   const stacked = useStacked();
   function goBack() {
-    const to = typeof window !== "undefined" ? sessionStorage.getItem("ccReturnTo") : null;
-    if (to) { sessionStorage.removeItem("ccReturnTo"); router.push(to); }
-    else router.push("/admin");
+    router.push(takeReturn(caseBase) ?? "/admin");
   }
   const [loan, setLoan] = useState<Loan | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);

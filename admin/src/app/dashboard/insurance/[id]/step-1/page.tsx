@@ -170,7 +170,7 @@ function Inner() {
 
   return (
     <main className="min-h-screen bg-bg-soft">
-      <InsuranceStepHeader step={1} />
+      <InsuranceStepHeader step={1} id={params.id} />
       <section className="max-w-2xl mx-auto px-5 sm:px-7 py-8">
         <h1 className="font-display text-[24px] sm:text-[28px] font-bold text-cc-ink mb-1">Insurance — your details</h1>
         <p className="text-text-mid mb-6">Upload PAN and Aadhaar.</p>

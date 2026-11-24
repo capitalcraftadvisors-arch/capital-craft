@@ -147,7 +147,8 @@ export default function Step1Page() {
     router.push("/onboarding/step-2");
   }
 
-  const inSelfEdit = getBusiness()?.status === "under_review";
+  // Only a draft or a self-edit pass gets into onboarding — any submitted status is the self-edit.
+  const inSelfEdit = getBusiness()?.status !== "draft";
   // Admin (impersonating) → no required fields; they can save a blank POC
   // and move on. Real EPCs keep every required rule.
   const bypass = isImpersonating();

@@ -27,7 +27,7 @@ function Inner() {
   function onEdit(docTags: string[]) {
     if (kind === "loan") {
       const doc = docTags.length ? `&doc=${encodeURIComponent(docTags.join(","))}` : "";
-      router.push(`/dashboard/apply/chat?id=${id}&edit=1${doc}`);
+      router.push(`/dashboard/apply/chat?id=${id}&edit=1${doc}&from=msg`); // ← in the chat comes back here
     } else {
       router.push(`/dashboard/insurance/${id}/step-1`);
     }

@@ -69,6 +69,7 @@ const draftKey = () => { const b = getBusiness(); return `cc_chat:loan:${b?.id ?
 type LoanChatDraft = {
   appId: string; msgs: Msg[]; form: Form; idx: number; undo: { msgs: Msg[]; form: Form; idx: number }[];
   subsidyCase: "subsidy" | "non_subsidy"; centralSub: string; tenure: number | null;
+  lead?: string | null; // ?lead=<id> it was started from — the same lead continues this draft
 };
 function lastLeadOwner(field: string): string {
   try { return (JSON.parse(localStorage.getItem(leadOwnerKey()) || "{}") as Form)[field] || ""; } catch { return ""; }
@@ -124,6 +125,7 @@ function ChatInner() {
     setMsgs((m) => [...m, { id: uidGen(), from: "user", text, time: nowLabel(), files, turnId, pass: form._pass, value }]);
   const prefillRef = useRef("");
   const leadRef = useRef<string | null>(null); // ?lead=<id> — the lead this application comes from
+  const backTo = useRef("/dashboard"); // ← / "No, go back" — the message page when the edit was opened from it
 
   // Warm greeting on mount, then the first question. In edit mode (?id&edit=1)
   // we adopt the existing application first (hydrate every field + which docs are
@@ -134,8 +136,16 @@ function ChatInner() {
     void (async () => {
       const q = new URLSearchParams(window.location.search);
       const editing = q.get("edit") === "1" && !!q.get("id");
+      // A lead's application, once its draft exists, continues like any other (refresh / Back / Apply again).
+      const lead = q.get("lead");
+      const d0 = lead ? loadChatDraft<LoanChatDraft>(draftKey()) : null;
+      const fromLead = async (id: string) => {
+        const l = (await fetchLeads().catch(() => [])).find((x) => x.id === id);
+        if (l) { leadRef.current = l.id; prefillRef.current = l.mobile ?? ""; }
+      };
       if (editing) {
         const qid = q.get("id")!;
+        if (q.get("from") === "msg") backTo.current = `/dashboard/messages/loan/${qid}`;
         setEditMode(true);
         setAppId(qid);
         const allow = await hydrate(qid);
@@ -151,26 +161,27 @@ function ChatInner() {
         } else {
           setScript(EDIT_INTRO);
         }
-      } else if (q.get("lead")) {
+      } else if (lead && !(d0?.appId && d0.lead === lead)) {
         // Applied from a lead (Partner Portal v2): a new application, its mobile
         // ready in the box; the loan is linked back to the lead once it starts.
-        const lead = (await fetchLeads().catch(() => [])).find((l) => l.id === q.get("lead"));
-        if (lead) { leadRef.current = lead.id; prefillRef.current = lead.mobile ?? ""; }
+        await fromLead(lead);
       } else {
         // An application left half-way (refresh, slow OCR, closed tab) — continue
         // it where it stopped, while it's still a draft.
-        const d = loadChatDraft<LoanChatDraft>(draftKey());
+        const d = d0 ?? loadChatDraft<LoanChatDraft>(draftKey());
         if (d?.appId) {
           const { data } = await supabase().from("epc_applications").select("status").eq("id", d.appId).maybeSingle();
           if ((data as { status?: string } | null)?.status === "draft") {
             setAppId(d.appId); setMsgs(d.msgs); setForm(d.form); setIdx(d.idx); setUndoStack(d.undo ?? []);
             setSubsidyCase(d.subsidyCase ?? "subsidy"); setCentralSub(d.centralSub ?? ""); setTenure(d.tenure ?? null);
+            leadRef.current = d.lead ?? null;
             const nm = await fetchEpcName();
             if (nm && nm !== "there") setEpcName(nm);
             setReady(true);
             return;
           }
           clearChatDraft(draftKey()); // submitted or gone
+          if (lead) await fromLead(lead); // the lead's draft is gone — a new application from the lead
         }
       }
       const epcName = await fetchEpcName();
@@ -225,7 +236,7 @@ function ChatInner() {
   // chat survives a refresh; cleared when the application is submitted.
   useEffect(() => {
     if (!ready || editMode || !appId || done) return;
-    const base = { appId, msgs: withoutThumbs(msgs), form, idx, subsidyCase, centralSub, tenure };
+    const base = { appId, msgs: withoutThumbs(msgs), form, idx, subsidyCase, centralSub, tenure, lead: leadRef.current };
     saveChatDraft(draftKey(), { ...base, undo: undoStack.map((s) => ({ ...s, msgs: withoutThumbs(s.msgs) })) }, { ...base, undo: [] });
   }, [ready, editMode, appId, done, msgs, form, idx, undoStack, subsidyCase, centralSub, tenure]);
 
@@ -592,7 +603,7 @@ function ChatInner() {
     <div className="h-screen flex flex-col overflow-hidden" style={THEME.canvas}>
       <PartnerChatHeader hideBrokenLogo title={editMode ? "Edit loan application" : "New loan application"}
         subtitle={editMode ? "updating the application" : "building the application"}
-        progress={progress} onBack={() => router.push("/dashboard")}>
+        progress={progress} onBack={() => router.push(backTo.current)}>
         <button onClick={undo} disabled={!undoStack.length || busy}
           className="w-8 h-8 rounded-full hover:bg-white/10 grid place-items-center text-white/80 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent text-[17px] leading-none"
           aria-label="Undo last step" title="Undo last step">↶</button>
@@ -678,7 +689,7 @@ function ChatInner() {
           {turn.kind === "confirm_edit" && (
             <div className="flex gap-2 flex-wrap">
               <button onClick={() => { pushUser("Yes, edit this application"); advance(); }} className="flex-1 px-4 py-2.5 rounded-xl bg-navy text-white text-[14px] font-semibold hover:bg-navy-hover">Yes, edit</button>
-              <button onClick={() => router.push("/dashboard")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">No, go back</button>
+              <button onClick={() => router.push(backTo.current)} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">No, go back</button>
             </div>
           )}
 

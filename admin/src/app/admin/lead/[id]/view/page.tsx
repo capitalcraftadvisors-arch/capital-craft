@@ -21,6 +21,7 @@ import Modal, { OVERLAY } from "@/components/ui/Modal";
 import CommentsSection from "@/components/CommentsSection";
 import OwnershipCard from "@/components/OwnershipCard";
 import { I, SectionCard, KV } from "@/components/view/ViewKit";
+import { returnFor, takeReturn } from "@/components/view/hooks";
 import { supabase } from "@/lib/supabase";
 import { authHeaders } from "@/lib/auth";
 import { notify } from "@/lib/notify";
@@ -63,6 +64,8 @@ export default function LeadViewPage() {
 function Inner() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
+  // Back → the Task Manager when it opened this lead (components/view/hooks), else the Leads tab.
+  const [returnTo] = useState(() => returnFor(`/admin/lead/${params.id}/`));
   const [lead, setLead] = useState<Lead | null>(null);
   const [epcs, setEpcs] = useState<EpcOpt[]>([]);
   const [loading, setLoading] = useState(true);
@@ -129,7 +132,8 @@ function Inner() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) { notify.error(data?.error || `Conversion failed (HTTP ${res.status}).`); setConverting(false); return; }
-      router.push(`/admin/app/${data.application_id}/view`);
+      // replace: browser Back from the new loan never reopens the converted lead.
+      router.replace(`/admin/app/${data.application_id}/view`);
     } catch (e) {
       notify.error("Conversion failed: " + (e as Error).message);
       setConverting(false);
@@ -161,10 +165,14 @@ function Inner() {
         <div className="w-full px-5 sm:px-8 h-14 flex items-center">
           <button
             type="button"
-            onClick={() => { sessionStorage.setItem("adminList.tab", "loanleads"); router.push("/admin"); }}
+            onClick={() => {
+              const to = takeReturn(`/admin/lead/${params.id}/`);
+              if (!to) { try { sessionStorage.setItem("adminList.tab", "loanleads"); } catch { /* storage blocked */ } }
+              router.push(to ?? "/admin");
+            }}
             className="text-[14px] text-cc-muted hover:text-cc-ink inline-flex items-center gap-1"
           >
-            ← Back to Leads
+            {returnTo === "/admin/board" ? "← Back to Task Manager" : "← Back to Leads"}
           </button>
         </div>
       </header>

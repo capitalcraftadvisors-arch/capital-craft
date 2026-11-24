@@ -79,8 +79,12 @@ export default function ReviewPage() {
     setSubmitting(true);
 
     if (isSelfEdit) {
-      const snap = localStorage.getItem("cc_self_edit_snapshot");
-      const before = snap ? JSON.parse(snap) : {};
+      let snap: string | null = null;
+      try { snap = localStorage.getItem("cc_self_edit_snapshot"); } catch { /* blocked */ }
+      // No snapshot = not an edit started from Status → Edit (e.g. Back from /status
+      // after the first submit) — nothing to send, and the one-time edit stays unused.
+      if (!snap) { setSubmitting(false); router.replace("/status"); return; }
+      const before = JSON.parse(snap);
       const res = await fetch("/api/epc/submit-self-edit", {
         method: "POST",
         headers: authHeaders({ "Content-Type": "application/json" }),
@@ -94,7 +98,7 @@ export default function ReviewPage() {
       localStorage.removeItem("cc_self_edit_snapshot");
       // Update cached business so AuthGuard reflects the lock.
       setBusiness({ ...b, status: "under_review", epc_self_edited: true });
-      router.push("/status");
+      router.replace("/status"); // Back doesn't return to the submitted review
       return;
     }
 
@@ -106,7 +110,7 @@ export default function ReviewPage() {
     setSubmitting(false);
     if (error) return notify.error(error.message);
     setBusiness({ ...b, status: "under_review" });
-    router.push("/status");
+    router.replace("/status"); // Back doesn't return to the submitted review
   }
 
   if (!biz) {

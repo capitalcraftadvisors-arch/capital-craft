@@ -244,7 +244,8 @@ export function getImpersonatedBusiness(): Business | null {
 // any lender gets the /dashboard immediately.
 export function routeForBusiness(b: Business): string {
   if (b.business_type === "admin") return b.is_owner ? "/admin/pri" : "/admin"; // owner lands on Pri
-  if (b.status === "draft") return `/onboarding/step-${Math.max(1, Math.min(b.current_step || 1, 7))}`;
+  // Step 6 saves current_step 7 = "all steps done" → the Review page (there is no step-7).
+  if (b.status === "draft") return (b.current_step ?? 1) >= 7 ? "/onboarding/review" : `/onboarding/step-${Math.max(1, b.current_step || 1)}`;
   // The dashboard is reachable when EITHER loans or insurance is unlocked;
   // the dashboard itself shows whichever apply buttons the EPC is entitled to.
   if (portalAccess(b)) return "/dashboard";

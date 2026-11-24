@@ -41,6 +41,8 @@ export default function QuotesList() {
   const [choose, setChoose] = useState(false);
   const [fromBill, setFromBill] = useState(false); // "From bill photo" (Partner Portal v2)
 
+  // The Commercial tab is kept in the address (?seg=commercial), so Back / "← Quotations" return to it.
+  useEffect(() => { if (new URLSearchParams(window.location.search).get("seg") === "commercial") setSegment("commercial"); }, []);
   useEffect(() => { fetchQuotes().then(setRows, () => setFailed(true)); }, []);
   useEffect(() => { fetchQuoteTemplate().then(setTpl, () => setTpl(null)); }, []);
   // One-tap WhatsApp share (Partner Portal v2, paid).
@@ -73,7 +75,7 @@ export default function QuotesList() {
       <div className="flex items-center gap-3 flex-wrap mb-4">
         <div className="inline-flex p-1 rounded-xl bg-white border border-line">
           {SEGMENTS.map(([k, label]) => (
-            <button key={k} type="button" onClick={() => { setSegment(k); setStatus("all"); }}
+            <button key={k} type="button" onClick={() => { setSegment(k); setStatus("all"); window.history.replaceState(null, "", k === "commercial" ? "/dashboard/quotes?seg=commercial" : "/dashboard/quotes"); }}
               className={["px-5 py-2 rounded-lg text-[14px] font-semibold", segment === k ? "text-white" : "text-text-mid hover:text-text"].join(" ")}
               style={segment === k ? { background: NAVY } : undefined}>
               {label} <span className="opacity-70">{(rows ?? []).filter((r) => r.segment === k).length}</span>

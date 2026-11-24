@@ -51,9 +51,10 @@ function Inner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allowed, params.id]);
 
-  function back() {
-    sessionStorage.setItem("adminList.tab", "otherins");
-    router.push("/admin");
+  // After a delete the console REPLACES this page, so browser Back never reopens the deleted file.
+  function back(replace = false) {
+    try { sessionStorage.setItem("adminList.tab", "otherins"); } catch { /* storage blocked */ }
+    if (replace) router.replace("/admin"); else router.push("/admin");
   }
 
   async function remove() {
@@ -64,7 +65,7 @@ function Inner() {
     setDeleting(false);
     if (!r.ok) { notify.error("Couldn't delete — " + r.error); return; }
     invalidate(OTHER_INS_LIST_CACHE);
-    back();
+    back(true);
   }
 
   if (!allowed) return null;
@@ -80,7 +81,7 @@ function Inner() {
     <main className="min-h-screen bg-white">
       <header className="border-b border-cc-line bg-white sticky top-0 z-30">
         <div className="w-full px-5 sm:px-8 h-14 flex items-center justify-between">
-          <button onClick={back} className="text-[14px] text-cc-muted hover:text-cc-ink inline-flex items-center gap-1">← Back to Other Insurance</button>
+          <button onClick={() => back()} className="text-[14px] text-cc-muted hover:text-cc-ink inline-flex items-center gap-1">← Back to Other Insurance</button>
           <img src="/brand/capital-craft.png" alt="Capital Craft" className="h-7 w-auto object-contain" />
         </div>
       </header>

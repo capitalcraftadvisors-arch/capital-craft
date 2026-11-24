@@ -78,8 +78,11 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
       setOrg(org);
       const sp = new URLSearchParams(window.location.search);
       let d: QuoteDoc;
-      if (params.id !== "new") {
-        const got = await fetchQuote(params.id);
+      // Back / Forward to a quotation first saved here keeps the router's "new"
+      // segment (the address was replaced on save) — the id is in the address.
+      const id = params.id !== "new" ? params.id : (window.location.pathname.split("/").pop() || "new");
+      if (id !== "new") {
+        const got = await fetchQuote(id);
         setRow(got.row);
         d = got.doc;
       } else if (sp.get("from")) {
@@ -104,6 +107,7 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
   if (!doc || !totals) return <p className="text-[13px] text-text-muted">Loading…</p>;
 
   const resi = doc.segment === "residential";
+  const listHref = resi ? "/dashboard/quotes" : "/dashboard/quotes?seg=commercial"; // the list opens on this kind's tab
   const pays = resi && totals.eligible ? totals.net : totals.total;
   const autoSubsidy = totals.eligible ? centralSubsidyFor(doc.kw, false) : 0;
 
@@ -194,7 +198,7 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
   async function remove() {
     if (!row || !(await askConfirm(`Delete quotation ${row.quote_no}? This can't be undone.`, { danger: true }))) return;
     setBusy("delete");
-    try { await deleteQuote(row.id); router.push("/dashboard/quotes"); }
+    try { await deleteQuote(row.id); router.replace(listHref); }
     catch (e) { setError((e as Error).message); setBusy(null); }
   }
 
@@ -237,7 +241,7 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
     <div className="max-w-[1250px]">
       {/* Action bar */}
       <div className="sticky top-0 z-30 -mx-5 sm:-mx-8 px-5 sm:px-8 py-3 mb-4 bg-bg-soft/95 backdrop-blur border-b border-line flex items-center gap-3 flex-wrap">
-        <button type="button" onClick={() => router.push("/dashboard/quotes")} className="text-[13px] text-text-muted hover:text-text">← Quotations</button>
+        <button type="button" onClick={() => router.push(listHref)} className="text-[13px] text-text-muted hover:text-text">← Quotations</button>
         <span className="text-[16px] font-bold text-cc-ink">{row ? row.quote_no : "New quotation"}</span>
         <span className="text-[12px] font-semibold px-2.5 py-1 rounded-full bg-[#fff5de] text-[#8a5a00]">{resi ? "Residential" : "Commercial"}</span>
         {row && (

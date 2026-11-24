@@ -491,7 +491,10 @@ function Inner() {
   return (
     <div className="h-screen flex flex-col overflow-hidden" style={THEME.canvas}>
       <AdminChatHeader theme={THEME} title={editMode ? "Edit EPC" : "New EPC"} subtitle={editMode ? "completing the profile" : "building the profile"}
-        progress={progress} onBack={() => router.push("/admin")} onClose={() => router.push("/admin")} />
+        progress={progress}
+        // ← from a profile's "Continue in chat" (?edit=1) goes back to that profile.
+        onBack={() => router.push(epcId && new URLSearchParams(window.location.search).get("edit") === "1" ? `/admin/epc/${epcId}/view` : "/admin")}
+        onClose={() => router.push("/admin")} />
 
       {/* Messages */}
       <ChatMessages scrollRef={scrollRef}>

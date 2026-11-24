@@ -59,6 +59,9 @@ export default function LeadsPage() {
     if (f && (f === "due" || (LEAD_STATUSES as string[]).includes(f))) setFilter(f);
     setOwner(u.get("owner"));
     if (u.get("new") === "1" && canWork(getBusiness())) setOpen("new");
+    // ?new=1 opens the form once — Back to this page or a refresh doesn't open it again
+    // (left alone while a non-v2 login is being sent to /dashboard above).
+    if (u.has("new") && portalV2(getBusiness())) { u.delete("new"); const s = u.toString(); window.history.replaceState(null, "", `/dashboard/leads${s ? `?${s}` : ""}`); }
   }, []);
   // Lead owners to pick from (Owner / Admin) — read when the form first opens.
   useEffect(() => {

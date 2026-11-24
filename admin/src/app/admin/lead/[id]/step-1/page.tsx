@@ -130,7 +130,7 @@ function Inner() {
         <div className="w-full px-4 sm:px-6 h-16 flex items-center">
           <button
             type="button"
-            onClick={() => router.push("/admin")}
+            onClick={() => { try { sessionStorage.setItem("adminList.tab", "loanleads"); } catch { /* storage blocked */ } router.push("/admin"); }}
             className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#4338ca] hover:opacity-80"
           >
             ← Back to Leads

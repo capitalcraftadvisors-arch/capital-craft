@@ -37,11 +37,12 @@ import BoardCard from "./_parts/BoardCard";
 import CaseDetails, { DETAIL_COLS } from "./_parts/CaseDetails";
 import LenderPickerPopup from "./_parts/LenderPickerPopup";
 import { MyMonthCard, WorkloadStrip } from "./_parts/MonthCards";
+import { clearReturn, rememberReturn } from "@/components/view/hooks";
 
-// A case page's back link returns to the board (app/[id]/view reads this key).
-// Blocked storage just means the back link goes to its usual place.
-function rememberBoardReturn() {
-  try { sessionStorage.setItem("ccReturnTo", "/admin/board"); } catch { /* storage blocked */ }
+// A case page's back link returns to the board — only for the case opened
+// (href; the profile views read it via components/view/hooks).
+function rememberBoardReturn(href: string) {
+  rememberReturn("/admin/board", href);
 }
 
 export default function OpsBoardPage() {
@@ -64,8 +65,8 @@ function Inner() {
   const [loading, setLoading] = useState(true);
   const [sel, setSel] = useState<string | null>(null);
   // No mixed "All" view — everyone works one source at a time (default: loans).
-  const [srcFilter, setSrcFilter] = useState<"all" | CaseSource>("loan");
-  const [ownerFilter, setOwnerFilter] = useState<string>(isMainAdmin ? "all" : "me"); // 'me' | 'all' | userId | 'unassigned'
+  const [srcFilter, setSrcFilter] = useState<"all" | CaseSource>(() => tmState().boardSrc ?? "loan");
+  const [ownerFilter, setOwnerFilter] = useState<string>(() => tmState().boardOwner ?? (isMainAdmin ? "all" : "me")); // 'me' | 'all' | userId | 'unassigned'
   const [myDayOwner, setMyDayOwner] = useState<string>(() => tmState().owner ?? "all"); // My Day (manager): 'all' team | 'me' | RM userId
   const [busy, setBusy] = useState(false);
   const [touches, setTouches] = useState(0);
@@ -83,8 +84,10 @@ function Inner() {
   // RMs / managers default to the "My Day" action queue; admins stay on the board.
   // Back from a case → the same view (and My Day's tabs / filters, see TmState).
   const [view, setView] = useState<"myday" | "board">(() => tmState().view ?? (isMainAdmin ? "board" : "myday"));
-  useEffect(() => { saveTm({ view, owner: myDayOwner, q }); }, [view, myDayOwner, q]);
-  const [quick, setQuick] = useState<"none" | "myoverdue" | "unassigned" | "breaches">("none");
+  const [quick, setQuick] = useState<"none" | "myoverdue" | "unassigned" | "breaches">(() => tmState().quick ?? "none");
+  useEffect(() => { saveTm({ view, owner: myDayOwner, q, boardSrc: srcFilter, boardOwner: ownerFilter, quick }); }, [view, myDayOwner, q, srcFilter, ownerFilter, quick]);
+  // Back on the board → a return key a case left behind (browser Back) is spent.
+  useEffect(() => { clearReturn(); }, []);
   const [dragId, setDragId] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ caseId: string; column: string } | null>(null);
   // Inline lender picker (change: loan lender/decision popups render ON the board).
@@ -335,8 +338,8 @@ function Inner() {
       // opens the approval-details page, and 1st-Phase opens disbursement.
       if (col === "send_lender") { setDrop(null); await openLenderPicker(c, "docsent"); return; }
       if (col === "approved" || col === "rejected") { setDrop(null); await openLenderPicker(c, col === "rejected" ? "reject" : "approve"); return; }
-      if (col === "phase1") { rememberBoardReturn(); setDrop(null); router.push(`/admin/app/${c.id}/disbursement`); return; }
-      if (col === "abort") { rememberBoardReturn(); setDrop(null); router.push(`/admin/app/${c.id}/view?do=abort`); return; }
+      if (col === "phase1") { const to = `/admin/app/${c.id}/disbursement`; rememberBoardReturn(to); setDrop(null); router.push(to); return; }
+      if (col === "abort") { const to = `/admin/app/${c.id}/view?do=abort`; rememberBoardReturn(to); setDrop(null); router.push(to); return; }
     }
     // Simple status move (loan → Docs Pending / hold, or an EPC / insurance / lead stage).
     const ok = await runAction(c, "set_stage", { column: drop.column });
@@ -392,9 +395,10 @@ function Inner() {
   function pickerApprove(lender: PickerLender) {
     if (!picker) return;
     const id = picker.c.id;
-    rememberBoardReturn();
+    const to = `/admin/app/${id}/approval?lender=${lender.key}&label=${encodeURIComponent(lender.label)}`;
+    rememberBoardReturn(to);
     setPicker(null);
-    router.push(`/admin/app/${id}/approval?lender=${lender.key}&label=${encodeURIComponent(lender.label)}`);
+    router.push(to);
   }
 
   // RMs an overseer manages: a MANAGER sees only their own RMs; MAIN_ADMIN all.
@@ -422,7 +426,7 @@ function Inner() {
     return new Set(ids.filter(Boolean) as string[]);
   }, [isMainAdmin, isManager, boardPeople, myRms, me]);
   // Open a case from My Day; its page's back link returns here.
-  const openCase = (href: string) => { rememberBoardReturn(); router.push(href); };
+  const openCase = (href: string) => { rememberBoardReturn(href); router.push(href); };
   // Today in IST ("YYYY-MM-DD") — for follow-up due/overdue comparisons.
   const todayStr = useMemo(() => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()), []);
   const myDay = useMemo(() => {
@@ -720,7 +724,7 @@ function Inner() {
                   <div className="text-[11px] text-text-muted mb-1">&nbsp;</div>
                   <button type="button"
                     className="w-full rounded-input border border-line bg-white text-text py-3 text-[14px] font-semibold inline-flex items-center justify-center gap-1.5 hover:bg-[#f5f8f6]"
-                    onClick={() => { rememberBoardReturn(); router.push(selCase.href); }}>
+                    onClick={() => openCase(selCase.href)}>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M1.5 12s3.5-7 10.5-7 10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg>
                     View profile
                   </button>

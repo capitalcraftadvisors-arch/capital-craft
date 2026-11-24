@@ -37,12 +37,13 @@ const th = "px-4 py-2.5 font-semibold text-left whitespace-nowrap";
 const td = "px-4 py-2.5 text-text";
 
 function Inner() {
-  const [tab, setTab] = useState<Tab>("team");
-  // The open tab lives in the URL, so Back from a profile lands on it.
-  useEffect(() => {
+  // The open tab lives in the URL, so Back from a profile lands on it — read on
+  // the first render (Inner mounts after AuthGuard, client-side), so the Team
+  // tab never mounts (and reads) first.
+  const [tab, setTab] = useState<Tab>(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    if (t === "partners" || t === "epcs") setTab(t);
-  }, []);
+    return t === "partners" || t === "epcs" ? t : "team";
+  });
   function pick(t: Tab) {
     setTab(t);
     window.history.replaceState(null, "", t === "team" ? "/admin/stakeholders" : `/admin/stakeholders?tab=${t}`);

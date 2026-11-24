@@ -14,6 +14,7 @@ import { saveDownload } from "@/lib/storage";
 import { fmtRupees } from "@/lib/money";
 import { notify } from "@/lib/notify";
 import { I, SectionCard, KV, Pill, DocGrid, StatusBtn, type ViewDocSlot } from "@/components/view/ViewKit";
+import { returnFor, takeReturn } from "@/components/view/hooks";
 import InsuranceUpload from "@/components/InsuranceUpload";
 import OwnershipCard from "@/components/OwnershipCard";
 import ProfileTabBar, { TabButton } from "@/components/ProfileTabBar";
@@ -42,6 +43,8 @@ export default function InsuranceViewPage() {
 function Inner() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  // Back → the Task Manager when it opened this file (components/view/hooks), else the console.
+  const [returnTo] = useState(() => returnFor(`/admin/insurance/${params.id}/`));
   const [app, setApp] = useState<App | null>(null);
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
@@ -181,7 +184,7 @@ function Inner() {
     <main className="min-h-screen bg-white">
       <header className="border-b border-cc-line bg-white sticky top-0 z-30">
         <div className="w-full px-5 sm:px-8 h-14 flex items-center justify-between">
-          <button onClick={() => router.push("/admin")} className="text-[14px] text-cc-muted hover:text-cc-ink inline-flex items-center gap-1">← Back to console</button>
+          <button onClick={() => router.push(takeReturn(`/admin/insurance/${params.id}/`) ?? "/admin")} className="text-[14px] text-cc-muted hover:text-cc-ink inline-flex items-center gap-1">{returnTo === "/admin/board" ? "← Back to Task Manager" : "← Back to console"}</button>
           <img src="/brand/capital-craft.png" alt="Capital Craft" className="h-7 w-auto object-contain" />
         </div>
       </header>
@@ -350,7 +353,7 @@ function Inner() {
         onDeleted={(payload) => {
           setDeleteOpen(false);
           notify.success(`Deleted ${payload.display_id ?? "insurance application"}${payload.applicant ? ` — ${payload.applicant}` : ""}.`);
-          router.push("/admin");
+          router.replace("/admin"); // replace: browser Back never reopens the deleted file
         }}
         endpoint="/api/admin/delete-insurance"
         body={{ applicationId: app.id }}
