@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CENTRAL_SUBSIDY_CAP, DEFAULT_INDICATIVE_ROI, TENURES,
-  centralSubsidyFor, computeCentralSubsidy, computeEmi, computeFlatEmi, stateSubsidyFor,
+  STATE_SUBSIDY, centralSubsidyFor, computeCentralSubsidy, computeEmi, computeFlatEmi, stateSubsidyFor,
 } from "../emi";
 
 describe("computeEmi (reducing balance)", () => {
@@ -82,29 +82,14 @@ describe("centralSubsidyFor", () => {
 });
 
 describe("stateSubsidyFor (quotation builder)", () => {
-  it("pays ₹30,000 a kW up to 3 kW, then ₹78,000", () => {
-    expect(stateSubsidyFor(1)).toBe(30000);
-    expect(stateSubsidyFor(2)).toBe(60000);
-    expect(stateSubsidyFor(3)).toBe(78000);
-    expect(stateSubsidyFor(5)).toBe(78000);
-  });
-
-  it("pays part-kW sizes pro rata below 3 kW", () => {
-    expect(stateSubsidyFor(0.5)).toBe(15000);
-    expect(stateSubsidyFor(1.5)).toBe(45000);
-    expect(stateSubsidyFor(2.5)).toBe(75000);
+  it("is a fixed ₹17,000 for any size", () => {
+    for (const kw of [1, 2, 3, 5, 10]) expect(stateSubsidyFor(kw)).toBe(STATE_SUBSIDY);
+    expect(STATE_SUBSIDY).toBe(17000);
   });
 
   it("is 0 for a missing, zero, negative or non-number size", () => {
     expect(stateSubsidyFor(0)).toBe(0);
     expect(stateSubsidyFor(-2)).toBe(0);
     expect(stateSubsidyFor(NaN)).toBe(0);
-  });
-
-  // Between 2.6 and 2.99 kW the pro-rata figure used to pass the cap
-  // (2.8 kW got ₹84,000, more than a 3 kW plant).
-  it("never pays more than the ₹78,000 cap (2.6–2.99 kW)", () => {
-    expect(stateSubsidyFor(2.8)).toBeLessThanOrEqual(78000);
-    expect(stateSubsidyFor(2.99)).toBeLessThanOrEqual(stateSubsidyFor(3));
   });
 });

@@ -31,10 +31,10 @@ export function centralSubsidyFor(kw: number | null, commercial: boolean): numbe
   return commercial ? 0 : computeCentralSubsidy(kw);
 }
 
-// State subsidy by system size (the quotation builder): 1 kW ₹30,000 · 2 kW ₹60,000 · 3 kW+ ₹78,000 (capped).
+// State subsidy in the quotation builder: a fixed ₹17,000 for now, whatever the size.
+export const STATE_SUBSIDY = 17000;
 export function stateSubsidyFor(kw: number): number {
-  if (!kw || kw <= 0) return 0;
-  return Math.min(CENTRAL_SUBSIDY_CAP, Math.round(kw * 30000));
+  return kw > 0 ? STATE_SUBSIDY : 0;
 }
 
 // Reducing-balance EMI, rounded to the nearest rupee.

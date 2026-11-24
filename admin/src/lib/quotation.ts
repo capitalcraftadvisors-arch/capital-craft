@@ -14,7 +14,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { downloadBuffer } from "./gcs";
 import { inr } from "./pdf-template";
 import { fmtDateIST } from "./dates";
-import { stateSubsidyFor } from "./emi";
+import { computeCentralSubsidy, stateSubsidyFor } from "./emi";
 
 export type QuotationInput = {
   customer_name: string;
@@ -22,12 +22,11 @@ export type QuotationInput = {
   state: string;
   date?: string;            // DD/MM/YYYY — defaults to today
   quote_no: string;
-  kw: number | string;
+  kw: number | string;      // whole kW
   system_type: string;      // Hybrid / On-grid / Off-grid
   battery?: string;         // voltage / capacity, blank for on-grid
   total: number;            // plant price (GST incl.)
   subsidised: boolean;
-  central_subsidy?: number;  // typed by the EPC when subsidised
   // Bill of material — selected makes.
   make_panel: string;
   make_inverter: string;
@@ -55,9 +54,10 @@ const loaded = new Map<string, Buffer>();
 
 // Build the docxtemplater data object (computes subsidy + final price + display).
 export function buildQuotationData(input: QuotationInput) {
-  const kwNum = Number(input.kw) || 0;
+  const kwNum = Math.round(Number(input.kw) || 0); // whole kW only
   const total = Number(input.total) || 0;
-  const central = input.subsidised ? (Number(input.central_subsidy) || 0) : 0;
+  // Central: PM Surya Ghar tiers (1 kW ₹30,000 · 2 kW ₹60,000 · 3 kW+ ₹78,000); state: fixed.
+  const central = input.subsidised ? computeCentralSubsidy(kwNum) : 0;
   const state = input.subsidised ? stateSubsidyFor(kwNum) : 0;
   const final = Math.max(0, total - central - state);
 

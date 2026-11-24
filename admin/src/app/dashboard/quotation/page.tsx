@@ -13,7 +13,7 @@ import AuthGuard from "@/components/AuthGuard";
 import BackHeader from "@/components/PartnerBackHeader";
 import { authHeaders } from "@/lib/auth";
 import { fmtDateIST } from "@/lib/dates";
-import { stateSubsidyFor } from "@/lib/emi";
+import { computeCentralSubsidy, stateSubsidyFor } from "@/lib/emi";
 import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template";
 import { customState } from "@/lib/custom-template";
 import { useCloseOnOutsideClick } from "@/lib/use-close-on-outside-click";
@@ -34,7 +34,7 @@ import {
 type Form = {
   customer_name: string; pincode: string; city: string; address: string; date: string; quote_no: string;
   kw: string; system_type: string; battery: string; battery_unit: string; total: string;
-  subsidised: boolean; central_subsidy: string;
+  subsidised: boolean;
   make_panel: string; make_inverter: string; roof_type: string; make_structure: string;
   make_acdb: string; make_dcdb: string; make_cable: string; make_battery: string;
 };
@@ -42,7 +42,7 @@ const BATTERY_UNITS = ["V", "Ah", "kWh", "VAh"];
 const EMPTY: Form = {
   customer_name: "", pincode: "", city: "", address: "", date: "", quote_no: "", // date: set when a quotation starts
   kw: "", system_type: "Hybrid", battery: "", battery_unit: "V", total: "",
-  subsidised: true, central_subsidy: "",
+  subsidised: true,
   make_panel: "", make_inverter: "", roof_type: "", make_structure: "",
   make_acdb: ACDB_DCDB_OPTIONS[0], make_dcdb: ACDB_DCDB_OPTIONS[0], make_cable: "Havells", make_battery: "",
 };
@@ -157,15 +157,15 @@ function Inner() {
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't read the photo."); return; }
       const x = j.fields || {};
+      const kwRead = Math.round(Number(decimal(String(x.kw ?? ""))) || 0); // whole kW
       setF((p) => ({
         ...p,
         customer_name: x.customer_name || p.customer_name,
         pincode: x.pincode || p.pincode,
         address: x.address || p.address,
-        kw: x.kw ? decimal(String(x.kw)) : p.kw,
+        kw: kwRead > 0 ? String(kwRead) : p.kw,
         system_type: normType(x.system_type) || p.system_type,
         total: x.total ? decimal(String(x.total)) : p.total,
-        central_subsidy: x.central_subsidy ? decimal(String(x.central_subsidy)) : p.central_subsidy,
         make_panel: x.module_brand || p.make_panel,
         make_inverter: x.inverter_brand || p.make_inverter,
         battery: x.battery ? decimal(String(x.battery)) : p.battery,
@@ -179,7 +179,7 @@ function Inner() {
 
   const kwNum = Number(f.kw) || 0;
   const totalNum = Number(f.total) || 0;
-  const centralNum = f.subsidised ? Number(f.central_subsidy) || 0 : 0;
+  const centralNum = f.subsidised ? computeCentralSubsidy(kwNum) : 0;
   const stateNum = f.subsidised ? stateSubsidyFor(kwNum) : 0;
   const finalNum = Math.max(0, totalNum - centralNum - stateNum);
 
@@ -194,7 +194,7 @@ function Inner() {
     await run({
       customer_name: f.customer_name, city: f.city, state: f.address, date: f.date, quote_no: f.quote_no,
       kw: kwNum, system_type: f.system_type, battery: hasBattery && f.battery ? `${f.battery} ${f.battery_unit}` : "",
-      total: totalNum, subsidised: f.subsidised, central_subsidy: centralNum,
+      total: totalNum, subsidised: f.subsidised,
       make_panel: f.make_panel, make_inverter: f.make_inverter, make_structure: f.make_structure,
       make_acdb: f.make_acdb, make_dcdb: f.make_dcdb, make_cable: f.make_cable,
       make_battery: hasBattery ? f.make_battery : "",
@@ -253,7 +253,8 @@ function Inner() {
 
         {/* System */}
         <Section title="System">
-          <Field l="System size (kW)" req><input className={input} inputMode="decimal" value={f.kw} onChange={(e) => set("kw", decimal(e.target.value))} placeholder="e.g. 3" /></Field>
+          {/* Whole kW only (subsidies go by 1 / 2 / 3 kW) — a "." or "," is refused. */}
+          <Field l="System size (kW)" req><input className={input} inputMode="numeric" value={f.kw} onChange={(e) => { const v = e.target.value; if (!/[.,]/.test(v)) set("kw", v.replace(/\D/g, "")); }} placeholder="e.g. 3" /></Field>
           <Field l="System type">
             <select className={input} value={f.system_type} onChange={(e) => set("system_type", e.target.value)}>
               {SYSTEM_TYPES.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -277,8 +278,8 @@ function Inner() {
           <Field l="Subsidised plan?"><YesNo value={f.subsidised} onChange={(v) => set("subsidised", v)} /></Field>
           {f.subsidised && (
             <>
-              <Field l="Central subsidy ₹ (you enter)"><input className={input} inputMode="numeric" value={f.central_subsidy} onChange={(e) => set("central_subsidy", decimal(e.target.value))} placeholder="e.g. 60000" /></Field>
-              <Field l="State subsidy ₹ (auto by kW)"><input className={input + " bg-bg-soft"} readOnly value={inr(stateNum)} /></Field>
+              <Field l="Central subsidy ₹ (auto by kW)"><input className={input + " bg-bg-soft"} readOnly value={inr(centralNum)} /></Field>
+              <Field l="State subsidy ₹"><input className={input + " bg-bg-soft"} readOnly value={inr(stateNum)} /></Field>
             </>
           )}
           <Field l="Final effective price ₹"><input className={input + " bg-bg-soft font-semibold"} readOnly value={inr(finalNum)} /></Field>
