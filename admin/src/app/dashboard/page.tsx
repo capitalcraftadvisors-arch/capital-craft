@@ -133,7 +133,7 @@ function DashboardInner() {
       <main className="px-5 sm:px-8 pb-12 pt-3">
         {section === "home" && hasModule(me, "quotes") && <CustomTemplateBanner tpl={quoteTpl} />}
         {section === "home" && v2 && (
-          <DashboardV2 rms={RMS}
+          <DashboardV2 rms={RMS} customers={customers && hasModule(me, "quotes")}
             onQuotation={() => (customers ? show("customers") : router.push("/dashboard/quotes"))}
             onLoans={(f) => { setLoanFilter(f); show("loans"); }}
             onInsurance={(due) => { setInsFilter(due ? "renewal" : "all"); show("insurance"); }}

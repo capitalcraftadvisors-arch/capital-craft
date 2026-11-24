@@ -75,8 +75,9 @@ export default function PartnerShell({ active, onSection, badge = 0, quoteTpl, t
     { key: "documents", label: "Document pending", show: !site },
     { key: "emi", label: "EMI calculator", show: !site },
     { key: "customers", label: "Customer applications", show: customers && quotes },
-    // Quotations — "New quotation" there picks the Simple or the Custom template.
-    { key: "quotation", label: "Quotations", show: !customers && quotes, href: "/dashboard/quotes" },
+    // Quotations — "New quotation" there picks the Simple or the Custom template. A
+    // Customer-applications company gets it on the new portal (bill photo, proposal link).
+    { key: "quotation", label: "Quotations", show: quotes && (!customers || v2), href: "/dashboard/quotes" },
     { key: "settings", label: "Settings", show: manage, href: SETTINGS_HREF },
   ];
   const items = nav.filter((n) => n.show);

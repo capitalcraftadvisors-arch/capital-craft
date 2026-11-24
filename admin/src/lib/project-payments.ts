@@ -45,13 +45,37 @@ function friendly(e: { message?: string; code?: string } | null, fallback = "Som
   return new Error(fallback);
 }
 
-/** Money received (customer + lender). */
-export const received = (pays: Pick<Payment, "amount">[]) => Math.round(pays.reduce((s, p) => s + Number(p.amount || 0), 0) * 100) / 100;
-/** What is still to come: the project cost less what was received (never below 0); null when there is no cost. */
-export function balanceDue(cost: number | null | undefined, pays: Pick<Payment, "amount">[]): number | null {
-  if (cost == null || !Number.isFinite(Number(cost))) return null;
-  return Math.max(0, Math.round((Number(cost) - received(pays)) * 100) / 100);
+/** A loan project's lender money (0139 epc_project_lender): paid so far, and its whole share net of its charges. */
+export type LenderMoney = { paid: number; share: number };
+
+/** The loan's lender money for a project from a loan (one small read when the project opens, kept a few minutes). */
+export async function fetchLenderMoney(applicationId: string): Promise<LenderMoney | null> {
+  const key = `lender.${getBusiness()?.id ?? ""}.${applicationId}`;
+  const hit = getCached<LenderMoney | null>(key, TTL);
+  if (hit !== null) return hit;
+  const { data, error } = await supabase().rpc("epc_project_lender", { p_app: applicationId });
+  if (error) throw friendly(error, "Couldn't load the loan's money.");
+  const r = (data as { paid: number; share: number }[] | null)?.[0];
+  const money = r ? { paid: Number(r.paid) || 0, share: Number(r.share) || 0 } : null;
+  setCached(key, money);
+  return money;
 }
+
+/** A project's money as the dashboard counts it (0139): received = the customer's payments
+ *  + the lender's money (its tranches, or the "From lender" payments if more — never both);
+ *  customerDue = what the customer still owes (the lender's share is the lender's). */
+export function projectMoney(cost: number | null | undefined, pays: Pick<Payment, "amount" | "source">[], lender: LenderMoney | null) {
+  const sum = (s: PaySource) => pays.filter((p) => p.source === s).reduce((t, p) => t + Number(p.amount || 0), 0);
+  const cust = sum("customer"), lend = sum("lender");
+  const fromLender = Math.max(lend, lender?.paid ?? 0);
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  return {
+    received: r2(cust + fromLender),
+    fromLender: r2(fromLender),
+    customerDue: cost == null || !Number.isFinite(Number(cost)) ? null : Math.max(0, r2(Number(cost) - cust - Math.max(lend, lender?.share ?? 0))),
+  };
+}
+
 
 /** A project's payments, newest first. */
 export async function fetchPayments(projectId: string): Promise<Payment[]> {

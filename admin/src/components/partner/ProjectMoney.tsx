@@ -1,8 +1,10 @@
 "use client";
 
 // A project's money inside the project editor (Partner Portal v2): project cost,
-// received, balance due, when the next payment is due, every payment (from the
-// customer or the lender) and a one-tap WhatsApp reminder of the balance (paid).
+// received (a loan project: its lender's money too), the customer's balance due,
+// when the next payment is due, every payment (from the customer or the lender)
+// and a one-tap WhatsApp reminder of the customer's balance (paid) — the same
+// figures as the dashboard (lib/project-payments projectMoney, 0139).
 // Owner / Admin / Sales add and delete payments and set the due date; Viewers
 // only see; Site staff never. The payments are one read when the project opens.
 
@@ -19,8 +21,8 @@ import { fmtDate, localIsoDate } from "@/lib/dates";
 import { amountInput, fmtRupees } from "@/lib/money";
 import type { ProjectRow } from "@/lib/projects";
 import {
-  fetchPayments, addPayment, deletePayment, setDueDate, remindPayment, received, balanceDue, newestFirst,
-  PAY_SOURCES, PAY_SOURCE_LABEL, PAY_MODES, PAY_MODE_LABEL, type Payment, type PaySource, type PayMode,
+  fetchPayments, fetchLenderMoney, projectMoney, addPayment, deletePayment, setDueDate, remindPayment, newestFirst,
+  PAY_SOURCES, PAY_SOURCE_LABEL, PAY_MODES, PAY_MODE_LABEL, type LenderMoney, type Payment, type PaySource, type PayMode,
 } from "@/lib/project-payments";
 
 type Draft = { paid_on: string; amount: string; source: PaySource; mode: PayMode | ""; reference: string; notes: string };
@@ -32,6 +34,7 @@ export default function ProjectMoney({ project, canEdit, onChanged }: { project:
   const me = getBusiness();
   const show = portalV2(me) && !isSiteStaff(me);
   const [pays, setPays] = useState<Payment[] | null>(null);
+  const [lender, setLender] = useState<LenderMoney | null>(null);
   const [failed, setFailed] = useState(false);
   const [wa, setWa] = useState(false);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -42,14 +45,17 @@ export default function ProjectMoney({ project, canEdit, onChanged }: { project:
   useEffect(() => {
     if (!show) return;
     let live = true;
-    setPays(null); setFailed(false); setDraft(null); setError(null);
-    fetchPayments(project.id).then((r) => { if (live) setPays(r); }, () => { if (live) setFailed(true); });
+    setPays(null); setLender(null); setFailed(false); setDraft(null); setError(null);
+    // A project from a loan: its lender money too (in parallel; a failure just leaves it out).
+    const loan = project.application_id && project.payment_mode !== "cash" ? fetchLenderMoney(project.application_id).catch(() => null) : Promise.resolve(null);
+    Promise.all([fetchPayments(project.id), loan]).then(([r, l]) => { if (live) { setPays(r); setLender(l); } }, () => { if (live) setFailed(true); });
     return () => { live = false; };
-  }, [show, project.id]);
+  }, [show, project.id, project.application_id, project.payment_mode]);
   useEffect(() => setDueOn(project.payment_due_on ?? ""), [project.payment_due_on]);
 
-  const got = pays ? received(pays) : null;
-  const bal = pays ? balanceDue(project.project_cost, pays) : null;
+  const money = pays ? projectMoney(project.project_cost, pays, lender) : null;
+  const got = money?.received ?? null;
+  const bal = money?.customerDue ?? null;
   const canRemind = !!project.mobile && (bal ?? 0) > 0;
   // WhatsApp (paid) — a cached read, only when there is something to remind.
   useEffect(() => { if (show && canRemind) fetchWhatsAppOn().then(setWa, () => {}); }, [show, canRemind]);
@@ -103,7 +109,10 @@ export default function ProjectMoney({ project, canEdit, onChanged }: { project:
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <Tile l="Project cost">{fmtRupees(project.project_cost)}</Tile>
-        <Tile l="Received">{pending ? "…" : fmtRupees(got)}</Tile>
+        <Tile l="Received">
+          {pending ? "…" : fmtRupees(got)}
+          {money && money.fromLender > 0 && <div className="text-[11.5px] font-normal text-text-muted">{fmtRupees(money.fromLender)} from lender</div>}
+        </Tile>
         <Tile l="Balance due">
           <div className={bal != null && bal > 0 ? "text-red-600" : undefined}>{pending ? "…" : fmtRupees(bal)}</div>
           {canRemind && <WhatsAppButton on={wa} busy={busy === "wa"} onClick={() => void remind()} label="Send reminder" className="mt-1" />}

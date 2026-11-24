@@ -15,6 +15,7 @@ import { getBusiness } from "@/lib/auth";
 import { canManageOrg } from "@/lib/epc-roles";
 import { customState, CUSTOM_LOCKED_MSG } from "@/lib/custom-template";
 import { markCustomTemplateSeen } from "@/components/partner/CustomTemplateBanner";
+import { SARVATRA } from "@/lib/quotation-brands";
 import type { QuoteTemplate } from "@/lib/quotation-template";
 
 export default function NewQuoteChooser({ segment, tpl, onClose }: {
@@ -24,7 +25,9 @@ export default function NewQuoteChooser({ segment, tpl, onClose }: {
 }) {
   const router = useRouter();
   const me = getBusiness();
-  const state = tpl ? customState(tpl) : null;
+  // The gozerobils builder (Sustera) is its Customer applications, and never locks.
+  const customers = tpl?.storage_path === SARVATRA.key;
+  const state = tpl ? (customers ? "ready" : customState(tpl)) : null;
   const [samples, setSamples] = useState(0); // the sample quotations uploaded (no template yet)
   const titleId = useId();
 
@@ -59,7 +62,7 @@ export default function NewQuoteChooser({ segment, tpl, onClose }: {
 
           {state === "ready" && tpl ? (
             <>
-              <button type="button" onClick={() => { markCustomTemplateSeen(tpl); router.push("/dashboard/quotation"); }}
+              <button type="button" onClick={() => { if (customers) { router.push("/dashboard?s=customers"); return; } markCustomTemplateSeen(tpl); router.push("/dashboard/quotation"); }}
                 className={primary + " mt-auto"} style={{ background: NAVY }}>
                 Make quotation
               </button>

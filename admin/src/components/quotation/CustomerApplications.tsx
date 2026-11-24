@@ -12,6 +12,7 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, authHeaders } from "@/lib/auth";
+import { canWork } from "@/lib/epc-roles";
 import { fmtDateTime } from "@/lib/dates";
 import { INDIA_STATES } from "@/lib/india-states";
 import { MODULE_BRANDS, INVERTER_BRANDS, BRAND_FIELDS, SARVATRA, sarvatraTerms } from "@/lib/quotation-brands";
@@ -157,6 +158,7 @@ let cache: { biz: string; rows: Row[] } | null = null;
 // the WhatsApp button stays closed; Email is always open.
 export default function CustomerApplications({ serialNext, onSerial, whatsapp }: { serialNext: number | null; onSerial: (n: number) => void; whatsapp: boolean }) {
   const biz = getBusiness()?.id ?? "";
+  const work = canWork(getBusiness()); // a Viewer reads only (0139): no making or editing
   const [rows, setRowsState] = useState<Row[] | null>(cache?.biz === biz ? cache.rows : null);
   const setRows = (fn: (r: Row[]) => Row[]) =>
     setRowsState((old) => { const next = fn(old ?? []); cache = { biz, rows: next }; return next; });
@@ -198,11 +200,13 @@ export default function CustomerApplications({ serialNext, onSerial, whatsapp }:
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h2 className="font-display text-[20px] font-bold text-cc-ink">Customer applications</h2>
-        <button onClick={() => setForm({ doc: "quotation", row: null })} disabled={!rows}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-[13px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
-          Quotation builder
-        </button>
+        {work && (
+          <button onClick={() => setForm({ doc: "quotation", row: null })} disabled={!rows}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-[13px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
+            Quotation builder
+          </button>
+        )}
       </div>
 
       <div className="flex items-center gap-2 max-w-[420px] bg-white border border-line rounded-xl px-3.5 h-11 focus-within:border-navy focus-within:ring-2 focus-within:ring-navy/15 transition">
@@ -224,7 +228,7 @@ export default function CustomerApplications({ serialNext, onSerial, whatsapp }:
           </thead>
           <tbody>
             {!rows ? <tr><td colSpan={6} className="px-5 py-8 text-center text-text-muted">{error ? "—" : "Loading…"}</td></tr>
-              : rows.length === 0 ? <tr><td colSpan={6} className="px-5 py-12 text-center text-text-muted">No quotations yet. Click <span className="text-text font-semibold">Quotation builder</span> to make one.</td></tr>
+              : rows.length === 0 ? <tr><td colSpan={6} className="px-5 py-12 text-center text-text-muted">No quotations yet.{work && <> Click <span className="text-text font-semibold">Quotation builder</span> to make one.</>}</td></tr>
               : filtered.length === 0 ? <tr><td colSpan={6} className="px-5 py-12 text-center text-text-muted">No customers match your search.</td></tr>
               : filtered.map((r) => (
                 <tr key={r.id} className="border-b border-line last:border-0 align-top">
@@ -246,7 +250,7 @@ export default function CustomerApplications({ serialNext, onSerial, whatsapp }:
                       const done = !!d.at(r);
                       return (
                         <div key={d.key} className="flex items-center gap-2 py-0.5">
-                          <button type="button" role="checkbox" aria-checked={done} aria-label={d.label} disabled={done}
+                          <button type="button" role="checkbox" aria-checked={done} aria-label={d.label} disabled={done || !work}
                             onClick={() => setAsk({ row: r, doc: d.key })}
                             className={["w-[17px] h-[17px] rounded-[5px] grid place-items-center border shrink-0", done ? "border-transparent" : "border-[#b6bfc9] bg-white hover:border-navy"].join(" ")}
                             style={done ? { background: NAVY } : undefined}>
@@ -264,10 +268,12 @@ export default function CustomerApplications({ serialNext, onSerial, whatsapp }:
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex flex-col items-start gap-1.5">
-                      <button type="button" onClick={() => setForm({ doc: "quotation", row: r })} className={TOOL}>
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
-                        Edit
-                      </button>
+                      {work && (
+                        <button type="button" onClick={() => setForm({ doc: "quotation", row: r })} className={TOOL}>
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+                          Edit
+                        </button>
+                      )}
                       <button type="button" onClick={() => setMail(r)} className={TOOL}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>
                         Email

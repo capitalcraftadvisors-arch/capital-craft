@@ -59,8 +59,9 @@ function Card({ title, onTitle, id, className = "", children }: { title: string;
   );
 }
 
-export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, onRenew, renewing, onOpenMessage }: {
+export default function DashboardV2({ rms, customers, onQuotation, onLoans, onInsurance, onRenew, renewing, onOpenMessage }: {
   rms: Rm[];
+  customers?: boolean;                   // the company works in Customer applications (gozerobils builder)
   onQuotation: () => void;               // the company's quotation builder
   onLoans: (f: LoanFilter) => void;      // the dashboard's Loans section, filtered
   onInsurance: (due: boolean) => void;   // the Insurance section (due = Due for renewal)
@@ -129,7 +130,7 @@ export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, on
   ];
 
   const p = d?.pipeline;
-  const funnel: { rows: { label: string; n: number; open: () => void }[]; color: string }[] = [
+  const funnel: { rows: { label: string; n: number; amount?: number; open: () => void }[]; color: string }[] = [
     { color: NAVY_ACCENT, rows: [
       { label: "Leads", n: p?.leads ?? 0, open: () => go("/dashboard/leads") },
       { label: LEAD_STATUS_LABEL.contacted, n: p?.contacted ?? 0, open: () => go("/dashboard/leads?f=contacted") },
@@ -141,6 +142,11 @@ export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, on
       { label: "Approved", n: p?.approved ?? 0, open: () => onLoans("approved") },
       { label: "1st tranche", n: p?.first_tranche ?? 0, open: () => onLoans("approved") },
       { label: "2nd tranche pending", n: p?.second_pending ?? 0, open: () => onLoans("tranche_pending") },
+    ] }] : []),
+    ...(customers ? [{ color: "#0e7490", rows: [
+      { label: "Customer quotations", n: d?.customer_apps?.quotations ?? 0, amount: d?.customer_apps?.quotations_value ?? 0, open: onQuotation },
+      { label: "PCRs", n: d?.customer_apps?.pcr ?? 0, amount: d?.customer_apps?.pcr_value ?? 0, open: onQuotation },
+      { label: "Agreements", n: d?.customer_apps?.agreements ?? 0, amount: d?.customer_apps?.agreements_value ?? 0, open: onQuotation },
     ] }] : []),
   ];
 
@@ -210,16 +216,21 @@ export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, on
             <div className="flex flex-col gap-4">
               {funnel.map((g, gi) => {
                 const max = Math.max(1, ...g.rows.map((r) => r.n));
+                const money = g.rows.some((r) => r.amount != null); // a row with ₹ needs a wider figure column
                 return (
                   <div key={gi} className={gi > 0 ? "pt-4 border-t border-line" : ""}>
                     {g.rows.map((r) => (
                       <button key={r.label} type="button" onClick={r.open}
-                        className="w-full grid grid-cols-[minmax(0,140px)_1fr_48px] items-center gap-3 py-1.5 text-left rounded-lg hover:bg-navy-mist px-1.5">
+                        className={["w-full grid items-center gap-3 py-1.5 text-left rounded-lg hover:bg-navy-mist px-1.5",
+                          money ? "grid-cols-[minmax(0,140px)_1fr_124px]" : "grid-cols-[minmax(0,140px)_1fr_48px]"].join(" ")}>
                         <span className="text-[13px] text-text-mid truncate">{r.label}</span>
                         <span className="h-2.5 rounded-full bg-grey-chip overflow-hidden">
                           <span className="block h-full rounded-full transition-[width] duration-300" style={{ width: `${(r.n / max) * 100}%`, background: g.color }} />
                         </span>
-                        <span className="text-[14px] font-bold text-cc-ink tabular-nums text-right">{dash(String(r.n))}</span>
+                        <span className="text-[14px] font-bold text-cc-ink tabular-nums text-right whitespace-nowrap">
+                          {r.amount != null && <span className="text-[12px] font-medium text-text-muted mr-2">{dash(rupeesShort(r.amount))}</span>}
+                          {dash(String(r.n))}
+                        </span>
                       </button>
                     ))}
                   </div>

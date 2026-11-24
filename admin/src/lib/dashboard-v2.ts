@@ -24,6 +24,7 @@ export type AttentionItem = { kind: AttentionKind; id: string; title: string; de
 export type FollowUpRow = { id: string; name: string; mobile: string | null; follow_up_at: string; owner: string };
 /** member_id null = the company's own leads (name = its contact). */
 export type LeadOwnerRow = { member_id: string | null; name: string; leads: number; won: number; due: number };
+/** received = the customer's own payments; balance = what the customer still owes (the lender's share left out, 0139). */
 export type PaymentDueRow = { id: string; customer: string; mobile: string | null; cost: number; received: number; balance: number; due_on: string | null };
 export type InsuranceDueRow = { id: string; name: string; policy_to_date: string; days_left: number };
 
@@ -40,6 +41,8 @@ export type Dashboard = {
   /** Counts at the portal's 4 loan stages; sanctioned / disbursed are ₹ sums. */
   loans: { under_review: number; updated: number; approved: number; rejected: number; sanctioned: number; disbursed: number };
   insurance_due: InsuranceDueRow[];
+  /** Customer applications made in the period (the gozerobils builder, 0139); absent before 0139. */
+  customer_apps?: { quotations: number; quotations_value: number; pcr: number; pcr_value: number; agreements: number; agreements_value: number };
 };
 
 const TTL = 5 * 60_000;
