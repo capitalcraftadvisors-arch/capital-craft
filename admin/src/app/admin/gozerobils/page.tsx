@@ -8,6 +8,8 @@
 //               follow-up, notes and its calls
 //   My Day    — follow-ups overdue / due today and the new leads not called yet,
 //               each with Call, WhatsApp and Log call
+//   Follow-ups — every open lead with a follow-up date, by when: overdue, today,
+//               tomorrow, the next 7 days, later (same cards and buttons)
 //   Calls     — every call logged, newest first (read when the tab opens)
 //   Traffic   — the website's visits (gzb_events, 0134): the last 14 days, one
 //               line a day (read when the tab opens); a day opens its visits
@@ -65,7 +67,7 @@ const inDays = (n: number) => localIsoDate(new Date(Date.now() + n * 86_400_000)
 const words = (v: string | null) => (v ? v.replace(/_+/g, " ").trim().replace(/^./, (c) => c.toUpperCase()) : v);
 const tel = (m: string) => `tel:+91${m}`;
 
-type Tab = "leads" | "myday" | "calls" | "traffic";
+type Tab = "leads" | "myday" | "followups" | "calls" | "traffic";
 
 export default function GozerobilsLeadsPage() {
   return (
@@ -145,6 +147,20 @@ function Inner() {
     };
   }, [rows, today]);
   const dayCount = day.overdue.length + day.today.length + day.fresh.length;
+  // Follow-ups: every open lead with a date, soonest first, cut by when it's due
+  // (from the list already loaded — no request).
+  const ahead = useMemo(() => {
+    const dated = (rows ?? []).filter((r) => OPEN(r.status) && r.follow_up_at)
+      .sort((a, b) => String(a.follow_up_at).localeCompare(String(b.follow_up_at)));
+    const tomorrow = inDays(1), week = inDays(7);
+    const on = (from: string | null, to: string | null) => dated.filter((r) => (!from || r.follow_up_at! >= from) && (!to || r.follow_up_at! <= to));
+    return {
+      all: dated.length,
+      tomorrow: on(tomorrow, tomorrow),
+      week: on(inDays(2), week),
+      later: on(inDays(8), null),
+    };
+  }, [rows]);
 
   if (!allowed) return null;
 
@@ -154,7 +170,7 @@ function Inner() {
     if (!needle) return true;
     return [r.name, r.mobile, r.city, r.pincode].some((v) => (v ?? "").toLowerCase().includes(needle));
   });
-  const tabs: [Tab, string, number | null][] = [["myday", "My Day", dayCount], ["leads", "All leads", rows?.length ?? null], ["calls", "Calls", null], ["traffic", "Traffic", null]];
+  const tabs: [Tab, string, number | null][] = [["myday", "My Day", dayCount], ["followups", "Follow-ups", rows ? ahead.all : null], ["leads", "All leads", rows?.length ?? null], ["calls", "Calls", null], ["traffic", "Traffic", null]];
 
   return (
     <div className="min-h-screen lg:flex" style={themeStyle("gzb")}>
@@ -193,6 +209,20 @@ function Inner() {
                 <DaySection title="Overdue" tone="text-red-600" rows={day.overdue} today={today} onOpen={setOpen} onLog={setLogFor} />
                 <DaySection title="Today" tone="text-amber-700" rows={day.today} today={today} onOpen={setOpen} onLog={setLogFor} />
                 <DaySection title="New, not called yet" tone="text-cc-blue" rows={day.fresh} today={today} onOpen={setOpen} onLog={setLogFor} />
+              </div>
+            )
+          )}
+
+          {tab === "followups" && (
+            !rows ? <p className="text-[13px] text-cc-muted">Loading…</p>
+            : ahead.all === 0 ? <Card className="p-8 text-center text-[14px] text-cc-muted">No follow-ups planned.</Card>
+            : (
+              <div className="flex flex-col gap-5">
+                <DaySection title="Overdue" tone="text-red-600" rows={day.overdue} today={today} onOpen={setOpen} onLog={setLogFor} />
+                <DaySection title="Today" tone="text-amber-700" rows={day.today} today={today} onOpen={setOpen} onLog={setLogFor} />
+                <DaySection title="Tomorrow" tone="text-cc-ink" rows={ahead.tomorrow} today={today} onOpen={setOpen} onLog={setLogFor} />
+                <DaySection title="Next 7 days" tone="text-cc-ink" rows={ahead.week} today={today} onOpen={setOpen} onLog={setLogFor} />
+                <DaySection title="Later" tone="text-cc-muted" rows={ahead.later} today={today} onOpen={setOpen} onLog={setLogFor} />
               </div>
             )
           )}
