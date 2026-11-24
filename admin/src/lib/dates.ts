@@ -61,6 +61,16 @@ export function fmtDateTime(v: DateInput): string {
   return `${fmtDate(d)}, ${fmtTime(d)}`;
 }
 
+/** When a comment / message was written: "just now", "12m ago", "3h ago", then
+ *  fmtDateTime ("05/07/2026, 5:52 am"). "—" for an invalid timestamp. */
+export function fmtWhen(iso: string): string {
+  const d = new Date(iso), diff = Date.now() - d.getTime();
+  if (diff < 60_000) return "just now";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return fmtDateTime(d);
+}
+
 // ── Date of birth as read by OCR ────────────────────────────────────────────
 // OCR returns a DOB "exactly as printed": DD/MM/YYYY (or - . separators),
 // DD/MM/YY, ISO YYYY-MM-DD (sometimes with a time), or — on older Aadhaar

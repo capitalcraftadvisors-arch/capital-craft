@@ -18,6 +18,7 @@ import archiver from "archiver";
 import { sendMail, mailConfigured } from "@/lib/mailer";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE, EMAIL_RE } from "@/lib/validators";
+import { fmtRupees } from "@/lib/money";
 import { isMainAdmin } from "@/lib/hierarchy";
 import { uploadBuffer, downloadBuffer } from "@/lib/gcs";
 import { fileLinkUrl } from "@/lib/file-links";
@@ -94,8 +95,8 @@ function completionDetail(loan: Record<string, any>, epcName: string): [string, 
     ["Applicant", loan.borrower_name || loan.aadhaar_name || "—"],
     ["Loan ID", loan.loan_display_id || "—"],
     ["EPC Partner", epcName || "—"],
-    ["Sanctioned amount", loan.sanctioned_amount != null ? "₹" + Math.round(Number(loan.sanctioned_amount)).toLocaleString("en-IN") : "—"],
-    ["1st disbursement", loan.first_disbursement_amount != null ? "₹" + Math.round(Number(loan.first_disbursement_amount)).toLocaleString("en-IN") : "—"],
+    ["Sanctioned amount", loan.sanctioned_amount != null ? fmtRupees(Math.round(Number(loan.sanctioned_amount))) : "—"],
+    ["1st disbursement", loan.first_disbursement_amount != null ? fmtRupees(Math.round(Number(loan.first_disbursement_amount))) : "—"],
   ];
 }
 

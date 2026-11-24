@@ -28,9 +28,9 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
-import { getBusiness, getToken } from "@/lib/auth";
+import { authHeaders, getBusiness } from "@/lib/auth";
 import { fetchEpcName } from "@/lib/epc-name";
-import { deleteDocument, getDocumentUrl } from "@/lib/storage";
+import { deleteDocument, openLoanDoc } from "@/lib/storage";
 import { nameDocument } from "@/lib/ocr";
 import { locateUpload, LOCATION_OFF_MSG } from "@/components/GeoOfficeUpload";
 import { hydrateLoanForm, type LoanDocRow } from "@/lib/loan-form";
@@ -40,10 +40,9 @@ import { fmtDate, toIsoDate } from "@/lib/dates";
 import { coappReasonText, decideRoles, eligibility, idNamesMatch, isBillOwner, personName, type IneligibleReason, type PersonFacts, type RoleDecision } from "@/lib/loan-roles";
 import EditTable from "@/components/EditTable";
 import LoanShareChips from "@/components/LoanShareChips";
-import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES, formatRupees } from "@/lib/emi";
-import { pctOf } from "@/lib/money";
+import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES } from "@/lib/emi";
+import { amountInput, fmtRupees, pctOf } from "@/lib/money";
 import { CATEGORY_LABEL } from "@/lib/loan-form";
-import { amountInput } from "@/lib/money";
 import { supabase } from "@/lib/supabase";
 import { clearChatDraft, loadChatDraft, saveChatDraft, withoutThumbs } from "@/lib/chat-draft";
 import { fetchLeads, linkLeadLoan } from "@/lib/leads";
@@ -488,7 +487,6 @@ function ChatInner() {
     setForm(ti < idx ? { ...f, _pass: String((Number(f._pass) || 0) + 1) } : f);
     setIdx(ti);
   }
-  const auth = () => ({ Authorization: `Bearer ${getToken() ?? ""}` });
 
   // ── Edit mode: hydrate an existing application into the form ────────────────
   // Loads every persisted field + which documents are on file, so re-asked
@@ -558,7 +556,7 @@ function ChatInner() {
     try {
       const res = await fetch("/api/epc/loan-apply", {
         method: "POST",
-        headers: { ...auth(), "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ phase: "register", borrower_mobile: f.borrower_mobile }),
       });
       const j = await res.json().catch(() => ({}));
@@ -626,7 +624,7 @@ function ChatInner() {
     if (!PINCODE_RE.test(pin)) { setError("Enter a valid 6-digit pincode."); return; }
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/pincode-lookup?pin=${pin}`, { headers: auth() });
+      const res = await fetch(`/api/admin/pincode-lookup?pin=${pin}`, { headers: authHeaders() });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok || !String(j.state ?? "").trim()) {
         setError(j?.error || "Couldn't find that pincode — please check and try again.");
@@ -706,7 +704,7 @@ function ChatInner() {
       const subsidyEmi = tenure ? computeEmi(Math.max(0, loanAmt - central), DEFAULT_INDICATIVE_ROI, tenure) : 0;
       const res = await fetch("/api/epc/loan-apply", {
         method: "POST",
-        headers: { ...auth(), "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           phase: "submit", id: appId,
           // Edit re-submit: the server then only validates/writes what's in scope,
@@ -925,7 +923,7 @@ function ChatInner() {
                 {/* The loan as a share of the project cost read from the quotation. */}
                 {amt > 0 && pctOf(amt, form.total_project_cost) && (
                   <div className="text-[11.5px] text-[#14235c] px-4">
-                    <span className="font-semibold">{pctOf(amt, form.total_project_cost)}</span> of the project cost ({formatRupees(Number(form.total_project_cost))})
+                    <span className="font-semibold">{pctOf(amt, form.total_project_cost)}</span> of the project cost ({fmtRupees(Number(form.total_project_cost))})
                   </div>
                 )}
               </div>
@@ -1115,22 +1113,9 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
 
-  const auth = () => ({ Authorization: `Bearer ${getToken() ?? ""}` });
-  // Open the document already on file for a unit (so editors can see what they
-  // uploaded before). Path-based docs go via sign-doc; the PAN image is a row,
-  // and a PAN read here opens by the signed URL its read returned.
-  async function view(path?: string | null, rowId?: string, url?: string) {
-    try {
-      if (url) { window.open(url, "_blank", "noopener"); return; }
-      if (path) {
-        const res = await fetch(`/api/admin/loan-app/${appId}/sign-doc`, { method: "POST", headers: { ...auth(), "Content-Type": "application/json" }, body: JSON.stringify({ path }) });
-        const j = await res.json().catch(() => ({}));
-        if (j?.ok && j.url) { window.open(j.url as string, "_blank", "noopener"); return; }
-      }
-      if (rowId) { const url = await getDocumentUrl(rowId); if (url) { window.open(url, "_blank", "noopener"); return; } }
-      alert("Couldn't open the document.");
-    } catch { alert("Couldn't open the document."); }
-  }
+  // The document already on file for a unit (View opens it, so editors can see
+  // what they uploaded before). Path-based docs go via sign-doc; the PAN image is
+  // a row, and a PAN read here opens by the signed URL its read returned.
   const unitTarget = (u: Unit): { path?: string; rowId?: string; url?: string } => {
     switch (u) {
       case "aadhaar":       return { path: form.aadhaar_front_path };
@@ -1164,7 +1149,7 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
       const fd = new FormData();
       fd.append("front", fileOf(co ? "coapp_aadhaar_front" : "aadhaar_front"));
       fd.append("back", fileOf(co ? "coapp_aadhaar_back" : "aadhaar_back"));
-      const res = await fetch(`/api/admin/loan-app/${appId}/extract-aadhaar`, { method: "POST", headers: auth(), body: fd });
+      const res = await fetch(`/api/admin/loan-app/${appId}/extract-aadhaar`, { method: "POST", headers: authHeaders(), body: fd });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the Aadhaar.");
       const x = j.fields ?? {}, p = j.storage_paths ?? {};
@@ -1181,7 +1166,7 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
       const file = fileOf(applicant ? "pan" : "coapp_pan");
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch(`/api/admin/loan-app/${appId}/extract-coapp-pan`, { method: "POST", headers: auth(), body: fd });
+      const res = await fetch(`/api/admin/loan-app/${appId}/extract-coapp-pan`, { method: "POST", headers: authHeaders(), body: fd });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the PAN.");
       const x = j.fields ?? {};
@@ -1194,7 +1179,7 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
     if (unit === "ebill") {
       const fd = new FormData();
       fd.append("ebill", fileOf("ebill"));
-      const res = await fetch(`/api/admin/loan-app/${appId}/extract-loan-docs`, { method: "POST", headers: auth(), body: fd });
+      const res = await fetch(`/api/admin/loan-app/${appId}/extract-loan-docs`, { method: "POST", headers: authHeaders(), body: fd });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the bill.");
       const e = j.ebill?.fields ?? {}; const path = j.ebill?.storage_path ?? "";
@@ -1207,7 +1192,7 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
     if (unit === "quotation") {
       const fd = new FormData();
       fd.append("proforma", fileOf("quotation"));
-      const res = await fetch(`/api/admin/loan-app/${appId}/extract-loan-docs`, { method: "POST", headers: auth(), body: fd });
+      const res = await fetch(`/api/admin/loan-app/${appId}/extract-loan-docs`, { method: "POST", headers: authHeaders(), body: fd });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the quotation.");
       const p = j.proforma?.fields ?? {}; const path = j.proforma?.storage_path ?? "";
@@ -1225,7 +1210,7 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
       const fd = new FormData();
       fd.append("file", fileOf("bank"));
       fd.append("method", "manual_epdf");
-      const res = await fetch(`/api/admin/loan-app/${appId}/extract-bank-statement`, { method: "POST", headers: auth(), body: fd });
+      const res = await fetch(`/api/admin/loan-app/${appId}/extract-bank-statement`, { method: "POST", headers: authHeaders(), body: fd });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the bank statement.");
       const b = (j.fields ?? {}) as Record<string, string | null>;
@@ -1251,7 +1236,7 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
     fd.append("application_id", appId);
     fd.append("uploaded_by", "epc");
     fd.append("replace", "true");
-    const res = await fetch("/api/upload", { method: "POST", headers: auth(), body: fd });
+    const res = await fetch("/api/upload", { method: "POST", headers: authHeaders(), body: fd });
     const j = await res.json().catch(() => ({}));
     if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't upload the file.");
     return { [pathField]: j.storage_path };
@@ -1308,7 +1293,7 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
       const build = UNIT_FIELDS[unit];
       const tgt = unitTarget(unit);
       const viewLink = (tgt.url || tgt.path || tgt.rowId)
-        ? <button onClick={() => void view(tgt.path, tgt.rowId, tgt.url)} className="text-[#1e3a8a] text-[11px] font-semibold hover:underline">View current file</button>
+        ? <button onClick={() => void openLoanDoc(appId, tgt)} className="text-[#1e3a8a] text-[11px] font-semibold hover:underline">View current file</button>
         : null;
       return build
         ? <div className="flex flex-col gap-1.5">{viewLink}<FieldRows theme={THEME} fields={build(form).map((x) => { const value = form[x.field] || ""; return { ...x, value, ok: !!value }; })} onEdit={(field, value) => onPatch({ [field]: value })} /></div>
@@ -1384,7 +1369,7 @@ function ExtraDocs({ appId, form, docRows, bills, only, onPatch, onBusy }: { app
       fd.append("category", EXTRA_CATEGORY[list]);
       fd.append("application_id", appId);
       fd.append("uploaded_by", "epc");
-      const res = await fetch("/api/upload", { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
+      const res = await fetch("/api/upload", { method: "POST", headers: authHeaders(), body: fd });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok || !j.id) { setError(j?.error || `Couldn't upload ${file.name}.`); return; }
       const doc = { id: String(j.id), name: named ?? file.name.replace(/\.[^.]+$/, "") };
@@ -1481,7 +1466,6 @@ function EditPicker({ appId, form, docRows, preselect = [], onPick }: {
 function QuotationDock({ appId, form, onPatch, onDone }: { appId: string; form: Form; onPatch: (p: Form) => void; onDone: () => void }) {
   const [status, setStatus] = useState<"idle" | "reading" | "done" | "error">(form.proforma_invoice_path ? "done" : "idle");
   const [err, setErr] = useState<string | null>(null);
-  const auth = () => ({ Authorization: `Bearer ${getToken() ?? ""}` });
 
   async function read(file: File) {
     if (!(file.type.startsWith("image/") || file.type.includes("pdf"))) return;
@@ -1489,7 +1473,7 @@ function QuotationDock({ appId, form, onPatch, onDone }: { appId: string; form: 
     try {
       const fd = new FormData();
       fd.append("proforma", file);
-      const res = await fetch(`/api/admin/loan-app/${appId}/extract-loan-docs`, { method: "POST", headers: auth(), body: fd });
+      const res = await fetch(`/api/admin/loan-app/${appId}/extract-loan-docs`, { method: "POST", headers: authHeaders(), body: fd });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the quotation.");
       const p = j.proforma?.fields ?? {}; const path = j.proforma?.storage_path ?? "";
@@ -1560,7 +1544,7 @@ function LoanConfigDock({ loanAmt, subsidyCase, setSubsidyCase, centralSub, setC
           {TENURES.map((t) => (
             <button key={t} onClick={() => setTenure(t)} className={["px-1 py-2 rounded-lg text-center border transition", tenure === t ? "bg-[#1e3a8a] text-white border-[#1e3a8a]" : "bg-white border-line text-text-mid hover:border-[#1e3a8a]"].join(" ")}>
               <div className="text-[13px] font-bold">{t}y</div>
-              <div className="text-[10px] opacity-80">{loanAmt > 0 ? formatRupees(computeEmi(loanAmt, DEFAULT_INDICATIVE_ROI, t)) : "—"}</div>
+              <div className="text-[10px] opacity-80">{loanAmt > 0 ? fmtRupees(computeEmi(loanAmt, DEFAULT_INDICATIVE_ROI, t)) : "—"}</div>
             </button>
           ))}
         </div>

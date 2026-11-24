@@ -16,6 +16,7 @@ import { upiChanged } from "@/lib/project-payments";
 import { BUSINESS_TYPE_LABEL, maskAcct, peopleHeading } from "@/lib/epc-labels";
 import { INDIA_STATES, stateOfGstin } from "@/lib/india-states";
 import { formatGstAddress } from "@/lib/gst-address";
+import { MOBILE_RE } from "@/lib/validators";
 
 type Fields = Pick<OrgProfile, "display_name" | "address_line" | "city" | "state" | "pincode" | "phone" | "email" | "website">;
 type Person = { name?: string | null; mobile?: string | null; email?: string | null };
@@ -64,7 +65,7 @@ export default function OrganizationSettings() {
     const nv = v2 && { invoice_prefix: v2.invoice_prefix.trim(), upi_id: v2.upi_id.trim(), whatsapp_number: v2.whatsapp_number.trim() };
     if (nv && !/^[A-Za-z0-9/-]{0,12}$/.test(nv.invoice_prefix)) { setError("Use up to 12 letters, numbers, / or - in the invoice prefix."); return; }
     if (nv?.upi_id && !/^[\w.-]{2,256}@[A-Za-z][A-Za-z0-9]{1,63}$/.test(nv.upi_id)) { setError("Enter a valid UPI ID."); return; }
-    if (nv?.whatsapp_number && !/^[6-9]\d{9}$/.test(nv.whatsapp_number)) { setError("Enter a valid 10-digit WhatsApp number."); return; }
+    if (nv?.whatsapp_number && !MOBILE_RE.test(nv.whatsapp_number)) { setError("Enter a valid 10-digit WhatsApp number."); return; }
     setBusy(true); setError(null);
     try {
       const clean = Object.fromEntries(Object.entries(f).map(([k, v]) => [k, v.trim() || null])) as Partial<OrgProfile>;

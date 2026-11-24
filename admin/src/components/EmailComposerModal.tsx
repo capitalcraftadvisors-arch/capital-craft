@@ -11,11 +11,11 @@
 //   3. Send (mode:"send") posts the edited content.
 
 import { useEffect, useMemo, useState } from "react";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import Modal from "@/components/ui/Modal";
 import { supabase } from "@/lib/supabase";
 import { useLenders } from "@/lib/lenders";
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+import { EMAIL_RE } from "@/lib/validators";
 
 type Preview = { subject: string; toName: string; detail: [string, string][]; docLabels: string[]; ccDefault: string[]; bccDefault: string[]; allowedLenders?: string[] };
 
@@ -44,7 +44,7 @@ export default function EmailComposerModal({
   async function api(payload: Record<string, unknown>) {
     const res = await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ ...(extraParams ?? {}), ...payload }),
     });
     const j = await res.json().catch(() => ({}));
@@ -91,17 +91,19 @@ export default function EmailComposerModal({
     if (!lender) { setError("Pick a lender."); return; }
     if (!EMAIL_RE.test(to.trim())) { setError("Enter a valid TO email."); return; }
     setBusy(true); setError(null);
-    const { ok, j } = await api({ mode: "send", lender, to: to.trim(), toName: toName.trim(), cc, bcc, subject: subject.trim(), detail });
-    if (ok) { setDone(`Sent to ${to.trim()} — ${j.documents} document link${j.documents === 1 ? "" : "s"} + summary + ZIP.`); onSent?.(lender); }
-    else setError(j?.error || "Couldn't send the email.");
-    setBusy(false);
+    try {
+      const { ok, j } = await api({ mode: "send", lender, to: to.trim(), toName: toName.trim(), cc, bcc, subject: subject.trim(), detail });
+      if (ok) { setDone(`Sent to ${to.trim()} — ${j.documents} document link${j.documents === 1 ? "" : "s"} + summary + ZIP.`); onSent?.(lender); }
+      else setError(j?.error || "Couldn't send the email.");
+    } catch { setError("Couldn't send the email."); }
+    finally { setBusy(false); }
   }
 
   return (
     <Modal onClose={onClose} busy={busy} className="w-full max-w-lg bg-white rounded-lg shadow-lg p-6 max-h-[92vh] overflow-y-auto">
       <div className="flex items-start justify-between mb-3">
         <h3 className="font-display font-semibold text-[18px] text-text">{title}</h3>
-        <button type="button" onClick={onClose} className="text-[18px] text-text-muted hover:text-text leading-none" aria-label="Close">×</button>
+        <button type="button" onClick={onClose} disabled={busy} className="text-[18px] text-text-muted hover:text-text leading-none" aria-label="Close">×</button>
       </div>
 
       {/* Shared datalist backing every email input's autocomplete. */}

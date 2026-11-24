@@ -27,10 +27,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
-import { getToken, getBusiness } from "@/lib/auth";
-import { computeCentralSubsidy, computeEmi, formatRupees, DEFAULT_INDICATIVE_ROI, TENURES } from "@/lib/emi";
+import { authHeaders, getBusiness } from "@/lib/auth";
+import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES } from "@/lib/emi";
 import { amountInWords } from "@/lib/numberToWords";
-import { amountInput } from "@/lib/money";
+import { amountInput, fmtRupees } from "@/lib/money";
 import { MOBILE_RE, EMAIL_RE, PINCODE_RE } from "@/lib/validators";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import { professionsFor } from "@/lib/loan-form";
@@ -458,7 +458,7 @@ function Inner() {
         // Q1/Q2 flow (which recognises what's already filled, incl. documents).
         // So restore only when not editing, or when the saved chat is itself an
         // edit chat (e.g. a mid-edit refresh).
-        const res = await fetch(`/api/admin/loan-app/${appParam}/intake-chat`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+        const res = await fetch(`/api/admin/loan-app/${appParam}/intake-chat`, { headers: authHeaders() });
         const j = await res.json().catch(() => ({}));
         const chat = j?.chat;
         const savedMsgs: ChatMsg[] = (chat && Array.isArray(chat.transcript)) ? (chat.transcript as ChatMsg[]) : [];
@@ -530,7 +530,7 @@ function Inner() {
       const fd = new FormData();
       fd.append("path", form.bank_statement_path);
       fd.append("method", form.bank_statement_method || "manual_epdf");
-      const res = await fetch(`/api/admin/loan-app/${appId}/extract-bank-statement`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
+      const res = await fetch(`/api/admin/loan-app/${appId}/extract-bank-statement`, { method: "POST", headers: authHeaders(), body: fd });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't read the bank statement on file. Attach it again, or skip."); return; }
       const { patch, fields } = mapExtract(t, j);
@@ -622,7 +622,6 @@ function Inner() {
 
   const advance = () => setIdx((i) => i + 1);
   const merge = (patch: Form) => setForm((f) => ({ ...f, ...patch }));
-  function hdr() { return { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` }; }
 
   // Undo — snapshot before each entry so the RM can step any action back.
   function pushUndo() { setUndoStack((s) => [...s.slice(-29), { msgs, form, idx, leadMode }]); }
@@ -643,7 +642,7 @@ function Inner() {
     if (opts.createApp) {
       setBusy(true);
       try {
-        const res = await fetch("/api/admin/create-loan-app", { method: "POST", headers: hdr(), body: JSON.stringify({ epc_business_id: value }) });
+        const res = await fetch("/api/admin/create-loan-app", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ epc_business_id: value }) });
         const j = await res.json().catch(() => ({}));
         if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't start the application."); setBusy(false); return; }
         setAppId(j.application.id);
@@ -691,7 +690,7 @@ function Inner() {
     const transcript = withoutThumbs(msgs);
     try {
       await fetch(`/api/admin/loan-app/${appId}/intake-chat`, {
-        method: "POST", headers: hdr(),
+        method: "POST", headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ transcript, form_state: form, cursor: idx, mode, mark_under_review: !!opts.markUnderReview }),
       });
     } catch { /* best-effort */ }
@@ -719,7 +718,7 @@ function Inner() {
     if (!PINCODE_RE.test(pin)) { setError("Enter a valid 6-digit pincode."); return; }
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/pincode-lookup?pin=${pin}`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+      const res = await fetch(`/api/admin/pincode-lookup?pin=${pin}`, { headers: authHeaders() });
       const j = await res.json().catch(() => ({}));
       if (j?.ok) {
         await answer(pin, `${pin} · ${j.city ? j.city + ", " : ""}${j.state}`, { editable: true, extra: { install_state: j.state, install_district: j.district || "", install_city: j.city || "" } });
@@ -782,7 +781,7 @@ function Inner() {
           fd.append("category", t.uploadCategory);
           fd.append("application_id", appId);
           fd.append("uploaded_by", "admin");
-          const res = await fetch("/api/upload", { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
+          const res = await fetch("/api/upload", { method: "POST", headers: authHeaders(), body: fd });
           const j = await res.json().catch(() => ({}));
           if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't upload the file. Try again, or skip."); setBusy(false); return; }
           if (t.pathField) {
@@ -802,7 +801,7 @@ function Inner() {
       // Applicant PAN reuses extract-coapp-pan — tell the route so it also files
       // the doc under category "borrower_pan" (the profile's Applicant-PAN slot).
       if (t.applicantPan) fd.append("applicant", "1");
-      const res = await fetch(`/api/admin/loan-app/${appId}/${t.extractRoute}`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
+      const res = await fetch(`/api/admin/loan-app/${appId}/${t.extractRoute}`, { method: "POST", headers: authHeaders(), body: fd });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't read the document. Attach a clearer copy, or skip and fill it in later."); setBusy(false); return; }
       const { patch, fields } = mapExtract(t, j);
@@ -901,7 +900,7 @@ function Inner() {
     if (!appId) return;
     try {
       const coapp = hasCoapp(f) ? { bill_on_applicant_name: false } : f.coapp_needed === "no" ? { bill_on_applicant_name: true } : {};
-      await fetch(`/api/admin/loan-app/${appId}/update-fields`, { method: "PATCH", headers: hdr(), body: JSON.stringify({ ...f, ...coapp }) });
+      await fetch(`/api/admin/loan-app/${appId}/update-fields`, { method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ ...f, ...coapp }) });
     } catch { /* best-effort */ }
   }
 
@@ -911,7 +910,7 @@ function Inner() {
     if (!appId) return true;
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/loan-app/${appId}/update-fields`, { method: "PATCH", headers: hdr(), body: JSON.stringify(obj) });
+      const res = await fetch(`/api/admin/loan-app/${appId}/update-fields`, { method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(obj) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't save the change."); return false; }
       return true;
@@ -922,7 +921,7 @@ function Inner() {
   // fields (co-applicant flag …) and advances current_step; step 5 only with a
   // loan configuration. update-fields already wrote the columns; these confirm.
   async function postStep(step: 1 | 2 | 3 | 4): Promise<boolean> {
-    const r = await fetch(`/api/admin/loan-app/${appId}/complete-step-${step}`, { method: step === 1 ? "PATCH" : "POST", headers: hdr(), body: JSON.stringify(STEP_PAYLOAD[step](form)) });
+    const r = await fetch(`/api/admin/loan-app/${appId}/complete-step-${step}`, { method: step === 1 ? "PATCH" : "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(STEP_PAYLOAD[step](form)) });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j?.ok) { setError(j?.error || `Couldn't save step ${step}.`); return false; }
     return true;
@@ -930,14 +929,14 @@ function Inner() {
   async function runSteps(config: Record<string, unknown> | null): Promise<boolean> {
     for (const step of [1, 2, 3, 4] as const) if (!(await postStep(step))) return false;
     if (!config) { invalidateLoanBoards(); return true; }
-    const r5 = await fetch(`/api/admin/loan-app/${appId}/complete-step-5`, { method: "POST", headers: hdr(), body: JSON.stringify(config) });
+    const r5 = await fetch(`/api/admin/loan-app/${appId}/complete-step-5`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(config) });
     const j5 = await r5.json().catch(() => ({}));
     if (!r5.ok || !j5?.ok) { setError(j5?.error || "Couldn't save loan configuration."); return false; }
     invalidateLoanBoards();
     return true;
   }
   async function submitApp(): Promise<boolean> {
-    const r6 = await fetch(`/api/admin/loan-app/${appId}/complete-step-6`, { method: "POST", headers: hdr(), body: JSON.stringify({}) });
+    const r6 = await fetch(`/api/admin/loan-app/${appId}/complete-step-6`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({}) });
     const j6 = await r6.json().catch(() => ({}));
     if (!r6.ok || !j6?.ok) { setError(j6?.error || "Couldn't submit the application."); return false; }
     invalidateLoanBoards();
@@ -1422,7 +1421,7 @@ type DocSlotFile = { file: File; thumb: string | null };
 // mapping reuses mapExtract (identical to the old per-doc turns). Throws on a hard
 // failure; the caller catches it and shows a per-row "couldn't read" state.
 async function callDocRoute(unit: DocUnit, appId: string, files: Partial<Record<DocSlot, DocSlotFile>>, form: Form): Promise<Form> {
-  const auth = { Authorization: `Bearer ${getToken() ?? ""}` };
+  const auth = authHeaders();
   const fileOf = (slot: DocSlot) => { const f = files[slot]?.file; if (!f) throw new Error("File missing — re-attach it."); return f; };
   if (unit === "aadhaar" || unit === "coapp_aadhaar") {
     const co = unit === "coapp_aadhaar";
@@ -1543,7 +1542,7 @@ function DocTable({ appId, form, onPatch, onSkipChange, onDone, limitUnits }: {
       fd.append("files", file);
       if (form.borrower_name) fd.append("applicant_name", form.borrower_name);
       if (form.coapp_name) fd.append("coapp_name", form.coapp_name);
-      const res = await fetch(`/api/admin/loan-app/${appId}/bundle-docs`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
+      const res = await fetch(`/api/admin/loan-app/${appId}/bundle-docs`, { method: "POST", headers: authHeaders(), body: fd });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read that PDF.");
       if (j.form && typeof j.form === "object") onPatch(j.form as Form);
@@ -1761,7 +1760,7 @@ function LoanConfigDock({ loanAmt, subsidyCase, setSubsidyCase, centralSub, setC
           {TENURES.map((t) => (
             <button key={t} onClick={() => setTenure(t)} className={["px-1 py-2 rounded-lg text-center border", tenure === t ? "bg-[#178a5c] text-white border-[#178a5c]" : "bg-white border-line text-text-mid"].join(" ")}>
               <div className="text-[13px] font-bold">{t}y</div>
-              <div className="text-[10px] opacity-80">{loanAmt > 0 ? formatRupees(computeEmi(loanAmt, DEFAULT_INDICATIVE_ROI, t)) : "—"}</div>
+              <div className="text-[10px] opacity-80">{loanAmt > 0 ? fmtRupees(computeEmi(loanAmt, DEFAULT_INDICATIVE_ROI, t)) : "—"}</div>
             </button>
           ))}
         </div>

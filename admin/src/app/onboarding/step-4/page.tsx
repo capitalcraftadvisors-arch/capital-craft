@@ -8,7 +8,7 @@ import Input from "@/components/ui/Input";
 import Card from "@/components/ui/Card";
 import WizardProgress from "@/components/WizardProgress";
 import FileUpload from "@/components/FileUpload";
-import { getBusiness, setBusiness, getToken, isImpersonating } from "@/lib/auth";
+import { getBusiness, setBusiness, authHeaders, isImpersonating } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { ACCOUNT_RE, IFSC_RE } from "@/lib/validators";
 
@@ -138,7 +138,7 @@ export default function Step4Page() {
       fd.append("file", file);
       const res = await fetch("/api/epc/extract-cheque", {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
         body: fd,
       });
       const r = await res.json().catch(() => ({}));

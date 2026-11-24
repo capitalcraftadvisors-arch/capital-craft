@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { supabase, FUNCTIONS_URL } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import { fmtDate } from "@/lib/dates";
 
 type Link = { id: string; created_at: string; expires_at: string; revoked_at: string | null };
@@ -30,7 +30,7 @@ export default function ClaudeConnectorCard() {
     try {
       const res = await fetch(`${FUNCTIONS_URL}/auth`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ action: "mcp_create" }),
       });
       const d = await res.json().catch(() => ({}));

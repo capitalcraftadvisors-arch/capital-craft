@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Button from "@/components/ui/Button";
 import Card from "@/components/ui/Card";
 import WizardProgress from "@/components/WizardProgress";
-import { getBusiness, setBusiness, isImpersonating } from "@/lib/auth";
+import { getBusiness, setBusiness, isImpersonating, authHeaders } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { PAN_RE } from "@/lib/validators";
 
@@ -82,10 +82,7 @@ export default function ReviewPage() {
       const before = snap ? JSON.parse(snap) : {};
       const res = await fetch("/api/epc/submit-self-edit", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${localStorage.getItem("cc_token") ?? ""}`,
-        },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ before }),
       });
       const data = await res.json();

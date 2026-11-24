@@ -49,6 +49,7 @@ export default function ConfirmDeleteModal<T = { id: string }>({
 
   useEffect(() => {
     if (open) { setTyped(""); setError(null); }
+    else setBusy(false); // ready again for the next open
   }, [open]);
 
   if (!open) return null;
@@ -75,6 +76,7 @@ export default function ConfirmDeleteModal<T = { id: string }>({
         setBusy(false);
         return;
       }
+      // busy stays on (no second Delete while the parent leaves the page); it resets once closed.
       onDeleted(data.deleted);
     } catch (e) {
       setError((e as Error)?.message || "Network error.");

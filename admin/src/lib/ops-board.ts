@@ -233,14 +233,14 @@ function loanLenderLabel(rows: Record<string, any>[]): string | null {
 // the user sees fresh data immediately; plain navigation to the board reuses a
 // result up to 20s old to cut egress.
 // After a loan's state changes (approve / reject / abort / docs-sent / hold…),
-// clear EVERY cached view that shows it — the Task Manager board, the admin Loans
-// list, and the KPI tiles — so all of them re-read fresh the next time they open.
+// clear EVERY cached view that shows it — the Task Manager board and the admin
+// Loans list (the KPI tiles are worked out from that list) — so all of them
+// re-read fresh the next time they open.
 // No background polling: just one fresh read on next open, so the whole portal
 // stays consistent with the change you just made.
 export function invalidateLoanBoards(): void {
   invalidate(`opscases.${getBusiness()?.id ?? "anon"}`); // Task Manager board
   invalidate("dash.apps");                               // admin Loans list
-  invalidate("dashkpis");                                // KPI tiles
 }
 
 export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ cases: OpsCase[]; users: TeamUser[] }> {

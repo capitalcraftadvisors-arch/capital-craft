@@ -15,8 +15,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
-import { getToken, getBusiness, isMainAdmin } from "@/lib/auth";
-import { getDocumentUrl, deleteDocument, downloadDocument, triggerDownload } from "@/lib/storage";
+import { authHeaders, getBusiness, isMainAdmin } from "@/lib/auth";
+import { getDocumentUrl, deleteDocument, downloadDocument, triggerDownload, signLoanPath } from "@/lib/storage";
 import { maskAcct } from "@/lib/epc-labels";
 import Modal from "@/components/ui/Modal";
 import ConfirmDeleteModal from "@/components/ConfirmDeleteModal";
@@ -31,7 +31,7 @@ import LoanLenderPickerModal, { type PickerLender } from "@/components/LoanLende
 import LoanLenderStatusBox from "@/components/LoanLenderStatusBox";
 import {
   LOAN_LENDER_COLS, lenderLabelIn, type LoanLenderRow,
-  latestLenderStatus, lendersWithDocs, approvedLenders,
+  lendersWithDocs, approvedLenders,
 } from "@/lib/loan-lenders";
 import LenderPickerModal, { type LenderKey } from "@/components/LenderPickerModal";
 import { useLenders } from "@/lib/lenders";
@@ -42,8 +42,8 @@ import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
 import { loanDocChecklist } from "@/lib/loan-doc-checklist";
 import { loanChecks } from "@/lib/loan-verification";
 import { cachedLoanUpdateCount } from "@/lib/use-epc-updates";
-import { deadlineState, DEADLINE_PILL, remainingAmount, fmtDateShort, firstDisbursedShown } from "@/lib/disbursement";
-import { fmtDateTime } from "@/lib/dates";
+import { firstDisbursedShown } from "@/lib/disbursement";
+import { fmtDate, fmtDateTime } from "@/lib/dates";
 import { fmtRupees, fmtRupeesExact, pctOf } from "@/lib/money";
 import { CATEGORY_LABEL } from "@/lib/loan-form";
 import { initialsOf } from "@/lib/names";
@@ -150,12 +150,6 @@ function displayId(loan: Loan): string {
   return "LA-" + String(loan.id).replace(/-/g, "").slice(0, 8).toUpperCase();
 }
 // fmtRupees imported from @/lib/money
-function fmtDate(v: string | null | undefined): string {
-  return fmtDateTime(v);
-}
-function cap(s: string): string {
-  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
-}
 // Approval-details cell: money → ₹ exact (never rounded), tenure → "<n> years". Numbers only.
 function fmtApproval(v: number | null | undefined, money: boolean, suffix?: string): string {
   if (v === null || v === undefined || !Number.isFinite(Number(v))) return "—";
@@ -446,7 +440,7 @@ function Inner() {
       // ONE request signs every document — document pictures, instant View, and
       // the header photo (this replaced the header photo's own sign call).
       const res = await fetch(`/api/admin/loan-app/${params.id}/doc-urls`, {
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
       }).catch(() => null);
       const data = res?.ok ? await res.json().catch(() => null) : null;
       const signed: SignedUrls | null = data?.ok ? { rows: data.rows ?? {}, paths: data.paths ?? {}, at: Date.now() } : null;
@@ -515,7 +509,7 @@ function Inner() {
   const fresh = (u: string | undefined) => (u && urls && Date.now() - urls.at < URL_TTL_MS ? u : null);
 
   const urlForDoc = async (id: string) => fresh(urls?.rows[id]) ?? await getDocumentUrl(id);
-  const urlForPath = async (path: string) => fresh(urls?.paths[path]) ?? await signPath(path);
+  const urlForPath = async (path: string) => fresh(urls?.paths[path]) ?? await signLoanPath(params.id, path);
 
   async function openDoc(id: string) {
     const url = await urlForDoc(id);
@@ -524,36 +518,14 @@ function Inner() {
 
   const downloadDoc = downloadDocument;
 
-  // Sign a *_path column (whitelisted server-side) and RETURN the URL.
-  async function signPath(path: string): Promise<string | null> {
-    try {
-      const res = await fetch(`/api/admin/loan-app/${params.id}/sign-doc`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
-        body: JSON.stringify({ path }),
-      });
-      const data = await res.json().catch(() => ({}));
-      return data?.ok && data.url ? (data.url as string) : null;
-    } catch {
-      return null;
-    }
-  }
-
   async function openPath(path: string) {
     const url = await urlForPath(path);
     if (url) window.open(url, "_blank", "noopener");
   }
 
   async function downloadPath(path: string) {
-    try {
-      const res = await fetch(`/api/admin/loan-app/${params.id}/sign-doc`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
-        body: JSON.stringify({ path, download: true }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (data?.ok && data.url) triggerDownload(data.url as string);
-    } catch { /* best effort */ }
+    const u = await signLoanPath(params.id, path, { download: true });
+    if (u) triggerDownload(u);
   }
 
   // Remove a doc-row-backed document (user_application_docs) — DocGrid has
@@ -570,7 +542,7 @@ function Inner() {
     try {
       const res = await fetch("/api/admin/delete-doc-path", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ table: "epc_applications", id: params.id, column }),
       });
       const data = await res.json().catch(() => ({}));
@@ -627,25 +599,6 @@ function Inner() {
     setStatusBusy(false);
   }
 
-  function onApproveConfirm(lender: LenderKey) {
-    if (!loan) return;
-    router.push(`/admin/app/${loan.id}/approval?lender=${lender}` as any);
-  }
-
-  async function onRejectConfirm(lender: LenderKey, reason?: string, creditScore?: number | null) {
-    if (!loan) return;
-    const why = (reason ?? "").trim();
-    await changeStatus(
-      "rejected",
-      {
-        rejected_lender: lender, rejected_at: new Date().toISOString(),
-        approved_lender: null, approved_at: null, rejection_reason: why || null,
-        ...(creditScore !== undefined ? { credit_score: creditScore } : {}),
-      },
-      `Rejected by ${lenderLabelIn(lenders, lender)}${why ? ` — ${why}` : ""}`,
-    );
-  }
-
   // Insurance — makes this loan's insurance profile from its data the first
   // time; afterwards fills only what that profile is still missing, then opens it.
   async function openInsurance() {
@@ -653,7 +606,7 @@ function Inner() {
     if (!loan.insurance_application_id && !window.confirm("Make the insurance profile from this application?")) return;
     setInsBusy(true);
     try {
-      const res = await fetch(`/api/admin/loan-app/${loan.id}/insurance`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+      const res = await fetch(`/api/admin/loan-app/${loan.id}/insurance`, { method: "POST", headers: authHeaders() });
       const d = await res.json().catch(() => ({}));
       if (!res.ok || !d?.ok) { alert("Couldn't open the insurance profile — " + (d?.error || `HTTP ${res.status}`)); return; }
       router.push(`/admin/insurance/${d.id}/view` as any);
@@ -667,7 +620,7 @@ function Inner() {
     setDownloading(true);
     try {
       const res = await fetch(`/api/admin/loan-app/${loan.id}/download-zip?lender=${lender}`, {
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
@@ -698,7 +651,7 @@ function Inner() {
     setTrancheBusy(tranche);
     try {
       const res = await fetch(`/api/admin/loan-app/${loan.id}/tranche-zip?tranche=${tranche}`, {
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
@@ -730,28 +683,21 @@ function Inner() {
     return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Loan application not found.</p></main>;
   }
 
-  const approved    = loan.status === "approved";
   const rejected    = loan.status === "rejected";
   const underReview = loan.status === "under_review";
-  const rfd         = loan.status === "rfd";
   const statusVal   = loan.status ?? "draft";
   const hasCoapp    = loan.bill_on_applicant_name === false;
   const aborted     = loan.aborted_at != null;
-  // Approval-and-beyond (includes RFD). "RFD reached" = the 'rfd' status OR a
-  // stamped rfd_at (backfilled/legacy rows).
+  // Approval-and-beyond (includes RFD).
   const approvedPlus   = ["approved", "rfd", "sent_to_nbfc", "disbursed"].includes(statusVal);
-  const rfdReached     = rfd || loan.rfd_at != null;
   const approvalFilled = loan.approval_details_filled === true;
 
   const decidedLender = approvedPlus ? loan.approved_lender : rejected ? loan.rejected_lender : null;
   const decidedByLabel = decidedLender ? lenderLabelIn(lenders, String(decidedLender)) : null;
   const approvalDetails = (loan.approval_details ?? null) as ApprovalDetails | null;
 
-  const dl = deadlineState(loan.first_disbursement_date, loan.second_disbursement_amount != null);
   const firstDone  = loan.first_disbursement_amount != null;
   const secondDone = loan.second_disbursement_amount != null;
-  const reviewLabel = ["approved", "rejected"].includes(String(loan.completion_docs_status))
-    ? "Reviewed" : "Pending";
 
   const docsSent = loan.status === "docs_sent";
   const onHold   = loan.status === "on_hold";
@@ -769,7 +715,6 @@ function Inner() {
   const appDocsComplete = loanDocChecklist(loan, docs.map((d) => d.category)).every((d) => d.ok);
 
   // ── Per-lender (loan_application_lenders) derived state ──────────────
-  const latest = latestLenderStatus(lenderRows);
   const withDocs = lendersWithDocs(lenderRows);
   const approvedRows = approvedLenders(lenderRows);
   const anyApprovedLender = approvedRows.length > 0;
@@ -797,7 +742,6 @@ function Inner() {
   const tDocsSent = firstDone || ["docs_sent", "approved", "rfd", "rejected", "sent_to_nbfc", "disbursed"].includes(effStatus);
   const tApproved = firstDone || ["approved", "rfd", "sent_to_nbfc", "disbursed"].includes(effStatus);
   const tRejected = !firstDone && effStatus === "rejected";
-  const tDecided  = tApproved || tRejected;
 
   // Tranche ZIPs are offered in the Download menu only when that tranche's
   // documents actually exist (no empty-tranche ZIP).
@@ -1009,8 +953,8 @@ function Inner() {
   };
   // Abort — a recorded soft-cancel (not a delete, not a status change). Keeps
   // the underlying status; the aborted_at flag makes it read as "Aborted".
-  async function doAbort(reason: string) {
-    if (!loan || statusBusy) return;
+  async function doAbort(reason: string): Promise<boolean> {
+    if (!loan || statusBusy) return false;
     setStatusBusy(true);
     setStatusMsg(null);
     const me = getBusiness();
@@ -1026,12 +970,13 @@ function Inner() {
       patch.status_before_hold = null;
     }
     const { error } = await supabase().from("epc_applications").update(patch).eq("id", loan.id);
-    if (error) { setStatusMsg("Couldn't abort — " + error.message); setStatusBusy(false); return; }
+    if (error) { setStatusMsg("Couldn't abort — " + error.message); setStatusBusy(false); return false; }
     setLoan({ ...loan, ...patch });
     invalidateLoanBoards(); // abort reflects on the Task Manager / Loans list immediately
     setStatusMsg("Application aborted.");
     await logLoanActivity(loan.id, "status_change", { detail: `Aborted — ${reason}` });
     setStatusBusy(false);
+    return true;
   }
 
   // Swap applicant ↔ co-applicant. The route moves every identity field and the
@@ -1045,7 +990,7 @@ function Inner() {
     try {
       const res = await fetch(`/api/admin/loan-app/${loan.id}/swap-roles`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) { alert("Couldn't swap: " + (data?.error || res.status)); return; }
@@ -1082,7 +1027,7 @@ function Inner() {
   // Approved: the Date of Approval entered on the approval form (a date — the
   // lender row's approved_at is only when it was recorded in the portal).
   const decidedWhen = tApproved
-    ? (approvalDetails?.approval_date ? fmtDateShort(approvalDetails.approval_date) : loan.approved_at ? fmtDateTime(loan.approved_at) : null)
+    ? (approvalDetails?.approval_date ? fmtDate(approvalDetails.approval_date) : loan.approved_at ? fmtDateTime(loan.approved_at) : null)
     : tRejected && loan.rejected_at ? fmtDateTime(loan.rejected_at) : null;
   const withWhen = (what: ReactNode, when: string | null) => (when ? <>{what}<br />{when}</> : what);
   const stages: Array<{ key: Stage; label: string; sub?: ReactNode; icon: ReactNode; state: StageState }> = [
@@ -1104,12 +1049,12 @@ function Inner() {
     {
       key: "first", label: "1st Disbursement", icon: I.money,
       state: held("first", firstDone ? "done" : tApproved ? "current" : "pending"),
-      sub: firstDone ? fmtDateShort(loan.first_disbursement_date) : tApproved ? <><FillCount have={t1Have} total={t1Need.length} /> documents</> : "Pending",
+      sub: firstDone ? fmtDate(loan.first_disbursement_date) : tApproved ? <><FillCount have={t1Have} total={t1Need.length} /> documents</> : "Pending",
     },
     {
       key: "second", label: "2nd Disbursement", icon: I.check,
       state: held("second", secondDone ? "done" : firstDone ? "current" : "pending"),
-      sub: secondDone ? fmtDateShort(loan.second_disbursement_date) : firstDone ? <><FillCount have={t2Have} total={COMPLETION_CATEGORIES.length} /> documents</> : "Pending",
+      sub: secondDone ? fmtDate(loan.second_disbursement_date) : firstDone ? <><FillCount have={t2Have} total={COMPLETION_CATEGORIES.length} /> documents</> : "Pending",
     },
   ];
   const activeTab: Stage = tab ?? stageNow;
@@ -1653,7 +1598,7 @@ function Inner() {
               Cancel
             </button>
             <button type="button" disabled={statusBusy || !abortReason.trim()}
-              onClick={() => { const r = abortReason.trim(); if (!r) return; void doAbort(r).then(() => { setAbortOpen(false); setAbortReason(""); }); }}
+              onClick={() => { const r = abortReason.trim(); if (!r) return; void doAbort(r).then((ok) => { if (ok) { setAbortOpen(false); setAbortReason(""); } }); }}
               className="text-[13px] font-semibold px-3 py-2 rounded-[8px] bg-red-600 text-white hover:bg-red-700 disabled:opacity-60">
               Abort application
             </button>
@@ -1675,7 +1620,7 @@ function Inner() {
       <ConfirmDeleteModal
         open={delOpen}
         onClose={() => setDelOpen(false)}
-        onDeleted={() => { invalidate("dash.apps"); invalidate("dashkpis"); router.replace("/admin" as any); }}
+        onDeleted={() => { invalidate("dash.apps"); router.replace("/admin" as any); }}
         endpoint="/api/admin/delete-loan-app"
         body={{ applicationId: loan.id }}
         title="Delete loan application permanently"

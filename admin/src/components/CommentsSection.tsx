@@ -1,5 +1,5 @@
 "use client";
-import { fmtDateTime } from "@/lib/dates";
+import { fmtWhen } from "@/lib/dates";
 
 // Inline "chat-box" comments component. Rendered on:
 //   - the View page (Col 3, replacing the old "Latest comment" card)
@@ -20,7 +20,7 @@ import { fmtDateTime } from "@/lib/dates";
 //   │  …                                             │
 //   └────────────────────────────────────────────────┘
 //
-// Same Supabase CRUD as CommentsPanel — admin-only RLS + audit trigger
+// Supabase CRUD on epc_/loan_/lead_comments — admin-only RLS + audit trigger
 // (migration 0018) means every add/edit/delete lands in admin_edit_log
 // automatically. onChanged fires so the View page can bump its activity
 // log refresh key.
@@ -163,14 +163,4 @@ export default function CommentsSection({
       </div>
     </div>
   );
-}
-
-function fmtWhen(iso: string): string {
-  const d = new Date(iso);
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return fmtDateTime(d);
 }

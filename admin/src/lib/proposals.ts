@@ -5,7 +5,7 @@
 // link per quotation is kept in the tab, so pressing again reuses it instead of
 // making another row; a changed quotation gets a new link.
 
-import { getToken } from "./auth";
+import { authHeaders } from "./auth";
 import { getCached, setCached } from "./list-cache";
 import { openWhatsApp } from "./wa-link";
 import type { QuoteDoc } from "./quote-calc";
@@ -49,7 +49,7 @@ async function make(quoteId: string, doc?: QuoteDoc): Promise<Made> {
   const v = version(doc);
   const hit = getCached<Made>(key(quoteId), TTL);
   if (hit && hit.v === v) return hit;
-  const res = await fetch(`/api/epc/quotes/${quoteId}/proposal`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+  const res = await fetch(`/api/epc/quotes/${quoteId}/proposal`, { method: "POST", headers: authHeaders() });
   const j = await res.json().catch(() => ({}));
   if (!res.ok || !j?.ok || !j.url) throw new Error(j?.error || "Couldn't make the proposal link.");
   const made: Made = { v, url: String(j.url), org: String(j.org || "") };

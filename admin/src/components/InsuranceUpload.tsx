@@ -7,7 +7,7 @@
 // GeoOfficeUpload instead; Aadhaar's two-file upload is handled inline.)
 
 import { useRef, useState } from "react";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 
 type Props = {
   endpoint: string;
@@ -40,7 +40,7 @@ export default function InsuranceUpload({
       if (extra) for (const [k, v] of Object.entries(extra)) fd.append(k, v);
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
         body: fd,
       });
       const d = await res.json().catch(() => ({}));

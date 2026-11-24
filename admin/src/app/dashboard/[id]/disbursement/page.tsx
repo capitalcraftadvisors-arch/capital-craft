@@ -18,9 +18,11 @@ import { supabase } from "@/lib/supabase";
 import CompletionDocsSection from "@/components/CompletionDocsSection";
 import { I, SectionCard, KV, Pill } from "@/components/view/ViewKit";
 import {
-  deadlineState, DEADLINE_PILL, remainingAmount, firstCharges, fmtRupeesExact, fmtDateShort,
+  deadlineState, DEADLINE_PILL, remainingAmount, firstCharges,
   DISBURSEMENT_WINDOW_DAYS,
 } from "@/lib/disbursement";
+import { fmtRupeesExact } from "@/lib/money";
+import { fmtDate } from "@/lib/dates";
 
 type Loan = Record<string, any>;
 
@@ -101,7 +103,7 @@ function Inner() {
                 {dl.label}
               </div>
               {dl.started && (
-                <div className="text-[11px] text-[#5a8a76] mt-1">Deadline {fmtDateShort(loan.disbursement_deadline)}</div>
+                <div className="text-[11px] text-[#5a8a76] mt-1">Deadline {fmtDate(loan.disbursement_deadline)}</div>
               )}
             </div>
           </div>
@@ -139,14 +141,14 @@ function Inner() {
             <KV k="Sanctioned amount" v={fmtRupeesExact(sanctioned)} />
             <KV
               k="First disbursement (received)"
-              v={firstSaved ? `${fmtRupeesExact(loan.first_disbursement_amount)} · ${fmtDateShort(loan.first_disbursement_date)}` : "Not released yet"}
+              v={firstSaved ? `${fmtRupeesExact(loan.first_disbursement_amount)} · ${fmtDate(loan.first_disbursement_date)}` : "Not released yet"}
               valueClass={firstSaved ? "text-[#178a5c]" : undefined}
             />
             <KV k="Remaining (pending)" v={firstSaved ? fmtRupeesExact(remaining) : "—"} />
             <KV
               k="Second disbursement"
               v={loan.second_disbursement_amount != null
-                ? `${fmtRupeesExact(loan.second_disbursement_amount)} · ${fmtDateShort(loan.second_disbursement_date)}`
+                ? `${fmtRupeesExact(loan.second_disbursement_amount)} · ${fmtDate(loan.second_disbursement_date)}`
                 : "After work completion & review"}
               valueClass={loan.second_disbursement_amount != null ? "text-[#178a5c]" : undefined}
             />

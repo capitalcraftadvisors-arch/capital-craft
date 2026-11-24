@@ -11,7 +11,7 @@
 // Secondary: Abort (drops the lead off the dashboard, kept for the record).
 // Delete was removed deliberately — aborting is the reversible-by-record path.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { fmtRupees } from "@/lib/money";
@@ -22,7 +22,7 @@ import CommentsSection from "@/components/CommentsSection";
 import OwnershipCard from "@/components/OwnershipCard";
 import { I, SectionCard, KV } from "@/components/view/ViewKit";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 
 type Lead = {
   id: string;
@@ -122,7 +122,7 @@ function Inner() {
     try {
       const res = await fetch(`/api/admin/lead/${lead.id}/convert-to-loan-app`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) { alert(data?.error || `Conversion failed (HTTP ${res.status}).`); setConverting(false); return; }
@@ -148,7 +148,6 @@ function Inner() {
   if (loading) return <main className="min-h-screen grid place-items-center bg-white"><p className="text-[#5a8a76]">Loading…</p></main>;
   if (!lead) return <main className="min-h-screen grid place-items-center bg-white"><p className="text-red-700">Lead not found.</p></main>;
 
-  const money = (v: number | null) => fmtRupees(v); // paise when present
   const sizeStr = lead.project_size != null ? `${lead.project_size} ${(lead.project_size_unit || "kw").toUpperCase()}` : "—";
   const aborted = !!lead.aborted_at;
 
@@ -257,8 +256,8 @@ function Inner() {
           <div className="flex flex-col gap-2.5">
             <SectionCard title="Project & loan" accent="blue" icon={I.money}>
               <KV k="Project Size" v={sizeStr} />
-              <KV k="Project cost" v={money(lead.total_project_cost)} />
-              <KV k="Loan amount required" v={money(lead.loan_amount)} />
+              <KV k="Project cost" v={fmtRupees(lead.total_project_cost)} />
+              <KV k="Loan amount required" v={fmtRupees(lead.loan_amount)} />
               <KV k="Lead Owner Name" v={lead.lead_owner_name} />
             </SectionCard>
 

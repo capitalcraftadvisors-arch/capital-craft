@@ -15,7 +15,7 @@
 // database (trigger) and here in place — the list is one query on open, cached
 // like the other lists; nothing is fetched again.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import AdminSidebar, { ACCENTS, SectionMark, themeStyle } from "@/components/AdminSidebar";
@@ -489,6 +489,16 @@ function LeadWindow({ lead, added, busy, onUpdate, onLog, onClose }: {
   lead: Lead; added: Call | null; busy: boolean; onUpdate: (p: Partial<Lead>) => Promise<boolean>; onLog: () => void; onClose: () => void;
 }) {
   const [notes, setNotes] = useState(lead.notes ?? "");
+  // Notes save on blur and when the window closes (a press on the overlay closes
+  // it before the box blurs); the value being saved is never sent twice.
+  const savingNotes = useRef<string | null>(null);
+  function saveNotes() {
+    const v = notes.trim();
+    if (v === (lead.notes ?? "").trim() || v === savingNotes.current) return;
+    savingNotes.current = v;
+    void onUpdate({ notes: v || null }).finally(() => { savingNotes.current = null; });
+  }
+  const close = () => { saveNotes(); onClose(); };
   const [calls, setCalls] = useState<Call[] | null>(null);
   useEffect(() => {
     void supabase().from("gozerobils_lead_calls").select("id, lead_id, called_at, outcome, note, next_follow_up")
@@ -503,7 +513,7 @@ function LeadWindow({ lead, added, busy, onUpdate, onLog, onClose }: {
     <div className="min-w-0"><div className="text-[11.5px] text-[#5a8a76]">{l}</div><div className="text-[14px] text-[#0f3d2e] break-words">{v || "—"}</div></div>
   );
   return (
-    <Modal onClose={onClose} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[680px] max-h-[92vh] overflow-y-auto p-6">
+    <Modal onClose={close} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[680px] max-h-[92vh] overflow-y-auto p-6">
       <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
         <div>
           <div className="text-[18px] font-display font-bold text-[#0f3d2e]">{lead.name || "—"}</div>
@@ -536,7 +546,7 @@ function LeadWindow({ lead, added, busy, onUpdate, onLog, onClose }: {
         <label className="flex flex-col gap-1 sm:col-span-2">
           <span className="text-[12px] font-medium text-[#5a8a76]">Notes</span>
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3}
-            onBlur={() => { if (notes.trim() !== (lead.notes ?? "").trim()) void onUpdate({ notes: notes.trim() || null }); }}
+            onBlur={saveNotes}
             className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none resize-none" />
         </label>
       </div>
@@ -558,7 +568,7 @@ function LeadWindow({ lead, added, busy, onUpdate, onLog, onClose }: {
           </div>
         )}
       <div className="flex justify-end mt-5">
-        <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-[#5a8a76] hover:bg-[#f7fcfa]">Close</button>
+        <button type="button" onClick={close} className="px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-[#5a8a76] hover:bg-[#f7fcfa]">Close</button>
       </div>
     </Modal>
   );

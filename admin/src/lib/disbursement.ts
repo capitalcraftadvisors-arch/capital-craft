@@ -9,8 +9,6 @@
 // Overdue is a FLAG, not a gate: it turns the countdown red for admin review
 // and never blocks anything on its own.
 
-import { fmtDate } from "./dates";
-
 export const DISBURSEMENT_WINDOW_DAYS = 45;
 
 // Amber once the remaining window drops under this.
@@ -152,12 +150,4 @@ export function displayAmount(loan: {
   }
   const n = loan.loan_amount_required ?? loan.loan_amount;
   return n == null ? null : Number(n);
-}
-
-// fmtRupees now lives in lib/money; re-exported here so existing imports keep working.
-export { fmtRupees, fmtRupeesExact } from "./money";
-
-/** Portal-wide compact date for tables/headers — DD/MM/YYYY (see lib/dates). */
-export function fmtDateShort(v: string | null | undefined): string {
-  return fmtDate(v);
 }

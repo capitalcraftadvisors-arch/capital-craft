@@ -29,7 +29,6 @@ const SRC: Record<string, { table: string; module: string }> = {
 // One-step stage advance per source (+ the timestamp columns the board reads).
 function nextStage(source: string, status: string): { status: string; stamp?: Record<string, unknown> } | null {
   const now = new Date().toISOString();
-  const today = now.slice(0, 10);
   if (source === "loan") {
     const map: Record<string, string> = { draft: "under_review", submitted: "under_review", on_hold: "docs_sent", under_review: "docs_sent", docs_sent: "approved" };
     const to = map[status];

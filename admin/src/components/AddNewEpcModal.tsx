@@ -17,14 +17,13 @@ import { useRouter } from "next/navigation";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import Modal from "@/components/ui/Modal";
-import { beginImpersonation, getToken } from "@/lib/auth";
+import { authHeaders, beginImpersonation } from "@/lib/auth";
+import { MOBILE_RE } from "@/lib/validators";
 
 type Props = {
   open: boolean;
   onClose: () => void;
 };
-
-const MOBILE_RE = /^[6-9]\d{9}$/;
 
 type DuplicateWarning = {
   id: string;
@@ -75,10 +74,7 @@ export default function AddNewEpcModal({ open, onClose }: Props) {
     try {
       const res = await fetch("/api/admin/create-epc", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken() ?? ""}`,
-        },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ mobile: m }),
       });
       const data = await res.json();
@@ -110,7 +106,7 @@ export default function AddNewEpcModal({ open, onClose }: Props) {
   }
 
   return (
-    <Modal onClose={close} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
+    <Modal onClose={close} busy={busy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
       <div className="flex items-start justify-between mb-4">
         <div>
           <h3 className="font-display font-semibold text-[18px] text-text">Add new EPC</h3>
@@ -121,6 +117,7 @@ export default function AddNewEpcModal({ open, onClose }: Props) {
         <button
           type="button"
           onClick={close}
+          disabled={busy}
           className="text-[18px] text-text-muted hover:text-text leading-none"
           aria-label="Close"
         >

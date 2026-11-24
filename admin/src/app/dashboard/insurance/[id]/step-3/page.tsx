@@ -10,7 +10,7 @@ import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import InsuranceStepHeader from "@/components/InsuranceStepHeader";
 
 type App = Record<string, any>;
@@ -48,7 +48,7 @@ function Inner() {
     try {
       const res = await fetch(`/api/epc/insurance/${params.id}/submit`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok || !d?.ok) { alert("Couldn't submit: " + (d?.error || res.status)); return; }

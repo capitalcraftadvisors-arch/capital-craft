@@ -23,7 +23,7 @@ import Modal, { OVERLAY, BACKDROP } from "@/components/ui/Modal";
 import LoanActivityLogModal from "@/components/LoanActivityLogModal";
 import ActivityLogModal from "@/components/ActivityLogModal";
 import { supabase } from "@/lib/supabase";
-import { getBusiness, getToken, greetingName, isMainAdmin as isMainAdminUser } from "@/lib/auth";
+import { authHeaders, getBusiness, greetingName, isMainAdmin as isMainAdminUser } from "@/lib/auth";
 import { loadOpsCases, columnsFor, SOURCE_META, type OpsCase, type TeamUser, type CaseSource } from "@/lib/ops-board";
 import { waTel, waUrl, WA_LANGS, type WaLang } from "@/lib/wa-link";
 import { PERIOD_OPTIONS, inPeriod, type Period } from "@/lib/period";
@@ -31,7 +31,7 @@ import { LOAN_LENDER_COLS, lendersWithDocs, type LoanLenderRow } from "@/lib/loa
 import { useLenders } from "@/lib/lenders";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { REVIEW_LABEL } from "@/lib/review";
-import { fmtRupees, inrPlain } from "@/lib/money";
+import { fmtRupees, rupeesShort } from "@/lib/money";
 
 // ── Loan pipeline: forward-only stage locking (no going back, no skipping —
 // except a lender decision straight after Send to Lender). Moves into these
@@ -126,21 +126,12 @@ function loanOutline(c: OpsCase): "green" | "yellow" | "red" | "neutral" {
   if (c.stageHours >= t[0]) return "yellow";
   return "green";
 }
-const OUTLINE: Record<"green" | "yellow" | "red" | "neutral", string> = { green: "#16a34a", yellow: "#eab308", red: "#dc2626", neutral: "#cbd5e1" };
 // Inner card fill by SLA status (replaces the coloured border): green = within
 // SLA, amber = approaching breach, red = breached/blocked, neutral = terminal.
 const OUTLINE_FILL: Record<"green" | "yellow" | "red" | "neutral", string> = { green: "#e7f5ee", yellow: "#fdf0da", red: "#fbe4e4", neutral: "#e8ebef" };
 // My Day's Idle chip text on those fills.
 const IDLE_TEXT: Record<"green" | "yellow" | "red" | "neutral", string> = { green: "#178a5c", yellow: "#854f0b", red: "#b42318", neutral: "#64748b" };
 
-function fmt(v: number): string {
-  if (!v) return "₹0";
-  if (v >= 1e7) return "₹" + (v / 1e7).toFixed(2) + " Cr";
-  if (v >= 1e5) return "₹" + (v / 1e5).toFixed(1) + " L";
-  return "₹" + inrPlain(v);
-}
-// Full Indian-grouped rupees for the side panel (₹1,80,000 — never "1.8 L"), paise when present.
-const fmtFull = (v: number) => fmtRupees(v);
 // The next action a case needs, derived from its stage. null = nothing to do
 // (aborted / fully disbursed / off-board, a rejected non-loan case) — excluded
 // from My Day. Rejected loans stay, in their own last tab, below the work.
@@ -306,18 +297,6 @@ function buildWaMessage(customer: string, rm: string, itemKeys: string[], source
       if (!items.length) return `${greet}\n\n${who} ${subj} को आगे बढ़ाने के लिए कुछ दस्तावेज़ चाहिए। कृपया संपर्क करें।${sign}`;
       return `${greet}\n\n${who} ${subj} को आगे बढ़ाने के लिए हमें ये दस्तावेज़ चाहिए:\n\n${items.map((it) => `• ${it.hi}`).join("\n")}\n\nकृपया इन्हें जल्दी WhatsApp पर भेजें।${sign}`;
   }
-}
-// Days since an ISO timestamp (for the "contacted Nd ago" chip).
-function daysAgo(iso: string | null): number | null {
-  if (!iso) return null;
-  const t = new Date(iso).getTime();
-  if (!isFinite(t)) return null;
-  return Math.max(0, Math.floor((Date.now() - t) / 86400000));
-}
-// "YYYY-MM-DD" → "DD/MM" for a compact follow-up chip.
-function dmy(iso: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  return m ? `${m[3]}/${m[2]}` : iso;
 }
 // "Act today" — who is blocking each case, so the day reads as a ranked list.
 type WaitParty = "Customer" | "Lender" | "EPC" | "Internal";
@@ -548,7 +527,7 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
                           <div className="font-semibold text-text truncate max-w-[190px] flex items-center gap-1.5">
                             {c.name}{fuDue && <span title="Follow-up due" className="text-[10px]">⏰</span>}
                           </div>
-                          <div className="text-[11px] text-text-muted truncate max-w-[190px]">{c.lender ? `${c.lender} · ` : ""}{c.epcName ?? c.statusLabel}{c.amount > 0 ? ` · ${fmtFull(c.amount)}` : ""}</div>
+                          <div className="text-[11px] text-text-muted truncate max-w-[190px]">{c.lender ? `${c.lender} · ` : ""}{c.epcName ?? c.statusLabel}{c.amount > 0 ? ` · ${fmtRupees(c.amount)}` : ""}</div>
                         </td>
                         <td className="px-2.5 py-2.5 align-top whitespace-nowrap">
                           <span className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold" style={{ color: WAIT_COLOR[w] }}>
@@ -584,8 +563,8 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
         <aside className="lg:w-72 shrink-0 mt-4 lg:mt-0 space-y-4">
           <div className="rounded-lg border border-[#f2c4c4] bg-[#fdf0f0] p-4">
             <p className="text-[12px] font-bold uppercase tracking-wide text-[#b42318] mb-2">Today&rsquo;s math</p>
-            <div className="flex justify-between items-baseline text-[13px] py-1 border-b border-[#f2c4c4]/60"><span className="text-[#8a3a3a]">₹ blocked (stuck &gt; 2d)</span><span className="font-bold text-[#b42318]">{fmtFull(blocked)}</span></div>
-            <div className="flex justify-between items-baseline text-[13px] py-1 border-b border-[#f2c4c4]/60"><span className="text-[#8a3a3a]">Recoverable by {custCases.length} call{custCases.length === 1 ? "" : "s"}</span><span className="font-bold text-[#b42318]">{fmtFull(recoverable)}</span></div>
+            <div className="flex justify-between items-baseline text-[13px] py-1 border-b border-[#f2c4c4]/60"><span className="text-[#8a3a3a]">₹ blocked (stuck &gt; 2d)</span><span className="font-bold text-[#b42318]">{fmtRupees(blocked)}</span></div>
+            <div className="flex justify-between items-baseline text-[13px] py-1 border-b border-[#f2c4c4]/60"><span className="text-[#8a3a3a]">Recoverable by {custCases.length} call{custCases.length === 1 ? "" : "s"}</span><span className="font-bold text-[#b42318]">{fmtRupees(recoverable)}</span></div>
             <div className="flex justify-between items-baseline text-[13px] py-1"><span className="text-[#8a3a3a]">Cases to action</span><span className="font-bold text-[#b42318]">{work.length}</span></div>
           </div>
           <div className="rounded-lg border border-line bg-white p-4">
@@ -1033,7 +1012,7 @@ function Inner() {
     try {
       const res = await fetch("/api/admin/ops/action", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ source: target.source, id: target.id, action, payload }),
       });
       const j = await res.json().catch(() => ({}));
@@ -1401,7 +1380,7 @@ function Inner() {
                             EPC has no loan value, so it shows the count only. */}
                         <div className="text-[11px] font-semibold text-[#0f3d2e] mt-0.5">
                           <span className="text-text-muted">{items.length}</span>
-                          {srcFilter !== "epc" && <> · {fmt(colValue)}</>}
+                          {srcFilter !== "epc" && <> · {rupeesShort(colValue)}</>}
                         </div>
                       </div>
                       <div className="flex flex-col gap-2">
@@ -1439,7 +1418,7 @@ function Inner() {
                               </div>
                               <div className="flex items-center justify-between gap-2 mt-1 min-w-0">
                                 <span className="text-[12.5px] font-bold text-[#0f3d2e] truncate">
-                                  {c.amount ? fmtFull(c.amount) : <span className="text-[11px] font-normal text-text-muted">{c.statusLabel}</span>}
+                                  {c.amount ? fmtRupees(c.amount) : <span className="text-[11px] font-normal text-text-muted">{c.statusLabel}</span>}
                                 </span>
                                 <span className="text-[11px] font-semibold shrink-0" style={{ color: late ? "#b45309" : "#5a8a76" }}>
                                   {late && "⚠ "}🕒 {stageDays}d in stage
@@ -1571,7 +1550,7 @@ function Inner() {
                 </div>
               ) : (
                 <div className="text-[13px] flex flex-col gap-1.5">
-                  <Row k="Amount" v={selCase.amount ? fmtFull(selCase.amount) : "—"} />
+                  <Row k="Amount" v={selCase.amount ? fmtRupees(selCase.amount) : "—"} />
                   <Row k="Lender" v={selCase.lender || "—"} />
                   <Row k="Owner" v={selCase.ownerName || "Unassigned"} />
                   <Row k="Lead owner" v={selCase.leadOwnerName || "—"} />
@@ -1633,7 +1612,7 @@ function Inner() {
           <div className="flex items-center gap-2.5 ml-auto min-w-[300px]">
             {epcTab
               ? <span className="whitespace-nowrap">{periodLabel} <strong>{onboarded}</strong> of {epcTarget} EPCs onboarded</span>
-              : <span className="whitespace-nowrap">{periodLabel} <strong>{fmt(mtd)}</strong> of ₹{target} L</span>}
+              : <span className="whitespace-nowrap">{periodLabel} <strong>{rupeesShort(mtd)}</strong> of ₹{target} L</span>}
             <div className="flex-1 h-3 rounded-full bg-neutral-200"><div className="h-3 rounded-full" style={{ width: pct + "%", backgroundColor: "#178a5c" }} /></div>
           </div>
         </footer>

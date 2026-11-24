@@ -22,11 +22,11 @@ import Button from "@/components/ui/Button";
 import DatePicker from "@/components/ui/DatePicker";
 import FileUpload from "@/components/FileUpload";
 import EpcApplyTracker from "@/components/EpcApplyTracker";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
-import { getDocumentUrl } from "@/lib/storage";
+import { openDocument, openLoanDoc } from "@/lib/storage";
 import { extractPan } from "@/lib/ocr";
-import { MOBILE_RE, EMAIL_RE } from "@/lib/validators";
+import { MOBILE_RE, EMAIL_RE, PAN_RE } from "@/lib/validators";
 
 export type EpcApplyDocsPayload = {
   borrower_pan: string | null;
@@ -191,23 +191,7 @@ function Inner() {
   }, [appId]);
 
   // Open a stored *_path document (Aadhaar / e-bill / quotation / rooftop / co-app).
-  async function viewPath(path: string) {
-    try {
-      const res = await fetch(`/api/admin/loan-app/${appId}/sign-doc`, {
-        method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
-        body: JSON.stringify({ path }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (j?.ok && j.url) window.open(j.url as string, "_blank", "noopener");
-      else alert("Couldn't open the document.");
-    } catch { alert("Couldn't open the document."); }
-  }
-  // Open a user_application_docs row (PAN card image).
-  async function openDocRow(id: string) {
-    const url = await getDocumentUrl(id);
-    if (url) window.open(url, "_blank", "noopener");
-    else alert("Couldn't open the document.");
-  }
+  const viewPath = (path: string) => openLoanDoc(appId, { path });
 
   // Run applicant-Aadhaar extraction once both sides are picked.
   useEffect(() => {
@@ -229,7 +213,7 @@ function Inner() {
       fd.append("back",  back);
       const res = await fetch(`/api/admin/loan-app/${appId}/extract-aadhaar`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
         body: fd,
       });
       const data = await res.json().catch(() => ({}));
@@ -269,7 +253,7 @@ function Inner() {
       fd.append("ebill", file);
       const res = await fetch(`/api/admin/loan-app/${appId}/extract-loan-docs`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
         body: fd,
       });
       const data = await res.json().catch(() => ({}));
@@ -300,7 +284,7 @@ function Inner() {
       fd.append("file", file);
       const res = await fetch(`/api/admin/loan-app/${appId}/extract-coapp-pan`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
         body: fd,
       });
       const data = await res.json().catch(() => ({}));
@@ -328,8 +312,6 @@ function Inner() {
     } catch { /* manual entry fallback */ }
   }
 
-  const PAN_FMT = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
-
   // Co-applicant email / phone must NOT match the applicant's.
   const coappMobileConflict =
     hasCoapp === true &&
@@ -346,7 +328,7 @@ function Inner() {
     hasCoapp === false ||
     (hasCoapp === true &&
       !!cPaths && !!cPanPath &&
-      PAN_FMT.test(cPan.trim().toUpperCase()) &&
+      PAN_RE.test(cPan.trim().toUpperCase()) &&
       MOBILE_RE.test(cMobile) &&
       EMAIL_RE.test(cEmail) &&
       !coappMobileConflict &&
@@ -466,7 +448,7 @@ function Inner() {
             onUploaded={(info) => void onPanUploaded(info)}
             hint="Photo, scan, or PDF."
           />
-          {panDocId && <DocOnFile label="PAN card on file" onView={() => void openDocRow(panDocId)} />}
+          {panDocId && <DocOnFile label="PAN card on file" onView={() => void openDocument(panDocId)} />}
           <Input
             label="PAN number"
             value={panNumber}

@@ -18,8 +18,6 @@ import { logLoanActivityServer } from "@/lib/loan-activity-server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const MASKED_RE = /^x{8}\d{4}$/;
-
 function strOrNull(v: unknown): string | null {
   if (v == null) return null;
   const s = String(v).trim();

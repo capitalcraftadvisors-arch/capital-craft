@@ -10,14 +10,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import { I, SectionCard, KV, Pill, DocGrid, StatusBtn, type ViewDocSlot } from "@/components/view/ViewKit";
 import InsuranceUpload from "@/components/InsuranceUpload";
 import OwnershipCard from "@/components/OwnershipCard";
 import ProfileTabBar, { TabButton } from "@/components/ProfileTabBar";
 import ConfirmDeleteModal from "@/components/ConfirmDeleteModal";
 import DateField from "@/components/ui/DateField";
-import { policyValidity } from "@/lib/insurance-validity";
+import { INSURANCE_STATUS_LABEL, policyValidity } from "@/lib/insurance-validity";
 
 type App = Record<string, any>;
 
@@ -29,9 +29,6 @@ function insurerLabel(v: string | null | undefined): string | null {
   if (!v) return v ?? null;
   return /^sbi\b/i.test(v.trim()) ? "SBI General Insurance" : v;
 }
-const STATUS_LABEL: Record<string, string> = {
-  draft: "Draft", under_review: "Under Review", issued: "Issued", rejected: "Rejected", hold: "Hold",
-};
 
 export default function InsuranceViewPage() {
   return (
@@ -68,7 +65,7 @@ function Inner() {
     setPolicySaved(false);
     const res = await fetch(`/api/admin/insurance/${app.id}/save-policy`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ policy_from_date: policyFrom || null, policy_to_date: policyTo || null }),
     });
     const d = await res.json().catch(() => ({}));
@@ -110,7 +107,7 @@ function Inner() {
     try {
       const res = await fetch(`/api/admin/insurance/${params.id}/sign-doc`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ path }),
       });
       const d = await res.json().catch(() => ({}));
@@ -124,7 +121,7 @@ function Inner() {
     try {
       const res = await fetch("/api/admin/delete-doc-path", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ table: "insurance_applications", id: params.id, column }),
       });
       const d = await res.json().catch(() => ({}));
@@ -140,7 +137,7 @@ function Inner() {
     setDownloading(true);
     try {
       const res = await fetch(`/api/admin/insurance/${app.id}/download-zip`, {
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
       });
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert("ZIP failed: " + (d?.error || `HTTP ${res.status}`)); return; }
       const blob = await res.blob();
@@ -209,7 +206,7 @@ function Inner() {
             <div className="flex gap-2 items-center flex-wrap">
               <Pill tint="blue" icon={I.id}>{app.insurance_display_id ?? app.id.slice(0, 8).toUpperCase()}</Pill>
               {app.pan_number && <Pill tint="blue">PAN {app.pan_number}</Pill>}
-              <Pill tint="amber">{STATUS_LABEL[app.status] ?? app.status}</Pill>
+              <Pill tint="amber">{INSURANCE_STATUS_LABEL[app.status] ?? app.status}</Pill>
             </div>
           </div>
         </div>
@@ -248,7 +245,7 @@ function Inner() {
               <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
                 Insurance status <span className="normal-case font-normal text-slate-400">· admin only</span>
               </div>
-              <span className="text-[18px] font-semibold text-slate-800">{STATUS_LABEL[app.status] ?? app.status}</span>
+              <span className="text-[18px] font-semibold text-slate-800">{INSURANCE_STATUS_LABEL[app.status] ?? app.status}</span>
             </div>
             <div className="flex gap-2 flex-wrap items-center">
               {app.status !== "under_review" && (

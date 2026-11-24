@@ -13,11 +13,9 @@ import FileUpload from "@/components/FileUpload";
 import { getBusiness, setBusiness, isImpersonating, logout } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { extractPan, extractGstLegalName } from "@/lib/ocr";
-import { PAN_RE } from "@/lib/validators";
+import { GSTIN_RE, PAN_RE } from "@/lib/validators";
 
 type SuryaGhar = "yes" | "no" | "other" | "";
-
-const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/;
 
 type Form = {
   business_type: "proprietorship" | "pvt_ltd" | "partnership" | "llp" | "";

@@ -100,12 +100,12 @@ export default function BillToQuote({ quotes, onClose }: { quotes: QuoteRow[]; o
   const icon = { width: 26, height: 26, viewBox: "0 0 24 24", fill: "none", stroke: NAVY, strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 
   return (
-    // Escape closes even while saving (as before); only the overlay press waits.
-    <Modal onClose={onClose} closeOnBackdrop={busy ? false : "mousedown"} closeOnEscape overlayClassName={OVERLAY.soft}
+    // Escape, ✕, Cancel and the overlay press all wait while the quotation saves.
+    <Modal onClose={onClose} busy={busy} closeOnBackdrop="mousedown" closeOnEscape overlayClassName={OVERLAY.soft}
       className="bg-white rounded-2xl shadow-xl w-full max-w-[640px] max-h-[92vh] overflow-y-auto p-6">
       <div className="flex items-center justify-between mb-4">
         <div className="text-[17px] font-display font-bold text-[#0f3d2e]">Quotation from bill</div>
-        <button type="button" onClick={onClose} aria-label="Close" className="w-8 h-8 grid place-items-center rounded-lg text-text-muted hover:bg-bg-soft">✕</button>
+        <button type="button" onClick={onClose} disabled={busy} aria-label="Close" className="w-8 h-8 grid place-items-center rounded-lg text-text-muted hover:bg-bg-soft">✕</button>
       </div>
 
       <input ref={camRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={pick} />
@@ -196,7 +196,7 @@ export default function BillToQuote({ quotes, onClose }: { quotes: QuoteRow[]; o
         <div className="flex items-center gap-2 mt-5">
           <button type="button" onClick={() => { setError(null); setStep("pick"); }} disabled={busy}
             className="px-3 py-2 rounded-xl text-[13.5px] font-semibold text-[#1e3a8a] hover:bg-bg-soft disabled:opacity-60">Retake</button>
-          <button type="button" onClick={onClose} className="ml-auto px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-text-mid hover:bg-bg-soft">Cancel</button>
+          <button type="button" onClick={onClose} disabled={busy} className="ml-auto px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-text-mid hover:bg-bg-soft">Cancel</button>
           <button type="button" onClick={() => void create()} disabled={busy || !org}
             className="px-5 py-2.5 rounded-xl text-white text-[13.5px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
             {busy ? "Creating…" : "Create quotation"}

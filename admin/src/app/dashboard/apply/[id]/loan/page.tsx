@@ -18,13 +18,13 @@ import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import EpcApplyTracker from "@/components/EpcApplyTracker";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
-import { amountInput, numberInput } from "@/lib/money";
+import { amountInput, numberInput, fmtRupees } from "@/lib/money";
 import LoanShareChips from "@/components/LoanShareChips";
 import {
   TENURES, DEFAULT_INDICATIVE_ROI,
-  computeCentralSubsidy, computeEmi, formatRupees,
+  computeCentralSubsidy, computeEmi,
 } from "@/lib/emi";
 
 export default function EpcApplyLoanPage() {
@@ -99,10 +99,7 @@ function Inner() {
 
       const res = await fetch("/api/epc/loan-apply", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken() ?? ""}`,
-        },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           phase: "submit",
           id: appId,
@@ -210,7 +207,7 @@ function Inner() {
           {validSize && validCost && (
             <p className="text-[12px] text-[#5a8a76]">
               Per kW price:{" "}
-              <span className="font-semibold text-[#0f3d2e]">{formatRupees(Math.round(costN / sizeN))}/kW</span>
+              <span className="font-semibold text-[#0f3d2e]">{fmtRupees(Math.round(costN / sizeN))}/kW</span>
               <span className="text-text-muted"> (total project cost ÷ project size)</span>
             </p>
           )}

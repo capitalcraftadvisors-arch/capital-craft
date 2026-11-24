@@ -11,17 +11,10 @@ import Modal from "@/components/ui/Modal";
 import Select from "@/components/ui/Select";
 import DateField from "@/components/ui/DateField";
 import { addLender } from "@/lib/lenders";
+import { localIsoDate } from "@/lib/dates";
 
 export type PickerLender = { key: string; label: string };
 const CUSTOM = "__custom__";
-
-// Local YYYY-MM-DD upper bound for the date picker (today, in the admin's
-// timezone) — DateField always displays it as DD/MM/YYYY.
-function todayLocal(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
 
 export default function LoanLenderPickerModal({
   open, title, subtitle, options, allowAdd, needReason, needDate, confirmLabel, tone = "blue", onClose, onConfirm,
@@ -41,7 +34,7 @@ export default function LoanLenderPickerModal({
   const [sel, setSel] = useState("");
   const [custom, setCustom] = useState("");
   const [reason, setReason] = useState("");
-  const [date, setDate] = useState<string>(todayLocal);
+  const [date, setDate] = useState<string>(() => localIsoDate(new Date()));
   const [busy, setBusy] = useState(false);
 
   if (!open) return null;
@@ -56,11 +49,12 @@ export default function LoanLenderPickerModal({
     (!needReason || reason.trim().length > 0) &&
     (!needDate || !!date);
 
-  const btnVariant = tone === "red" ? "primary" : tone === "green" ? "grad" : "primary";
+  // Button has no red variant: the reject flow paints the primary one red.
+  const btnVariant = tone === "green" ? "grad" : "primary";
 
   function close() {
     if (busy) return;
-    setSel(""); setCustom(""); setReason(""); setDate(todayLocal());
+    setSel(""); setCustom(""); setReason(""); setDate(localIsoDate(new Date()));
     onClose();
   }
 
@@ -76,7 +70,7 @@ export default function LoanLenderPickerModal({
         lender = r.lender;
       }
       await onConfirm(lender, needReason ? reason.trim() : undefined, needDate ? date : undefined);
-      setSel(""); setCustom(""); setReason(""); setDate(todayLocal());
+      setSel(""); setCustom(""); setReason(""); setDate(localIsoDate(new Date()));
       onClose();
     } finally {
       setBusy(false);
@@ -126,7 +120,7 @@ export default function LoanLenderPickerModal({
           </label>
           <DateField
             value={date}
-            max={todayLocal()}
+            max={localIsoDate(new Date())}
             onChange={(iso) => setDate(iso)}
             ariaLabel="Date of rejection"
             className="rounded-input border border-line bg-white px-3 py-2 text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-red-200"
@@ -151,7 +145,8 @@ export default function LoanLenderPickerModal({
 
       <div className="mt-5 flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={close} disabled={busy}>Cancel</Button>
-        <Button type="button" variant={btnVariant} onClick={submit} disabled={!canConfirm} loading={busy}>
+        <Button type="button" variant={btnVariant} onClick={submit} disabled={!canConfirm} loading={busy}
+          style={tone === "red" ? { backgroundColor: "#dc2626" } : undefined}>
           {confirmLabel || "Confirm"}
         </Button>
       </div>

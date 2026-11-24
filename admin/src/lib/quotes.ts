@@ -4,7 +4,7 @@
 // few minutes in the tab (list-cache) and dropped on every save / delete.
 
 import { supabase } from "./supabase";
-import { getBusiness, getToken } from "./auth";
+import { getBusiness, authHeaders } from "./auth";
 import { getCached, invalidate, setCached } from "./list-cache";
 import { quoteTotals, type QuoteDoc } from "./quote-calc";
 import type { Segment } from "./quotation-brands";
@@ -83,7 +83,7 @@ export async function deleteQuote(id: string) {
 
 /** Builds the PDF on the server and saves it. */
 export async function downloadQuotePdf(id: string) {
-  const res = await fetch(`/api/epc/quotes/${id}/pdf`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+  const res = await fetch(`/api/epc/quotes/${id}/pdf`, { headers: authHeaders() });
   if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j?.error || "Couldn't make the PDF."); }
   const name = ((res.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/) || [])[1] || "quotation.pdf";
   const url = URL.createObjectURL(await res.blob());

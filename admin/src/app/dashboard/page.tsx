@@ -14,7 +14,7 @@ import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import LoginWelcome from "@/components/LoginWelcome";
 import PartnerShell, { NAVY, NAVY_ACCENT, PARTNER_SECTIONS, type PartnerSection } from "@/components/partner/PartnerShell";
-import { getBusiness, getToken, greetingName, loanAccess, insuranceAccess } from "@/lib/auth";
+import { authHeaders, getBusiness, greetingName, loanAccess, insuranceAccess } from "@/lib/auth";
 import { canWork, hasModule, isSiteStaff, portalV2 } from "@/lib/epc-roles";
 import DashboardV2, { Donut } from "@/components/partner/DashboardV2";
 import { fetchEpcName, shortEpcName } from "@/lib/epc-name";
@@ -24,12 +24,12 @@ import { SARVATRA } from "@/lib/quotation-brands";
 import CustomerApplications from "@/components/quotation/CustomerApplications";
 import CustomTemplateBanner from "@/components/partner/CustomTemplateBanner";
 import Modal from "@/components/ui/Modal";
-import { fmtRupees, fmtDateShort, deadlineState, DEADLINE_PILL } from "@/lib/disbursement";
+import { deadlineState, DEADLINE_PILL } from "@/lib/disbursement";
 import { amountInWords } from "@/lib/numberToWords";
-import { fmtDateTime as fmtDateTimeLib } from "@/lib/dates";
-import { policyValidityParts, VALIDITY_TEXT } from "@/lib/insurance-validity";
-import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES, formatRupees } from "@/lib/emi";
-import { amountInput, inrPlain, numberInput } from "@/lib/money";
+import { fmtDate, fmtDateTime as fmtDateTimeLib } from "@/lib/dates";
+import { policyValidityParts, INSURANCE_STATUS_LABEL, VALIDITY_TEXT } from "@/lib/insurance-validity";
+import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES } from "@/lib/emi";
+import { amountInput, fmtRupees, inrPlain, numberInput } from "@/lib/money";
 
 // Capital Craft regional managers shown on the EPC portal (tap to Call). Numbers
 // are in international format, digits only. TODO: confirm these are the correct
@@ -63,7 +63,6 @@ type InsRow = {
   attention_status: string | null; attention_raised_at: string | null; msg_epc_seen_at: string | null;
 };
 
-const INS_STATUS_LABEL: Record<string, string> = { draft: "Draft", under_review: "Under Review", issued: "Issued", rejected: "Rejected", hold: "Hold" };
 const INS_STATUS_PILL: Record<string, string> = {
   draft: "bg-[#eef1f0] text-[#5a8a76]", under_review: "bg-[#fef0d6] text-[#854f0b]",
   issued: "bg-[#e6f6ee] text-[#178a5c]", rejected: "bg-red-50 text-red-700", hold: "bg-[#dceffb] text-[#185fa5]",
@@ -192,7 +191,7 @@ function DashboardInner() {
     if (insBusy) return;
     setInsBusy(true);
     try {
-      const res = await fetch("/api/epc/insurance/create", { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+      const res = await fetch("/api/epc/insurance/create", { method: "POST", headers: authHeaders() });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) { alert("Couldn't start the insurance application: " + (data?.error || `HTTP ${res.status}`)); return; }
       router.push(`/dashboard/insurance/${data.application.id}/chat` as any);
@@ -539,8 +538,8 @@ function LoansSection({ loans, loading, canLoan, readOnly, initial = "all", onOp
                     <td className="px-3 py-3.5 align-top"><span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold ${STAGE4_PILL[stg]}`}>{STAGE4_LABEL[stg]}</span>{changedAt && <div className="text-[10.5px] text-text-muted mt-1 whitespace-nowrap">{fmtDateTime(changedAt)}</div>}</td>
                     <td className="px-3 py-3.5 align-top font-semibold text-[#0f3d2e] whitespace-nowrap">{appliedAmount(r)}</td>
                     <td className="px-3 py-3.5 align-top whitespace-nowrap">{approved && r.sanctioned_amount != null ? <span className="font-semibold text-[#178a5c]">{fmtRupees(r.sanctioned_amount)}</span> : <span className="text-text-muted">—</span>}</td>
-                    <td className="px-3 py-3.5 align-top whitespace-nowrap">{r.first_disbursement_amount != null ? <><div className="font-semibold text-[#0f3d2e]">{fmtRupees(r.first_disbursement_amount)}</div><div className="text-[10.5px] text-text-muted">{fmtDateShort(r.first_disbursement_date)}</div></> : <span className="text-text-muted">—</span>}</td>
-                    <td className="px-3 py-3.5 align-top whitespace-nowrap">{r.second_disbursement_amount != null ? <><div className="font-semibold text-[#0f3d2e]">{fmtRupees(r.second_disbursement_amount)}</div><div className="text-[10.5px] text-text-muted">{fmtDateShort(r.second_disbursement_date)}</div></> : approved && r.first_disbursement_amount != null ? <span className="text-[11px] font-semibold text-amber-700">Pending</span> : <span className="text-text-muted">—</span>}</td>
+                    <td className="px-3 py-3.5 align-top whitespace-nowrap">{r.first_disbursement_amount != null ? <><div className="font-semibold text-[#0f3d2e]">{fmtRupees(r.first_disbursement_amount)}</div><div className="text-[10.5px] text-text-muted">{fmtDate(r.first_disbursement_date)}</div></> : <span className="text-text-muted">—</span>}</td>
+                    <td className="px-3 py-3.5 align-top whitespace-nowrap">{r.second_disbursement_amount != null ? <><div className="font-semibold text-[#0f3d2e]">{fmtRupees(r.second_disbursement_amount)}</div><div className="text-[10.5px] text-text-muted">{fmtDate(r.second_disbursement_date)}</div></> : approved && r.first_disbursement_amount != null ? <span className="text-[11px] font-semibold text-amber-700">Pending</span> : <span className="text-text-muted">—</span>}</td>
                     <td className="px-3 py-3.5 align-top whitespace-nowrap">{!approved ? <span className="text-text-muted">—</span> : (() => { const dl = deadlineState(r.first_disbursement_date, r.second_disbursement_amount != null); return <span className={["inline-block px-2 py-1 rounded-[6px] text-[11px] font-semibold whitespace-nowrap", DEADLINE_PILL[dl.tone]].join(" ")}>{dl.label}</span>; })()}</td>
                     <td className="px-3 py-3.5 align-top whitespace-nowrap">
                       {approved && !readOnly ? <button onClick={(e) => { e.stopPropagation(); onTranche(r); }} className="px-3 py-1.5 rounded-lg text-white text-[12px] font-semibold" style={{ background: NAVY_ACCENT }}>2nd tranche</button>
@@ -629,7 +628,7 @@ function InsuranceSection({ insRows, loading, onApply, applying, onOpen, v2 = fa
                   <td className="px-5 py-4"><div className="text-[15px] font-semibold text-text">{r.aadhaar_name || "—"}</div>{r.insurance_display_id && <div className="text-[12px] font-mono text-[#185fa5] mt-0.5">{r.insurance_display_id}</div>}{r.attention_status === "open" && <div className="mt-1"><span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Action needed</span></div>}</td>
                   <td className="px-5 py-4 font-semibold text-[#0f3d2e]">{fmtRupees(r.sum_insured ?? r.invoice_confirmed_amount)}</td>
                   <td className="px-5 py-4">{r.insurance_partner || "—"}</td>
-                  <td className="px-5 py-4"><span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${INS_STATUS_PILL[r.status] ?? INS_STATUS_PILL.draft}`}>{INS_STATUS_LABEL[r.status] ?? r.status}</span></td>
+                  <td className="px-5 py-4"><span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${INS_STATUS_PILL[r.status] ?? INS_STATUS_PILL.draft}`}>{INSURANCE_STATUS_LABEL[r.status] ?? r.status}</span></td>
                   <td className="px-5 py-4">
                     {(() => { const v = policyValidityParts(r.policy_from_date, r.policy_to_date); return v ? <span className={`text-[12px] font-medium ${VALIDITY_TEXT[v.tone]}`}>{v.text}</span> : <span className="text-text-muted">—</span>; })()}
                     {canRenew(r) && (
@@ -708,7 +707,7 @@ function EmiSection() {
             </div>
             <div className="rounded-2xl px-6 py-5 flex-1 flex flex-col justify-center" style={{ background: "#e8effc" }}>
               <div className="text-[13px] text-[#1e3a8a]">Monthly EMI · {tenure} years</div>
-              <div className="text-[34px] font-bold text-[#1e3a8a] leading-tight">{net > 0 ? formatRupees(emi) : "—"}<span className="text-[15px] font-medium">/mo</span></div>
+              <div className="text-[34px] font-bold text-[#1e3a8a] leading-tight">{net > 0 ? fmtRupees(emi) : "—"}<span className="text-[15px] font-medium">/mo</span></div>
             </div>
           </div>
         </div>

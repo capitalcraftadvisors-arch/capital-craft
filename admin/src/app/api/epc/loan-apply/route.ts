@@ -30,7 +30,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { err, dbAs, requireLogin } from "@/lib/api";
-import { UUID_RE, MOBILE_RE, EMAIL_RE, PAN_RE, PINCODE_RE } from "@/lib/validators";
+import { UUID_RE, MOBILE_RE, EMAIL_RE, PAN_RE, PINCODE_RE, IFSC_RE } from "@/lib/validators";
 import { DEFAULT_INDICATIVE_ROI } from "@/lib/emi";
 import { isUndefinedColumn, omitKeys, UNDEFINED_COLUMN } from "@/lib/optional-column";
 import { toIsoDate } from "@/lib/dates";
@@ -441,9 +441,9 @@ export async function POST(req: NextRequest) {
           ...(strOrNull(b.bank_name)           ? { bank_name:           strOrNull(b.bank_name) } : {}),
           ...(strOrNull(b.bank_account_no)     ? { bank_account_no:     strOrNull(b.bank_account_no) } : {}),
           ...(strOrNull(b.bank_account_type)   ? { bank_account_type:   strOrNull(b.bank_account_type) } : {}),
-          ...(/^[A-Z]{4}0[A-Z0-9]{6}$/.test(String(b.bank_ifsc ?? "").toUpperCase()) ? { bank_ifsc: String(b.bank_ifsc).toUpperCase() } : {}),
-          ...(/^[6-9]\d{9}$/.test(String(b.bank_mobile ?? "")) ? { bank_mobile: String(b.bank_mobile) } : {}),
-          ...(/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(b.bank_email ?? "")) ? { bank_email: String(b.bank_email) } : {}),
+          ...(IFSC_RE.test(String(b.bank_ifsc ?? "").toUpperCase()) ? { bank_ifsc: String(b.bank_ifsc).toUpperCase() } : {}),
+          ...(MOBILE_RE.test(String(b.bank_mobile ?? "")) ? { bank_mobile: String(b.bank_mobile) } : {}),
+          ...(EMAIL_RE.test(String(b.bank_email ?? "")) ? { bank_email: String(b.bank_email) } : {}),
           // Consent is captured at the end of the chatbot (just before submit).
           ...(b.consented === true ? {
             consent_at: now, consent_policies: CONSENT_POLICIES,

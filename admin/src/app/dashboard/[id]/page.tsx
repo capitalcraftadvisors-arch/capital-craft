@@ -2,7 +2,7 @@
 import { fmtDate } from "@/lib/dates";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import StatusBadge from "@/components/StatusBadge";
@@ -22,7 +22,6 @@ export default function LoanDetailPage() {
 
 function Inner() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const [app, setApp] = useState<App | null>(null);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [thumbs, setThumbs] = useState<Record<string, string>>({});

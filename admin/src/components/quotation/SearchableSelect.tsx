@@ -5,7 +5,7 @@
 // (POST /api/epc/quotation/brands) so it's in the list forever, for everyone.
 
 import { useEffect, useRef, useState } from "react";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import { rememberBrandOption } from "./form-kit";
 
 export default function SearchableSelect({
@@ -51,7 +51,7 @@ export default function SearchableSelect({
       if (field) {
         await fetch("/api/epc/quotation/brands", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+          headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ field, value: v }),
         }).catch(() => {});
         rememberBrandOption(field, v);

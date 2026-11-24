@@ -17,7 +17,7 @@ import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import RowLink from "@/components/RowLink";
 import { ACCENTS } from "@/components/AdminSidebar";
-import { getToken, getBusiness } from "@/lib/auth";
+import { authHeaders, getBusiness } from "@/lib/auth";
 import { useAdminNames } from "@/lib/use-admin-names";
 
 type LeadRow = {
@@ -46,7 +46,6 @@ type LeadRow = {
 // Table header cell — same as the other console tables.
 const TH = "px-4 py-3 font-medium text-[12px] uppercase tracking-wide";
 
-const rupees = (v: number | null): string => fmtRupees(v); // lib/money — paise when present
 function epcName(r: LeadRow): string {
   const b = r.epc_business;
   if (b) return b.trade_name || b.legal_name || b.contact_name || "—";
@@ -159,7 +158,7 @@ export default function LoanLeadsTab() {
     try {
       const res = await fetch(`/api/admin/lead/${r.id}/convert-to-loan-app`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) { toast.error(data?.error || `Conversion failed (HTTP ${res.status}).`); setConverting(null); return; }
@@ -236,7 +235,7 @@ export default function LoanLeadsTab() {
                     <td className="px-4 py-3 text-center text-[#0f3d2e]">
                       {r.project_size != null ? `${r.project_size} ${(r.project_size_unit || "kw").toUpperCase()}` : "—"}
                     </td>
-                    <td className="px-4 py-3 text-center font-semibold text-[#0f3d2e]">{rupees(r.loan_amount)}</td>
+                    <td className="px-4 py-3 text-center font-semibold text-[#0f3d2e]">{fmtRupees(r.loan_amount)}</td>
                     <td className="px-4 py-3 text-center text-[13px] text-[#5a8a76]">
                       {fmtDate(r.created_at)}
                     </td>

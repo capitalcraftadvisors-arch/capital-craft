@@ -4,6 +4,8 @@
 // null instead of letting a mis-read masquerade as correct data. Never invents
 // a value — only rejects impossible ones.
 
+import { GSTIN_RE, IFSC_RE, PAN_RE } from "./validators";
+
 // ── Aadhaar: 12 digits with a Verhoeff check-digit (last digit). ────────────
 const VERHOEFF_D = [
   [0,1,2,3,4,5,6,7,8,9],[1,2,3,4,0,6,7,8,9,5],[2,3,4,0,1,7,8,9,5,6],
@@ -27,7 +29,6 @@ export function isValidAadhaar(num: string | null | undefined): boolean {
 }
 
 // ── PAN: AAAAA9999A (no public checksum — 4th char is holder type). ─────────
-const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 export function isValidPan(pan: string | null | undefined): boolean {
   if (!pan) return false;
   const p = pan.toUpperCase().replace(/\s/g, "");
@@ -36,7 +37,6 @@ export function isValidPan(pan: string | null | undefined): boolean {
 }
 
 // ── GSTIN: 15 chars with a mod-36 check-digit (15th char). ──────────────────
-const GSTIN_RE = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/;
 export function isValidGstin(gstin: string | null | undefined): boolean {
   if (!gstin) return false;
   const g = gstin.toUpperCase().replace(/\s/g, "");
@@ -49,7 +49,6 @@ export function isValidGstin(gstin: string | null | undefined): boolean {
 }
 
 // ── IFSC: AAAA0999999 (5th char is always 0). Format only. ──────────────────
-const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 export function isValidIfsc(ifsc: string | null | undefined): boolean {
   if (!ifsc) return false;
   return IFSC_RE.test(ifsc.toUpperCase().replace(/\s/g, ""));

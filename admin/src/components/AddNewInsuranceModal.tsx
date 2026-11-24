@@ -17,7 +17,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 
 type Props = {
@@ -94,10 +94,7 @@ export default function AddNewInsuranceModal({ open, onClose }: Props) {
     try {
       const res = await fetch("/api/admin/create-insurance-app", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken() ?? ""}`,
-        },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ epc_business_id: selected }),
       });
       const data = await res.json().catch(() => ({}));
@@ -126,6 +123,7 @@ export default function AddNewInsuranceModal({ open, onClose }: Props) {
         <button
           type="button"
           onClick={close}
+          disabled={busy}
           className="text-[18px] text-text-muted hover:text-text leading-none"
           aria-label="Close"
         >

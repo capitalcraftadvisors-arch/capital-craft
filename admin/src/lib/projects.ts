@@ -5,7 +5,7 @@
 // a few minutes in the tab and dropped on every change.
 
 import { supabase } from "./supabase";
-import { getBusiness, getToken } from "./auth";
+import { authHeaders, getBusiness } from "./auth";
 import { getCached, invalidate, setCached } from "./list-cache";
 import type { LeadRow } from "./leads";
 import { dashboardChanged } from "./dashboard-v2";
@@ -135,19 +135,18 @@ export const projectFromLead = (l: LeadRow) => saveProject(null, {
 });
 
 // â”€â”€ Site photos (/api/epc/project-photo) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-const auth = () => ({ Authorization: `Bearer ${getToken() ?? ""}` });
 async function photoCall(res: Promise<Response>): Promise<Photo[]> {
   const r = await res;
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j?.ok) throw new Error(j?.error || "Couldn't load the photos.");
   return j.photos as Photo[];
 }
-export const fetchPhotos = (id: string) => photoCall(fetch(`/api/epc/project-photo?project=${id}`, { headers: auth() }));
+export const fetchPhotos = (id: string) => photoCall(fetch(`/api/epc/project-photo?project=${id}`, { headers: authHeaders() }));
 export function addPhoto(id: string, file: File) {
   const fd = new FormData();
   fd.append("project", id);
   fd.append("file", file);
-  return photoCall(fetch("/api/epc/project-photo", { method: "POST", headers: auth(), body: fd }));
+  return photoCall(fetch("/api/epc/project-photo", { method: "POST", headers: authHeaders(), body: fd }));
 }
 export const removePhoto = (id: string, path: string) =>
-  photoCall(fetch(`/api/epc/project-photo?project=${id}&path=${encodeURIComponent(path)}`, { method: "DELETE", headers: auth() }));
+  photoCall(fetch(`/api/epc/project-photo?project=${id}&path=${encodeURIComponent(path)}`, { method: "DELETE", headers: authHeaders() }));

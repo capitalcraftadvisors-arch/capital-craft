@@ -21,13 +21,13 @@ import { fetchProjects, projectFromLead } from "@/lib/projects";
 import { fetchMembers, type MemberRow } from "@/lib/members";
 import { fmtDate, localIsoDate } from "@/lib/dates";
 import { fmtRupees } from "@/lib/money";
+import { MOBILE_RE } from "@/lib/validators";
 import {
   fetchLeads, saveLead, deleteLead, leadsChanged, filedElsewhere, isDue,
   LEAD_STATUSES, LEAD_STATUS_LABEL, LEAD_STATUS_PILL, type LeadRow, type LeadStatus,
 } from "@/lib/leads";
 
 type Filter = "all" | "due" | LeadStatus;
-const MOBILE_RE = /^[6-9]\d{9}$/;
 
 export default function LeadsPage() {
   const router = useRouter();
@@ -220,7 +220,7 @@ function LeadEditor({ lead, rows, members, ownerName, assign, readOnly, wa, org,
   }
 
   return (
-    <Modal onClose={onClose} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[640px] max-h-[92vh] overflow-y-auto p-6">
+    <Modal onClose={onClose} closeOnBackdrop="mousedown" busy={busy} overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[640px] max-h-[92vh] overflow-y-auto p-6">
       <div className="text-[17px] font-display font-bold text-[#0f3d2e] mb-4">{lead ? lead.name : "New lead"}</div>
       <fieldset disabled={readOnly || busy} className="grid sm:grid-cols-2 gap-3">
         <Field l="Customer name" req><input className={input} value={d.name} onChange={(e) => set("name", e.target.value)} /></Field>

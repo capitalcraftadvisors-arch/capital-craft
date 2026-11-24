@@ -33,20 +33,14 @@ import ReviewBar from "@/components/ReviewBar";
 import { lenderName } from "@/lib/lenders";
 import DateField from "@/components/ui/DateField";
 import { I, KV, Section, StatusBtn } from "@/components/view/ViewKit";
-import { amountInput } from "@/lib/money";
+import { amountInput, fmtRupeesExact } from "@/lib/money";
+import { fmtDate, localIsoDate } from "@/lib/dates";
 import {
-  remainingAmount, fmtRupeesExact, fmtDateShort, DISBURSEMENT_WINDOW_DAYS,
+  remainingAmount, DISBURSEMENT_WINDOW_DAYS,
   FIRST_CHARGES, firstCharges, type FirstChargeKey,
 } from "@/lib/disbursement";
 
 type Loan = Record<string, any>;
-
-// Local calendar date as YYYY-MM-DD (never toISOString — that shifts IST back a day).
-function todayISO(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
 
 // The team's lock until the admin approves the stage before.
 function LockNote({ what }: { what: string }) {
@@ -67,10 +61,10 @@ export default function LoanDisbursementPanel({
   onChanged: () => Promise<void> | void;
 }) {
   const [firstAmt, setFirstAmt]   = useState("");
-  const [firstDate, setFirstDate] = useState(todayISO());
+  const [firstDate, setFirstDate] = useState(localIsoDate(new Date()));
   const [charges, setCharges] = useState<Record<FirstChargeKey, string>>({ first_processing_fee: "", first_legal_charges: "", first_cersai_charges: "" });
   const [secondAmt, setSecondAmt]   = useState("");
-  const [secondDate, setSecondDate] = useState(todayISO());
+  const [secondDate, setSecondDate] = useState(localIsoDate(new Date()));
   const [busy, setBusy] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -133,7 +127,7 @@ export default function LoanDisbursementPanel({
       .eq("id", loan.id);
     if (e) { setError("Couldn't save — " + reviewError(e.message)); setBusy(false); return; }
     await logLoanActivity(loan.id, "status_change", {
-      detail: `First disbursement ${fmtRupeesExact(amt)} + charges ${fmtRupeesExact(total - amt)} on ${fmtDateShort(firstDate)} — 45-day clock started`,
+      detail: `First disbursement ${fmtRupeesExact(amt)} + charges ${fmtRupeesExact(total - amt)} on ${fmtDate(firstDate)} — 45-day clock started`,
     });
     invalidateLoanBoards(); // disbursement moves the case on the Task Manager / list
     invalidatePendingCount();
@@ -188,7 +182,7 @@ export default function LoanDisbursementPanel({
       .eq("id", loan.id);
     if (e) { setError("Couldn't save — " + reviewError(e.message)); setBusy(false); return; }
     await logLoanActivity(loan.id, "status_change", {
-      detail: `Second disbursement ${fmtRupeesExact(amt)} on ${fmtDateShort(secondDate)}`,
+      detail: `Second disbursement ${fmtRupeesExact(amt)} on ${fmtDate(secondDate)}`,
     });
     invalidateLoanBoards(); // 2nd disbursement moves the case on the Task Manager / list
     invalidatePendingCount();
@@ -268,10 +262,10 @@ export default function LoanDisbursementPanel({
             {firstLocked ? (
               <div className="max-w-[520px]">
                 <KV k="Amount" v={fmtRupeesExact(loan.first_disbursement_amount)} />
-                <KV k="Date" v={fmtDateShort(loan.first_disbursement_date)} />
+                <KV k="Date" v={fmtDate(loan.first_disbursement_date)} />
                 {FIRST_CHARGES.map((c) => <KV key={c.key} k={c.label} v={fmtRupeesExact(loan[c.key] ?? 0)} />)}
                 <KV k="Remaining (pending)" v={fmtRupeesExact(remaining)} />
-                <KV k="Deadline (45 days)" v={fmtDateShort(loan.disbursement_deadline)} />
+                <KV k="Deadline (45 days)" v={fmtDate(loan.disbursement_deadline)} />
               </div>
             ) : !tranche1Complete ? (
               <p className="text-[13px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2">
@@ -285,7 +279,7 @@ export default function LoanDisbursementPanel({
               <>
                 {firstSaved ? (
                   <div className="mb-3 text-[12px] text-[#5a8a76]">
-                    Deadline (45 days): <span className="font-semibold text-[#0f3d2e]">{fmtDateShort(loan.disbursement_deadline)}</span>
+                    Deadline (45 days): <span className="font-semibold text-[#0f3d2e]">{fmtDate(loan.disbursement_deadline)}</span>
                     {" · "}Remaining (pending): <span className="font-semibold text-[#0f3d2e]">{fmtRupeesExact(remaining)}</span>
                   </div>
                 ) : (
@@ -367,7 +361,7 @@ export default function LoanDisbursementPanel({
               <div className="max-w-[520px]">
                 <KV k="Status" v={docsReview ? docsReview[0].toUpperCase() + docsReview.slice(1) : "Not reviewed"} />
                 {loan.completion_reviewed_at && (
-                  <KV k="Reviewed" v={`${fmtDateShort(loan.completion_reviewed_at)}${loan.completion_reviewed_by ? ` · ${loan.completion_reviewed_by}` : ""}`} />
+                  <KV k="Reviewed" v={`${fmtDate(loan.completion_reviewed_at)}${loan.completion_reviewed_by ? ` · ${loan.completion_reviewed_by}` : ""}`} />
                 )}
               </div>
               {!allDocsIn && docsReview !== "approved" && (
@@ -408,7 +402,7 @@ export default function LoanDisbursementPanel({
               {secondLocked ? (
                 <div className="max-w-[520px]">
                   <KV k="Amount" v={fmtRupeesExact(loan.second_disbursement_amount)} />
-                  <KV k="Date" v={fmtDateShort(loan.second_disbursement_date)} />
+                  <KV k="Date" v={fmtDate(loan.second_disbursement_date)} />
                 </div>
               ) : !secondUnlocked && !secondSaved ? (
                 <p className="text-[13px] text-[#5a8a76]">

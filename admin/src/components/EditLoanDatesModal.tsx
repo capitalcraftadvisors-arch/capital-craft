@@ -44,17 +44,19 @@ export default function EditLoanDatesModal({
   const [val, setVal] = useState<Partial<Record<Key, string>>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [partly, setPartly] = useState(false); // the loan's dates saved, the lender's record not
 
   useEffect(() => {
     if (!open) return;
     const v = initial(loan);
-    setInit(v); setVal(v); setError(null);
+    setInit(v); setVal(v); setError(null); setPartly(false);
   }, [open, loan]);
 
   if (!open) return null;
 
   const keys = (Object.keys(LABEL) as Key[]).filter((k) => k in init);
   const today = localIsoDate(new Date());
+  const close = partly ? onSaved : onClose; // after a part-save, closing reloads the profile
 
   async function save() {
     if (busy) return;
@@ -67,7 +69,7 @@ export default function EditLoanDatesModal({
       if (val[keys[i]]! < val[keys[i - 1]]!) { setError(`${LABEL[keys[i]]} can't be before ${LABEL[keys[i - 1]].toLowerCase()}.`); return; }
     }
     const changed = keys.filter((k) => val[k] !== init[k]);
-    if (!changed.length) { onClose(); return; }
+    if (!changed.length) { close(); return; }
 
     const patch: Loan = {};
     if (changed.includes("created")) patch.created_at = withLocalDate(loan.created_at, val.created!);
@@ -79,35 +81,45 @@ export default function EditLoanDatesModal({
     if (changed.includes("second")) patch.second_disbursement_date = val.second;
 
     setBusy(true); setError(null);
-    const { error: e } = await supabase().from("epc_applications").update(patch).eq("id", loan.id);
-    if (e) { setError("Couldn't save — " + e.message); setBusy(false); return; }
+    let saved = false; // the loan's own dates are written
+    try {
+      const { error: e } = await supabase().from("epc_applications").update(patch).eq("id", loan.id);
+      if (e) { setError("Couldn't save — " + e.message); return; }
+      saved = true;
 
-    // The approving lender's own record carries the approval date too (Lender status box).
-    if (changed.includes("approval") && loan.approved_lender) {
-      const { data: lr } = await supabase().from("loan_application_lenders")
-        .select("id, approval_details")
-        .eq("application_id", loan.id).eq("lender_key", loan.approved_lender).not("approved_at", "is", null)
-        .maybeSingle();
-      if (lr) {
-        await supabase().from("loan_application_lenders").update({
-          approved_at: patch.approved_at,
-          approval_details: { ...((lr as Loan).approval_details ?? {}), approval_date: val.approval },
-        }).eq("id", (lr as Loan).id);
+      // The approving lender's own record carries the approval date too (Lender status box).
+      // If it fails, the loan's dates are already saved: Save again re-applies the change and
+      // finishes the lender's record; closing reloads the profile instead.
+      if (changed.includes("approval") && loan.approved_lender) {
+        const { data: lr, error: le } = await supabase().from("loan_application_lenders")
+          .select("id, approval_details")
+          .eq("application_id", loan.id).eq("lender_key", loan.approved_lender).not("approved_at", "is", null)
+          .maybeSingle();
+        if (le) { setError("Couldn't save — " + le.message); setPartly(true); return; }
+        if (lr) {
+          const { error: ue } = await supabase().from("loan_application_lenders").update({
+            approved_at: patch.approved_at,
+            approval_details: { ...((lr as Loan).approval_details ?? {}), approval_date: val.approval },
+          }).eq("id", (lr as Loan).id);
+          if (ue) { setError("Couldn't save — " + ue.message); setPartly(true); return; }
+        }
       }
+    } finally {
+      if (saved) {
+        await logLoanActivity(loan.id, "field_edit", {
+          detail: "Dates edited — " + changed.map((k) => `${LABEL[k]} ${fmtDate(init[k])} → ${fmtDate(val[k])}`).join("; "),
+        });
+        invalidateLoanBoards(); // period filters / KPIs / board read these dates
+      }
+      setBusy(false);
     }
-
-    await logLoanActivity(loan.id, "field_edit", {
-      detail: "Dates edited — " + changed.map((k) => `${LABEL[k]} ${fmtDate(init[k])} → ${fmtDate(val[k])}`).join("; "),
-    });
-    invalidateLoanBoards(); // period filters / KPIs / board read these dates
-    setBusy(false);
     onSaved();
   }
 
   const inputCls = "w-full border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] focus:border-[#185fa5] outline-none bg-white";
 
   return (
-    <Modal onClose={onClose} busy={busy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
+    <Modal onClose={close} busy={busy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
       <h3 className="font-semibold text-[18px] text-[#0f3d2e]">Edit dates</h3>
       <div className="mt-4 space-y-3">
         {keys.map((k) => (
@@ -120,7 +132,7 @@ export default function EditLoanDatesModal({
       </div>
       {error && <p className="mt-3 text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-[8px] px-3 py-2">{error}</p>}
       <div className="mt-5 flex justify-end gap-2">
-        <button type="button" onClick={onClose} disabled={busy}
+        <button type="button" onClick={close} disabled={busy}
           className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border border-[#cdeadd] bg-white text-[#0f3d2e] hover:bg-[#f0faf5] disabled:opacity-60">
           Cancel
         </button>

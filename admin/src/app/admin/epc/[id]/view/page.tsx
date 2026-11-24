@@ -22,12 +22,12 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
-import { getToken, getBusiness, isMainAdmin } from "@/lib/auth";
+import { authHeaders, getBusiness, isMainAdmin } from "@/lib/auth";
 import { epcReviewPatch, approveEpcReview, epcLocked, invalidatePendingCount, saveEpcLenderState } from "@/lib/review";
 import AdminPendingPill from "@/components/AdminPendingPill";
 import { toast } from "sonner";
 import { getDocumentUrl, deleteDocument, downloadDocument } from "@/lib/storage";
-import { BUSINESS_TYPE_LABEL, maskAcct, peopleHeading } from "@/lib/epc-labels";
+import { BUSINESS_TYPE_LABEL, EPC_STATUS_LABEL, maskAcct, peopleHeading } from "@/lib/epc-labels";
 import { logAudit } from "@/lib/auditLog";
 import { Period, inPeriod } from "@/lib/period";
 import LenderCell, { LenderMap } from "@/components/LenderCell";
@@ -51,7 +51,7 @@ import Modal, { OVERLAY } from "@/components/ui/Modal";
 // Shared view chrome — the SAME kit the Loan Application View imports, so the
 // two dashboards can't drift apart. EPC-specific pieces stay in this file.
 import {
-  I, StatusBtn, KV, formatGstAddress, StepBlock, DocGrid, CopyButton, FieldCol, FillCount, fillOf, fillText, fillTone,
+  I, KV, formatGstAddress, StepBlock, DocGrid, CopyButton, FieldCol, FillCount, fillOf, fillText, fillTone,
   HAction, ProgressTabs, Section, StatCards,
   type FieldRow, type StageState, type ViewDocSlot,
 } from "@/components/view/ViewKit";
@@ -122,11 +122,6 @@ function DOC_LABEL(cat: string): string {
   return M[cat] ?? cat;
 }
 
-function maskMobile(m: string | null | undefined): string {
-  if (!m) return "—";
-  return m.length === 10 ? "•••••" + m.slice(5) : m;
-}
-
 // Reasons offered when an admin rejects an EPC (last option = free text).
 const EPC_REJECT_REASONS = [
   "Incomplete documents",
@@ -153,7 +148,6 @@ function Inner() {
   const [adminInfo, setAdminInfo] = useState<AdminInfo | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
-  const [serviceBusy, setServiceBusy] = useState(false);
   const [zipPickerOpen, setZipPickerOpen] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
   // Marking a lender Approved asks for the date the lender approved.
@@ -320,24 +314,6 @@ function Inner() {
     }
   }
 
-  // Admin picks the EPC's service. Insurance unlocks purely from this;
-  // loan still additionally needs a lender "Approved" tick.
-  async function setService(next: "loans" | "insurance" | "both") {
-    if (!biz || serviceBusy) return;
-    setServiceBusy(true);
-    try {
-      const { error } = await supabase()
-        .from("epc_business")
-        .update({ service_type: next })
-        .eq("id", biz.id);
-      if (error) { alert("Service update failed: " + error.message); return; }
-      await logAudit(biz.id, "field_edit", "service_type", biz.service_type ?? null, next);
-      setBiz({ ...biz, service_type: next });
-    } finally {
-      setServiceBusy(false);
-    }
-  }
-
   // Set ONE exclusive lender state (none / docs / approved / rejected) from the
   // profile — same epc_lender_status upsert the main table's Lender status uses.
   // Approved / Rejected are gated behind Docs Sent in the UI below.
@@ -389,7 +365,7 @@ function Inner() {
     setDownloading(true);
     try {
       const res = await fetch(`/api/epc/${biz.id}/download-zip?lender=${lender}`, {
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const blob = await res.blob();
@@ -559,7 +535,7 @@ function Inner() {
     : checkPending ? "Admin check pending"
     : ccApproved ? "Approved by Manish"
     : ccRejected ? "Rejected by CC"
-    : INTERNAL_STATUS_LABEL[biz.status] ?? biz.status;
+    : EPC_STATUS_LABEL[biz.status] ?? biz.status;
   const statusCls = approvedRows.length || reviewDone ? "bg-[#e6f6ee] text-[#0f7a52] border-[#bfe6d5]"
     : ccRejected ? "bg-red-50 text-red-700 border-red-200"
     : "bg-[#fef8ee] text-[#854f0b] border-[#f3dcb4]";
@@ -972,7 +948,7 @@ function Inner() {
         <Modal onClose={() => setRejectOpen(false)} busy={statusBusy} className="w-full max-w-md bg-white rounded-[12px] shadow-lg p-5">
           <div className="flex items-start justify-between gap-2 mb-3">
             <h3 className="text-[17px] font-bold text-[#0f3d2e]">Reject this EPC</h3>
-            <button type="button" onClick={() => setRejectOpen(false)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
+            <button type="button" onClick={() => setRejectOpen(false)} disabled={statusBusy} className="text-[18px] text-text-muted hover:text-text leading-none p-1 disabled:opacity-60">✕</button>
           </div>
           <label className="block text-[13px] font-medium text-text-mid">Reason for rejection
             <select value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}
@@ -999,129 +975,12 @@ function Inner() {
 
 // ── Reusable pieces ─────────────────────────────────────────────────
 
-// Service band — same shape as the internal-status band, but green (brand)
-// since this is a positive, EPC-affecting choice. Sets epc_business.service_type.
+// The EPC's service (epc_business.service_type) as shown in the header.
 const SERVICE_LABEL: Record<string, string> = {
   loans:     "Loan",
   insurance: "Insurance",
   both:      "Loan and Insurance",
 };
-
-function ServiceBand({
-  current, busy, onChange,
-}: {
-  current: "loans" | "insurance" | "both" | null;
-  busy: boolean;
-  onChange: (next: "loans" | "insurance" | "both") => void;
-}) {
-  const badge = current ? SERVICE_LABEL[current] : null;
-  const btn = (val: "loans" | "insurance" | "both", label: string) => {
-    const active = current === val;
-    return (
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => onChange(val)}
-        className={[
-          "text-[13px] font-semibold px-3.5 py-1.5 rounded-md border transition-colors disabled:opacity-60",
-          active
-            ? "bg-[#178a5c] text-white border-[#178a5c]"
-            : "bg-white text-[#178a5c] border-[#cdeadd] hover:bg-[#f0faf5]",
-        ].join(" ")}
-      >
-        {label}
-      </button>
-    );
-  };
-  return (
-    <div className="rounded-[12px] border border-[#cdeadd] bg-[#f0faf5] p-4 sm:p-5 mb-4">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold text-[#5a8a76] uppercase tracking-wider mb-1">
-            Service <span className="normal-case font-normal text-[#8ab3a1]">· admin only</span>
-          </div>
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <span className="text-[18px] font-semibold text-[#0f3d2e]">{badge ?? "Not set"}</span>
-          </div>
-        </div>
-        <div className="flex gap-2 flex-wrap items-center">
-          {btn("loans", "Only Loans")}
-          {btn("insurance", "Only Insurance")}
-          {btn("both", "Loan and Insurance")}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const INTERNAL_STATUS_LABEL: Record<string, string> = {
-  draft:        "Draft",
-  under_review: "Under review",
-  approved:     "Approved by Manish",
-  on_hold:      "On hold",
-  rejected:     "Rejected",
-};
-
-function InternalStatusBand({
-  current, busy, onChange,
-}: {
-  current: string;
-  busy: boolean;
-  onChange: (next: "approved" | "on_hold" | "rejected" | "under_review") => void;
-}) {
-  // Draft: nothing to change yet (EPC hasn't submitted).
-  const label = INTERNAL_STATUS_LABEL[current] ?? current;
-  return (
-    <div className="rounded-[12px] border border-slate-300 bg-slate-50 p-4 sm:p-5 mb-4">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
-            Internal status <span className="normal-case font-normal text-slate-400">· admin only</span>
-          </div>
-          <div className="flex items-baseline gap-2 flex-wrap">
-            <span className="text-[18px] font-semibold text-slate-800">{label}</span>
-          </div>
-        </div>
-        <div className="flex gap-2 flex-wrap items-center">
-          {/* Draft: admin can still act — internal status is admin's
-              bookkeeping, not gated on EPC submission. Show the same
-              action buttons as under_review, plus a small hint. */}
-          {current === "draft" && (
-            <>
-              <span className="text-[12px] text-slate-500 italic self-center">
-                EPC hasn&rsquo;t submitted yet
-              </span>
-              <StatusBtn kind="approve" busy={busy} onClick={() => onChange("approved")}>Approve</StatusBtn>
-              <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("on_hold")}>On hold</StatusBtn>
-              <StatusBtn kind="danger" busy={busy} onClick={() => onChange("rejected")}>Reject</StatusBtn>
-              <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("under_review")}>Mark under review</StatusBtn>
-            </>
-          )}
-          {current === "under_review" && (
-            <>
-              <StatusBtn kind="approve" busy={busy} onClick={() => onChange("approved")}>Approve</StatusBtn>
-              <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("on_hold")}>On hold</StatusBtn>
-              <StatusBtn kind="danger" busy={busy} onClick={() => onChange("rejected")}>Reject</StatusBtn>
-            </>
-          )}
-          {current === "on_hold" && (
-            <>
-              <StatusBtn kind="approve" busy={busy} onClick={() => onChange("approved")}>Approve</StatusBtn>
-              <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("under_review")}>Back to review</StatusBtn>
-              <StatusBtn kind="danger" busy={busy} onClick={() => onChange("rejected")}>Reject</StatusBtn>
-            </>
-          )}
-          {current === "rejected" && (
-            <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("under_review")}>Re-open</StatusBtn>
-          )}
-          {current === "approved" && (
-            <StatusBtn kind="neutral" busy={busy} onClick={() => onChange("under_review")}>Move back to review</StatusBtn>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function LenderStatePill({ state }: { state: "approved" | "docs" | "none" | "rejected" }) {
   if (state === "rejected") {

@@ -24,8 +24,8 @@ import Select from "@/components/ui/Select";
 import Button from "@/components/ui/Button";
 import LoanAppStepTracker from "@/components/LoanAppStepTracker";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
-import { amountInput } from "@/lib/money";
+import { authHeaders } from "@/lib/auth";
+import { amountInput, fmtRupees } from "@/lib/money";
 
 type Loan = {
   id: string;
@@ -53,7 +53,7 @@ type Loan = {
 // EMI + subsidy math shared with the EPC apply flow — see lib/emi.ts.
 import {
   TENURES, DEFAULT_INDICATIVE_ROI,
-  computeCentralSubsidy, computeEmi, formatRupees,
+  computeCentralSubsidy, computeEmi,
 } from "@/lib/emi";
 
 export default function LoanAppStep5Page() {
@@ -151,8 +151,6 @@ function Inner() {
     }));
   }, [roiValid, loanAmount, roiNum, subsidyPrincipal]);
 
-  const canSave = roiValid && selectedTenure !== null && !saving;
-
   async function saveAndNext() {
     if (!loan) return; // admin-only flow: never block on missing fields
     setSaveError(null);
@@ -162,10 +160,7 @@ function Inner() {
       const chosen = emiRows.find((r) => r.years === selectedTenure);
       const res = await fetch(`/api/admin/loan-app/${loan.id}/complete-step-5`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken() ?? ""}`,
-        },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           roi_percent:           roiNum,
           central_subsidy:       centralSubsidy,
@@ -247,9 +242,9 @@ function Inner() {
             Your loan profile
           </h2>
           <div className="grid sm:grid-cols-3 gap-4">
-            <ProfileTile label="Loan amount required" value={formatRupees(loan.loan_amount_required)} accent="green" />
-            <ProfileTile label="Monthly bill" value={formatRupees(loan.monthly_bill_amount)}   accent="sky" />
-            <ProfileTile label="Annual income" value={formatRupees(loan.annual_income)}         accent="green" />
+            <ProfileTile label="Loan amount required" value={fmtRupees(loan.loan_amount_required)} accent="green" />
+            <ProfileTile label="Monthly bill" value={fmtRupees(loan.monthly_bill_amount)}   accent="sky" />
+            <ProfileTile label="Annual income" value={fmtRupees(loan.annual_income)}         accent="green" />
           </div>
         </Card>
 
@@ -386,7 +381,7 @@ function Inner() {
                         Monthly EMI
                       </p>
                       <p className="font-display font-bold text-[16px] text-[#185fa5]">
-                        {row.monthly !== null ? formatRupees(row.monthly) : "—"}
+                        {row.monthly !== null ? fmtRupees(row.monthly) : "—"}
                       </p>
                     </div>
                     <div>
@@ -394,7 +389,7 @@ function Inner() {
                         Subsidy EMI
                       </p>
                       <p className="text-[13px] font-semibold text-[#0f3d2e]">
-                        {row.subsidy !== null ? formatRupees(row.subsidy) : "—"}
+                        {row.subsidy !== null ? fmtRupees(row.subsidy) : "—"}
                       </p>
                     </div>
                   </div>

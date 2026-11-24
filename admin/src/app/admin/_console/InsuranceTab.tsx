@@ -11,7 +11,8 @@ import Button from "@/components/ui/Button";
 import AddNewInsuranceModal from "@/components/AddNewInsuranceModal";
 import { ACCENTS } from "@/components/AdminSidebar";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
+import { INSURANCE_STATUS_LABEL } from "@/lib/insurance-validity";
 import { getCached, setCached } from "@/lib/list-cache";
 import { useAdminNames } from "@/lib/use-admin-names";
 import { useEpcUpdates } from "@/lib/use-epc-updates";
@@ -36,10 +37,6 @@ function insurerLabelShort(v: string | null | undefined): string {
   return /^sbi\b/i.test(v.trim()) ? "SBI-GI" : v;
 }
 
-// Issued / Rejected / Hold / Draft / Under Review (migration 0047).
-const STATUS_LABEL: Record<string, string> = {
-  draft: "Draft", under_review: "Under Review", issued: "Issued", rejected: "Rejected", hold: "Hold",
-};
 const STATUS_PILL: Record<string, string> = {
   draft: "bg-[#eef1f0] text-[#5a8a76]",
   under_review: "bg-[#fef0d6] text-[#854f0b]",
@@ -175,7 +172,7 @@ export default function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
     try {
       const res = await fetch(`/api/admin/insurance/${r.id}/sign-doc`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ path: r.policy_path }),
       });
       const d = await res.json().catch(() => ({}));
@@ -266,7 +263,7 @@ export default function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
       epc(r),
       r.sum_insured ?? r.invoice_confirmed_amount ?? r.invoice_amount ?? "",
       insurerLabelShort(r.insurance_partner),
-      STATUS_LABEL[r.status] ?? r.status,
+      INSURANCE_STATUS_LABEL[r.status] ?? r.status,
       ...policyDateCells(r),
       fmtDateTime(r.created_at),
       createdBy(r),
@@ -289,7 +286,7 @@ export default function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
       <FiltersPanel open={filtersOpen} hasActive={activeCount > 0} onClear={clearAll}>
         <Select
           placeholder="Status filter"
-          options={Object.entries(STATUS_LABEL).map(([value, label]) => ({ value, label }))}
+          options={Object.entries(INSURANCE_STATUS_LABEL).map(([value, label]) => ({ value, label }))}
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
         />
@@ -369,7 +366,7 @@ export default function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
                 <td className="px-3 py-3 text-center text-[13px] text-[#0f3d2e]">{insurerLabelShort(r.insurance_partner)}</td>
                 <td className="px-3 py-3 text-center">
                   <span className={`${PILL} ${STATUS_PILL[r.status] ?? STATUS_PILL.draft}`}>
-                    {STATUS_LABEL[r.status] ?? r.status.replace(/_/g, " ")}
+                    {INSURANCE_STATUS_LABEL[r.status] ?? r.status.replace(/_/g, " ")}
                   </span>
                 </td>
                 {/* Policy Validity — end date, with the colour-coded days-left

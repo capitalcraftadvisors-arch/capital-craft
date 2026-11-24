@@ -481,52 +481,6 @@ export function Pill({ children, tint, icon }: {
   );
 }
 
-export function BigProgressStep({ icon, done, inProgress, failed, label, sub, mutedIfPending }: {
-  icon: React.ReactNode;
-  done?: boolean;
-  inProgress?: boolean;
-  /** Terminal-negative stage (e.g. a rejected decision) — renders red.
-   *  Optional and opt-in: callers that omit it render exactly as before. */
-  failed?: boolean;
-  label: React.ReactNode;
-  sub?: React.ReactNode;
-  mutedIfPending?: boolean;
-}) {
-  const bg = failed
-    ? "bg-[#dc2626] text-white ring-4 ring-[#dc2626]/15"
-    : done
-    ? "bg-[#178a5c] text-white ring-4 ring-[#178a5c]/15"
-    : inProgress
-    ? "bg-[#ef9f27] text-white ring-4 ring-[#ef9f27]/15"
-    : "bg-[#e3eeff] text-[#6b93c4]";
-  const labelCls = failed
-    ? "text-red-700 font-semibold"
-    : done || inProgress
-    ? "text-[#0f3d2e] font-semibold"
-    : (mutedIfPending ? "text-[#5a8a76] font-medium" : "text-[#0f3d2e] font-semibold");
-  const subCls = failed ? "text-red-700" : done || inProgress ? "text-[#5a8a76]" : "text-[#8ab3a1]";
-  return (
-    <div className="flex-1 flex flex-col items-center gap-3 min-w-0">
-      <div className={["w-[56px] h-[56px] rounded-full grid place-items-center shrink-0 transition-all", bg].join(" ")} style={{ transform: "scale(1.35)" }}>
-        <span style={{ transform: "scale(1.5)" }}>{icon}</span>
-      </div>
-      <div className="text-center min-w-0">
-        <div className={["text-[15px] leading-tight", labelCls].join(" ")}>{label}</div>
-        {sub && <div className={["text-[12px] mt-1", subCls].join(" ")}>{sub}</div>}
-      </div>
-    </div>
-  );
-}
-
-export function BigConnector({ active }: { active: boolean }) {
-  return (
-    <div
-      className={["flex-none h-[4px] rounded-full", active ? "bg-[#9dcbe8]" : "bg-[#e3eeff]"].join(" ")}
-      style={{ width: "clamp(40px, 8vw, 120px)" }}
-    />
-  );
-}
-
 export function SectionCard({
   title, icon, children, accent, tint, adminOnly,
 }: {

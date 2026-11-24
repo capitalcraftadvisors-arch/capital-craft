@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from "react";
 import { DocGrid, FillCount, I, Section, type ViewDocSlot } from "@/components/view/ViewKit";
-import { deleteDocument, getDocumentUrl, uploadDocument } from "@/lib/storage";
+import { deleteDocument, openDocument, uploadDocument } from "@/lib/storage";
 import { listStakeholderDocs, OTHER_DOC, type StakeholderDoc } from "@/lib/stakeholders";
 import { inputCls } from "@/components/StakeholderDetails";
 
@@ -35,10 +35,6 @@ export default function StakeholderDocs({ owner, slots }: { owner: Owner; slots:
     setDocs(await listStakeholderDocs(owner));
     setBusy(false);
   }
-  async function open(id: string, download?: boolean) {
-    const url = await getDocumentUrl(id, { download });
-    if (url) window.open(url, "_blank", "noopener"); else alert("Couldn't open the document.");
-  }
   async function remove(id: string) {
     if (await deleteDocument(id)) setDocs((d) => d?.filter((x) => x.id !== id) ?? d);
     else alert("Couldn't delete the document.");
@@ -46,8 +42,8 @@ export default function StakeholderDocs({ owner, slots }: { owner: Owner; slots:
 
   const slotOf = (d: StakeholderDoc | undefined, key: string, label: string): ViewDocSlot => ({
     key, label, title: d?.file_name ?? undefined,
-    onView: d ? () => void open(d.id) : undefined,
-    onDownload: d ? () => void open(d.id, true) : undefined,
+    onView: d ? () => void openDocument(d.id) : undefined,
+    onDownload: d ? () => void openDocument(d.id, { download: true }) : undefined,
     onDelete: d ? () => void remove(d.id) : undefined,
   });
   const latest = (label: string) => [...(docs ?? [])].reverse().find((d) => d.category === label);

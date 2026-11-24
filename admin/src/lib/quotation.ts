@@ -12,6 +12,8 @@ import PizZip from "pizzip";
 import Docxtemplater from "docxtemplater";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { downloadBuffer } from "./gcs";
+import { inr } from "./pdf-template";
+import { fmtDate } from "./dates";
 
 export type QuotationInput = {
   customer_name: string;
@@ -34,17 +36,6 @@ export type QuotationInput = {
   make_cable?: string;
   make_battery?: string;
 };
-
-// Indian-format rupees without the ₹ sign (the template already has ₹).
-export function inr(n: number): string {
-  return Math.round(n).toLocaleString("en-IN");
-}
-
-export function todayDDMMYYYY(): string {
-  const d = new Date();
-  const p = (x: number) => String(x).padStart(2, "0");
-  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`;
-}
 
 // State subsidy by system size: 1 kW ₹30,000 · 2 kW ₹60,000 · 3 kW+ ₹78,000 (capped).
 export function stateSubsidyFor(kw: number): number {
@@ -84,7 +75,7 @@ export function buildQuotationData(input: QuotationInput) {
     customer_name: input.customer_name || "",
     city: input.city || "",
     state: input.state || "",
-    date: input.date || todayDDMMYYYY(),
+    date: input.date || fmtDate(new Date()),
     quote_no: input.quote_no || "",
     kw: String(kwNum || input.kw || ""),
     system_type: input.system_type || "",

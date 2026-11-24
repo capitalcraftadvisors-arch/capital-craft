@@ -18,7 +18,9 @@ import { supabase } from "@/lib/supabase";
 import FileUpload from "@/components/FileUpload";
 import LoanDisbursementPanel from "@/components/LoanDisbursementPanel";
 import { I, Pill, Section } from "@/components/view/ViewKit";
-import { deadlineState, DEADLINE_PILL, fmtRupeesExact, fmtDateShort } from "@/lib/disbursement";
+import { deadlineState, DEADLINE_PILL } from "@/lib/disbursement";
+import { fmtRupeesExact } from "@/lib/money";
+import { fmtDate } from "@/lib/dates";
 
 type Loan = Record<string, any>;
 
@@ -104,7 +106,7 @@ function Inner() {
                 {dl.label}
               </div>
               {dl.started && (
-                <div className="text-[11px] text-[#5a8a76] mt-1">Deadline {fmtDateShort(loan.disbursement_deadline)}</div>
+                <div className="text-[11px] text-[#5a8a76] mt-1">Deadline {fmtDate(loan.disbursement_deadline)}</div>
               )}
               {!dl.started && (
                 <div className="text-[11px] text-[#5a8a76] mt-1">Starts on 1st disbursement</div>

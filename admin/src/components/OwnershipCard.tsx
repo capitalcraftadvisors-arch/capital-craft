@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import Select from "@/components/ui/Select";
 import { I, SectionCard, KV } from "@/components/view/ViewKit";
 import { supabase } from "@/lib/supabase";
-import { getBusiness, getToken } from "@/lib/auth";
+import { getBusiness, authHeaders } from "@/lib/auth";
 
 type ModuleKey = "epcs" | "apps" | "loanleads" | "leads" | "insurance";
 
@@ -60,7 +60,7 @@ export default function OwnershipCard({
     try {
       const res = await fetch("/api/admin/reassign", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ module, record_id: recordId, assigned_to_user_id: next }),
       });
       const j = await res.json().catch(() => ({}));

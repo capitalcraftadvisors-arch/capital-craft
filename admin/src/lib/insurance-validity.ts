@@ -7,6 +7,8 @@
 // Dates are Postgres `date` columns ("YYYY-MM-DD"); parsed as LOCAL calendar
 // dates (never new Date("YYYY-MM-DD"), which is UTC and can shift a day in IST).
 
+import { fmtDate } from "@/lib/dates";
+
 export type ValidityTone = "green" | "amber" | "red";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -17,10 +19,6 @@ function parseISO(s: string): Date | null {
 }
 function startOfDay(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
-function fmt(d: Date): string {
-  // Portal-wide DD/MM/YYYY (en-GB renders day/month/year in that order).
-  return d.toLocaleDateString("en-GB");
 }
 
 export type ValidityParts = {
@@ -42,8 +40,8 @@ export function policyValidityParts(
   const t = to ? parseISO(to) : null;
   if (!f && !t) return null;
 
-  const fromLabel = f ? fmt(f) : null;
-  const toLabel = t ? fmt(t) : null;
+  const fromLabel = f ? fmtDate(f) : null;
+  const toLabel = t ? fmtDate(t) : null;
   const range = `${fromLabel ?? "?"} – ${toLabel ?? "?"}`;
   if (!t) return { text: range, tone: "green", daysLeft: null, fromLabel, toLabel };
 
@@ -73,4 +71,9 @@ export const VALIDITY_TEXT: Record<ValidityTone, string> = {
   green: "text-[#178a5c]",
   amber: "text-[#854f0b]",
   red: "text-red-700",
+};
+
+/** An insurance application's status as shown to people (statuses of migration 0047). */
+export const INSURANCE_STATUS_LABEL: Record<string, string> = {
+  draft: "Draft", under_review: "Under Review", issued: "Issued", rejected: "Rejected", hold: "Hold",
 };

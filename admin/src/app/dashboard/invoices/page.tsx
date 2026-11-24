@@ -38,6 +38,7 @@ export default function InvoicesPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState<InvoiceRow | null>(null);
   const [reissuing, setReissuing] = useState<{ invoice: InvoiceRow; start: BillTo } | null>(null);
+  const [issuing, setIssuing] = useState(false); // the re-issue pop-up stays open while it issues
 
   useEffect(() => { if (!allowed) router.replace("/dashboard" as any); }, [allowed, router]);
   useEffect(() => {
@@ -131,9 +132,9 @@ export default function InvoicesPage() {
 
       {cancelling && <CancelInvoice invoice={cancelling} onDone={(r) => { put(r); setCancelling(null); }} onClose={() => setCancelling(null)} />}
       {reissuing && (
-        <Modal onClose={() => setReissuing(null)} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[680px] max-h-[92vh] overflow-y-auto">
+        <Modal onClose={() => setReissuing(null)} busy={issuing} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[680px] max-h-[92vh] overflow-y-auto">
           <InvoiceForm className="p-6" projectId={reissuing.invoice.project_id} kw={reissuing.invoice.kw} start={reissuing.start} replaces={reissuing.invoice}
-            onIssued={(r) => { put(r); setReissuing(null); }} onClose={() => setReissuing(null)} />
+            onBusy={setIssuing} onIssued={(r) => { put(r); setIssuing(false); setReissuing(null); }} onClose={() => setReissuing(null)} />
         </Modal>
       )}
     </div>

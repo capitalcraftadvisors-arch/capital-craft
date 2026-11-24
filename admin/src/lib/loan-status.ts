@@ -36,9 +36,3 @@ export const OUTCOME_PILL: Record<LenderOutcome, string> = {
   review:   "bg-blue-50 text-blue",
 };
 
-// Statuses each bucket covers — used by list filters.
-export const OUTCOME_STATUSES: Record<LenderOutcome, string[]> = {
-  approved: ["approved", "rfd", "sent_to_nbfc", "disbursed"],
-  rejected: ["rejected"],
-  review:   ["draft", "submitted", "under_review", "on_hold"],
-};

@@ -25,7 +25,8 @@ import Button from "@/components/ui/Button";
 import DatePicker from "@/components/ui/DatePicker";
 import LoanAppStepTracker from "@/components/LoanAppStepTracker";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
+import { signLoanPath } from "@/lib/storage";
 
 type Loan = {
   id: string;
@@ -56,7 +57,6 @@ type ExtractionResult = {
   face_signed_url: string | null;
 };
 
-const ACCEPT = "image/*,application/pdf";
 const GENDER_OPTIONS = ["Male", "Female", "Transgender"];
 
 export default function LoanAppStep2Page() {
@@ -153,15 +153,8 @@ function Inner() {
         // Sign the stored front image so it renders in the preview on edit
         // (PDF fronts have no inline thumbnail — they fall back to the label).
         if (row.aadhaar_front_path && !/\.pdf$/i.test(String(row.aadhaar_front_path))) {
-          try {
-            const r2 = await fetch(`/api/admin/loan-app/${params.id}/sign-doc`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
-              body: JSON.stringify({ path: row.aadhaar_front_path }),
-            });
-            const d2 = await r2.json().catch(() => ({}));
-            if (d2?.ok && d2.url) setFrontStoredUrl(d2.url as string);
-          } catch { /* preview is best-effort */ }
+          const u = await signLoanPath(params.id, row.aadhaar_front_path); // preview is best-effort
+          if (u) setFrontStoredUrl(u);
         }
       }
       setLoading(false);
@@ -178,7 +171,7 @@ function Inner() {
       form.append("back",  backFile);
       const res = await fetch(`/api/admin/loan-app/${loan.id}/extract-aadhaar`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
         body: form,
       });
       const data = await res.json().catch(() => ({}));
@@ -228,7 +221,7 @@ function Inner() {
     try {
       const res = await fetch(`/api/admin/loan-app/${params.id}/sign-doc`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ path }),
       });
       const data = await res.json().catch(() => ({}));
@@ -240,15 +233,6 @@ function Inner() {
   }
 
   const validAadhaar = /^\d{12}$/.test(aadhaarNumber);
-  const validForm   =
-    name.trim().length > 0 &&
-    dob.trim().length > 0 &&
-    gender.trim().length > 0 &&
-    validAadhaar &&
-    address.trim().length > 0;
-  // Admin/team flow — any stage can be skipped. Next is always available; a
-  // skipped Aadhaar just saves blank (the app stays a draft) and moves on.
-  const canNext = !saving;
 
   async function saveAndNext() {
     if (!loan) return; // admin-only flow: never block on missing fields/docs
@@ -272,10 +256,7 @@ function Inner() {
       };
       const res = await fetch(`/api/admin/loan-app/${loan.id}/complete-step-2`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken() ?? ""}`,
-        },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
@@ -637,11 +618,6 @@ function UploadTile({
   useEffect(() => {
     return () => { if (previewUrl) URL.revokeObjectURL(previewUrl); };
   }, [previewUrl]);
-
-  function openPreview(e: React.MouseEvent) {
-    e.stopPropagation();
-    if (previewUrl) window.open(previewUrl, "_blank", "noopener");
-  }
 
   return (
     <div>

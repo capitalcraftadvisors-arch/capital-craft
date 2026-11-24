@@ -2,7 +2,7 @@
 // The actual work (compression, GCS upload, signed URLs) happens on the server
 // in /api/upload and /api/document/[id].
 
-import { getToken } from "./auth";
+import { authHeaders } from "./auth";
 
 type UploadMeta = {
   table: "epc_documents" | "user_application_docs" | "stakeholder_docs";
@@ -55,7 +55,7 @@ export async function uploadDocument(
 
   const res = await fetch("/api/upload", {
     method: "POST",
-    headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+    headers: authHeaders(),
     body: form,
   });
   return res.json();
@@ -69,7 +69,7 @@ export async function getDocumentUrl(
 ): Promise<string | null> {
   const qs = opts?.download ? "?download=1" : "";
   const res = await fetch(`/api/document/${docId}${qs}`, {
-    headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+    headers: authHeaders(),
   });
   if (!res.ok) return null;
   const data = (await res.json()) as { ok: boolean; url?: string };
@@ -94,10 +94,48 @@ export async function downloadDocument(docId: string): Promise<void> {
   if (url) triggerDownload(url);
 }
 
+const OPEN_FAILED = "Couldn't open the document.";
+const openTab = (url: string) => window.open(url, "_blank", "noopener");
+
+/** Opens a stored document row in a new tab; alerts when it can't be signed. */
+export async function openDocument(docId: string, opts?: { download?: boolean }): Promise<void> {
+  const url = await getDocumentUrl(docId, opts);
+  if (url) openTab(url);
+  else alert(OPEN_FAILED);
+}
+
+// The loan application's sign-doc route: a signed link for one of its *_path
+// columns (the server whitelists the path). Throws only on a network error.
+async function postSignDoc(appId: string, path: string, download?: boolean): Promise<string | null> {
+  const res = await fetch(`/api/admin/loan-app/${appId}/sign-doc`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(download ? { path, download: true } : { path }),
+  });
+  const j = await res.json().catch(() => ({}));
+  return j?.ok && j.url ? (j.url as string) : null;
+}
+
+/** Signed link for a loan application's stored *_path document, or null on any failure. */
+export async function signLoanPath(appId: string, path: string, opts?: { download?: boolean }): Promise<string | null> {
+  try { return await postSignDoc(appId, path, opts?.download); } catch { return null; }
+}
+
+/** Opens a loan document in a new tab, trying in order: a link already signed
+ *  (`url`), a *_path column (`path`), a document row (`rowId`). Alerts when none opens. */
+export async function openLoanDoc(appId: string, src: { url?: string; path?: string | null; rowId?: string }): Promise<void> {
+  try {
+    if (src.url) { openTab(src.url); return; }
+    if (src.path) { const u = await postSignDoc(appId, src.path); if (u) { openTab(u); return; } }
+    if (src.rowId) { const u = await getDocumentUrl(src.rowId); if (u) { openTab(u); return; } }
+    alert(OPEN_FAILED);
+  } catch { alert(OPEN_FAILED); }
+}
+
 export async function deleteDocument(docId: string): Promise<boolean> {
   const res = await fetch(`/api/document/${docId}`, {
     method: "DELETE",
-    headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+    headers: authHeaders(),
   });
   if (!res.ok) return false;
   const data = (await res.json()) as { ok: boolean };

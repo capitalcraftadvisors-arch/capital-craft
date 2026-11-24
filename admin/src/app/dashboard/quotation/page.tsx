@@ -11,7 +11,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import BackHeader from "@/components/PartnerBackHeader";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
+import { fmtDate } from "@/lib/dates";
 import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template";
 import { customState } from "@/lib/custom-template";
 import { markCustomTemplateSeen } from "@/components/partner/CustomTemplateBanner";
@@ -28,7 +29,6 @@ import {
 } from "@/lib/quotation-brands";
 
 function stateSubsidyFor(kw: number): number { if (!kw || kw <= 0) return 0; return kw >= 3 ? 78000 : Math.round(kw * 30000); }
-function todayDDMMYYYY() { const d = new Date(); const p = (x: number) => String(x).padStart(2, "0"); return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`; }
 
 type Form = {
   customer_name: string; pincode: string; city: string; address: string; date: string; quote_no: string;
@@ -39,7 +39,7 @@ type Form = {
 };
 const BATTERY_UNITS = ["V", "Ah", "kWh", "VAh"];
 const EMPTY: Form = {
-  customer_name: "", pincode: "", city: "", address: "", date: todayDDMMYYYY(), quote_no: "",
+  customer_name: "", pincode: "", city: "", address: "", date: fmtDate(new Date()), quote_no: "",
   kw: "", system_type: "Hybrid", battery: "", battery_unit: "V", total: "",
   subsidised: true, central_subsidy: "",
   make_panel: "", make_inverter: "", roof_type: "", make_structure: "",
@@ -137,7 +137,7 @@ function Inner() {
     if (!/^\d{6}$/.test(pin)) return;
     setPinBusy(true);
     try {
-      const res = await fetch(`/api/admin/pincode-lookup?pin=${pin}`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+      const res = await fetch(`/api/admin/pincode-lookup?pin=${pin}`, { headers: authHeaders() });
       const j = await res.json().catch(() => ({}));
       if (j?.state) {
         const city = String(j.city || j.district || "");
@@ -157,7 +157,7 @@ function Inner() {
     setOcrBusy(true); setError(null);
     try {
       const fd = new FormData(); fd.append("file", file);
-      const res = await fetch("/api/epc/quotation/ocr", { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
+      const res = await fetch("/api/epc/quotation/ocr", { method: "POST", headers: authHeaders(), body: fd });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't read the photo."); return; }
       const x = j.fields || {};

@@ -27,13 +27,13 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import { uploadDocument } from "@/lib/storage";
 import { extractPan, extractGstLegalName } from "@/lib/ocr";
 import FileUpload from "@/components/FileUpload";
 import DateField from "@/components/ui/DateField";
 import { toIsoDate } from "@/lib/dates";
-import { MOBILE_RE, EMAIL_RE, PAN_RE, ACCOUNT_RE } from "@/lib/validators";
+import { MOBILE_RE, EMAIL_RE, PAN_RE, ACCOUNT_RE, GSTIN_RE } from "@/lib/validators";
 import { clearChatDraft, loadChatDraft, saveChatDraft } from "@/lib/chat-draft";
 // The chat kit (src/components/chat) — this chat's blue palette is EPC_INTAKE_THEME.
 import { EPC_INTAKE_THEME as THEME } from "@/components/chat/theme";
@@ -52,8 +52,6 @@ export default function EpcIntakePage() {
     </AuthGuard>
   );
 }
-
-const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/;
 
 type Stakeholder = {
   id: string;
@@ -222,7 +220,6 @@ function Inner() {
   const editTurn = editing ? SCRIPT.find((t) => t.id === editing.turnId) ?? null : null;
   const active = editTurn ?? turn;
 
-  function hdr() { return { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` }; }
   const advance = () => setIdx((i) => i + 1);
   const merge = (patch: Form) => setForm((f) => ({ ...f, ...patch }));
 
@@ -535,7 +532,7 @@ function Inner() {
       // cheque
       const fd = new FormData();
       fd.append("file", file);
-      const res = await fetch("/api/epc/extract-cheque", { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
+      const res = await fetch("/api/epc/extract-cheque", { method: "POST", headers: authHeaders(), body: fd });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) return { patch: {}, fields: blank() };
       return {
@@ -569,7 +566,7 @@ function Inner() {
     if (!MOBILE_RE.test(m)) { setError("Enter a valid 10-digit mobile."); return; }
     setBusy(true); setError(null);
     try {
-      const res = await fetch("/api/admin/create-epc", { method: "POST", headers: hdr(), body: JSON.stringify({ mobile: m }) });
+      const res = await fetch("/api/admin/create-epc", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ mobile: m }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't create the EPC."); setBusy(false); return; }
       const biz = j.business;
@@ -821,7 +818,7 @@ function StakeholdersDock({ epcId, businessType, initial, busy, onContinue }: {
       try {
         const res = await fetch(`/api/admin/epc/${epcId}/proprietor-pan`, {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+          headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ stakeholder_id: id }),
         });
         const j = await res.json().catch(() => ({}));
@@ -845,7 +842,7 @@ function StakeholdersDock({ epcId, businessType, initial, busy, onContinue }: {
       const fd = new FormData();
       fd.append("file", file);
       fd.append("kind", kind);
-      const res = await fetch(`/api/admin/epc/${epcId}/extract-stakeholder`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
+      const res = await fetch(`/api/admin/epc/${epcId}/extract-stakeholder`, { method: "POST", headers: authHeaders(), body: fd });
       const j = await res.json().catch(() => ({}));
       if (!j?.ok || !j.fields) return;
       fillMember(id, kind, j.fields as Record<string, string>);

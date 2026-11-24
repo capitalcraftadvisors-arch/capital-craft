@@ -78,7 +78,7 @@ export default function ActivityLog({ businessId, refreshKey }: Props) {
                 <span className={["shrink-0 mt-0.5", icon.tone].join(" ")}>{icon.svg}</span>
                 <p className="text-[14px] text-[#0f3d2e]">{describe(r)}</p>
               </div>
-              <span className="text-[11px] text-[#5a8a76] shrink-0">{fmtDate(r.created_at)}</span>
+              <span className="text-[11px] text-[#5a8a76] shrink-0">{fmtDateTime(r.created_at)}</span>
             </div>
             <p className="text-[12px] text-[#5a8a76] mt-0.5 pl-[26px]">
               by {r.actor === "epc" ? "the EPC" : (adminNames.get(r.actor_id) || "Admin")}
@@ -214,12 +214,4 @@ function clip(s: string | null): string {
   if (!s) return "";
   const t = s.length > 120 ? s.slice(0, 120) + "…" : s;
   return t;
-}
-
-function fmtDate(iso: string): string {
-  try {
-    return fmtDateTime(iso);
-  } catch {
-    return iso;
-  }
 }

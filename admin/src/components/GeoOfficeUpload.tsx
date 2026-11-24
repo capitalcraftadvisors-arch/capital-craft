@@ -29,7 +29,7 @@ import { useEffect, useRef, useState } from "react";
 import { gps as exifrGps } from "exifr";
 import { supabase } from "@/lib/supabase";
 import { uploadDocument, getDocumentUrl, deleteDocument, downloadDocument } from "@/lib/storage";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import { isAcceptedFileType } from "@/lib/validators";
 import { I } from "@/components/view/ViewKit";
 import { UPLOAD_BOX_COMPACT } from "@/components/FileUpload";
@@ -93,7 +93,7 @@ async function readStampGps(file: File): Promise<Gps | null> {
     fd.append("file", file);
     const res = await fetch("/api/epc/extract-geo", {
       method: "POST",
-      headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      headers: authHeaders(),
       body: fd,
     });
     const d = await res.json().catch(() => ({}));

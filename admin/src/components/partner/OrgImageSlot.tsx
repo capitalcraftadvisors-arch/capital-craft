@@ -4,7 +4,7 @@
 // Upload / Change and Remove — through /api/epc/org-image.
 
 import { useRef, useState, type ReactNode } from "react";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import { orgImageUrl, type OrgImageKind } from "@/lib/org-profile";
 import { setOrgImage } from "@/lib/org-settings";
 import { NAVY } from "@/components/partner/PartnerShell";
@@ -21,7 +21,7 @@ export default function OrgImageSlot({ kind, path, empty, onChange }: {
 
   async function call(method: "POST" | "DELETE", body?: FormData): Promise<{ ok?: boolean; path?: string; error?: string }> {
     const res = await fetch(`/api/epc/org-image${method === "DELETE" ? `?kind=${kind}` : ""}`,
-      { method, headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body });
+      { method, headers: authHeaders(), body });
     return res.json().catch(() => ({ error: "Network error." }));
   }
   async function done(p: string | null) { await setOrgImage(kind, p).catch(() => {}); onChange(p); }

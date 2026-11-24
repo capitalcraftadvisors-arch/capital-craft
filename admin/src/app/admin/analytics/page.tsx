@@ -459,18 +459,6 @@ function buildSummary(title: string, deltas: Delta[], w: Windows): string {
   return parts.length ? parts.join("; ") + "." : `${title} metrics are broadly stable vs the previous ${w.label.toLowerCase()}.`;
 }
 
-type Alert = { sev: "high" | "medium" | "positive" | "monitor"; text: string };
-function buildAlerts(deltas: Delta[], extra: Alert[] = []): Alert[] {
-  const out: Alert[] = [];
-  for (const d of deltas) {
-    if (!flagged(d)) continue;
-    const mag = Math.abs(d.changePct as number).toFixed(0);
-    if (improving(d)) out.push({ sev: "positive", text: `${d.label} improved ${mag}% (${d.fmt(d.m.cur)}).` });
-    else out.push({ sev: Math.abs(d.changePct as number) >= 25 ? "high" : "medium", text: `${d.label} declined ${mag}% (${d.fmt(d.m.prev)} → ${d.fmt(d.m.cur)}).` });
-  }
-  return [...extra, ...out].slice(0, 5);
-}
-
 // ── good/bad arrow ────────────────────────────────────────────────────────────
 function arrowFor(d: Delta): { glyph: string; cls: string; text: string } {
   if (d.changePct == null || d.m.nPrev < MIN_PREV) return { glyph: "→", cls: "text-text-muted", text: "no prior data" };
@@ -824,55 +812,6 @@ function ChangeList({ title, color, items }: { title: string; color: string; ite
         <ul className="space-y-1.5">{items.map((x, i) => <li key={i} className="text-[12.5px] text-text-mid leading-snug flex gap-1.5"><span style={{ color }}>•</span><span>{x}</span></li>)}</ul>
       ) : <p className="text-[12px] text-text-muted">—</p>}
     </div>
-  );
-}
-
-const SEV_STYLE: Record<Alert["sev"], { bg: string; fg: string; label: string }> = {
-  high: { bg: "#fbeae8", fg: "#b42318", label: "High" },
-  medium: { bg: "#fef0d6", fg: "#854f0b", label: "Medium" },
-  positive: { bg: "#e6f6ee", fg: "#178a5c", label: "Positive" },
-  monitor: { bg: "#eef1f0", fg: "#5a8a76", label: "Monitoring" },
-};
-function AlertsCard({ alerts }: { alerts: Alert[] }) {
-  return (
-    <Card className="p-5">
-      <p className="text-[13px] font-semibold text-text mb-3">Alerts</p>
-      {alerts.length ? (
-        <ul className="space-y-2">
-          {alerts.map((a, i) => {
-            const s = SEV_STYLE[a.sev];
-            return (
-              <li key={i} className="flex items-start gap-2.5">
-                <span className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full shrink-0" style={{ backgroundColor: s.bg, color: s.fg }}>{s.label}</span>
-                <span className="text-[12.5px] text-text-mid leading-snug">{a.text}</span>
-              </li>
-            );
-          })}
-        </ul>
-      ) : <p className="text-[12.5px] text-text-muted">No alerts — metrics within normal range (or not enough data to raise one).</p>}
-    </Card>
-  );
-}
-
-function BottleneckCard({ text }: { text: string | null }) {
-  return (
-    <Card className="p-5">
-      <p className="text-[13px] font-semibold text-text mb-2">Bottleneck</p>
-      <p className="text-[12.5px] text-text-mid leading-snug">{text ?? "No stage is dropping conversion significantly vs the previous period (or not enough data to compare)."}</p>
-    </Card>
-  );
-}
-
-function RecommendationsCard({ items }: { items: string[] }) {
-  return (
-    <Card className="p-5">
-      <p className="text-[13px] font-semibold text-text mb-2">Recommended Actions</p>
-      {items.length ? (
-        <ol className="space-y-2 list-none">
-          {items.map((x, i) => <li key={i} className="text-[12.5px] text-text-mid leading-snug flex gap-2"><span className="font-semibold" style={{ color: ACCENT }}>{i + 1}.</span><span>{x}</span></li>)}
-        </ol>
-      ) : <p className="text-[12.5px] text-text-muted">No actions triggered — nothing above threshold this period.</p>}
-    </Card>
   );
 }
 

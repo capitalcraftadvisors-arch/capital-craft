@@ -21,9 +21,6 @@ import { logLoanActivityServer } from "@/lib/loan-activity-server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const EMPLOYMENT_TYPES = new Set(["salaried", "self_employed"]);
-const METHODS = new Set(["manual_epdf", "scanned_pdf"]);
-
 function strOrNull(v: unknown): string | null {
   if (v == null) return null;
   const s = String(v).trim();

@@ -19,15 +19,11 @@ import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import { uploadDocument } from "@/lib/storage";
 import { supabase } from "@/lib/supabase";
-import { isAcceptedFileType } from "@/lib/validators";
+import { EMAIL_RE, MOBILE_RE, PINCODE_RE, isAcceptedFileType } from "@/lib/validators";
 import EpcApplyTracker from "@/components/EpcApplyTracker";
-
-const PIN_RE    = /^[1-9]\d{5}$/;
-const MOBILE_RE = /^[6-9]\d{9}$/;
-const EMAIL_RE  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const SYSTEM_CARDS = [
   { value: "on_grid",  title: "On-Grid Solar System",  desc: "Connected to electricity grid, can sell excess power" },
@@ -84,11 +80,11 @@ function Inner() {
 
   async function lookupPincode(next: string) {
     setPinError(null);
-    if (!PIN_RE.test(next)) return;
+    if (!PINCODE_RE.test(next)) return;
     setPinBusy(true);
     try {
       const res = await fetch(`/api/admin/pincode-lookup?pin=${next}`, {
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) {
@@ -109,7 +105,7 @@ function Inner() {
     name.trim().length >= 2 &&
     MOBILE_RE.test(phone) &&
     EMAIL_RE.test(email) &&
-    PIN_RE.test(pin) &&
+    PINCODE_RE.test(pin) &&
     state.trim().length > 0 &&
     !!systemType &&
     !!plantUse &&
@@ -129,10 +125,7 @@ function Inner() {
       if (!appId) {
         const res = await fetch("/api/epc/loan-apply", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${getToken() ?? ""}`,
-          },
+          headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             phase: "register",
             borrower_name:    name.trim(),

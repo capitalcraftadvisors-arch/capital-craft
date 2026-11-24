@@ -4,7 +4,7 @@
 // and Customer applications (gozerobils).
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import { inrPlain, numberInput } from "@/lib/money";
 
 export const NAVY = "#1e3a8a";
@@ -76,7 +76,7 @@ export function rememberBrandOption(field: string, value: string) {
 export function useBrandOptions() {
   const [custom, setCustom] = useState<Record<string, string[]>>({});
   useEffect(() => {
-    brandOptions ??= fetch("/api/epc/quotation/brands", { headers: { Authorization: `Bearer ${getToken() ?? ""}` } })
+    brandOptions ??= fetch("/api/epc/quotation/brands", { headers: authHeaders() })
       .then((res) => res.json())
       .then((j) => { if (!j?.ok) throw new Error(); return j.options as Record<string, string[]>; })
       .catch(() => { brandOptions = null; return {}; }); // defaults only; retried on the next form
@@ -97,7 +97,7 @@ export function saveUrl(url: string, name: string) {
 async function fetchQuotation(body: object): Promise<{ file: File; next: string | null }> {
   const res = await fetch("/api/epc/quotation", {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
   if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j?.error || "Couldn't generate the document."); }

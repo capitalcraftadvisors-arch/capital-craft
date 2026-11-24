@@ -27,11 +27,12 @@ import EpcAdminInfoSection from "@/components/EpcAdminInfoSection";
 import CommentsSection from "@/components/CommentsSection";
 import EditableField from "@/components/EditableField";
 import AdminDocSlot from "@/components/AdminDocSlot";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import FileUpload from "@/components/FileUpload";
 import { supabase } from "@/lib/supabase";
 import { logAudit } from "@/lib/auditLog";
-import { EMAIL_RE, PAN_RE, MOBILE_RE, IFSC_RE, ACCOUNT_RE } from "@/lib/validators";
+import { EMAIL_RE, PAN_RE, MOBILE_RE, IFSC_RE, ACCOUNT_RE, GSTIN_RE } from "@/lib/validators";
+import { EPC_STATUS_LABEL } from "@/lib/epc-labels";
 
 type Biz = Record<string, any>;
 type Stakeholder = { id: string; name: string; designation: string; mobile: string; email: string; father_name: string; dob: string; aadhaar_number: string; aadhaar_address: string };
@@ -168,7 +169,7 @@ function Inner() {
           </div>
           {(() => {
             const s = biz.status;
-            const label = s === "approved" ? "Approved by Manish" : s === "under_review" ? "Under review" : s === "on_hold" ? "On hold" : s === "rejected" ? "Rejected" : "Draft";
+            const label = EPC_STATUS_LABEL[s] ?? "Draft";
             const cls = s === "approved" ? "bg-green-50 text-green-dark" : s === "rejected" ? "bg-red-50 text-red-700" : s === "under_review" ? "bg-[#fef0d6] text-[#854f0b]" : s === "on_hold" ? "bg-[#e5edf5] text-[#3b5a76]" : "bg-[#eef1f0] text-[#5a8a76]";
             return <span className={`inline-block px-3 py-1 rounded-full text-[12px] font-semibold ${cls}`}>{label}</span>;
           })()}
@@ -242,7 +243,7 @@ function Inner() {
             onSave={async (v) => saveField("gstin_number")(v.toUpperCase())}
             validate={(v) =>
               !v ? null
-              : /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/.test(v.toUpperCase())
+              : GSTIN_RE.test(v.toUpperCase())
                   ? null
                   : "Invalid GSTIN (15 chars)"
             }
@@ -483,7 +484,7 @@ function MembersEditor({
       fd.append("file", file);
       fd.append("kind", kind);
       const res = await fetch(`/api/admin/epc/${businessId}/extract-stakeholder`, {
-        method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd,
+        method: "POST", headers: authHeaders(), body: fd,
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j?.ok || !j.fields) return;

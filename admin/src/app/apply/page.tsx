@@ -13,10 +13,10 @@ import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import { amountInput } from "@/lib/money";
+import { MOBILE_RE } from "@/lib/validators";
 
 type Step = "mobile" | "choose" | "form" | "done";
 type LeadType = "loan" | "insurance";
-const MOBILE_RE = /^[6-9]\d{9}$/;
 
 export default function ApplyPage() {
   const [step, setStep] = useState<Step>("mobile");

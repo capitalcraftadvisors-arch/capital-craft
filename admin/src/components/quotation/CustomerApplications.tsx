@@ -11,7 +11,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { getBusiness, getToken } from "@/lib/auth";
+import { getBusiness, authHeaders } from "@/lib/auth";
 import { fmtDateTime } from "@/lib/dates";
 import { INDIA_STATES } from "@/lib/india-states";
 import { MODULE_BRANDS, INVERTER_BRANDS, BRAND_FIELDS, SARVATRA, sarvatraTerms } from "@/lib/quotation-brands";
@@ -514,7 +514,7 @@ function QuotationEmail({ row, onClose }: { row: Row; onClose: () => void }) {
     try {
       const res = await fetch("/api/epc/quotation/email", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ ...row.data, doc, date: docOf(doc).at(row), to: m.to.trim(), cc: m.cc, bcc: m.bcc, subject: m.subject.trim(), message: m.message }),
       });
       const j = await res.json().catch(() => ({}));
@@ -532,7 +532,7 @@ function QuotationEmail({ row, onClose }: { row: Row; onClose: () => void }) {
             <h2 className="font-display text-[20px] font-bold text-text">Email</h2>
             <div className="text-[13px] text-text-muted mt-0.5">{fullName(row.data)} · From {SARVATRA.sender}</div>
           </div>
-          <button onClick={onClose} aria-label="Close" className="w-9 h-9 grid place-items-center rounded-xl text-text-muted hover:text-text hover:bg-bg-soft text-[18px]">✕</button>
+          <button onClick={onClose} disabled={busy} aria-label="Close" className="w-9 h-9 grid place-items-center rounded-xl text-text-muted hover:text-text hover:bg-bg-soft text-[18px]">✕</button>
         </div>
         <DocTabs active={doc} onPick={(d) => { setDoc(d); setError(null); }} open={(d) => made(row, d)} />
 
@@ -622,7 +622,7 @@ function QuotationWhatsApp({ row, onClose }: { row: Row; onClose: () => void }) 
     try {
       const res = await fetch("/api/epc/quotation/share", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(body),
       });
       const j = await res.json().catch(() => ({}));
@@ -664,7 +664,7 @@ function QuotationWhatsApp({ row, onClose }: { row: Row; onClose: () => void }) 
           <div className="text-[15px] font-bold text-text">Send WhatsApp</div>
           <div className="text-[12px] text-text-muted">{fullName(row.data)}</div>
         </div>
-        <button type="button" onClick={onClose} aria-label="Close" className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
+        <button type="button" onClick={onClose} disabled={busy} aria-label="Close" className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
       </div>
       <DocTabs active={doc} onPick={setDoc} open={(d) => made(row, d)} />
 

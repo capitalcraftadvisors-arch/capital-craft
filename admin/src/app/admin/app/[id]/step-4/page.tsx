@@ -28,8 +28,8 @@ import Button from "@/components/ui/Button";
 import LoanAppStepTracker from "@/components/LoanAppStepTracker";
 import FileUpload from "@/components/FileUpload";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
-import { getDocumentUrl } from "@/lib/storage";
+import { authHeaders } from "@/lib/auth";
+import { openDocument } from "@/lib/storage";
 import { IFSC_RE, MOBILE_RE, EMAIL_RE } from "@/lib/validators";
 import { professionsFor } from "@/lib/loan-form";
 import { amountInput } from "@/lib/money";
@@ -205,7 +205,7 @@ function Inner() {
     try {
       const res = await fetch(`/api/admin/loan-app/${params.id}/sign-doc`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ path }),
       });
       const data = await res.json().catch(() => ({}));
@@ -229,7 +229,7 @@ function Inner() {
       fd.append("method", method);
       const res = await fetch(`/api/admin/loan-app/${loan.id}/extract-bank-statement`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
         body: fd,
       });
       const data = await res.json().catch(() => ({}));
@@ -321,10 +321,7 @@ function Inner() {
       };
       const res = await fetch(`/api/admin/loan-app/${loan.id}/complete-step-4`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken() ?? ""}`,
-        },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
@@ -523,7 +520,7 @@ function Inner() {
                   // to the sign-doc route (whitelisted on the persisted *_path)
                   // for a reloaded doc where no signed_url is in hand.
                   if (bankDoc.signed_url) window.open(bankDoc.signed_url, "_blank", "noopener");
-                  else if (bankDoc.docId) void getDocumentUrl(bankDoc.docId).then((u) => (u ? window.open(u, "_blank", "noopener") : alert("Couldn't open the document.")));
+                  else if (bankDoc.docId) void openDocument(bankDoc.docId);
                   else void signAndOpen(bankDoc.path);
                 } : undefined}
               />

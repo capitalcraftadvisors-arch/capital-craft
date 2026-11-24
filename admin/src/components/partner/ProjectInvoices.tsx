@@ -49,11 +49,12 @@ const knownState = (s: string | null | undefined) => INDIA_STATES.find((x) => x.
 type Draft = { customer_name: string; customer_address: string; customer_gstin: string; customer_state: string; amount: string; invoice_date: string };
 
 /** A new invoice, or a cancelled one issued again (replaces). */
-export function InvoiceForm({ projectId, kw, start, applicationId, replaces, onIssued, onClose, className = "rounded-2xl border border-line p-4 sm:p-5" }: {
+export function InvoiceForm({ projectId, kw, start, applicationId, replaces, onIssued, onClose, onBusy, className = "rounded-2xl border border-line p-4 sm:p-5" }: {
   projectId: string; kw: number | null; start: Partial<BillTo>;
   applicationId?: string | null;   // a loan project: its site address fills the address
   replaces?: InvoiceRow | null;
   onIssued: (r: InvoiceRow) => void; onClose: () => void;
+  onBusy?: (busy: boolean) => void; // a pop-up around the form: no closing while issuing
   className?: string;
 }) {
   const today = localIsoDate(new Date());
@@ -80,14 +81,14 @@ export function InvoiceForm({ projectId, kw, start, applicationId, replaces, onI
 
   async function issue() {
     if (!d.invoice_date) { setError("Enter the invoice date."); return; }
-    setBusy(true); setError(null);
+    setBusy(true); onBusy?.(true); setError(null);
     try {
       onIssued(await issueInvoice({
         project_id: projectId, kw, invoice_date: d.invoice_date, customer_name: d.customer_name, customer_address: d.customer_address,
         customer_gstin: d.customer_gstin, customer_state: d.customer_state, amount: Number(d.amount) || 0, epcState: epcState ?? "",
         replaces_id: replaces?.id ?? null,
       }));
-    } catch (e) { setError((e as Error).message || "Couldn't issue the invoice."); setBusy(false); }
+    } catch (e) { setError((e as Error).message || "Couldn't issue the invoice."); setBusy(false); onBusy?.(false); }
   }
 
   const th = "px-2.5 py-2 font-semibold", td = "px-2.5 py-2 whitespace-nowrap";

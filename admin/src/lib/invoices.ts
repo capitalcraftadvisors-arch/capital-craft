@@ -12,7 +12,7 @@
 // their own. Every issue / cancel updates the copies in place — no reload.
 
 import { supabase } from "./supabase";
-import { getBusiness, getToken } from "./auth";
+import { getBusiness, authHeaders } from "./auth";
 import { getCached, setCached } from "./list-cache";
 import { invoiceFigures } from "./invoice-calc";
 import { SUBSCRIPTION_MSG } from "./subscription";
@@ -156,16 +156,12 @@ export async function cancelInvoice(r: InvoiceRow, reason: string): Promise<Invo
   return saved;
 }
 
-/** A cancelled invoice issued again (a new number), from the details given. */
-export const reissueInvoice = (cancelled: InvoiceRow, v: Omit<InvoiceInput, "replaces_id" | "project_id">) =>
-  issueInvoice({ ...v, project_id: cancelled.project_id, replaces_id: cancelled.id });
-
 /** A cancelled invoice that no other invoice replaces yet. */
 export const canReissue = (r: InvoiceRow, all: InvoiceRow[]) => r.status === "cancelled" && !all.some((x) => x.replaces_id === r.id);
 
 /** Builds the PDF on the server and saves it. */
 export async function downloadInvoicePdf(id: string) {
-  const res = await fetch(`/api/epc/invoices/${id}/pdf`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+  const res = await fetch(`/api/epc/invoices/${id}/pdf`, { headers: authHeaders() });
   if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j?.error || "Couldn't make the PDF."); }
   const name = ((res.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/) || [])[1] || "invoice.pdf";
   const url = URL.createObjectURL(await res.blob());

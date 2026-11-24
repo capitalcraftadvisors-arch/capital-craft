@@ -27,7 +27,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { err, dbAs, requireLogin } from "@/lib/api";
-import { UUID_RE, PINCODE_RE } from "@/lib/validators";
+import { UUID_RE } from "@/lib/validators";
 import { logLoanActivityServer } from "@/lib/loan-activity-server";
 // Note: sendWhatsAppConfirmation is intentionally NOT imported here —
 // the WhatsApp step is dropped from the current build. See header

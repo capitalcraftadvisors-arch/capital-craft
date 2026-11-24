@@ -28,10 +28,11 @@ export default function CommandPalette() {
   const [searching, setSearching] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ⌘K / Ctrl-K toggles; Esc closes (handled by cmdk Dialog too).
+  // ⌘K / Ctrl-K toggles; Esc closes.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); setOpen((o) => !o); }
+      else if (e.key === "Escape") setOpen(false);
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);

@@ -41,7 +41,6 @@ export default function LoanAppForm({
   epcBusinessId,
   createdBy = "epc",
   existing,
-  mode = "create",
 }: {
   epcBusinessId: string;
   createdBy?: "epc" | "admin";

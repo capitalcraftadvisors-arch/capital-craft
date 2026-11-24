@@ -95,10 +95,6 @@ const STEP_STAMPS: { col: string; step: number }[] = [
 
 type Ev = { at: string; text: string; by?: string | null; note?: string | null; tone: string; svg: React.ReactNode };
 
-function fmtDate(v: string): string {
-  return fmtDateTime(v);
-}
-
 // Older chatbot saves logged every column name ("intake chat: install_pincode,
 // borrower_pan, …"); read them the way new saves are written (update-fields).
 function editText(detail: string | null): string {
@@ -209,7 +205,7 @@ export function LoanActivityList({ loan, compact }: { loan: Record<string, any>;
           <li key={`${e.at}-${i}`} className="relative pl-4">
             <span className={["absolute -left-[9px] top-0 w-[17px] h-[17px] rounded-full bg-white grid place-items-center [&>svg]:w-[13px] [&>svg]:h-[13px]", e.tone].join(" ")}>{e.svg}</span>
             <p className="text-[13px] text-[#0f3d2e] leading-snug">{e.text}</p>
-            <p className="text-[11.5px] text-[#7a958a] mt-0.5">{fmtDate(e.at)}{e.by ? ` · ${e.by}` : ""}</p>
+            <p className="text-[11.5px] text-[#7a958a] mt-0.5">{fmtDateTime(e.at)}{e.by ? ` · ${e.by}` : ""}</p>
             {e.note && <p className="text-[12px] text-[#5a8a76] mt-0.5 italic">“{e.note}”</p>}
           </li>
         ))}
@@ -229,7 +225,7 @@ export function LoanActivityList({ loan, compact }: { loan: Record<string, any>;
               <span className={["shrink-0 mt-0.5", e.tone].join(" ")}>{e.svg}</span>
               <p className="text-[14px] text-[#0f3d2e]">{e.text}</p>
             </div>
-            <span className="text-[11px] text-[#5a8a76] shrink-0">{fmtDate(e.at)}</span>
+            <span className="text-[11px] text-[#5a8a76] shrink-0">{fmtDateTime(e.at)}</span>
           </div>
           {e.by && (
             <p className="text-[12px] text-[#5a8a76] mt-0.5 pl-[26px]">by {e.by}</p>

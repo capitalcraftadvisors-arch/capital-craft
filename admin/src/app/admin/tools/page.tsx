@@ -5,7 +5,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 
 export default function ToolsPage() {
   return (
@@ -32,7 +32,7 @@ function Inner() {
       while (true) {
         const res = await fetch("/api/admin/backfill-aadhaar-faces", {
           method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+          headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({ limit: 15, after }),
         });
         const j = await res.json().catch(() => ({}));

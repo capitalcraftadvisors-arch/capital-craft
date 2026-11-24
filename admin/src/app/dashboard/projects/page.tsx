@@ -20,6 +20,7 @@ import { canManageOrg, canWork, epcRole, isSiteStaff, portalV2 } from "@/lib/epc
 import { fetchMembers, type MemberRow } from "@/lib/members";
 import { fmtDate } from "@/lib/dates";
 import { fmtRupees } from "@/lib/money";
+import { MOBILE_RE } from "@/lib/validators";
 import {
   fetchProjects, fetchHistory, saveProject, saveNotes, setStage, deleteProject, fetchPhotos, addPhoto, removePhoto,
   stagesFor, needsPhotos, daysInStage, PROJECT_STAGES, STAGE_LABEL, PAYMENT_MODES, PAYMENT_LABEL, PHOTOS_NEEDED,
@@ -27,7 +28,6 @@ import {
 } from "@/lib/projects";
 
 type Filter = "all" | ProjectStage;
-const MOBILE_RE = /^[6-9]\d{9}$/;
 const STAGE_PILL = (s: ProjectStage) =>
   s === "closed" ? "bg-[#eef1f5] text-[#475569]" : s === "commissioned" ? "bg-[#e6f6ee] text-[#178a5c]"
   : needsPhotos(s) ? "bg-[#efedff] text-[#5b3fc4]" : "bg-[#e8effc] text-[#1e3a8a]";
@@ -214,7 +214,7 @@ function ProjectEditor({ project, crew, assign, site, canEdit, canDelete, onGo, 
   };
 
   return (
-    <Modal onClose={onClose} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[760px] max-h-[92vh] overflow-y-auto p-6">
+    <Modal onClose={onClose} closeOnBackdrop="mousedown" busy={busy} overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[760px] max-h-[92vh] overflow-y-auto p-6">
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="text-[17px] font-display font-bold text-[#0f3d2e]">{p ? p.customer_name : "New project"}</div>
         {p?.application_id && !site && (

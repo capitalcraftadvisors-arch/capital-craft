@@ -1,38 +1,11 @@
-import { FUNCTIONS_URL } from "./supabase";
-import { getToken } from "./auth";
+import { authHeaders } from "./auth";
 
 // PAN / GST / GSTR-3B OCR now goes through the same-origin Node route
 // /api/ocr, which reads the document with Gemini (primary) and falls back to
 // the Vision Edge Function automatically. The route returns the SAME shapes
 // these callers already expect, so the client just forwards the file and
 // returns the JSON — the name/address/validation enrichment that used to live
-// here now runs server-side. (extractCheque still targets its Edge Function.)
-
-export type ChequeOcrResult =
-  | {
-      ok: true;
-      raw: string;
-      ifsc: string | null;
-      accountNumber: string | null;
-      bankName: string | null;
-    }
-  | { ok: false; error: string };
-
-// Converts a File (image or PDF) to base64 and calls extract-cheque.
-// mimeType is forwarded so PDFs route to Vision's files:annotate endpoint
-// instead of images:annotate.
-export async function extractCheque(file: File): Promise<ChequeOcrResult> {
-  const base64 = await fileToBase64(file);
-  const res = await fetch(`${FUNCTIONS_URL}/extract-cheque`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken() ?? ""}`,
-    },
-    body: JSON.stringify({ imageBase64: base64, mimeType: file.type }),
-  });
-  return res.json();
-}
+// here now runs server-side. (Cheque OCR goes through /api/epc/extract-cheque.)
 
 export type GstR3bOcrResult =
   | {
@@ -49,17 +22,14 @@ export type GstR3bOcrResult =
     }
   | { ok: false; error: string };
 
-// Mirrors extractCheque: file -> base64 -> Edge Function. Passes mimeType
+// file -> base64 -> /api/ocr. Passes mimeType
 // through so the function can route PDFs to files:annotate (Vision's PDF
 // endpoint) instead of images:annotate.
 export async function extractGstR3b(file: File): Promise<GstR3bOcrResult> {
   const base64 = await fileToBase64(file);
   const res = await fetch(`/api/ocr`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken() ?? ""}`,
-    },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ type: "gstr3b", imageBase64: base64, mimeType: file.type }),
   });
   return res.json();
@@ -85,10 +55,7 @@ export async function extractPan(file: File): Promise<PanOcrResult> {
   const base64 = await fileToBase64(file);
   const res = await fetch(`/api/ocr`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken() ?? ""}`,
-    },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ type: "pan", imageBase64: base64, mimeType: file.type }),
   });
   // The route already returns { ok, raw_text, pan, name, father_name, dob }
@@ -116,10 +83,7 @@ export async function extractGstLegalName(file: File): Promise<GstLegalNameOcrRe
   const base64 = await fileToBase64(file);
   const res = await fetch(`/api/ocr`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken() ?? ""}`,
-    },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ type: "gst", imageBase64: base64, mimeType: file.type }),
   });
   // The route returns { ok, gstin, legal_name, trade_name, address, raw_text }
@@ -133,10 +97,7 @@ export async function nameDocument(file: File): Promise<string | null> {
     const base64 = await fileToBase64(file);
     const res = await fetch(`/api/ocr`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${getToken() ?? ""}`,
-      },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ type: "doc_name", imageBase64: base64, mimeType: file.type }),
     });
     const j = await res.json().catch(() => null);

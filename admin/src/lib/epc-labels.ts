@@ -8,6 +8,15 @@ export const BUSINESS_TYPE_LABEL: Record<string, string> = {
   llp:            "LLP",
 };
 
+/** An EPC's onboarding status as the team sees it (onboarding_status, migration 0001). */
+export const EPC_STATUS_LABEL: Record<string, string> = {
+  draft:        "Draft",
+  under_review: "Under review",
+  approved:     "Approved by Manish",
+  on_hold:      "On hold",
+  rejected:     "Rejected",
+};
+
 /** The heading for an EPC's people — by constitution. */
 export function peopleHeading(bt: string | null | undefined): string {
   switch (bt) {

@@ -14,7 +14,7 @@
 // which records consent, fires the WhatsApp stub, and advances
 // current_step to 2. Client then routes to /admin/app/[id]/step-2.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
@@ -23,9 +23,9 @@ import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import FileUpload from "@/components/FileUpload";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import { extractPan } from "@/lib/ocr";
-import { EMAIL_RE, MOBILE_RE, PINCODE_RE } from "@/lib/validators";
+import { EMAIL_RE, MOBILE_RE, PAN_RE, PINCODE_RE } from "@/lib/validators";
 import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
 
 // The five policy keys recorded in the consent legal breadcrumb. The
@@ -207,7 +207,7 @@ function Inner() {
     setPinBusy(true);
     try {
       const res = await fetch(`/api/admin/pincode-lookup?pin=${next}`, {
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) {
@@ -247,8 +247,7 @@ function Inner() {
     return epc.trade_name || epc.legal_name || epc.contact_name || "(unnamed EPC)";
   }, [epc]);
 
-  const PAN_FMT_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
-  const panValid = PAN_FMT_RE.test(panNumber.trim().toUpperCase());
+  const panValid = PAN_RE.test(panNumber.trim().toUpperCase());
 
   const canSend =
     PINCODE_RE.test(pin) &&
@@ -271,10 +270,7 @@ function Inner() {
     try {
       const res = await fetch(`/api/admin/loan-app/${loan.id}/complete-step-1`, {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken() ?? ""}`,
-        },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           install_pincode:  pin,
           install_state:    state,

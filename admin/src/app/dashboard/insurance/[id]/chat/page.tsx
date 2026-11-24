@@ -15,7 +15,7 @@ import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import GeoOfficeUpload from "@/components/GeoOfficeUpload";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import { fetchEpcName } from "@/lib/epc-name";
 import { fmtRupeesExact, amountInput } from "@/lib/money";
 // The chat kit (src/components/chat) — this chat's navy palette is PARTNER_THEME.
@@ -54,7 +54,6 @@ const QUESTION: Record<Stage, string> = {
   done: "",
 };
 
-const auth = () => ({ Authorization: `Bearer ${getToken() ?? ""}` });
 const thumbOf = (f: File) => (f.type.startsWith("image/") ? URL.createObjectURL(f) : null);
 const num = (s: string) => { const n = Number(amountInput(s)); return s.trim() && Number.isFinite(n) ? n : null; };
 
@@ -198,7 +197,7 @@ function Inner() {
     const isForm = body instanceof FormData;
     const res = await fetch(`/api/epc/insurance/${id}/${route}`, {
       method: "POST",
-      headers: isForm ? auth() : { ...auth(), "Content-Type": "application/json" },
+      headers: isForm ? authHeaders() : authHeaders({ "Content-Type": "application/json" }),
       body: isForm ? body : JSON.stringify(body),
     });
     const d = await res.json().catch(() => ({}));
@@ -249,7 +248,7 @@ function Inner() {
   async function uploadPlant(file: File, gps: Gps): Promise<{ ok: boolean; error?: string }> {
     const fd = new FormData();
     fd.append("file", file); fd.append("kind", "plant"); fd.append("gps", JSON.stringify(gps));
-    const res = await fetch(`/api/epc/insurance/${id}/upload`, { method: "POST", headers: auth(), body: fd });
+    const res = await fetch(`/api/epc/insurance/${id}/upload`, { method: "POST", headers: authHeaders(), body: fd });
     const d = await res.json().catch(() => ({}));
     if (!res.ok || !d?.ok) return { ok: false, error: d?.error || `Upload failed (HTTP ${res.status}).` };
     merge({ plant_photo_path: "x", plant_photo_gps: gps });

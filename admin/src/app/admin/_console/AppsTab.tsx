@@ -13,7 +13,7 @@ import Modal, { OVERLAY } from "@/components/ui/Modal";
 import AddNewLoanAppModal from "@/components/AddNewLoanAppModal";
 import { ACCENTS } from "@/components/AdminSidebar";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
 import { getCached, setCached } from "@/lib/list-cache";
 import { invalidateLoanBoards } from "@/lib/ops-board";
@@ -26,7 +26,7 @@ import RowLink from "@/components/RowLink";
 import { toast } from "sonner";
 import { nameCase, initialsOf } from "@/lib/names";
 import {
-  deadlineState, DEADLINE_PILL, fmtDateShort, firstDisbursedShown, FIRST_CHARGE_COLS,
+  deadlineState, DEADLINE_PILL, firstDisbursedShown, FIRST_CHARGE_COLS,
   displayAmount as amountFor,
 } from "@/lib/disbursement";
 import { fmtRupees } from "@/lib/money";
@@ -546,7 +546,7 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
     setReportBusy("Preparing…");
     try {
       const qs = type === "monthly" ? `type=monthly&month=${month}` : "type=pending";
-      const res = await fetch(`/api/admin/loan-reports?${qs}`, { headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+      const res = await fetch(`/api/admin/loan-reports?${qs}`, { headers: authHeaders() });
       if (!res.ok) { const j = await res.json().catch(() => ({})); toast.error(j?.error || "Couldn't build the report."); return; }
       const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? "report.xlsx";
       const url = URL.createObjectURL(await res.blob());
@@ -738,7 +738,7 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
                       {r.first_disbursement_amount != null && (
                         <>
                           <p className="text-[13px] font-semibold text-[#0f3d2e]">{fmtRupees(firstDisbursedShown(r))}</p>
-                          <p className="text-[11px] text-[#7a958a] mt-0.5">{fmtDateShort(r.first_disbursement_date)}</p>
+                          <p className="text-[11px] text-[#7a958a] mt-0.5">{fmtDate(r.first_disbursement_date)}</p>
                         </>
                       )}
                       {(() => {
@@ -786,7 +786,7 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
                     </div>
                     {/* When the documents were last emailed to a lender. */}
                     {r.aborted_at == null && lenderSentAt[r.id] && (
-                      <p className="text-[11px] text-[#7a958a] whitespace-nowrap">Sent {fmtDateShort(lenderSentAt[r.id])}</p>
+                      <p className="text-[11px] text-[#7a958a] whitespace-nowrap">Sent {fmtDate(lenderSentAt[r.id])}</p>
                     )}
                   </div>
                 </td>

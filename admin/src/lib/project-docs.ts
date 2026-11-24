@@ -12,7 +12,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JwtClaims } from "./jwt";
-import { getBusiness, getToken } from "./auth";
+import { authHeaders, getBusiness } from "./auth";
 import { getCached, setCached } from "./list-cache";
 import { fmtDateIST } from "./dates";
 import { LOAN_PATH_COLUMNS } from "./loan-doc-checklist";
@@ -132,7 +132,6 @@ export async function vaultEntries(db: SupabaseClient, projectId: string, who: V
 }
 
 // ── Portal ─────────────────────────────────────────────────────────────────
-const auth = () => ({ Authorization: `Bearer ${getToken() ?? ""}` });
 const listKey = (id: string) => `projectdocs.${getBusiness()?.id ?? ""}.${getBusiness()?.member?.id ?? ""}.${id}`;
 const LIST_TTL = 5 * 60_000; // the links inside last an hour
 
@@ -146,7 +145,7 @@ async function json(r: Response, fallback: string) {
 export async function fetchVault(projectId: string): Promise<VaultFile[]> {
   const hit = getCached<VaultFile[]>(listKey(projectId), LIST_TTL);
   if (hit) return hit;
-  const j = await json(await fetch(`/api/epc/project-docs?project=${projectId}`, { headers: auth() }), "Couldn't load the documents.");
+  const j = await json(await fetch(`/api/epc/project-docs?project=${projectId}`, { headers: authHeaders() }), "Couldn't load the documents.");
   const files = j.files as VaultFile[];
   setCached(listKey(projectId), files);
   return files;
@@ -159,7 +158,7 @@ export async function addVaultDoc(projectId: string, files: VaultFile[], categor
   fd.append("table", "epc_project_documents");
   fd.append("category", category);
   fd.append("project_id", projectId);
-  const r = await fetch("/api/upload", { method: "POST", headers: auth(), body: fd });
+  const r = await fetch("/api/upload", { method: "POST", headers: authHeaders(), body: fd });
   const j = await r.json().catch(() => ({}));
   if (!r.ok || !j?.ok) {
     throw new Error(j?.error === "unsupported_file_type" ? "Choose a PDF or a photo (JPG or PNG)." : j?.error || "Couldn't upload the document.");
@@ -171,7 +170,7 @@ export async function addVaultDoc(projectId: string, files: VaultFile[], categor
 
 /** Deletes a project document (RLS: Owner / Admin, or whoever added it); returns the list without it. */
 export async function removeVaultDoc(projectId: string, files: VaultFile[], id: string): Promise<VaultFile[]> {
-  await json(await fetch(`/api/document/${id}?in=project`, { method: "DELETE", headers: auth() }), "Couldn't delete the document.");
+  await json(await fetch(`/api/document/${id}?in=project`, { method: "DELETE", headers: authHeaders() }), "Couldn't delete the document.");
   const next = files.filter((f) => f.id !== id);
   setCached(listKey(projectId), next);
   return next;
@@ -179,7 +178,7 @@ export async function removeVaultDoc(projectId: string, files: VaultFile[], id: 
 
 /** The whole vault as one ZIP (the caller saves it). */
 export async function fetchVaultZip(projectId: string): Promise<{ blob: Blob; name: string }> {
-  const r = await fetch(`/api/epc/project-zip?project=${projectId}`, { headers: auth() });
+  const r = await fetch(`/api/epc/project-zip?project=${projectId}`, { headers: authHeaders() });
   if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j?.error || "Couldn't make the ZIP."); }
   const name = ((r.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/) || [])[1] || "Project.zip";
   return { blob: await r.blob(), name };
@@ -191,7 +190,7 @@ export async function whatsAppPhotoUpdate(p: Pick<ProjectRow, "id" | "customer_n
   const win = window.open("", "_blank");
   if (win) win.opener = null;
   try {
-    const j = await json(await fetch(`/api/epc/project-docs?project=${p.id}&share=photos`, { method: "POST", headers: auth() }), "Couldn't share the photos.");
+    const j = await json(await fetch(`/api/epc/project-docs?project=${p.id}&share=photos`, { method: "POST", headers: authHeaders() }), "Couldn't share the photos.");
     const text = `नमस्ते ${p.customer_name} जी,\n\nआपके सोलर इंस्टॉलेशन की ताज़ा तस्वीरें:\n${(j.links as string[]).join("\n")}\n\n${org}`;
     openWhatsApp(win, p.mobile, text);
   } catch (e) {

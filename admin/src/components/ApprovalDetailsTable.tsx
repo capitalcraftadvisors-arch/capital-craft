@@ -51,11 +51,6 @@ export type ApprovalDetails = {
 };
 
 // fmtDate is imported from @/lib/dates (one portal-wide DD/MM/YYYY format).
-export function roiLabelFor(lender: string | null | undefined): string {
-  if (lender === "creditfair") return "Flat ROI (%)";
-  if (lender === "solfin") return "Reducing ROI (%)";
-  return "ROI (%)";
-}
 
 // Which rate the lender's ENTERED ROI represents; the other side is derived.
 // Credit Fair enters FLAT; Solfin / Aerem (and anything else) enter REDUCING.

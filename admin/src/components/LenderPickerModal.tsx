@@ -48,6 +48,8 @@ export default function LenderPickerModal({ open, onClose, onConfirm, epcName }:
       await onConfirm(lender);
       setLender("");
       onClose();
+    } catch (e) {
+      alert("Download failed: " + (e as Error)?.message);
     } finally {
       setBusy(false);
     }

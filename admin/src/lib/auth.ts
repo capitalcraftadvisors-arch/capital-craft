@@ -164,6 +164,13 @@ export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
 
+/** Headers for a call to our own API as the signed-in user: `extra` (e.g.
+ *  { "Content-Type": "application/json" }) plus `Authorization: Bearer <token>`
+ *  ("Bearer " with no token when signed out). Read fresh on every call. */
+export function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  return { ...extra, Authorization: `Bearer ${getToken() ?? ""}` };
+}
+
 export function getBusiness(): Business | null {
   if (typeof window === "undefined") return null;
   const imp = localStorage.getItem(IMPERSONATE_KEY);

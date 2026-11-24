@@ -18,7 +18,7 @@ import { fmtDateTime } from "@/lib/dates";
 //   h. Co-applicant (conditional): PAN upload w/ OCR + fields
 //   i. Previous / Next buttons
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
@@ -29,8 +29,9 @@ import DatePicker from "@/components/ui/DatePicker";
 import FileUpload from "@/components/FileUpload";
 import LoanAppStepTracker from "@/components/LoanAppStepTracker";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
-import { MOBILE_RE, EMAIL_RE, PAN_RE } from "@/lib/validators";
+import { authHeaders } from "@/lib/auth";
+import { signLoanPath } from "@/lib/storage";
+import { MOBILE_RE, EMAIL_RE, PAN_RE, PINCODE_RE } from "@/lib/validators";
 import { INDIA_STATES } from "@/lib/india-states";
 import { amountInput, numberInput, fmtRupees } from "@/lib/money";
 import LoanShareChips from "@/components/LoanShareChips";
@@ -107,23 +108,6 @@ const EMPTY_COAPP: Coapp = {
   aadhaar_front_signed_url: null, aadhaar_back_signed_url: null,
   aadhaar_uploading: false, aadhaar_error: null,
 };
-
-// Sign a whitelisted *_path column via the admin sign-doc route; returns the
-// signed URL (or null). Used to make View work on reload for docs that are
-// only persisted as a path column (no user_application_docs row yet).
-async function signLoanPath(id: string, path: string): Promise<string | null> {
-  try {
-    const res = await fetch(`/api/admin/loan-app/${id}/sign-doc`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
-      body: JSON.stringify({ path }),
-    });
-    const data = await res.json().catch(() => ({}));
-    return data?.ok && data.url ? (data.url as string) : null;
-  } catch {
-    return null;
-  }
-}
 
 // ── Page ─────────────────────────────────────────────────────────────
 
@@ -307,7 +291,7 @@ function Inner() {
       fd.append(kind, file);
       const res = await fetch(`/api/admin/loan-app/${loan!.id}/extract-loan-docs`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
         body: fd,
       });
       const data = await res.json().catch(() => ({}));
@@ -362,11 +346,11 @@ function Inner() {
 
   async function lookupPincode(pin: string) {
     setPincodeError(null);
-    if (!/^[1-9]\d{5}$/.test(pin)) return;
+    if (!PINCODE_RE.test(pin)) return;
     setPincodeBusy(true);
     try {
       const res = await fetch(`/api/admin/pincode-lookup?pin=${pin}`, {
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) {
@@ -390,7 +374,7 @@ function Inner() {
       fd.append("file", file);
       const res = await fetch(`/api/admin/loan-app/${loan!.id}/extract-coapp-pan`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
         body: fd,
       });
       const data = await res.json().catch(() => ({}));
@@ -425,7 +409,7 @@ function Inner() {
       fd.append("back",  back);
       const res = await fetch(`/api/admin/loan-app/${loan!.id}/extract-aadhaar`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
         body: fd,
       });
       const data = await res.json().catch(() => ({}));
@@ -486,7 +470,7 @@ function Inner() {
 
   const addressComplete =
     addressLine.trim().length > 0 &&
-    /^[1-9]\d{5}$/.test(pincode) &&
+    PINCODE_RE.test(pincode) &&
     city.trim().length > 0 &&
     state.trim().length > 0;
 
@@ -591,10 +575,7 @@ function Inner() {
       }
       const res = await fetch(`/api/admin/loan-app/${loan.id}/complete-step-3`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken() ?? ""}`,
-        },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));

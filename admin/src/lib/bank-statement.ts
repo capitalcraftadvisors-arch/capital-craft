@@ -9,6 +9,7 @@
 
 import { visionDocumentText } from "./vision-server";
 import { isValidIfsc } from "./doc-validation";
+import { MOBILE_RE } from "./validators";
 
 export type BankStatementFields = {
   account_holder: string | null;
@@ -226,7 +227,7 @@ function looksLikeName(line: string): boolean {
 // A digit run that is a phone / helpline number, never an account number.
 function isOtherNumber(raw: string, digits: string): boolean {
   return /^18[06]0/.test(digits)               // toll-free / helpline
-    || /^[6-9]\d{9}$/.test(digits)             // a 10-digit mobile
+    || MOBILE_RE.test(digits)                  // a 10-digit mobile
     || (raw.match(/-/g) ?? []).length >= 2;     // hyphen-grouped phone (1800-11-22-11)
 }
 

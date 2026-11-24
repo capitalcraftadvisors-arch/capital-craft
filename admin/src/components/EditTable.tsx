@@ -10,8 +10,7 @@
 //   • Admin "Message to EPC" window — Capital Craft ticks which rows to OPEN for
 //     the EPC to edit (the grant). Keys match lib/loan-form + the submit route.
 
-import { getToken } from "@/lib/auth";
-import { getDocumentUrl } from "@/lib/storage";
+import { openLoanDoc } from "@/lib/storage";
 import { CATEGORY_LABEL, type LoanForm, type LoanDocRow } from "@/lib/loan-form";
 import { DOC_CATEGORY } from "@/lib/loan-doc-checklist";
 
@@ -87,22 +86,6 @@ export default function EditTable({ appId, form, docRows, value, onChange, accen
 }) {
   const sel = new Set(value);
   const toggle = (k: string) => { const n = new Set(sel); n.has(k) ? n.delete(k) : n.add(k); onChange([...n]); };
-  const auth = () => ({ Authorization: `Bearer ${getToken() ?? ""}` });
-
-  async function view(path?: string | null, rowId?: string) {
-    try {
-      if (path) {
-        const res = await fetch(`/api/admin/loan-app/${appId}/sign-doc`, {
-          method: "POST", headers: { ...auth(), "Content-Type": "application/json" }, body: JSON.stringify({ path }),
-        });
-        const j = await res.json().catch(() => ({}));
-        if (j?.ok && j.url) { window.open(j.url as string, "_blank", "noopener"); return; }
-      }
-      if (rowId) { const url = await getDocumentUrl(rowId); if (url) { window.open(url, "_blank", "noopener"); return; } }
-      alert("Couldn't open the document.");
-    } catch { alert("Couldn't open the document."); }
-  }
-
   const groups = editGroups(form, docRows);
   return (
     <div className="rounded-xl border border-line bg-white overflow-hidden">
@@ -119,7 +102,7 @@ export default function EditTable({ appId, form, docRows, value, onChange, accen
                   it.on ? (
                     <span className="flex items-center gap-2 shrink-0">
                       <span className="text-[11px] font-semibold text-[#178a5c]">On file</span>
-                      <button onClick={(e) => { e.stopPropagation(); void view(it.path, it.rowId); }} className="text-[11px] font-semibold hover:underline" style={{ color: accent }}>View</button>
+                      <button onClick={(e) => { e.stopPropagation(); void openLoanDoc(appId, { path: it.path, rowId: it.rowId }); }} className="text-[11px] font-semibold hover:underline" style={{ color: accent }}>View</button>
                     </span>
                   ) : <span className="text-[11px] font-semibold text-amber-600 shrink-0">Missing</span>
                 ) : (

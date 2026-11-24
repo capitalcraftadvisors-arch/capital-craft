@@ -2,7 +2,7 @@
 // the EPC's own WhatsApp opens with a ready message (Hinglish, editable before
 // sending). A quotation goes as a 90-day link to its PDF (/api/epc/quotes/<id>/share).
 
-import { getToken } from "./auth";
+import { authHeaders } from "./auth";
 import { openWhatsApp } from "./wa-link";
 
 /** A lead's follow-up message. */
@@ -16,7 +16,7 @@ export async function whatsAppQuote(id: string) {
   const win = window.open("", "_blank");
   if (win) win.opener = null;
   try {
-    const res = await fetch(`/api/epc/quotes/${id}/share`, { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` } });
+    const res = await fetch(`/api/epc/quotes/${id}/share`, { method: "POST", headers: authHeaders() });
     const j = await res.json().catch(() => ({}));
     if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't share the quotation.");
     const size = j.kw ? `${+Number(j.kw).toFixed(2)} kW ` : "";

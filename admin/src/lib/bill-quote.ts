@@ -10,7 +10,7 @@
 //   EMI        on what the customer pays (after the central subsidy), at the
 //              indicative rate, for each tenure, against the current monthly bill
 
-import { getToken } from "./auth";
+import { authHeaders } from "./auth";
 import { computeEmi, DEFAULT_INDICATIVE_ROI, TENURES } from "./emi";
 import { newQuoteDoc, quoteTotals, withAutoItems, type QuoteDoc } from "./quote-calc";
 import { STANDARD, type Segment } from "./quotation-brands";
@@ -99,7 +99,7 @@ export function billFigures(doc: QuoteDoc, monthlyBill: number) {
 export async function readBill(file: File): Promise<BillQuoteFields> {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await fetch("/api/epc/bill-to-quote", { method: "POST", headers: { Authorization: `Bearer ${getToken() ?? ""}` }, body: fd });
+  const res = await fetch("/api/epc/bill-to-quote", { method: "POST", headers: authHeaders(), body: fd });
   const j = await res.json().catch(() => ({}));
   if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read this bill.");
   return j.fields as BillQuoteFields;

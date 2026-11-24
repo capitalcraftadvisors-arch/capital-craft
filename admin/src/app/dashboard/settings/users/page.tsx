@@ -17,6 +17,7 @@ import { EPC_MODULES, epcRole, roleLabel, staffRoles, type EpcModule, type Staff
 import { addMember, fetchMembers, removeMember, setMemberPassword, updateMember, type MemberRow } from "@/lib/members";
 import { generateStrongPassword } from "@/lib/password-gen";
 import { fmtDateTime } from "@/lib/dates";
+import { MOBILE_RE } from "@/lib/validators";
 
 type Draft = { id: string | null; name: string; mobile: string; email: string; role: StaffRole; modules: EpcModule[]; password: string };
 const blank = (): Draft => ({ id: null, name: "", mobile: "", email: "", role: "SALES", modules: EPC_MODULES.map((m) => m.key), password: generateStrongPassword(10) });
@@ -47,7 +48,7 @@ export default function UsersSettings() {
   async function save() {
     if (!draft) return;
     if (!draft.name.trim()) { setError("Enter the name."); return; }
-    if (!/^[6-9]\d{9}$/.test(draft.mobile)) { setError("Enter a 10-digit mobile number."); return; }
+    if (!MOBILE_RE.test(draft.mobile)) { setError("Enter a 10-digit mobile number."); return; }
     if (draft.role !== "SITE" && !draft.modules.length) { setError("Choose at least one module."); return; }
     setBusy(true); setError(null);
     try {

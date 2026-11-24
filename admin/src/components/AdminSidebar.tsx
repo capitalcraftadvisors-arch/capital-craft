@@ -19,7 +19,7 @@
 
 import { CSSProperties, ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { logout, getBusiness, allowedModules, canAccessModule, isMainAdmin, type ModuleKey } from "@/lib/auth";
+import { logout, getBusiness, allowedModules, isMainAdmin, type ModuleKey } from "@/lib/auth";
 import { pendingCount } from "@/lib/review";
 
 export type ConsoleTab = "epcs" | "apps" | "loanleads" | "insurance" | "otherins" | "leads";

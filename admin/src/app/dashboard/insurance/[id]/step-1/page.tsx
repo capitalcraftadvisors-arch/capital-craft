@@ -16,7 +16,7 @@ import Input from "@/components/ui/Input";
 import InsuranceUpload from "@/components/InsuranceUpload";
 import InsuranceStepHeader from "@/components/InsuranceStepHeader";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 
 type App = Record<string, any>;
 
@@ -96,7 +96,7 @@ function Inner() {
       fd.append("back", back);
       const res = await fetch(`/api/epc/insurance/${params.id}/extract-aadhaar`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders(),
         body: fd,
       });
       const d = await res.json().catch(() => ({}));
@@ -123,7 +123,7 @@ function Inner() {
     setGstSaved(false);
     const res = await fetch(`/api/epc/insurance/${params.id}/save-fields`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ gst_legal_name: gstLegal, gst_trade_name: gstTrade, gstin }),
     });
     const d = await res.json().catch(() => ({}));
@@ -140,7 +140,7 @@ function Inner() {
     try {
       const res = await fetch(`/api/epc/insurance/${params.id}/save`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ step: 1 }),
       });
       const d = await res.json().catch(() => ({}));

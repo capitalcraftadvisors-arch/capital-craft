@@ -1,5 +1,5 @@
 "use client";
-import { fmtDateTime } from "@/lib/dates";
+import { fmtWhen } from "@/lib/dates";
 
 // Shared "Message to EPC" thread — admin ⇄ EPC, for both loan and insurance.
 // Self-contained: loads its own messages + the parent's attention state under
@@ -10,7 +10,7 @@ import { fmtDateTime } from "@/lib/dates";
 
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import {
   MSG_TEMPLATES, DOC_TAGS, docTagLabel,
   type Message, type MsgKind, type MsgAttachment, type MsgTemplate,
@@ -77,8 +77,6 @@ export default function MessageThread({
   const taRef = useRef<HTMLTextAreaElement>(null);
   const seenRef = useRef(false);
 
-  const authHdr = () => ({ Authorization: `Bearer ${getToken() ?? ""}` });
-
   async function load() {
     const [{ data: mrows }, { data: prow }] = await Promise.all([
       supabase().from(cfg.msgTable)
@@ -98,7 +96,7 @@ export default function MessageThread({
     // Mark the thread seen once (records the read receipt for the other side).
     if (!seenRef.current) {
       seenRef.current = true;
-      void fetch("/api/messages", { method: "POST", headers: { ...authHdr(), "Content-Type": "application/json" }, body: JSON.stringify({ action: "seen", kind, id }) });
+      void fetch("/api/messages", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ action: "seen", kind, id }) });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [kind, id]);
@@ -117,7 +115,7 @@ export default function MessageThread({
   }, [body]);
 
   async function post(payload: Record<string, unknown>) {
-    const res = await fetch("/api/messages", { method: "POST", headers: { ...authHdr(), "Content-Type": "application/json" }, body: JSON.stringify({ kind, id, ...payload }) });
+    const res = await fetch("/api/messages", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ kind, id, ...payload }) });
     return res.json().catch(() => ({}));
   }
 
@@ -125,7 +123,7 @@ export default function MessageThread({
     setUploading(true);
     for (const f of Array.from(list)) {
       const fd = new FormData(); fd.append("file", f); fd.append("kind", kind); fd.append("id", id);
-      const res = await fetch("/api/messages/attach", { method: "POST", headers: authHdr(), body: fd });
+      const res = await fetch("/api/messages/attach", { method: "POST", headers: authHeaders(), body: fd });
       const j = await res.json().catch(() => ({}));
       if (j?.ok) setPending((p) => [...p, { path: j.path, name: j.name, mime: j.mime }]);
       else alert("Upload failed: " + (j?.error || ""));
@@ -134,7 +132,7 @@ export default function MessageThread({
   }
 
   async function view(a: MsgAttachment) {
-    const res = await fetch("/api/messages/sign", { method: "POST", headers: { ...authHdr(), "Content-Type": "application/json" }, body: JSON.stringify({ kind, id, path: a.path }) });
+    const res = await fetch("/api/messages/sign", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ kind, id, path: a.path }) });
     const j = await res.json().catch(() => ({}));
     if (j?.ok && j.url) window.open(j.url as string, "_blank", "noopener");
     else alert("Couldn't open the attachment.");
@@ -319,12 +317,4 @@ export default function MessageThread({
       </div>
     </div>
   );
-}
-
-function fmtWhen(iso: string): string {
-  const d = new Date(iso), diff = Date.now() - d.getTime();
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return fmtDateTime(d);
 }

@@ -4,7 +4,7 @@
 // kept for the main admin to read back (0110); team passwords never are.
 
 import { supabase } from "./supabase";
-import { getToken } from "./auth";
+import { authHeaders } from "./auth";
 
 /** When each account's password was last set (accounts without one are absent). */
 export async function loginPasswordStatus(businessIds: string[]): Promise<Map<string, string>> {
@@ -25,7 +25,7 @@ export type PasswordEmailResult = { ok: boolean; sentTo?: string; error?: string
 async function post(businessId: string, body: Record<string, unknown>): Promise<PasswordEmailResult> {
   const res = await fetch(`/api/admin/login-password/${businessId}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+    headers: authHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
   const d = await res.json().catch(() => ({}));

@@ -25,7 +25,7 @@ import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
 import LoanAppStepTracker from "@/components/LoanAppStepTracker";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 
 type Loan = Record<string, any>;
 
@@ -55,10 +55,6 @@ function displayId(loan: Loan): string {
 }
 
 // fmtRupees imported from @/lib/money
-
-function fmtDate(v: string | null | undefined): string {
-  return fmtDateTime(v);
-}
 
 export default function LoanAppStep6Page() {
   return (
@@ -116,10 +112,7 @@ function Inner() {
     try {
       const res = await fetch(`/api/admin/loan-app/${loan.id}/complete-step-6`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${getToken() ?? ""}`,
-        },
+        headers: authHeaders({ "Content-Type": "application/json" }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) {
@@ -204,7 +197,7 @@ function Inner() {
             loan.plant_use_type === "residential" ? "Residential" :
             loan.plant_use_type === "commercial"  ? "Commercial"  : "—"
           } />
-          <ReviewRow label="Consent recorded" value={loan.consent_at ? fmtDate(loan.consent_at) : "—"} />
+          <ReviewRow label="Consent recorded" value={loan.consent_at ? fmtDateTime(loan.consent_at) : "—"} />
         </ReviewSection>
 
         {/* Section 2 — KYC */}
@@ -362,7 +355,7 @@ function Inner() {
 
         {loan.status === "submitted" && loan.submitted_at && !submittedNow && (
           <p className="text-[12px] text-text-muted text-center">
-            Application already submitted on {fmtDate(loan.submitted_at)}. Re-submitting will update the timestamp.
+            Application already submitted on {fmtDateTime(loan.submitted_at)}. Re-submitting will update the timestamp.
           </p>
         )}
       </section>
@@ -416,7 +409,7 @@ function ThankYou({ loan, onBack }: { loan: Loan; onBack: () => void }) {
             {displayId(loan)}
           </p>
           <div className="mt-3 pt-3 border-t border-[#cdeadd] text-[12px] text-text-muted">
-            Submitted on {fmtDate(loan.submitted_at)}
+            Submitted on {fmtDateTime(loan.submitted_at)}
           </div>
         </div>
 

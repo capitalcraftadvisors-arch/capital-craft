@@ -21,7 +21,7 @@ import Input from "@/components/ui/Input";
 import GeoOfficeUpload from "@/components/GeoOfficeUpload";
 import InsuranceUpload from "@/components/InsuranceUpload";
 import { supabase } from "@/lib/supabase";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 import InsuranceStepHeader from "@/components/InsuranceStepHeader";
 
 type App = Record<string, any>;
@@ -71,7 +71,7 @@ function Inner() {
     fd.append("gps", JSON.stringify(gps));
     const res = await fetch(`/api/epc/insurance/${params.id}/upload`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${getToken() ?? ""}` },
+      headers: authHeaders(),
       body: fd,
     });
     const d = await res.json().catch(() => ({}));
@@ -86,7 +86,7 @@ function Inner() {
     setAddrSaved(false);
     const res = await fetch(`/api/epc/insurance/${params.id}/save-fields`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ plant_address: address }),
     });
     const d = await res.json().catch(() => ({}));
@@ -107,7 +107,7 @@ function Inner() {
     try {
       const res = await fetch(`/api/epc/insurance/${params.id}/save`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ step: 2, plant_address: address.trim(), invoice_confirmed_amount: confirmNum }),
       });
       const d = await res.json().catch(() => ({}));
