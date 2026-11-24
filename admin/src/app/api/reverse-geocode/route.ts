@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
 
     const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
     if (!res.ok) {
-      return NextResponse.json({ ok: false, error: `geocoder ${res.status}` });
+      return NextResponse.json({ ok: false, error: `geocoder ${res.status}` }, { status: 502 });
     }
     const d = (await res.json()) as Record<string, unknown>;
 
@@ -65,6 +65,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ ok: false, error: msg });
+    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }

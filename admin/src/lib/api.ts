@@ -8,8 +8,7 @@
 //   const supabase = dbAs(token);
 //
 // The database work goes through the caller's own token (RLS decides what it may
-// read or change). The one route that needs the service key
-// (admin/backfill-gst-address) builds its own client and doesn't use these.
+// read or change).
 
 import { NextResponse } from "next/server";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";

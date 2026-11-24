@@ -21,7 +21,7 @@ import { fmtDateTime } from "@/lib/dates";
 import { inPeriod, usePeriodRows, type TabPeriodProps } from "./console-period";
 import {
   CreatedOnCell, DateRange, EmptyRow, FiltersPanel, ListToolbar, PILL, ReportButton, SummaryCards, UnseenBadge,
-  createdRange, downloadCsv, highlightRowStyle, nameOptions, useRestoredFilters,
+  createdRange, downloadCsv, highlightRowStyle, nameOptions, useRestoredFilters, useReturnHighlight,
   type EpcBusinessRef, type SummaryCard,
 } from "./kit";
 import {
@@ -90,7 +90,8 @@ export default function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
   const [loaded, setLoaded] = useState(false); // first read done (cache or query)
   const [q, setQ] = useState("");
   const [policyBusy, setPolicyBusy] = useState<string | null>(null);
-  const [highlightId, setHighlightId] = useState<string | null>(null);
+  // Row highlighted after returning from View (scroll restored too).
+  const highlightId = useReturnHighlight("insList.scroll", "insList.lastRowId", rows.length);
   const [addOpen, setAddOpen] = useState(false);
   // Client-side filters over the already-loaded list (the query is untouched).
   const [statusFilter, setStatusFilter] = useState("");
@@ -122,20 +123,6 @@ export default function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
       setCached("dash.insurance", rows);
     })();
   }, []);
-
-  useEffect(() => {
-    if (rows.length === 0) return;
-    const savedScroll = sessionStorage.getItem("insList.scroll");
-    const savedRow = sessionStorage.getItem("insList.lastRowId");
-    if (savedScroll) { const y = parseInt(savedScroll, 10); if (!isNaN(y)) window.scrollTo(0, y); }
-    if (savedRow) {
-      setHighlightId(savedRow);
-      const t = window.setTimeout(() => setHighlightId(null), 2100);
-      sessionStorage.removeItem("insList.lastRowId");
-      sessionStorage.removeItem("insList.scroll");
-      return () => window.clearTimeout(t);
-    }
-  }, [rows.length]);
 
   // Restore the filter/search state saved by navigateToView, so returning
   // from a View lands on the same filtered list. Mount-only + consumed
@@ -356,6 +343,7 @@ export default function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
               const hl = highlightId === r.id;
               return (
               <tr key={r.id}
+                  data-highlighted={hl ? "yes" : undefined}
                   style={highlightRowStyle(hl)}
                   onClick={() => navigateToView(r)}
                   className="border-b border-[#eaf3ee] cursor-pointer hover:bg-[#f7fcfa] align-top">

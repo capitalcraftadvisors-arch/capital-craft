@@ -12,7 +12,7 @@ import NotificationBell from "@/components/NotificationBell";
 import LoginWelcome from "@/components/LoginWelcome";
 import LoanLeadsTab from "@/components/LoanLeadsTab";
 import { PeriodPicker, type Period, type TabPeriodProps } from "./_console/console-period";
-import DashboardKpis, { type EpcKpis } from "./_console/DashboardKpis";
+import DashboardKpis, { type EpcKpis, type KpiRow } from "./_console/DashboardKpis";
 import EpcsTab from "./_console/EpcsTab";
 import AppsTab from "./_console/AppsTab";
 import InsuranceTab from "./_console/InsuranceTab";
@@ -57,6 +57,7 @@ function Inner() {
   // (top-right). Default is per-tab: EPCs = This Year, all others = This Month.
   const [period, setPeriod] = useState<Period>("year");
   const [epcKpis, setEpcKpis] = useState<EpcKpis | null>(null); // EPC tab's counts → the KPI strip
+  const [loanRows, setLoanRows] = useState<KpiRow[] | null>(null); // Loan tab's loaded list → the KPI strip
   const [pFrom, setPFrom] = useState("");
   const [pTo, setPTo] = useState("");
 
@@ -139,10 +140,10 @@ function Inner() {
           </div>
           {/* At-a-glance loan KPIs — MAIN_ADMIN only, compact. Driven by the
               period picker above, and a loan-money set on apps. */}
-          {isMainAdmin && <DashboardKpis tab={tab} period={period} pFrom={pFrom} pTo={pTo} epc={epcKpis} />}
+          {isMainAdmin && <DashboardKpis tab={tab} period={period} pFrom={pFrom} pTo={pTo} epc={epcKpis} loans={loanRows} />}
 
           {tab === "epcs" ? <EpcsTab {...periodProps} onKpis={setEpcKpis} />
-            : tab === "apps" ? <AppsTab {...periodProps} />
+            : tab === "apps" ? <AppsTab {...periodProps} onRows={setLoanRows} />
             : tab === "loanleads" ? <LoanLeadsTab />
             : tab === "insurance" ? <InsuranceTab {...periodProps} />
             : tab === "otherins" ? <OtherInsuranceTab {...periodProps} />

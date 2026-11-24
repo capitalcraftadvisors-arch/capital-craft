@@ -82,10 +82,15 @@ export default function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps
   async function downloadPolicy(r: Row) {
     if (busyId || !r.policy_path) return;
     setBusyId(r.id);
-    const res = await otherInsDoc(r.id, r.policy_path, "sign");
-    setBusyId(null);
-    if (res.ok && res.url) window.open(res.url, "_blank", "noopener");
-    else alert("Couldn't open the policy: " + res.error);
+    try {
+      const res = await otherInsDoc(r.id, r.policy_path, "sign");
+      if (res.ok && res.url) window.open(res.url, "_blank", "noopener");
+      else alert("Couldn't open the policy: " + res.error);
+    } catch (e) {
+      alert("Couldn't open the policy: " + (e as Error).message);
+    } finally {
+      setBusyId(null);
+    }
   }
 
   function catMatch(r: Row, key: string): boolean {

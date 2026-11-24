@@ -3,28 +3,28 @@
 // Admin console — KPI strip under the header (main admin only): loan money
 // figures on the Loan-applications tab, EPC stage counts on the EPCs tab.
 
-import { useEffect, useMemo, useState } from "react";
-import { supabase } from "@/lib/supabase";
-import { getCached, setCached } from "@/lib/list-cache";
-import { remainingAmount, firstCharges, FIRST_CHARGE_COLS } from "@/lib/disbursement";
+import { useMemo } from "react";
+import { remainingAmount, firstCharges } from "@/lib/disbursement";
 import { KpiTile } from "@/components/view/ViewKit";
 import { inPeriod, type Period } from "./console-period";
 
 // Loan KPIs show on the Loan-applications tab ONLY, driven by the SAME period
 // as the tab's PeriodPicker — so the strip always agrees with the cards + list
-// below it. One small aggregate query (cached 30s to protect egress); the
-// figures are recomputed locally when the period changes. Every tile shows the
-// amount + the number of files: Pipeline value (in-progress files only — not
-// yet approved / disbursed; Current Month only), Approved loan amount, 1st
-// tranche disbursed, 2nd tranche pending (sanctioned − 1st). The EPC tab shows
+// below it. No query of its own: the figures come from the Loan tab's
+// already-loaded list (AppsTab → onRows) and are recomputed locally when the
+// period changes. Every tile shows the amount + the number of files: Pipeline
+// value (in-progress files only — not yet approved / disbursed; Current Month
+// only), Approved loan amount, 1st tranche disbursed, 2nd tranche pending
+// (sanctioned − 1st). The EPC tab shows
 // EPC stage counts, fed by EpcsTab's own period-scoped cards (no extra query).
 export type EpcKpis = { total: number; unseen: number; docsSent: number; lenderApproved: number; approved: number; rejected: number };
-type KpiRow = {
+// The loan-list columns the KPIs read (AppsTab's rows carry all of them).
+export type KpiRow = {
   status: string | null;
   loan_amount_required: number | null; loan_amount: number | null; sanctioned_amount: number | null;
   first_disbursement_amount: number | null; second_disbursement_amount: number | null;
   first_disbursement_date: string | null;
-  first_processing_fee: number | null; first_legal_charges: number | null; first_cersai_charges: number | null;
+  first_processing_fee?: number | null; first_legal_charges?: number | null; first_cersai_charges?: number | null;
   created_at: string | null; aborted_at: string | null;
 };
 // Each KPI = total amount + number of files.
@@ -32,26 +32,7 @@ type KpiFig = { amount: number; files: number };
 type KpiData = { pipeline: KpiFig; approved: KpiFig; firstTranche: KpiFig; secondPending: KpiFig };
 const KPI_APPROVED = new Set(["approved", "rfd", "sent_to_nbfc", "disbursed"]);
 
-export default function DashboardKpis({ tab, period, pFrom, pTo, epc }: { tab: string; period: Period; pFrom: string; pTo: string; epc: EpcKpis | null }) {
-  const [rows, setRows] = useState<KpiRow[] | null>(null);
-  const loanTab = tab === "apps";
-  useEffect(() => {
-    if (!loanTab || rows) return; // only the Loan-applications tab needs the query
-    let cancelled = false;
-    const cached = getCached<KpiRow[]>("dashkpis", 30000);
-    if (cached) { setRows(cached); return; }
-    void (async () => {
-      const { data } = await supabase()
-        .from("epc_applications")
-        .select(`status, loan_amount_required, loan_amount, sanctioned_amount, first_disbursement_amount, second_disbursement_amount, first_disbursement_date, ${FIRST_CHARGE_COLS}, created_at, aborted_at`);
-      if (cancelled) return;
-      const r = (data ?? []) as unknown as KpiRow[];
-      setCached("dashkpis", r);
-      setRows(r);
-    })();
-    return () => { cancelled = true; };
-  }, [loanTab, rows]);
-
+export default function DashboardKpis({ tab, period, pFrom, pTo, epc, loans: rows }: { tab: string; period: Period; pFrom: string; pTo: string; epc: EpcKpis | null; loans: KpiRow[] | null }) {
   const d = useMemo<KpiData | null>(() => {
     if (!rows) return null;
     const num = (v: unknown) => Number(v) || 0;

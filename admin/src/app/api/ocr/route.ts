@@ -71,7 +71,8 @@ export async function POST(req: NextRequest) {
     // ── Document name — Gemini only (no Vision fallback to proxy to) ───────
     if (type === "doc_name") {
       const name = await geminiNameDocument([{ buffer, mime }]);
-      return NextResponse.json(name ? { ok: true, source: "gemini", name } : { ok: false, error: "unreadable" });
+      if (!name) return err("unreadable", 422);
+      return NextResponse.json({ ok: true, source: "gemini", name });
     }
 
     // ── PRIMARY: Gemini ────────────────────────────────────────────────────
@@ -111,7 +112,7 @@ export async function POST(req: NextRequest) {
       return err(e instanceof Error ? e.message : "ocr upstream failed", 502);
     }
     if (!edge || edge.ok === false) {
-      return NextResponse.json(edge ?? { ok: false, error: "ocr_failed" });
+      return NextResponse.json(edge ?? { ok: false, error: "ocr_failed" }, { status: 502 });
     }
 
     // Post-process to the client shape (mirrors lib/ocr.ts's client enrichment).

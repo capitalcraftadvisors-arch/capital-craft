@@ -45,6 +45,8 @@ const EPC_STAGE_META: Record<string, { label: string; cls: string }> = {
   lender_approved: { label: "Approved by Lender",  cls: "bg-[#d6efe3] text-[#0f7a52]" },
   rejected_by_lender: { label: "Rejected by Lender", cls: "bg-[#ffe4e6] text-[#9f1239]" },
 };
+// The Status column sorts by the shown stage, in this order (= the summary cards).
+const EPC_STAGE_ORDER = Object.keys(EPC_STAGE_META);
 
 type SortKey = "created_at" | "status";
 type SortDir = "asc" | "desc";
@@ -90,6 +92,9 @@ export default function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps &
     reviewed_at: string | null;
     created_by_user_id: string | null;
     admin_review_status: string | null;
+    // Its lender ticks (epc_lender_status, embedded in the list query) — read
+    // once into lenderState at load.
+    lender_status?: { lender: Lender; docs_given: boolean; approved: boolean; rejected: boolean }[] | null;
   };
   const adminNames = useAdminNames();
   const [rows, setRows] = useState<Row[]>([]);
@@ -150,28 +155,23 @@ export default function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps &
       if (cached) { setRows(cached.rows); setLenderState(cached.lenderState); setLoaded(true); return; }
     }
     let query = supabase().from("epc_business")
-      .select("id, epc_display_id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, source, created_at, submitted_at, epc_self_edited, reviewed_at, created_by_user_id, admin_review_status")
+      .select("id, epc_display_id, legal_name, trade_name, contact_name, contact_mobile, contact_email, business_type, status, source, created_at, submitted_at, epc_self_edited, reviewed_at, created_by_user_id, admin_review_status, " +
+        // Each EPC's lender ticks in the SAME request — no id list in the URL.
+        "lender_status:epc_lender_status(lender, docs_given, approved, rejected)")
       .neq("business_type", "admin");
     const { data } = await query;
-    const rs = (data ?? []) as Row[];
+    const rs = (data ?? []) as unknown as Row[];
     setRows(rs);
     setLoaded(true);
 
-    let map: Record<string, LenderMap> = {};
-    if (rs.length > 0) {
-      const ids = rs.map((r) => r.id);
-      const { data: lenderRows } = await supabase()
-        .from("epc_lender_status")
-        .select("business_id, lender, docs_given, approved, rejected")
-        .in("business_id", ids);
-      for (const lr of (lenderRows ?? []) as { business_id: string; lender: Lender; docs_given: boolean; approved: boolean; rejected: boolean }[]) {
-        if (!map[lr.business_id]) map[lr.business_id] = {};
-        map[lr.business_id][lr.lender] = { docs_given: lr.docs_given, approved: lr.approved, rejected: !!lr.rejected };
+    const map: Record<string, LenderMap> = {};
+    for (const r of rs) {
+      for (const lr of r.lender_status ?? []) {
+        if (!map[r.id]) map[r.id] = {};
+        map[r.id][lr.lender] = { docs_given: lr.docs_given, approved: lr.approved, rejected: !!lr.rejected };
       }
-      setLenderState(map);
-    } else {
-      setLenderState({});
     }
+    setLenderState(map);
     setCached(CK, { rows: rs, lenderState: map });
   }
 
@@ -271,8 +271,8 @@ export default function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps &
         av = new Date(a.created_at).getTime() || 0;
         bv = new Date(b.created_at).getTime() || 0;
       } else if (sortKey === "status") {
-        av = a.status || "";
-        bv = b.status || "";
+        av = EPC_STAGE_ORDER.indexOf(epcStage(a));
+        bv = EPC_STAGE_ORDER.indexOf(epcStage(b));
       }
       const cmp = av < bv ? -1 : av > bv ? 1 : 0;
       return sortDir === "asc" ? cmp : -cmp;

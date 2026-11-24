@@ -31,8 +31,15 @@ function capPhone(v: string): string {
 
 // Shared CSV export — one blob/download path for every console table (Loans,
 // Insurance, Leads, EPCs). Excel-friendly: UTF-8 BOM + CRLF + quoted cells.
+// Formula-injection guard (OWASP): a text cell starting with = + - @ or a tab /
+// carriage return would run as a formula in Excel, so it gets a leading single
+// quote. Real numbers, and text that is just a number ("-500"), stay as they are.
 export function downloadCsv(filenameStem: string, header: string[], rows: (unknown[])[]) {
-  const esc = (v: unknown) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const safe = (v: unknown) => {
+    const s = String(v ?? "");
+    return typeof v !== "number" && /^[=+\-@\t\r]/.test(s) && !/^[+-]?\d+(\.\d+)?$/.test(s) ? "'" + s : s;
+  };
+  const esc = (v: unknown) => `"${safe(v).replace(/"/g, '""')}"`;
   const lines = [header.map(esc).join(",")];
   for (const r of rows) lines.push(r.map(esc).join(","));
   const csv = "﻿" + lines.join("\r\n");

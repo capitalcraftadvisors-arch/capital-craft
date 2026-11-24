@@ -204,7 +204,7 @@ export default function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
               <LeadRow k="City" v={viewLead.city} />
               <LeadRow k="Pincode" v={viewLead.pincode} />
               <LeadRow k="PAN" v={viewLead.pan} />
-              <LeadRow k="Aadhaar" v={viewLead.aadhaar} />
+              <LeadRow k="Aadhaar" v={maskAadhaar(viewLead.aadhaar)} />
               {viewLead.lead_type === "loan" ? (
                 <>
                   <LeadRow k="Project cost" v={fmtRupees(viewLead.project_cost)} />
