@@ -7,7 +7,7 @@
 
 ## Migrations — `supabase/migrations/`
 
-The files are numbered (`0001_…` to `0134_…`). Each one runs **once, in order**,
+The files are numbered (`0001_…`, `0002_…` …). Each one runs **once, in order**,
 against PROD. Apply a new file one of two ways:
 
 - paste it into the dashboard SQL editor, or
