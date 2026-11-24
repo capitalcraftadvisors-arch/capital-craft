@@ -7,14 +7,12 @@
 // dates are shown editable on the admin View so a miss is correctable.
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 import { uploadBuffer } from "@/lib/gcs";
 import { visionDocumentText } from "@/lib/vision-server";
 import { geminiExtractPolicy } from "@/lib/doc-extractors";
-import {
-  SUPABASE_URL, SUPABASE_ANON, compress, safeName, parsePolicyPeriod, UUID_RE, ACCEPTED,
-} from "@/lib/insurance-server";
+import { compress, safeName, parsePolicyPeriod, ACCEPTED } from "@/lib/insurance-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,16 +20,11 @@ export const maxDuration = 60;
 
 const RAW_CAP = 4000;
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
+    const auth = await requireLogin(req, { role: "admin" });
+    if (auth instanceof Response) return auth;
+    const { token } = auth;
     const id = params.id;
     if (!UUID_RE.test(id)) return err("Invalid application id.", 400);
 
@@ -61,10 +54,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       }
     }
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = dbAs(token);
     const { error: updErr } = await supabase
       .from("insurance_applications")
       .update({

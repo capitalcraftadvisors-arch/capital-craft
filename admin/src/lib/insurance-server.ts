@@ -5,39 +5,27 @@
 // decide ownership — the EPC can only touch its own application; admin any.
 // No route needs the service key.
 
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import sharp from "sharp";
-import { verifyJwt } from "./jwt";
-import { isMainAdmin } from "./hierarchy";
+import type { NextResponse } from "next/server";
+import { dbAs, err, requireLogin } from "./api";
+import { UUID_RE } from "./validators";
 import type { KycDoc } from "./other-insurance";
 
-export const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://hpebydmrpimyuxgsgtmu.supabase.co";
-export const SUPABASE_ANON =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
-
-export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 const MAX_DIMENSION = 2000;
 
-export function insuranceClient(token: string): SupabaseClient {
-  return createClient(SUPABASE_URL, SUPABASE_ANON, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
-
-// Other Insurance (0093) routes: main admin only, row read through RLS.
-export async function otherInsuranceRow(token: string, id: string):
-  Promise<{ supabase: SupabaseClient; row: { kyc_docs: KycDoc[]; policy_path: string | null } } | { error: string; status: number }> {
-  const claims = await verifyJwt(token);
-  if (!isMainAdmin(claims)) return { error: "main_admin_only", status: 403 };
-  if (!UUID_RE.test(id)) return { error: "Invalid id.", status: 400 };
-  const supabase = insuranceClient(token);
+// Other Insurance (0093) routes: main admin only, row read through RLS. Answers
+// the row + the caller's client, or the reply to send back (401 / 403 / 400 / 404 / 500).
+export async function otherInsuranceRow(req: Request, id: string):
+  Promise<{ supabase: SupabaseClient; row: { kyc_docs: KycDoc[]; policy_path: string | null } } | NextResponse> {
+  const auth = await requireLogin(req, { role: "main_admin" });
+  if (auth instanceof Response) return auth;
+  if (!UUID_RE.test(id)) return err("Invalid id.", 400);
+  const supabase = dbAs(auth.token);
   const { data, error } = await supabase.from("other_insurance").select("kyc_docs, policy_path").eq("id", id).maybeSingle();
-  if (error) return { error: error.message, status: 500 };
-  if (!data) return { error: "Not found.", status: 404 };
+  if (error) return err(error.message, 500);
+  if (!data) return err("Not found.", 404);
   const d = data as { kyc_docs: KycDoc[] | null; policy_path: string | null };
   return { supabase, row: { kyc_docs: Array.isArray(d.kyc_docs) ? d.kyc_docs : [], policy_path: d.policy_path } };
 }

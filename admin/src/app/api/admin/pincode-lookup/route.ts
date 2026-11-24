@@ -1,6 +1,7 @@
 // GET /api/admin/pincode-lookup?pin=XXXXXX
 //
-// Admin-only server-side proxy to the India Post pincode API. Two
+// Server-side proxy to the India Post pincode API, for any login (the
+// Partner Portal's loan forms call it too, not only the admin's). Two
 // reasons this lives on the server rather than being called directly
 // from the client:
 //   1. Avoids CORS surprises (the upstream sometimes trips browsers).
@@ -11,8 +12,9 @@
 //   { ok: false, error: string }
 
 import { NextRequest, NextResponse } from "next/server";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, requireLogin } from "@/lib/api";
 import { geminiExtract } from "@/lib/gemini-extract";
+import { PINCODE_RE } from "@/lib/validators";
 
 // Fallback: India Post is often blocked from cloud egress, so when it fails we
 // ask Gemini (reachable from Cloud Run, same GOOGLE_VISION_API_KEY as the OCR)
@@ -39,7 +41,6 @@ async function geminiPincode(pin: string): Promise<{ state: string; district: st
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const PIN_RE = /^[1-9]\d{5}$/;
 const UPSTREAM = "https://api.postalpincode.in/pincode/";
 
 type PostOffice = {
@@ -53,21 +54,16 @@ type UpstreamItem = {
   PostOffice?: PostOffice[] | null;
 };
 
-function err(message: string, status = 400) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function GET(req: NextRequest) {
   try {
     // Any authenticated user may look up a pincode — it's public India
     // Post data. Both the admin loan flow and the EPC-facing apply flow
     // call this.
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    await verifyJwt(token);
+    const auth = await requireLogin(req);
+    if (auth instanceof Response) return auth;
 
     const pin = (req.nextUrl.searchParams.get("pin") ?? "").trim();
-    if (!PIN_RE.test(pin)) return err("Enter a valid 6-digit Indian pincode.", 400);
+    if (!PINCODE_RE.test(pin)) return err("Enter a valid 6-digit Indian pincode.", 400);
 
     // The India Post upstream has the data (verified for 303801 / 413581) but
     // is flaky/slow from cloud egress and intermittently returns Status:"Error"

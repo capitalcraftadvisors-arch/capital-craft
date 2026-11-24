@@ -24,17 +24,12 @@
 //      from this point forward.
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
-import { getBearerToken, verifyJwt, type JwtClaims } from "@/lib/jwt";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { JwtClaims } from "@/lib/jwt";
+import { err, dbAs, requireLogin } from "@/lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://hpebydmrpimyuxgsgtmu.supabase.co";
-const SUPABASE_ANON =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
 
 // Text fields where we log per-field old/new on diff. contact_mobile is
 // excluded — admin made it read-only and we don't track it here either.
@@ -51,15 +46,11 @@ const TRACKED_TEXT_FIELDS = [
   "bank_name",
 ] as const;
 
-function err(message: string, status = 400) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function POST(req: NextRequest) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
+    const auth = await requireLogin(req);
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
 
     if (claims.business_type === "admin") {
       return err("admin_cannot_self_edit", 403);
@@ -68,7 +59,7 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as { before?: Record<string, unknown> };
     const before = body.before ?? {};
 
-    const supabase = client(token);
+    const supabase = dbAs(token);
 
     // Current state.
     const { data: current, error: fetchErr } = await supabase
@@ -146,13 +137,6 @@ export async function POST(req: NextRequest) {
     console.error("[submit-self-edit] error:", msg);
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
-}
-
-function client(token: string) {
-  return createClient(SUPABASE_URL, SUPABASE_ANON, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
 }
 
 function normalize(v: unknown): string | null {

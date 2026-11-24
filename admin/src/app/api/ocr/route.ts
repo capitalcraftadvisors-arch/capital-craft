@@ -17,7 +17,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, requireLogin } from "@/lib/api";
+import { FUNCTIONS_URL } from "@/lib/supabase-config";
 import { parsePanFields } from "@/lib/pan-parser";
 import { parseGstAddress } from "@/lib/gst-address";
 import { isValidPan, isValidGstin } from "@/lib/doc-validation";
@@ -27,10 +28,6 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const FUNCTIONS_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL ||
-  "https://hpebydmrpimyuxgsgtmu.supabase.co/functions/v1";
-
 const MAX_DIMENSION = 2000;
 const TYPES = new Set(["pan", "gst", "gstr3b", "doc_name"]);
 const EDGE: Record<string, string> = {
@@ -39,16 +36,11 @@ const EDGE: Record<string, string> = {
   gstr3b: "extract-gst-r3b",
 };
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function POST(req: NextRequest) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token).catch(() => null);
-    if (!claims) return err("unauthorized", 401);
+    const auth = await requireLogin(req);
+    if (auth instanceof Response) return auth;
+    const { token } = auth;
 
     const body = await req.json().catch(() => null);
     const type = String(body?.type ?? "");

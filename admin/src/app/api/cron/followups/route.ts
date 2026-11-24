@@ -26,7 +26,7 @@
 //      Run once by hand: gcloud scheduler jobs run cc-followups-daily --location=asia-southeast1
 
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { err, publicDb } from "@/lib/api";
 import { sendMail, mailConfigured } from "@/lib/mailer";
 import { publicOrigin } from "@/lib/login-password-server";
 import { fmtDateIST } from "@/lib/dates";
@@ -40,9 +40,6 @@ export const maxDuration = 180;
 type DueLead = { name: string; mobile: string | null; follow_up_at: string; overdue: boolean };
 type Person = { recipient_name: string | null; email: string; company_name: string | null; leads: DueLead[] | null };
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string));
 
 function mail(p: Person, leads: DueLead[], link: string): { subject: string; html: string; text: string } {
@@ -84,7 +81,7 @@ export async function POST(req: NextRequest) {
     if (!/^[0-9a-f]{64}$/i.test(key)) return err("unauthorized", 401);
     if (!mailConfigured()) return err("Email isn't configured yet (app password missing).", 500);
 
-    const { data, error } = await supabase().rpc("epc_followup_digest", { p_key: key });
+    const { data, error } = await publicDb().rpc("epc_followup_digest", { p_key: key });
     if (error) {
       if (/invalid_key/.test(error.message)) return err("unauthorized", 401);
       return err("Couldn't read today's follow-ups — " + error.message, 500);

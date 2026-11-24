@@ -2,23 +2,17 @@
 // and every document stored under other-insurance/<id>/.
 
 import { NextRequest, NextResponse } from "next/server";
-import { getBearerToken } from "@/lib/jwt";
+import { err } from "@/lib/api";
 import { deleteFolder } from "@/lib/gcs";
 import { otherInsuranceRow } from "@/lib/insurance-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const ctx = await otherInsuranceRow(token, params.id);
-    if ("error" in ctx) return err(ctx.error, ctx.status);
+    const ctx = await otherInsuranceRow(req, params.id);
+    if (ctx instanceof Response) return ctx;
 
     const { error: delErr } = await ctx.supabase.from("other_insurance").delete().eq("id", params.id);
     if (delErr) return err(`Delete failed: ${delErr.message}`, 500);

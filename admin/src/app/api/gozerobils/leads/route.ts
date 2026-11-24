@@ -13,7 +13,7 @@
 //   401 bad key · 400 bad data
 
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { err, publicDb } from "@/lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,10 +23,6 @@ const FIELDS = [
   "monthly_bill", "looking_for", "timeline",
   "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "landing_page",
 ] as const;
-
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -44,7 +40,7 @@ export async function POST(req: NextRequest) {
       if (typeof v === "string" || typeof v === "number") lead[f] = String(v).slice(0, 500);
     }
 
-    const { data, error } = await supabase().rpc("gozerobils_save_lead", { p_key: key, p_lead: lead });
+    const { data, error } = await publicDb().rpc("gozerobils_save_lead", { p_key: key, p_lead: lead });
     if (error) return err(error.message, 500);
 
     const r = (data ?? {}) as { ok?: boolean; error?: string; id?: string; created?: boolean };

@@ -12,11 +12,12 @@
 // Admin-only. Keeps the Download-ZIP button untouched.
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import ExcelJS from "exceljs";
 import archiver from "archiver";
 import { sendMail, mailConfigured } from "@/lib/mailer";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE, EMAIL_RE } from "@/lib/validators";
 import { isMainAdmin } from "@/lib/hierarchy";
 import { uploadBuffer, downloadBuffer } from "@/lib/gcs";
 import { fileLinkUrl } from "@/lib/file-links";
@@ -29,20 +30,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 180;
 
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://hpebydmrpimyuxgsgtmu.supabase.co";
-const SUPABASE_ANON =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
-
 const LOAN_CC_DEFAULT = ["malvikasaxena323@gmail.com"];
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 function extOf(p: string): string { const m = p.split("/").pop()?.match(/\.[a-z0-9]+$/i); return m ? m[0] : ""; }
 function safe(s: string): string { return s.replace(/[^\w .-]+/g, "_").slice(0, 80); }
 function esc(s: string): string { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string)); }
@@ -119,10 +108,9 @@ async function saveContacts(supabase: SupabaseClient, emails: string[]) {
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
+    const auth = await requireLogin(req, { role: "admin" });
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
 
     const appId = params.id;
     if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);
@@ -137,10 +125,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const scope = body.scope === "completion" ? "completion" : "application";
     const lender = String(body.lender ?? "").toLowerCase();
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = dbAs(token);
     // Any lender the portal works with (the registry) — not a fixed list.
     const lenders = await fetchLenders(supabase);
     const isLender = (k: string) => lenders.some((l) => l.key === k);

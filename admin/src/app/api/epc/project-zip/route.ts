@@ -5,11 +5,11 @@
 // → Web ReadableStream, like /api/epc/[id]/download-zip); a missing file is
 // skipped, never fails the ZIP. Saved as Project_<customer>_<date>.zip.
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import archiver from "archiver";
 import { Readable } from "node:stream";
-import { verifyJwt, getBearerToken } from "@/lib/jwt";
-import { insuranceClient as userClient, UUID_RE } from "@/lib/insurance-server";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 import { downloadBuffer } from "@/lib/gcs";
 import { fmtDateIST } from "@/lib/dates";
 import { vaultEntries, vaultViewer, type VaultEntry, type VaultGroup } from "@/lib/project-docs";
@@ -24,9 +24,6 @@ const FOLDER: Record<VaultGroup, string> = {
   "Loan documents": "3. Loan documents",
 };
 
-function err(message: string, status = 400) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 const segment = (s: string) => s.replace(/[<>:"|?*\\/\x00-\x1F]+/g, "-").replace(/\s+/g, " ").trim().slice(0, 100) || "file";
 function extOf(e: VaultEntry): string {
   const m = (e.mime || "").toLowerCase();
@@ -41,12 +38,12 @@ const zipName = (e: VaultEntry) => `${FOLDER[e.group]}/${segment(e.name.replace(
 
 export async function GET(req: NextRequest) {
   try {
-    const token = getBearerToken(req);
-    const claims = token ? await verifyJwt(token).catch(() => null) : null;
-    if (!token || !claims) return err("unauthorized", 401);
+    const auth = await requireLogin(req);
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
     const id = req.nextUrl.searchParams.get("project") || "";
     if (!UUID_RE.test(id)) return err("not_found", 404);
-    const v = await vaultEntries(userClient(token), id, vaultViewer(claims));
+    const v = await vaultEntries(dbAs(token), id, vaultViewer(claims));
     if (!v) return err("not_found", 404);
 
     const customer = v.customer.replace(/[^\w-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 60) || "project";

@@ -11,21 +11,14 @@
 //             1st) and how many days it has been pending (since the 1st).
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import ExcelJS from "exceljs";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, dbAs, requireLogin } from "@/lib/api";
 import { fetchLenders, lenderLabelIn, type Lender } from "@/lib/loan-lenders";
 import { deadlineState, remainingAmount, firstCharges, FIRST_CHARGE_COLS } from "@/lib/disbursement";
 import { fmtDate } from "@/lib/dates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://hpebydmrpimyuxgsgtmu.supabase.co";
-const SUPABASE_ANON =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
 
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DAY_MS = 86_400_000;
@@ -44,10 +37,6 @@ type Loan = {
   epc_business: { trade_name: string | null; legal_name: string | null; contact_name: string | null } | null;
 };
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 const num = (v: unknown): number | null => (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 const epcOf = (l: Loan) => l.epc_business?.trade_name || l.epc_business?.legal_name || l.epc_business?.contact_name || "—";
 const borrowerOf = (l: Loan) => l.aadhaar_name || l.borrower_name || "—";
@@ -56,10 +45,9 @@ const day = (d: string | null) => (d ? fmtDate(d) : "");
 
 export async function GET(req: NextRequest) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
+    const auth = await requireLogin(req, { role: "admin" });
+    if (auth instanceof Response) return auth;
+    const { token } = auth;
 
     const sp = req.nextUrl.searchParams;
     const type = sp.get("type");
@@ -67,10 +55,7 @@ export async function GET(req: NextRequest) {
     if (type !== "monthly" && type !== "pending") return err("Unknown report.", 400);
     if (type === "monthly" && !MONTH_RE.test(month)) return err("Pick a month.", 400);
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = dbAs(token);
     const [{ data, error }, lenders] = await Promise.all([
       supabase.from("epc_applications")
         .select(

@@ -6,10 +6,9 @@
 // application being viewed. Same pattern as the loan sign-doc route.
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 import { getSignedReadUrl } from "@/lib/gcs";
-import { SUPABASE_URL, SUPABASE_ANON, UUID_RE } from "@/lib/insurance-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -20,16 +19,11 @@ const PATH_COLUMNS = [
   "photo_panel_path", "photo_inverter_path", "photo_meter_path",
 ] as const;
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
+    const auth = await requireLogin(req, { role: "admin" });
+    if (auth instanceof Response) return auth;
+    const { token } = auth;
 
     const id = params.id;
     if (!UUID_RE.test(id)) return err("Invalid application id.", 400);
@@ -39,10 +33,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       ? String((body as Record<string, unknown>).path).trim() : "";
     if (!path) return err("Missing document path.", 400);
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = dbAs(token);
     const { data, error: loadErr } = await supabase
       .from("insurance_applications")
       .select(PATH_COLUMNS.join(", "))

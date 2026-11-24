@@ -6,9 +6,8 @@
 //          becomes Accepted and a project starts, once. Not after the validity.
 // Anonymous Supabase client: the two functions are the only way in.
 
-import { createClient } from "@supabase/supabase-js";
 import { NextRequest, NextResponse } from "next/server";
-import { SUPABASE_ANON, SUPABASE_URL } from "@/lib/insurance-server";
+import { publicDb } from "@/lib/api";
 import { fileLinkUrl } from "@/lib/file-links";
 import { publicOrigin } from "@/lib/login-password-server";
 import { PROPOSAL_TOKEN_RE, type ProposalSnapshot, type PublicProposal } from "@/lib/proposals";
@@ -23,12 +22,10 @@ function err(message: string, status = 400) {
 }
 const ok = (body: object) => NextResponse.json({ ok: true, ...body }, { headers: { "Cache-Control": "no-store" } });
 
-const anon = () => createClient(SUPABASE_URL, SUPABASE_ANON, { auth: { persistSession: false, autoRefreshToken: false } });
-
 type Got = { snapshot: ProposalSnapshot; pdf_path: string | null; accepted_at: string | null; accepted_name: string | null };
 
 async function read(token: string): Promise<Got | null> {
-  const { data, error } = await anon().rpc("epc_proposal_get", { p_token: token });
+  const { data, error } = await publicDb().rpc("epc_proposal_get", { p_token: token });
   if (error) throw new Error(error.message);
   return (data as Got | null) ?? null;
 }
@@ -57,7 +54,7 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
   if (!name) return err("Enter your name.");
   try {
     // Past its validity it can still be read, not accepted (the database refuses it: 'expired').
-    const { data, error } = await anon().rpc("epc_proposal_accept", { p_token: params.token, p_name: name });
+    const { data, error } = await publicDb().rpc("epc_proposal_accept", { p_token: params.token, p_name: name });
     if (error) {
       if (/not_found/.test(error.message)) return err(NOT_FOUND, 404);
       if (/expired/.test(error.message)) return err("This proposal has expired.", 410);

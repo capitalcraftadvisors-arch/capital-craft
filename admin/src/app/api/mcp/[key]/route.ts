@@ -7,8 +7,8 @@
 // instance until it nears expiry. The tools (lib/mcp-tools) are read-only.
 
 import { NextRequest, NextResponse } from "next/server";
-import { FUNCTIONS_URL } from "@/lib/supabase";
-import { insuranceClient as callerClient } from "@/lib/insurance-server";
+import { FUNCTIONS_URL } from "@/lib/supabase-config";
+import { dbAs } from "@/lib/api";
 import { MCP_TOOLS } from "@/lib/mcp-tools";
 
 export const runtime = "nodejs";
@@ -63,7 +63,7 @@ async function handle(msg: RpcMsg, jwt: string): Promise<object | null> {
       const tool = MCP_TOOLS.find((t) => t.name === msg.params?.name);
       if (!tool) return rpcError(id, -32602, `Unknown tool: ${String(msg.params?.name)}`);
       try {
-        const out = await tool.run(callerClient(jwt), (msg.params?.arguments ?? {}) as Record<string, unknown>);
+        const out = await tool.run(dbAs(jwt), (msg.params?.arguments ?? {}) as Record<string, unknown>);
         return rpcResult(id, { content: [{ type: "text", text: JSON.stringify(out) }] });
       } catch (e) {
         return rpcResult(id, { content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }], isError: true });

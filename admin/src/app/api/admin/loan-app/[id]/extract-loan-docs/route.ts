@@ -14,8 +14,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
-import { createClient } from "@supabase/supabase-js";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 import { uploadBuffer, getSignedReadUrl } from "@/lib/gcs";
 import { extractProforma, extractEbill, type ProformaFields, type EbillFields } from "@/lib/loan-docs";
 import { geminiExtractProforma, geminiExtractEbill } from "@/lib/doc-extractors";
@@ -24,19 +24,8 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://hpebydmrpimyuxgsgtmu.supabase.co";
-const SUPABASE_ANON =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_DIMENSION = 2000;
 const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
-
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 
 async function compress(file: File): Promise<{ buffer: Buffer; mime: string }> {
   const ab = await file.arrayBuffer();
@@ -61,9 +50,9 @@ export async function POST(
   try {
     // Admin, or the EPC that owns this application (ownership checked
     // against the loaded row below).
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
+    const auth = await requireLogin(req);
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
 
     const appId = params.id;
     if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);
@@ -80,10 +69,7 @@ export async function POST(
     if (ebillFile    && !ACCEPTED.has(ebillFile.type))    return err("E-bill must be JPEG, PNG, WebP, or PDF.", 400);
 
     // Row check.
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = dbAs(token);
     const { data: app, error: loadErr } = await supabase
       .from("epc_applications")
       .select("id, current_step, epc_business_id")

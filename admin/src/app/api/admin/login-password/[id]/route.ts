@@ -6,24 +6,18 @@
 // Gmail) and only then saves it (lib/login-password-server).
 
 import { NextRequest, NextResponse } from "next/server";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
-import { isMainAdmin } from "@/lib/hierarchy";
-import { UUID_RE } from "@/lib/insurance-server";
+import { err, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 import { emailLoginPassword, sendPasswordDraft, publicOrigin } from "@/lib/login-password-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (!isMainAdmin(claims)) return err("Only the main admin can send login passwords.", 403);
+    const auth = await requireLogin(req, { role: "main_admin", forbidden: "Only the main admin can send login passwords." });
+    if (auth instanceof Response) return auth;
+    const { token } = auth;
     if (!UUID_RE.test(params.id)) return err("Invalid id.", 400);
 
     const b = (await req.json().catch(() => ({}))) as Record<string, unknown>;

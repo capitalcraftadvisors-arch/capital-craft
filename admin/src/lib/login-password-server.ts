@@ -12,7 +12,7 @@
 // knows. Saving goes through set_login_password under the caller's JWT, so the
 // database enforces that only the main admin can set one.
 
-import { insuranceClient as callerClient } from "./insurance-server";
+import { dbAs } from "./api";
 import { generateStrongPassword, issuedPasswordOk, ISSUED_PASSWORD_RULE } from "./password-gen";
 import { sendMail, mailConfigured } from "./mailer";
 import { EMAIL_RE } from "./validators";
@@ -32,7 +32,7 @@ export async function emailLoginPassword(
   accountId: string,
   opts: { email?: string | null; origin: string },
 ): Promise<PasswordMailResult> {
-  const db = callerClient(token);
+  const db = dbAs(token);
   const { data: acc, error } = await db.from("epc_business")
     .select("id, business_type, contact_name, trade_name, legal_name, contact_mobile, contact_email")
     .eq("id", accountId).maybeSingle();
@@ -75,7 +75,7 @@ export async function emailLoginPassword(
   return savePassword(db, accountId, password, to);
 }
 
-async function savePassword(db: ReturnType<typeof callerClient>, accountId: string, password: string, to: string): Promise<PasswordMailResult> {
+async function savePassword(db: ReturnType<typeof dbAs>,accountId: string, password: string, to: string): Promise<PasswordMailResult> {
   const { error: setErr } = await db.rpc("set_login_password", { p_business_id: accountId, p_password: password });
   if (setErr) return { ok: false, error: "Email sent, but the password couldn't be saved — send it again. " + setErr.message, status: 500 };
   return { ok: true, sentTo: to };
@@ -97,7 +97,7 @@ export async function sendPasswordDraft(
   if (!issuedPasswordOk(d.password)) return { ok: false, error: ISSUED_PASSWORD_RULE, status: 400 };
   if (!mailConfigured()) return { ok: false, error: "Email isn't configured yet (app password missing).", status: 500 };
 
-  const db = callerClient(token);
+  const db = dbAs(token);
   const { data: acc } = await db.from("epc_business").select("id").eq("id", accountId).maybeSingle();
   if (!acc) return { ok: false, error: "Account not found.", status: 404 };
 

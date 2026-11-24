@@ -7,8 +7,8 @@
 
 import { randomUUID } from "crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { verifyJwt, getBearerToken } from "@/lib/jwt";
-import { insuranceClient as userClient, UUID_RE } from "@/lib/insurance-server";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 import { buildSavedQuotePdf } from "@/lib/quote-pdf-server";
 import { quoteTotals } from "@/lib/quote-calc";
 import { uploadBuffer, deleteObject } from "@/lib/gcs";
@@ -21,20 +21,16 @@ export const maxDuration = 60;
 
 const NO_ACCESS = "You don't have access to make a proposal link.";
 
-function err(message: string, status = 400) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 type Contact = { contact_mobile: string | null; contact_email: string | null; epc_org_profile: { phone: string | null; email: string | null } | { phone: string | null; email: string | null }[] | null };
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const token = getBearerToken(req);
-    const claims = token ? await verifyJwt(token).catch(() => null) : null;
-    if (!token || !claims) return err("unauthorized", 401);
+    const auth = await requireLogin(req);
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
     if (!UUID_RE.test(params.id)) return err("not_found", 404);
     if (claims.business_type === "admin" || claims.member_role === "VIEWER" || claims.member_role === "SITE") return err(NO_ACCESS, 403);
-    const db = userClient(token);
+    const db = dbAs(token);
 
     // The PDF and the company's phone / email (the same ones the PDF prints) in parallel.
     const [pdf, contact] = await Promise.all([

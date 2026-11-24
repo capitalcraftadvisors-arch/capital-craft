@@ -4,23 +4,20 @@
 // Site staff). No subscription check — old invoices stay downloadable.
 
 import { NextRequest, NextResponse } from "next/server";
-import { verifyJwt, getBearerToken } from "@/lib/jwt";
-import { insuranceClient as userClient, UUID_RE } from "@/lib/insurance-server";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 import { buildInvoicePdf } from "@/lib/invoice-pdf";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function err(message: string, status = 400) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const token = getBearerToken(req);
-  if (!token || !(await verifyJwt(token).catch(() => null))) return err("Please sign in again.", 401);
+  const auth = await requireLogin(req, { unauthorized: "Please sign in again." });
+  if (auth instanceof Response) return auth;
+  const { token } = auth;
   if (!UUID_RE.test(params.id)) return err("This invoice was not found.", 404);
   try {
-    const pdf = await buildInvoicePdf(userClient(token), params.id);
+    const pdf = await buildInvoicePdf(dbAs(token), params.id);
     if (!pdf) return err("This invoice was not found.", 404);
     return new NextResponse(Buffer.from(pdf.bytes), {
       headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="${pdf.name}"`, "Cache-Control": "no-store" },

@@ -5,23 +5,17 @@
 // (its policy_path or one of its kyc_docs).
 
 import { NextRequest, NextResponse } from "next/server";
-import { getBearerToken } from "@/lib/jwt";
+import { err } from "@/lib/api";
 import { getSignedReadUrl, deleteObject } from "@/lib/gcs";
 import { otherInsuranceRow } from "@/lib/insurance-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const ctx = await otherInsuranceRow(token, params.id);
-    if ("error" in ctx) return err(ctx.error, ctx.status);
+    const ctx = await otherInsuranceRow(req, params.id);
+    if (ctx instanceof Response) return ctx;
 
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const path = typeof body.path === "string" ? body.path : "";

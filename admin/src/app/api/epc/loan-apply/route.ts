@@ -28,8 +28,9 @@
 // scopes every read/write to the EPC's own rows; no service-role.
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE, MOBILE_RE, EMAIL_RE, PAN_RE, PINCODE_RE } from "@/lib/validators";
 import { DEFAULT_INDICATIVE_ROI } from "@/lib/emi";
 import { isUndefinedColumn, omitKeys, UNDEFINED_COLUMN } from "@/lib/optional-column";
 import { toIsoDate } from "@/lib/dates";
@@ -37,17 +38,6 @@ import { toIsoDate } from "@/lib/dates";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://hpebydmrpimyuxgsgtmu.supabase.co";
-const SUPABASE_ANON =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
-
-const UUID_RE   = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const PIN_RE    = /^[1-9]\d{5}$/;
-const MOBILE_RE = /^[6-9]\d{9}$/;
-const EMAIL_RE  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PAN_RE    = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const SYSTEM_TYPES = new Set(["off_grid", "on_grid", "hybrid"]);
 const CONSENT_POLICIES = [
   "terms_conditions", "privacy_policy", "cookie_policy",
@@ -62,10 +52,6 @@ const OPTIONAL_COL_GROUPS = [
 // the message names the column) before Postgres could answer 42703.
 const missingColumn = (e: { code?: string; message?: string } | null, col?: string) =>
   isUndefinedColumn(e?.code === "PGRST204" ? { ...e, code: UNDEFINED_COLUMN } : e, col);
-
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 
 // Duplicate customer (0127): another EPC already filed a loan for this mobile / PAN
 // → stop, without saying which. Only EPCs with Partner Portal v2 (`v2`, 0133; `demo`
@@ -95,9 +81,9 @@ function firstIp(req: NextRequest): string | null {
 
 export async function POST(req: NextRequest) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
+    const auth = await requireLogin(req);
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
     // EPC accounts only — admins use the 6-step flow with EPC selection.
     if (claims.business_type === "admin") return err("epc_flow_only", 403);
     if (!claims.business_id) return err("unauthorized", 401);
@@ -106,10 +92,7 @@ export async function POST(req: NextRequest) {
     const b = body as Record<string, unknown>;
     const phase = String(b.phase ?? "");
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = dbAs(token);
 
     // ── Phase 1: register ─────────────────────────────────────
     if (phase === "register") {
@@ -130,7 +113,7 @@ export async function POST(req: NextRequest) {
       // Anything present is still format-validated.
       if (!MOBILE_RE.test(borrower_mobile)) return err("Enter a valid 10-digit mobile.", 400);
       if (borrower_email && !EMAIL_RE.test(borrower_email)) return err("Enter a valid email.", 400);
-      if (install_pincode && !PIN_RE.test(install_pincode)) return err("Enter a valid 6-digit pincode.", 400);
+      if (install_pincode && !PINCODE_RE.test(install_pincode)) return err("Enter a valid 6-digit pincode.", 400);
       if (system_type && !SYSTEM_TYPES.has(system_type)) return err("Choose a valid system type.", 400);
       const connection_category = strOrNull(b.connection_category);
       if (connection_category && connection_category !== "domestic" && connection_category !== "non_domestic") {

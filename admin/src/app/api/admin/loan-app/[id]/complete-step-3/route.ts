@@ -15,29 +15,14 @@
 //     (name, pan, dob, relation, mobile, email, pan_path).
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE, MOBILE_RE, EMAIL_RE, PAN_RE, PINCODE_RE } from "@/lib/validators";
 import { logLoanActivityServer } from "@/lib/loan-activity-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://hpebydmrpimyuxgsgtmu.supabase.co";
-const SUPABASE_ANON =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
-
-const UUID_RE    = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const PIN_RE     = /^[1-9]\d{5}$/;
-const MOBILE_RE  = /^[6-9]\d{9}$/;
-const EMAIL_RE   = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const PAN_RE     = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const UNITS      = new Set(["kw", "mw"]);
-
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 
 function strOrNull(v: unknown): string | null {
   if (v == null) return null;
@@ -56,10 +41,9 @@ export async function POST(
   { params }: { params: { id: string } },
 ) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
+    const auth = await requireLogin(req, { role: "admin" });
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
 
     const appId = params.id;
     if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);
@@ -104,7 +88,7 @@ export async function POST(
     const ebill_name         = strOrNull(b.ebill_name);
 
     // Installation address optional for admin (only reject a present-invalid PIN).
-    if (install_pincode && !PIN_RE.test(install_pincode)) {
+    if (install_pincode && !PINCODE_RE.test(install_pincode)) {
       return err("Installation pincode must be a valid 6-digit PIN.", 400);
     }
 
@@ -187,10 +171,7 @@ export async function POST(
       : null;
 
     // ── Persist + advance ─────────────────────────────────
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = dbAs(token);
 
     const { data: app, error: loadErr } = await supabase
       .from("epc_applications")

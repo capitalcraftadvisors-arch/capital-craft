@@ -12,15 +12,12 @@
 //            Step 4. Remove this branch once everyone has re-logged-in.
 
 import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify } from "jose";
-
-const PROJECT_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  "https://hpebydmrpimyuxgsgtmu.supabase.co";
+import { SUPABASE_URL } from "./supabase-config";
 
 // JWKS endpoint exposes Supabase's auth keys + our uploaded Standby key.
 // createRemoteJWKSet caches keys in-memory and refreshes on signature misses.
 const JWKS_URL = new URL(
-  PROJECT_URL.replace(/\/$/, "") + "/auth/v1/.well-known/jwks.json",
+  SUPABASE_URL.replace(/\/$/, "") + "/auth/v1/.well-known/jwks.json",
 );
 const JWKS = createRemoteJWKSet(JWKS_URL);
 

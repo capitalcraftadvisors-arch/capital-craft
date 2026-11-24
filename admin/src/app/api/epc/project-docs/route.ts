@@ -9,8 +9,8 @@
 // may see what — Site staff only the projects given to them.
 
 import { NextRequest, NextResponse } from "next/server";
-import { verifyJwt, getBearerToken, type JwtClaims } from "@/lib/jwt";
-import { insuranceClient as userClient, UUID_RE } from "@/lib/insurance-server";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 import { getSignedReadUrl } from "@/lib/gcs";
 import { fileLinkUrl } from "@/lib/file-links";
 import { publicOrigin } from "@/lib/login-password-server";
@@ -23,22 +23,13 @@ export const maxDuration = 60;
 
 const SHARE_PHOTOS = 6;
 
-function err(message: string, status = 400) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-async function caller(req: NextRequest): Promise<{ token: string; claims: JwtClaims } | null> {
-  const token = getBearerToken(req);
-  const claims = token ? await verifyJwt(token).catch(() => null) : null;
-  return token && claims ? { token, claims } : null;
-}
-
 export async function GET(req: NextRequest) {
   try {
-    const who = await caller(req);
-    if (!who) return err("unauthorized", 401);
+    const who = await requireLogin(req);
+    if (who instanceof Response) return who;
     const id = req.nextUrl.searchParams.get("project") || "";
     if (!UUID_RE.test(id)) return err("not_found", 404);
-    const v = await vaultEntries(userClient(who.token), id, vaultViewer(who.claims));
+    const v = await vaultEntries(dbAs(who.token), id, vaultViewer(who.claims));
     if (!v) return err("not_found", 404);
     const files = await Promise.all(v.entries.map(async (e) => ({
       group: e.group, name: e.name, ...(e.id ? { id: e.id } : {}), deletable: e.deletable,
@@ -54,12 +45,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const who = await caller(req);
-    if (!who) return err("unauthorized", 401);
+    const who = await requireLogin(req);
+    if (who instanceof Response) return who;
     const id = req.nextUrl.searchParams.get("project") || "";
     if (!UUID_RE.test(id) || req.nextUrl.searchParams.get("share") !== "photos") return err("not_found", 404);
     if (who.claims.member_role === "VIEWER") return err("You don't have access to share this project.", 403);
-    const db = userClient(who.token);
+    const db = dbAs(who.token);
     const [{ data: on }, { data: p }] = await Promise.all([
       db.rpc("epc_has_feature", { p_business: who.claims.business_id, p_feature: "whatsapp" }),
       db.from("epc_projects").select("photos").eq("id", id).maybeSingle(),

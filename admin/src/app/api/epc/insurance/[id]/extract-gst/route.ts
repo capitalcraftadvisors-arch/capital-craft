@@ -7,26 +7,23 @@
 // insurance row and returns them for on-screen review (editable).
 
 import { NextRequest, NextResponse } from "next/server";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, dbAs, requireLogin } from "@/lib/api";
 import { uploadBuffer } from "@/lib/gcs";
 import { visionDocumentText } from "@/lib/vision-server";
 import { parseGstFields } from "@/lib/gst-parser";
 import { geminiExtractGst } from "@/lib/doc-extractors";
-import { insuranceClient, compress, safeName, UUID_RE, ACCEPTED } from "@/lib/insurance-server";
+import { compress, safeName, ACCEPTED } from "@/lib/insurance-server";
+import { UUID_RE } from "@/lib/validators";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    await verifyJwt(token);
+    const auth = await requireLogin(req);
+    if (auth instanceof Response) return auth;
+    const { token } = auth;
     const id = params.id;
     if (!UUID_RE.test(id)) return err("Invalid application id.", 400);
 
@@ -52,7 +49,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       }
     }
 
-    const supabase = insuranceClient(token);
+    const supabase = dbAs(token);
     const { error: updErr } = await supabase
       .from("insurance_applications")
       .update({

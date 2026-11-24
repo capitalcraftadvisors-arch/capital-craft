@@ -13,21 +13,13 @@
 // Returns: { ok, processed, fixed, noFace, failed, nextAfter, done }
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, dbAs, requireLogin } from "@/lib/api";
 import { downloadBuffer } from "@/lib/gcs";
 import { cropAndUploadFace } from "@/lib/aadhaar";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
-
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-const SUPABASE_ANON = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
-
-function err(message: string, status = 400) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 
 function mimeFor(path: string): string {
   const p = path.toLowerCase();
@@ -39,19 +31,15 @@ function mimeFor(path: string): string {
 
 export async function POST(req: NextRequest) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
+    const auth = await requireLogin(req, { role: "admin" });
+    if (auth instanceof Response) return auth;
+    const { token } = auth;
 
     const body = (await req.json().catch(() => ({}))) as { limit?: number; after?: string };
     const limit = Math.min(50, Math.max(1, Number(body.limit) || 15));
     const after = typeof body.after === "string" ? body.after : "";
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = dbAs(token);
 
     let query = supabase
       .from("epc_applications")

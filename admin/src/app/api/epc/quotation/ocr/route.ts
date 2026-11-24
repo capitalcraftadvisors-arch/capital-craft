@@ -7,20 +7,17 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, requireLogin } from "@/lib/api";
 import { geminiExtractQuotation } from "@/lib/doc-extractors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-function err(m: string, s: number) { return NextResponse.json({ ok: false, error: m }, { status: s }); }
-
 export async function POST(req: NextRequest) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    await verifyJwt(token);
+    const auth = await requireLogin(req);
+    if (auth instanceof Response) return auth;
 
     const form = await req.formData().catch(() => null);
     const file = form?.get("file");

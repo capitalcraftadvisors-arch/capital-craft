@@ -8,18 +8,12 @@
 // are found too; ?in=project looks there first (one read instead of four).
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { deleteObject, getSignedReadUrl } from "@/lib/gcs";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, dbAs, requireLogin } from "@/lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://hpebydmrpimyuxgsgtmu.supabase.co";
-const SUPABASE_ANON =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
 
 type FoundRow = { id: string; storage_path: string; category: string; business_id?: string };
 type Found =
@@ -86,17 +80,6 @@ function requireAdminForCategory(
   return null;
 }
 
-function client(token: string) {
-  return createClient(SUPABASE_URL, SUPABASE_ANON, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
-
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 // Last path segment (the stored file name) for the download's saved filename.
 function baseName(p: string): string {
   const seg = p.split("/").pop() || "document";
@@ -108,11 +91,11 @@ export async function GET(
   { params }: { params: { id: string } },
 ) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
+    const auth = await requireLogin(req);
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
 
-    const supabase = client(token);
+    const supabase = dbAs(token);
     const doc = await findDoc(supabase, params.id, req.nextUrl.searchParams.get("in") === "project");
     if (!doc) return err("not_found", 404);
 
@@ -143,11 +126,11 @@ export async function DELETE(
   { params }: { params: { id: string } },
 ) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
+    const auth = await requireLogin(req);
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
 
-    const supabase = client(token);
+    const supabase = dbAs(token);
     const doc = await findDoc(supabase, params.id, req.nextUrl.searchParams.get("in") === "project");
     if (!doc) return err("not_found", 404);
 

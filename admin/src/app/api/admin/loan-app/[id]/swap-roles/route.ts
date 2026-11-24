@@ -19,8 +19,8 @@
 // (42703 → read/write without them).
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 import { isMainAdmin } from "@/lib/hierarchy";
 import { logLoanActivityServer, type LoanAction } from "@/lib/loan-activity-server";
 import { fmtDate, toIsoDate } from "@/lib/dates";
@@ -28,14 +28,6 @@ import { isUndefinedColumn } from "@/lib/optional-column";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://hpebydmrpimyuxgsgtmu.supabase.co";
-const SUPABASE_ANON =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // Applicant column ↔ co-applicant column, swapped value for value.
 const PAIRS: [string, string][] = [
@@ -55,28 +47,20 @@ const EARNING_PAIRS: [string, string][] = [
 ];
 const BASE_COLS = ["bill_on_applicant_name", "borrower_dob", "coapp_dob", "coapp_relation", "coapp_pan_path", ...PAIRS.flat()];
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } },
 ) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
+    const auth = await requireLogin(req, { role: "admin" });
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
     if (!isMainAdmin(claims)) return err("Only the main admin can swap the applicant and co-applicant.", 403);
 
     const appId = params.id;
     if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = dbAs(token);
 
     const load = (cols: string[]) =>
       supabase.from("epc_applications").select(cols.join(", ")).eq("id", appId).maybeSingle();

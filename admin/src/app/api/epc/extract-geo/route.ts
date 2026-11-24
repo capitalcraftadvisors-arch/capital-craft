@@ -21,7 +21,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, requireLogin } from "@/lib/api";
 import { visionDocumentText } from "@/lib/vision-server";
 import { geminiExtractGeoStamp } from "@/lib/doc-extractors";
 
@@ -32,10 +32,6 @@ export const maxDuration = 60;
 const MAX_DIMENSION = 2200;
 const RAW_TEXT_CAP = 4000;
 const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp"]);
-
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 
 type Coords = { lat: number; lng: number };
 
@@ -102,9 +98,8 @@ function parseStampCoords(text: string): Coords | null {
 
 export async function POST(req: NextRequest) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    await verifyJwt(token); // any authenticated business may OCR its own photo
+    const auth = await requireLogin(req); // any authenticated business may OCR its own photo
+    if (auth instanceof Response) return auth;
 
     const form = await req.formData();
     const file = form.get("file");

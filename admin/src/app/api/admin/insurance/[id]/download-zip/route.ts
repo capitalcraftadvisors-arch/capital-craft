@@ -9,13 +9,12 @@
 // ReadableStream); missing GCS objects are logged and skipped.
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
 import archiver from "archiver";
 import ExcelJS from "exceljs";
 import { Readable } from "node:stream";
 import { downloadBuffer } from "@/lib/gcs";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
-import { SUPABASE_URL, SUPABASE_ANON, UUID_RE } from "@/lib/insurance-server";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 import { rupees } from "@/lib/money";
 import { fmtDate } from "@/lib/dates";
 
@@ -23,26 +22,19 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 function baseName(path: string): string { return path.split("/").pop() || "file"; }
 // rupees imported from @/lib/money
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
+    const auth = await requireLogin(req, { role: "admin" });
+    if (auth instanceof Response) return auth;
+    const { token } = auth;
 
     const id = params.id;
     if (!UUID_RE.test(id)) return err("Invalid application id.", 400);
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = dbAs(token);
     const { data: app, error: loadErr } = await supabase
       .from("insurance_applications")
       .select("*, epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)")

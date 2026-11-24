@@ -24,7 +24,7 @@ import FileUpload from "@/components/FileUpload";
 import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
 import { extractPan } from "@/lib/ocr";
-import { EMAIL_RE, MOBILE_RE } from "@/lib/validators";
+import { EMAIL_RE, MOBILE_RE, PINCODE_RE } from "@/lib/validators";
 import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
 
 // The five policy keys recorded in the consent legal breadcrumb. The
@@ -60,8 +60,6 @@ const SYSTEM_CARDS = [
     desc:  "Connected to the grid with battery storage",
   },
 ] as const;
-
-const PIN_RE = /^[1-9]\d{5}$/;
 
 type Epc = {
   id: string;
@@ -204,7 +202,7 @@ function Inner() {
   async function lookupPincode(next: string) {
     setPinError(null);
     setPinLocked(false);
-    if (!PIN_RE.test(next)) return;
+    if (!PINCODE_RE.test(next)) return;
     setPinBusy(true);
     try {
       const res = await fetch(`/api/admin/pincode-lookup?pin=${next}`, {
@@ -252,7 +250,7 @@ function Inner() {
   const panValid = PAN_FMT_RE.test(panNumber.trim().toUpperCase());
 
   const canSend =
-    PIN_RE.test(pin) &&
+    PINCODE_RE.test(pin) &&
     state.trim().length > 0 &&
     MOBILE_RE.test(phone) &&
     EMAIL_RE.test(email) &&

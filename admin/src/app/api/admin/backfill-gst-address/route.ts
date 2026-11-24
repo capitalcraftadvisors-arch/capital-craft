@@ -20,23 +20,16 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, requireLogin } from "@/lib/api";
+import { SUPABASE_URL, FUNCTIONS_URL } from "@/lib/supabase-config";
 import { parseGstAddress } from "@/lib/gst-address";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://hpebydmrpimyuxgsgtmu.supabase.co";
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const FUNCTIONS_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_FUNCTIONS_URL ||
-  "https://hpebydmrpimyuxgsgtmu.supabase.co/functions/v1";
 const DOC_BUCKET = "epc-docs";
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 function guessMime(path: string): string {
   return /\.pdf$/i.test(path) ? "application/pdf"
     : /\.png$/i.test(path) ? "image/png"
@@ -52,10 +45,9 @@ type Report = {
 
 export async function POST(req: NextRequest) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
+    const auth = await requireLogin(req, { role: "admin" });
+    if (auth instanceof Response) return auth;
+    const { token } = auth;
     if (!SERVICE_KEY) return err("missing SUPABASE_SERVICE_ROLE_KEY", 500);
 
     const body = (await req.json().catch(() => ({}))) as {

@@ -13,7 +13,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, requireLogin } from "@/lib/api";
 import { visionDocumentText } from "@/lib/vision-server";
 import { parseChequeFields } from "@/lib/cheque-parser";
 
@@ -25,15 +25,10 @@ const MAX_DIMENSION = 2000;
 const RAW_TEXT_CAP = 4000;
 const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function POST(req: NextRequest) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    await verifyJwt(token); // any authenticated business may OCR its own cheque
+    const auth = await requireLogin(req); // any authenticated business may OCR its own cheque
+    if (auth instanceof Response) return auth;
 
     const form = await req.formData();
     const file = form.get("file");

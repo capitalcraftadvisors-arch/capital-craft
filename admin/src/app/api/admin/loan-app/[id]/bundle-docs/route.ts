@@ -30,8 +30,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
 import { PDFDocument } from "pdf-lib";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 import { uploadBuffer, getSignedReadUrl, downloadBuffer } from "@/lib/gcs";
 import { geminiExtract } from "@/lib/gemini-extract";
 import { geminiExtractPan, geminiExtractBankStatement, geminiExtractEbill } from "@/lib/doc-extractors";
@@ -42,19 +43,9 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://hpebydmrpimyuxgsgtmu.supabase.co";
-const SUPABASE_ANON =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_DIMENSION = 1100; // smaller image → far faster Gemini read (fewer vision tiles); still readable for KYC
 const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 function safeName(fileName: string, fallback: string): string {
   return (fileName || fallback).replace(/[^\w.\-]+/g, "_").slice(0, 80) || fallback;
 }
@@ -383,9 +374,9 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T, index: nu
 // ── POST — classify, split, store, extract ───────────────────────────────────
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
+    const auth = await requireLogin(req);
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
 
     const appId = params.id;
     if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);
@@ -399,10 +390,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const appName = normPersonName(typeof rawAppName === "string" ? rawAppName : "");
     const coName = normPersonName(typeof rawCoName === "string" ? rawCoName : "");
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = dbAs(token);
     const { data: app, error: loadErr } = await supabase
       .from("epc_applications").select("id, current_step, epc_business_id").eq("id", appId).maybeSingle();
     if (loadErr) return err(loadErr.message, 500);
@@ -589,9 +577,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 // old keys cleared to "") for the chat to merge.
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
+    const auth = await requireLogin(req);
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
 
     const appId = params.id;
     if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);
@@ -605,10 +593,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     if (!storagePath) return err("storage_path is required.", 400);
     if (!ALLOWED_TYPES.has(toType)) return err("Invalid target type.", 400);
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = dbAs(token);
     const { data: app, error: loadErr } = await supabase
       .from("epc_applications").select("id, epc_business_id").eq("id", appId).maybeSingle();
     if (loadErr) return err(loadErr.message, 500);

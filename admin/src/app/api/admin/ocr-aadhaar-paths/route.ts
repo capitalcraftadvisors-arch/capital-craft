@@ -10,7 +10,7 @@
 // Auth: admin only. Runs on Cloud Run where GCS ADC + the Gemini key exist.
 
 import { NextRequest, NextResponse } from "next/server";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, requireLogin } from "@/lib/api";
 import { downloadBuffer } from "@/lib/gcs";
 import { geminiExtractAadhaar } from "@/lib/aadhaar";
 import { geminiExtractPan } from "@/lib/doc-extractors";
@@ -19,20 +19,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 function mimeOf(path: string): string {
   return /\.pdf$/i.test(path) ? "application/pdf" : "image/jpeg";
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
+    const auth = await requireLogin(req, { role: "admin" });
+    if (auth instanceof Response) return auth;
 
     const body = (await req.json().catch(() => ({}))) as { front?: string; back?: string; type?: string };
     const front = String(body.front ?? "").trim();

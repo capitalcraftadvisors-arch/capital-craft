@@ -12,8 +12,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
 import { uploadBuffer, deleteObject, downloadBuffer } from "@/lib/gcs";
-import { verifyJwt, getBearerToken } from "@/lib/jwt";
-import { insuranceClient as userClient, UUID_RE } from "@/lib/insurance-server";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 import { ORG_IMAGE_COLUMN, type OrgImageKind } from "@/lib/org-profile";
 
 export const runtime = "nodejs";
@@ -21,10 +21,6 @@ export const dynamic = "force-dynamic";
 
 const IMAGE_PATH = /^(logos|signatures|stamps)\/[0-9a-f-]{36}\/\d{10,16}\.png$/i;
 const IMAGES = new Set(["image/jpeg", "image/png", "image/webp"]);
-
-function err(message: string, status = 400) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 
 export async function GET(req: NextRequest) {
   const p = req.nextUrl.searchParams.get("p") || "";
@@ -41,17 +37,16 @@ export async function GET(req: NextRequest) {
 
 // The caller's token + the business it acts on (an admin may name another one).
 async function caller(req: NextRequest, requested: string | null) {
-  const token = getBearerToken(req);
-  if (!token) return null;
-  const claims = await verifyJwt(token).catch(() => null);
-  if (!claims) return null;
+  const auth = await requireLogin(req);
+  if (auth instanceof Response) return null;
+  const { token, claims } = auth;
   const target = claims.business_type === "admin" && requested ? requested : claims.business_id;
-  return UUID_RE.test(target || "") ? { db: userClient(token), target } : null;
+  return UUID_RE.test(target || "") ? { db: dbAs(token), target } : null;
 }
 
 const kindOf = (v: unknown): OrgImageKind | null => (v === "logo" || v === "signature" || v === "stamp" ? v : null);
 
-async function currentPath(db: ReturnType<typeof userClient>, target: string, col: string): Promise<string | null> {
+async function currentPath(db: ReturnType<typeof dbAs>, target: string, col: string): Promise<string | null> {
   const { data } = await db.from("epc_org_profile").select(col).eq("business_id", target).maybeSingle();
   return ((data as Record<string, string | null> | null)?.[col]) ?? null;
 }

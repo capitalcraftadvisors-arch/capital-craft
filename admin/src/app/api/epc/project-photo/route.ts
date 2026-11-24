@@ -6,8 +6,8 @@
 // trigger) decide who may see it or change its photos — Site staff only their own.
 
 import { NextRequest, NextResponse } from "next/server";
-import { verifyJwt, getBearerToken } from "@/lib/jwt";
-import { insuranceClient as userClient, UUID_RE } from "@/lib/insurance-server";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 import { uploadBuffer, deleteObject, getSignedReadUrl } from "@/lib/gcs";
 import { compressUpload } from "@/lib/image-compress";
 
@@ -18,13 +18,9 @@ export const maxDuration = 60;
 type Photo = { path: string; at: string };
 const IMAGES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
-function err(message: string, status = 400) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 async function caller(req: NextRequest) {
-  const token = getBearerToken(req);
-  if (!token || !(await verifyJwt(token).catch(() => null))) return null;
-  return userClient(token);
+  const auth = await requireLogin(req);
+  return auth instanceof Response ? null : dbAs(auth.token);
 }
 const withLinks = async (photos: Photo[]) =>
   Promise.all(photos.map(async (p) => ({ ...p, url: await getSignedReadUrl(p.path, 3600).catch(() => "") })));

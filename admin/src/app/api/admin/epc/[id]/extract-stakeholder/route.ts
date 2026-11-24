@@ -12,7 +12,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, requireLogin } from "@/lib/api";
 import { geminiExtractPan } from "@/lib/doc-extractors";
 import { geminiExtractAadhaar } from "@/lib/aadhaar";
 
@@ -23,10 +23,6 @@ export const maxDuration = 60;
 const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 const KINDS = new Set(["pan", "aadhaar_front", "aadhaar_back"]);
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 async function compress(file: File): Promise<{ buffer: Buffer; mime: string }> {
   const input = Buffer.from(await file.arrayBuffer());
   if (!file.type.startsWith("image/")) return { buffer: input, mime: file.type };
@@ -36,10 +32,8 @@ async function compress(file: File): Promise<{ buffer: Buffer; mime: string }> {
 
 export async function POST(req: NextRequest) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
+    const auth = await requireLogin(req, { role: "admin" });
+    if (auth instanceof Response) return auth;
 
     const form = await req.formData();
     const file = form.get("file");

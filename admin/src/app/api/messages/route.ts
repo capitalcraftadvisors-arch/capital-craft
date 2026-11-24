@@ -12,19 +12,11 @@
 // (all) or the owning EPC (own profiles / own messages).
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://hpebydmrpimyuxgsgtmu.supabase.co";
-const SUPABASE_ANON =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const CFG = {
   loan:      { msgTable: "loan_messages",      parentTable: "epc_applications",       fk: "application_id" },
@@ -32,9 +24,6 @@ const CFG = {
 } as const;
 type Kind = keyof typeof CFG;
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 function strOrNull(v: unknown): string | null {
   if (v == null) return null;
   const s = String(v).trim();
@@ -43,9 +32,9 @@ function strOrNull(v: unknown): string | null {
 
 export async function POST(req: NextRequest) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
+    const auth = await requireLogin(req);
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
     if (!claims.business_id) return err("unauthorized", 401);
     const isAdmin = claims.business_type === "admin";
     const sender: "admin" | "epc" = isAdmin ? "admin" : "epc";
@@ -56,10 +45,7 @@ export async function POST(req: NextRequest) {
     if (!CFG[kind]) return err("bad_kind", 400);
     const { msgTable, parentTable, fk } = CFG[kind];
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = dbAs(token);
     const now = new Date().toISOString();
 
     // ── edit / delete operate on a single message (RLS enforces ownership) ────

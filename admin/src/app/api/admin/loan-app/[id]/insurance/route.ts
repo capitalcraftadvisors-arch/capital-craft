@@ -18,10 +18,11 @@
 // Admin only; reads / writes run under the caller's JWT (RLS).
 
 import { NextRequest, NextResponse } from "next/server";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 import { downloadBuffer, uploadBuffer, deleteObject } from "@/lib/gcs";
 import { geminiExtractInvoice } from "@/lib/doc-extractors";
-import { insuranceClient, safeName, UUID_RE } from "@/lib/insurance-server";
+import { safeName } from "@/lib/insurance-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,21 +31,17 @@ export const maxDuration = 120;
 type Row = Record<string, any>;
 type Doc = { category: string; storage_path: string; file_name: string | null; mime_type: string | null; metadata: Row | null };
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 const mimeOf = (path: string, mime?: string | null) => mime || (/\.pdf$/i.test(path) ? "application/pdf" : "image/jpeg");
 const blank = (v: unknown) => v == null || v === "";
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const copied: string[] = [];
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("admin_only", 403);
+    const auth = await requireLogin(req, { role: "admin" });
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
     if (!UUID_RE.test(params.id)) return err("Invalid application id.", 400);
-    const db = insuranceClient(token);
+    const db = dbAs(token);
 
     const { data: loan } = await db.from("epc_applications").select("*").eq("id", params.id).maybeSingle();
     if (!loan) return err("Loan application not found.", 404);

@@ -12,30 +12,19 @@
 // reassignment additionally requires MAIN_ADMIN.
 
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
+import { err, dbAs, requireLogin } from "@/lib/api";
+import { UUID_RE } from "@/lib/validators";
 import { logUserActivity } from "@/lib/user-activity-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const SUPABASE_URL =
-  process.env.NEXT_PUBLIC_SUPABASE_URL || "https://hpebydmrpimyuxgsgtmu.supabase.co";
-const SUPABASE_ANON =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhwZWJ5ZG1ycGlteXV4Z3NndG11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEwNzI3OTUsImV4cCI6MjA5NjY0ODc5NX0.VRhdmxA9YfBAkpDwOXpnvlX0JDBUfzUUJzs1HM8VPqE";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SRC: Record<string, { table: string; module: string }> = {
   loan: { table: "epc_applications", module: "apps" },
   insurance: { table: "insurance_applications", module: "insurance" },
   lead: { table: "loan_leads", module: "loanleads" },
   epc: { table: "epc_business", module: "epcs" },
 };
-
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
 
 // One-step stage advance per source (+ the timestamp columns the board reads).
 function nextStage(source: string, status: string): { status: string; stamp?: Record<string, unknown> } | null {
@@ -106,10 +95,9 @@ function columnToStatus(source: string, col: string): { status: string; stamp?: 
 
 export async function POST(req: NextRequest) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
-    if (claims.business_type !== "admin") return err("forbidden", 403);
+    const auth = await requireLogin(req, { role: "admin", forbidden: "forbidden" });
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
     const me = claims.business_id;
 
     const body = (await req.json().catch(() => ({}))) as {
@@ -124,10 +112,7 @@ export async function POST(req: NextRequest) {
     if (!meta) return err("invalid source", 400);
     if (!UUID_RE.test(id)) return err("invalid id", 400);
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = dbAs(token);
     const now = new Date().toISOString();
     const touch: Record<string, unknown> = { last_updated_by_user_id: me };
     if (source === "lead") touch.reviewed_at = now; // leads have no updated_at trigger

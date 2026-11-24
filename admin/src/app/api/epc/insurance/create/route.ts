@@ -10,25 +10,20 @@
 // also call it (their JWT bypasses the gate).
 
 import { NextRequest, NextResponse } from "next/server";
-import { getBearerToken, verifyJwt } from "@/lib/jwt";
-import { insuranceClient } from "@/lib/insurance-server";
+import { err, dbAs, requireLogin } from "@/lib/api";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function err(message: string, status: number) {
-  return NextResponse.json({ ok: false, error: message }, { status });
-}
-
 export async function POST(req: NextRequest) {
   try {
-    const token = getBearerToken(req);
-    if (!token) return err("unauthorized", 401);
-    const claims = await verifyJwt(token);
+    const auth = await requireLogin(req);
+    if (auth instanceof Response) return auth;
+    const { token, claims } = auth;
     const businessId = claims.business_id;
     if (!businessId) return err("no_business", 400);
 
-    const supabase = insuranceClient(token);
+    const supabase = dbAs(token);
 
     // Resume an existing draft if one is lying around.
     const { data: existing } = await supabase
