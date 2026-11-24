@@ -17,6 +17,7 @@ import { loginPasswordStatus, sendPasswordDraft } from "@/lib/passwords";
 import { DEFAULT_MAIL_SENDER } from "@/lib/mail-sender";
 import { fmtDate } from "@/lib/dates";
 import { EMAIL_RE } from "@/lib/validators";
+import Modal from "@/components/ui/Modal";
 
 type Epc = { id: string; tradeName: string; contactName?: string | null; mobile?: string | null; email?: string | null };
 
@@ -107,42 +108,40 @@ export default function EpcPasswordEmailModal({ open, epc, onClose }: { open: bo
   const lbl = "text-[12px] text-[#5a8a76]";
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => { if (!busy) onClose(); }}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-xl bg-white rounded-lg shadow-lg p-6 max-h-[92vh] overflow-y-auto">
-        <h3 className="font-semibold text-[18px] text-[#0f3d2e]">Email password</h3>
-        <p className="text-[13px] text-[#5a8a76] mt-0.5">
-          {epc.tradeName}{epc.mobile ? ` · ${epc.mobile}` : ""}{setAt ? ` · last sent ${fmtDate(setAt)}` : ""}
+    <Modal onClose={onClose} busy={busy} className="w-full max-w-xl bg-white rounded-lg shadow-lg p-6 max-h-[92vh] overflow-y-auto">
+      <h3 className="font-semibold text-[18px] text-[#0f3d2e]">Email password</h3>
+      <p className="text-[13px] text-[#5a8a76] mt-0.5">
+        {epc.tradeName}{epc.mobile ? ` · ${epc.mobile}` : ""}{setAt ? ` · last sent ${fmtDate(setAt)}` : ""}
+      </p>
+
+      {sentTo ? (
+        <p className="mt-4 text-[13px] text-[#178a5c] bg-[#e6f6ee] border border-[#cdeadd] rounded-[8px] px-3 py-2">
+          Password emailed to <span className="font-semibold">{sentTo}</span>.
         </p>
-
-        {sentTo ? (
-          <p className="mt-4 text-[13px] text-[#178a5c] bg-[#e6f6ee] border border-[#cdeadd] rounded-[8px] px-3 py-2">
-            Password emailed to <span className="font-semibold">{sentTo}</span>.
-          </p>
-        ) : (
-          <div className="mt-4 space-y-2.5">
-            <div className={row}><span className={lbl}>From</span><span className="text-[14px] text-[#0f3d2e]">{DEFAULT_MAIL_SENDER}</span></div>
-            <div className={row}><span className={lbl}>To</span><input type="email" className={inputCls} value={to} onChange={(e) => setTo(e.target.value)} /></div>
-            <div className={row}><span className={lbl}>CC</span><input className={inputCls} value={cc} onChange={(e) => setCc(e.target.value)} /></div>
-            <div className={row}><span className={lbl}>Subject</span><input className={inputCls} value={subject} onChange={(e) => setSubject(e.target.value)} /></div>
-            <textarea className={inputCls + " font-[inherit] leading-relaxed"} rows={13} value={body} onChange={(e) => setBody(e.target.value)} />
-          </div>
-        )}
-
-        {error && <p className="mt-3 text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-[8px] px-3 py-2">{error}</p>}
-
-        <div className="mt-5 flex justify-end gap-2">
-          <button type="button" onClick={onClose} disabled={busy}
-            className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border border-[#cdeadd] bg-white text-[#0f3d2e] hover:bg-[#f0faf5] disabled:opacity-60">
-            {sentTo ? "Done" : "Cancel"}
-          </button>
-          {!sentTo && (
-            <button type="button" onClick={() => void send()} disabled={busy}
-              className="text-[13px] font-semibold px-4 py-2 rounded-[8px] bg-[#178a5c] text-white hover:bg-[#12734c] disabled:opacity-60">
-              {busy ? "Sending…" : "Send"}
-            </button>
-          )}
+      ) : (
+        <div className="mt-4 space-y-2.5">
+          <div className={row}><span className={lbl}>From</span><span className="text-[14px] text-[#0f3d2e]">{DEFAULT_MAIL_SENDER}</span></div>
+          <div className={row}><span className={lbl}>To</span><input type="email" className={inputCls} value={to} onChange={(e) => setTo(e.target.value)} /></div>
+          <div className={row}><span className={lbl}>CC</span><input className={inputCls} value={cc} onChange={(e) => setCc(e.target.value)} /></div>
+          <div className={row}><span className={lbl}>Subject</span><input className={inputCls} value={subject} onChange={(e) => setSubject(e.target.value)} /></div>
+          <textarea className={inputCls + " font-[inherit] leading-relaxed"} rows={13} value={body} onChange={(e) => setBody(e.target.value)} />
         </div>
+      )}
+
+      {error && <p className="mt-3 text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-[8px] px-3 py-2">{error}</p>}
+
+      <div className="mt-5 flex justify-end gap-2">
+        <button type="button" onClick={onClose} disabled={busy}
+          className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border border-[#cdeadd] bg-white text-[#0f3d2e] hover:bg-[#f0faf5] disabled:opacity-60">
+          {sentTo ? "Done" : "Cancel"}
+        </button>
+        {!sentTo && (
+          <button type="button" onClick={() => void send()} disabled={busy}
+            className="text-[13px] font-semibold px-4 py-2 rounded-[8px] bg-[#178a5c] text-white hover:bg-[#12734c] disabled:opacity-60">
+            {busy ? "Sending…" : "Send"}
+          </button>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }

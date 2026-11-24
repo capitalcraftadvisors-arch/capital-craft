@@ -14,6 +14,7 @@
 
 import { useState } from "react";
 import Button from "@/components/ui/Button";
+import Modal from "@/components/ui/Modal";
 import Select from "@/components/ui/Select";
 import { useLenders } from "@/lib/lenders";
 
@@ -53,49 +54,41 @@ export default function LenderPickerModal({ open, onClose, onConfirm, epcName }:
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
-      onClick={close}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md bg-white rounded-lg shadow-lg p-6"
-      >
-        <div className="flex items-start justify-between mb-4">
-          <div className="min-w-0">
-            <h3 className="font-display font-semibold text-[18px] text-text">Download ZIP</h3>
-            <p className="text-[12px] text-text-mid mt-0.5">
-              {epcName ? `For ${epcName}. ` : ""}Pick the lender you&rsquo;re preparing the ZIP for — the Excel inside is built to that lender&rsquo;s template.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={close}
-            disabled={busy}
-            className="text-[18px] text-text-muted hover:text-text leading-none disabled:opacity-40"
-            aria-label="Close"
-          >
-            ×
-          </button>
+    <Modal onClose={close} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
+      <div className="flex items-start justify-between mb-4">
+        <div className="min-w-0">
+          <h3 className="font-display font-semibold text-[18px] text-text">Download ZIP</h3>
+          <p className="text-[12px] text-text-mid mt-0.5">
+            {epcName ? `For ${epcName}. ` : ""}Pick the lender you&rsquo;re preparing the ZIP for — the Excel inside is built to that lender&rsquo;s template.
+          </p>
         </div>
-
-        <Select
-          label="Lender"
-          placeholder="Select a lender…"
-          options={lenders.map((l) => ({ value: l.key, label: l.label }))}
-          value={lender}
-          onChange={(e) => setLender(e.target.value as LenderKey | "")}
-        />
-
-        <div className="mt-5 flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={close} disabled={busy}>
-            Cancel
-          </Button>
-          <Button type="button" variant="primary" onClick={submit} disabled={!lender} loading={busy}>
-            Confirm &amp; download
-          </Button>
-        </div>
+        <button
+          type="button"
+          onClick={close}
+          disabled={busy}
+          className="text-[18px] text-text-muted hover:text-text leading-none disabled:opacity-40"
+          aria-label="Close"
+        >
+          ×
+        </button>
       </div>
-    </div>
+
+      <Select
+        label="Lender"
+        placeholder="Select a lender…"
+        options={lenders.map((l) => ({ value: l.key, label: l.label }))}
+        value={lender}
+        onChange={(e) => setLender(e.target.value as LenderKey | "")}
+      />
+
+      <div className="mt-5 flex justify-end gap-2">
+        <Button type="button" variant="outline" onClick={close} disabled={busy}>
+          Cancel
+        </Button>
+        <Button type="button" variant="primary" onClick={submit} disabled={!lender} loading={busy}>
+          Confirm &amp; download
+        </Button>
+      </div>
+    </Modal>
   );
 }

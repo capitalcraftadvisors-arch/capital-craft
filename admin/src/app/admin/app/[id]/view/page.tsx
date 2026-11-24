@@ -18,7 +18,8 @@ import { supabase } from "@/lib/supabase";
 import { getToken, getBusiness, isMainAdmin } from "@/lib/auth";
 import { getDocumentUrl, deleteDocument, downloadDocument, triggerDownload } from "@/lib/storage";
 import { maskAcct } from "@/lib/epc-labels";
-import DeleteLoanAppModal from "@/components/DeleteLoanAppModal";
+import Modal from "@/components/ui/Modal";
+import ConfirmDeleteModal from "@/components/ConfirmDeleteModal";
 import EditLoanDatesModal from "@/components/EditLoanDatesModal";
 import { invalidate } from "@/lib/list-cache";
 import CommentsSection from "@/components/CommentsSection";
@@ -1635,31 +1636,29 @@ function Inner() {
         onConfirm={(l, reason, date) => rejectLenderNow(l, reason, date)}
       />
       {abortOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => { if (!statusBusy) setAbortOpen(false); }}>
-          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
-            <h3 className="font-semibold text-[18px] text-[#0f3d2e]">Abort application</h3>
-            <p className="text-[12px] text-[#5a8a76] mt-0.5">Cancels this application. It stays on record (not deleted) and can&apos;t be edited afterwards. Record the reason.</p>
-            <label className="block text-[13px] font-medium text-[#0f3d2e] mt-4 mb-1">Reason for abort <span className="text-red-600">*</span></label>
-            <textarea
-              value={abortReason}
-              onChange={(e) => setAbortReason(e.target.value)}
-              rows={3}
-              placeholder="Why is this being aborted?"
-              className="w-full rounded-input border border-red-200 bg-white px-3 py-2 text-[14px] text-[#0f3d2e] focus:outline-none focus:ring-2 focus:ring-red-200 resize-y"
-            />
-            <div className="mt-5 flex justify-end gap-2">
-              <button type="button" onClick={() => setAbortOpen(false)} disabled={statusBusy}
-                className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border border-[#cdeadd] bg-white text-[#0f3d2e] hover:bg-[#f0faf5] disabled:opacity-60">
-                Cancel
-              </button>
-              <button type="button" disabled={statusBusy || !abortReason.trim()}
-                onClick={() => { const r = abortReason.trim(); if (!r) return; void doAbort(r).then(() => { setAbortOpen(false); setAbortReason(""); }); }}
-                className="text-[13px] font-semibold px-3 py-2 rounded-[8px] bg-red-600 text-white hover:bg-red-700 disabled:opacity-60">
-                Abort application
-              </button>
-            </div>
+        <Modal onClose={() => setAbortOpen(false)} busy={statusBusy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
+          <h3 className="font-semibold text-[18px] text-[#0f3d2e]">Abort application</h3>
+          <p className="text-[12px] text-[#5a8a76] mt-0.5">Cancels this application. It stays on record (not deleted) and can&apos;t be edited afterwards. Record the reason.</p>
+          <label className="block text-[13px] font-medium text-[#0f3d2e] mt-4 mb-1">Reason for abort <span className="text-red-600">*</span></label>
+          <textarea
+            value={abortReason}
+            onChange={(e) => setAbortReason(e.target.value)}
+            rows={3}
+            placeholder="Why is this being aborted?"
+            className="w-full rounded-input border border-red-200 bg-white px-3 py-2 text-[14px] text-[#0f3d2e] focus:outline-none focus:ring-2 focus:ring-red-200 resize-y"
+          />
+          <div className="mt-5 flex justify-end gap-2">
+            <button type="button" onClick={() => setAbortOpen(false)} disabled={statusBusy}
+              className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border border-[#cdeadd] bg-white text-[#0f3d2e] hover:bg-[#f0faf5] disabled:opacity-60">
+              Cancel
+            </button>
+            <button type="button" disabled={statusBusy || !abortReason.trim()}
+              onClick={() => { const r = abortReason.trim(); if (!r) return; void doAbort(r).then(() => { setAbortOpen(false); setAbortReason(""); }); }}
+              className="text-[13px] font-semibold px-3 py-2 rounded-[8px] bg-red-600 text-white hover:bg-red-700 disabled:opacity-60">
+              Abort application
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
       <DocViewer
         items={viewerItems}
@@ -1673,14 +1672,25 @@ function Inner() {
         onClose={() => setDatesOpen(false)}
         onSaved={() => { setDatesOpen(false); setReloadKey((k) => k + 1); }}
       />
-      <DeleteLoanAppModal
+      <ConfirmDeleteModal
         open={delOpen}
         onClose={() => setDelOpen(false)}
         onDeleted={() => { invalidate("dash.apps"); invalidate("dashkpis"); router.replace("/admin" as any); }}
-        applicationId={loan.id}
-        displayId={displayId(loan)}
-        applicant={applicantName}
-        mobile={loan.borrower_mobile ?? null}
+        endpoint="/api/admin/delete-loan-app"
+        body={{ applicationId: loan.id }}
+        title="Delete loan application permanently"
+        confirmLabel="Delete application permanently"
+        message="You’re about to permanently delete this loan application and every document attached to it. This cannot be undone."
+        rows={[
+          { label: "Loan ID", value: displayId(loan) ?? "—", className: "font-mono font-semibold" },
+          { label: "Applicant", value: applicantName || "(no name)", className: "font-semibold" },
+          { label: "Mobile", value: loan.borrower_mobile ? `+91 ${loan.borrower_mobile}` : "—" },
+        ]}
+        deletes={[
+          "The loan application row",
+          "All uploaded documents (PAN, Aadhaar, e-bill, photos, quotation, etc.)",
+          "Storage folder in Google Cloud Storage",
+        ]}
       />
     </main>
   );

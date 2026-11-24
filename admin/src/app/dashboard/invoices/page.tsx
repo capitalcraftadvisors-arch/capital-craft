@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { NAVY } from "@/components/partner/PartnerShell";
 import { input } from "@/components/quotation/form-kit";
 import { InvoiceForm, CancelInvoice, PaidButton } from "@/components/partner/ProjectInvoices";
+import Modal, { OVERLAY } from "@/components/ui/Modal";
 import { getBusiness } from "@/lib/auth";
 import { canManageOrg, canWork, isSiteStaff, portalV2 } from "@/lib/epc-roles";
 import { fetchSubscription, hasFeature } from "@/lib/subscription";
@@ -130,12 +131,10 @@ export default function InvoicesPage() {
 
       {cancelling && <CancelInvoice invoice={cancelling} onDone={(r) => { put(r); setCancelling(null); }} onClose={() => setCancelling(null)} />}
       {reissuing && (
-        <div className="fixed inset-0 z-50 bg-black/30 grid place-items-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) setReissuing(null); }}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-[680px] max-h-[92vh] overflow-y-auto">
-            <InvoiceForm className="p-6" projectId={reissuing.invoice.project_id} kw={reissuing.invoice.kw} start={reissuing.start} replaces={reissuing.invoice}
-              onIssued={(r) => { put(r); setReissuing(null); }} onClose={() => setReissuing(null)} />
-          </div>
-        </div>
+        <Modal onClose={() => setReissuing(null)} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[680px] max-h-[92vh] overflow-y-auto">
+          <InvoiceForm className="p-6" projectId={reissuing.invoice.project_id} kw={reissuing.invoice.kw} start={reissuing.start} replaces={reissuing.invoice}
+            onIssued={(r) => { put(r); setReissuing(null); }} onClose={() => setReissuing(null)} />
+        </Modal>
       )}
     </div>
   );

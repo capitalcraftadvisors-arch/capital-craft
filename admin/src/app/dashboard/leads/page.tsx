@@ -10,6 +10,7 @@ import { useRouter } from "next/navigation";
 import { NAVY } from "@/components/partner/PartnerShell";
 import { input, decimal, digits, Field } from "@/components/quotation/form-kit";
 import DateField from "@/components/ui/DateField";
+import Modal, { OVERLAY } from "@/components/ui/Modal";
 import WhatsAppButton from "@/components/partner/WhatsAppButton";
 import { getBusiness, loanAccess } from "@/lib/auth";
 import { canManageOrg, canWork, epcRole, hasModule, portalV2 } from "@/lib/epc-roles";
@@ -219,57 +220,55 @@ function LeadEditor({ lead, rows, members, ownerName, assign, readOnly, wa, org,
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/30 grid place-items-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-[640px] max-h-[92vh] overflow-y-auto p-6">
-        <div className="text-[17px] font-display font-bold text-[#0f3d2e] mb-4">{lead ? lead.name : "New lead"}</div>
-        <fieldset disabled={readOnly || busy} className="grid sm:grid-cols-2 gap-3">
-          <Field l="Customer name" req><input className={input} value={d.name} onChange={(e) => set("name", e.target.value)} /></Field>
-          <Field l="Mobile"><input className={input} inputMode="numeric" value={d.mobile} onChange={(e) => set("mobile", digits(e.target.value).slice(0, 10))} placeholder="10-digit mobile" /></Field>
-          <Field l="City"><input className={input} value={d.city} onChange={(e) => set("city", e.target.value)} /></Field>
-          <Field l="System size (kW)"><input className={input} inputMode="decimal" value={d.kw} onChange={(e) => set("kw", decimal(e.target.value))} /></Field>
-          <Field l="Project cost ₹"><input className={input} inputMode="decimal" value={d.project_cost} onChange={(e) => set("project_cost", decimal(e.target.value))} /></Field>
-          <Field l="Status">
-            <select className={input} value={d.status} onChange={(e) => set("status", e.target.value as LeadStatus)}>
-              {LEAD_STATUSES.map((s) => <option key={s} value={s}>{LEAD_STATUS_LABEL[s]}</option>)}
+    <Modal onClose={onClose} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[640px] max-h-[92vh] overflow-y-auto p-6">
+      <div className="text-[17px] font-display font-bold text-[#0f3d2e] mb-4">{lead ? lead.name : "New lead"}</div>
+      <fieldset disabled={readOnly || busy} className="grid sm:grid-cols-2 gap-3">
+        <Field l="Customer name" req><input className={input} value={d.name} onChange={(e) => set("name", e.target.value)} /></Field>
+        <Field l="Mobile"><input className={input} inputMode="numeric" value={d.mobile} onChange={(e) => set("mobile", digits(e.target.value).slice(0, 10))} placeholder="10-digit mobile" /></Field>
+        <Field l="City"><input className={input} value={d.city} onChange={(e) => set("city", e.target.value)} /></Field>
+        <Field l="System size (kW)"><input className={input} inputMode="decimal" value={d.kw} onChange={(e) => set("kw", decimal(e.target.value))} /></Field>
+        <Field l="Project cost ₹"><input className={input} inputMode="decimal" value={d.project_cost} onChange={(e) => set("project_cost", decimal(e.target.value))} /></Field>
+        <Field l="Status">
+          <select className={input} value={d.status} onChange={(e) => set("status", e.target.value as LeadStatus)}>
+            {LEAD_STATUSES.map((s) => <option key={s} value={s}>{LEAD_STATUS_LABEL[s]}</option>)}
+          </select>
+        </Field>
+        <Field l="Follow-up date"><DateField value={d.follow_up_at} onChange={(v) => set("follow_up_at", v)} className={input} /></Field>
+        {assign && (
+          <Field l="Lead owner">
+            <select className={input} value={d.owner_member_id} onChange={(e) => set("owner_member_id", e.target.value)}>
+              <option value="">{ownerName}</option>
+              {owners.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </Field>
-          <Field l="Follow-up date"><DateField value={d.follow_up_at} onChange={(v) => set("follow_up_at", v)} className={input} /></Field>
-          {assign && (
-            <Field l="Lead owner">
-              <select className={input} value={d.owner_member_id} onChange={(e) => set("owner_member_id", e.target.value)}>
-                <option value="">{ownerName}</option>
-                {owners.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-              </select>
-            </Field>
-          )}
-          <div className="sm:col-span-2">
-            <Field l="Notes"><textarea className={input + " min-h-[80px]"} value={d.notes} onChange={(e) => set("notes", e.target.value)} /></Field>
-          </div>
-        </fieldset>
-        {lead && (
-          <div className="flex items-center gap-4 flex-wrap mt-4 pt-4 border-t border-line text-[13px] font-semibold">
-            {lead.mobile && <WhatsAppButton on={wa} onClick={() => whatsAppLead(lead.name, lead.mobile, org)} />}
-            {lead.application_id
-              ? <button type="button" onClick={() => onGo(`/dashboard/${lead.application_id}`)} className="text-[#1e3a8a] hover:underline">Open loan</button>
-              : canLoan && <button type="button" onClick={() => onGo(`/dashboard/apply/chat?lead=${lead.id}`)} className="text-[#1e3a8a] hover:underline">Apply for loan</button>}
-            {!readOnly && lead.status === "won" && (
-              <button type="button" onClick={() => void toProject()} disabled={busy} className="text-[#1e3a8a] hover:underline disabled:opacity-60">Create project</button>
-            )}
-          </div>
         )}
-        {error && <p className="text-[13px] text-red-600 mt-3">{error}</p>}
-        <div className="flex items-center gap-2 mt-5">
-          {!readOnly && lead && (
-            <button type="button" onClick={() => void remove()} disabled={busy} className="px-3 py-2 rounded-xl text-[13.5px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60">Delete</button>
-          )}
-          <button type="button" onClick={onClose} className="ml-auto px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-text-mid hover:bg-bg-soft">{readOnly ? "Close" : "Cancel"}</button>
-          {!readOnly && (
-            <button type="button" onClick={() => void save()} disabled={busy} className="px-5 py-2.5 rounded-xl text-white text-[13.5px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
-              {busy ? "Saving…" : "Save"}
-            </button>
+        <div className="sm:col-span-2">
+          <Field l="Notes"><textarea className={input + " min-h-[80px]"} value={d.notes} onChange={(e) => set("notes", e.target.value)} /></Field>
+        </div>
+      </fieldset>
+      {lead && (
+        <div className="flex items-center gap-4 flex-wrap mt-4 pt-4 border-t border-line text-[13px] font-semibold">
+          {lead.mobile && <WhatsAppButton on={wa} onClick={() => whatsAppLead(lead.name, lead.mobile, org)} />}
+          {lead.application_id
+            ? <button type="button" onClick={() => onGo(`/dashboard/${lead.application_id}`)} className="text-[#1e3a8a] hover:underline">Open loan</button>
+            : canLoan && <button type="button" onClick={() => onGo(`/dashboard/apply/chat?lead=${lead.id}`)} className="text-[#1e3a8a] hover:underline">Apply for loan</button>}
+          {!readOnly && lead.status === "won" && (
+            <button type="button" onClick={() => void toProject()} disabled={busy} className="text-[#1e3a8a] hover:underline disabled:opacity-60">Create project</button>
           )}
         </div>
+      )}
+      {error && <p className="text-[13px] text-red-600 mt-3">{error}</p>}
+      <div className="flex items-center gap-2 mt-5">
+        {!readOnly && lead && (
+          <button type="button" onClick={() => void remove()} disabled={busy} className="px-3 py-2 rounded-xl text-[13.5px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60">Delete</button>
+        )}
+        <button type="button" onClick={onClose} className="ml-auto px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-text-mid hover:bg-bg-soft">{readOnly ? "Close" : "Cancel"}</button>
+        {!readOnly && (
+          <button type="button" onClick={() => void save()} disabled={busy} className="px-5 py-2.5 rounded-xl text-white text-[13.5px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
+            {busy ? "Saving…" : "Save"}
+          </button>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }

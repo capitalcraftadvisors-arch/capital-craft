@@ -7,7 +7,8 @@
 import { useEffect, useState } from "react";
 import Card from "@/components/ui/Card";
 import Select from "@/components/ui/Select";
-import DeleteLeadModal from "@/components/DeleteLeadModal";
+import Modal from "@/components/ui/Modal";
+import ConfirmDeleteModal from "@/components/ConfirmDeleteModal";
 import { ACCENTS } from "@/components/AdminSidebar";
 import { supabase } from "@/lib/supabase";
 import { getCached, setCached, invalidate } from "@/lib/list-cache";
@@ -190,53 +191,51 @@ export default function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
       </Card>
 
       {viewLead && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setViewLead(null)}>
-          <div className="w-full max-w-lg bg-white rounded-card-lg shadow-lg p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <h3 className="font-display font-semibold text-[19px] text-[#0f3d2e]">{viewLead.name || "(no name given)"}</h3>
-                <p className="text-[13px] text-[#5a8a76] mt-0.5">Non-EPC lead · <span className="uppercase font-semibold text-[#185fa5]">{viewLead.lead_type}</span></p>
-              </div>
-              <button type="button" onClick={() => setViewLead(null)} className="text-[22px] text-[#5a8a76] hover:text-[#0f3d2e] leading-none" aria-label="Close">×</button>
+        <Modal onClose={() => setViewLead(null)} className="w-full max-w-lg bg-white rounded-card-lg shadow-lg p-6 max-h-[90vh] overflow-y-auto">
+          <div className="flex items-start justify-between mb-4">
+            <div>
+              <h3 className="font-display font-semibold text-[19px] text-[#0f3d2e]">{viewLead.name || "(no name given)"}</h3>
+              <p className="text-[13px] text-[#5a8a76] mt-0.5">Non-EPC lead · <span className="uppercase font-semibold text-[#185fa5]">{viewLead.lead_type}</span></p>
             </div>
-            <div className="border border-[#e6f1ec] rounded-[12px] px-4">
-              <LeadRow k="Mobile" v={"+91 " + viewLead.mobile} />
-              <LeadRow k="City" v={viewLead.city} />
-              <LeadRow k="Pincode" v={viewLead.pincode} />
-              <LeadRow k="PAN" v={viewLead.pan} />
-              <LeadRow k="Aadhaar" v={maskAadhaar(viewLead.aadhaar)} />
-              {viewLead.lead_type === "loan" ? (
-                <>
-                  <LeadRow k="Project cost" v={fmtRupees(viewLead.project_cost)} />
-                  <LeadRow k="Loan amount wanted" v={fmtRupees(viewLead.loan_amount)} />
-                </>
-              ) : (
-                <>
-                  <LeadRow k="Approx. plant value" v={fmtRupees(viewLead.plant_value)} />
-                  <LeadRow k="GSTIN" v={viewLead.gstin} />
-                </>
-              )}
-              <LeadRow k="Status" v={viewLead.status[0].toUpperCase() + viewLead.status.slice(1)} />
-              <LeadRow k="Received" v={fmtDate(viewLead.created_at) + " · " + fmtAddedTime(viewLead.created_at)} />
-            </div>
-            <div className="mt-5 flex items-center justify-between gap-3 flex-wrap">
-              <p className="text-[12px] text-[#5a8a76] max-w-xs">Basic lead details — not under any EPC. Use these to reach out and build the full profile.</p>
-              <button
-                type="button"
-                onClick={() => setDelLead(viewLead)}
-                className="text-[13px] font-semibold px-3.5 py-2 rounded-[8px] border border-red-300 text-red-700 hover:bg-red-50 hover:border-red-500 disabled:opacity-60 shrink-0 inline-flex items-center gap-1.5"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
-                Delete lead
-              </button>
-            </div>
+            <button type="button" onClick={() => setViewLead(null)} className="text-[22px] text-[#5a8a76] hover:text-[#0f3d2e] leading-none" aria-label="Close">×</button>
           </div>
-        </div>
+          <div className="border border-[#e6f1ec] rounded-[12px] px-4">
+            <LeadRow k="Mobile" v={"+91 " + viewLead.mobile} />
+            <LeadRow k="City" v={viewLead.city} />
+            <LeadRow k="Pincode" v={viewLead.pincode} />
+            <LeadRow k="PAN" v={viewLead.pan} />
+            <LeadRow k="Aadhaar" v={maskAadhaar(viewLead.aadhaar)} />
+            {viewLead.lead_type === "loan" ? (
+              <>
+                <LeadRow k="Project cost" v={fmtRupees(viewLead.project_cost)} />
+                <LeadRow k="Loan amount wanted" v={fmtRupees(viewLead.loan_amount)} />
+              </>
+            ) : (
+              <>
+                <LeadRow k="Approx. plant value" v={fmtRupees(viewLead.plant_value)} />
+                <LeadRow k="GSTIN" v={viewLead.gstin} />
+              </>
+            )}
+            <LeadRow k="Status" v={viewLead.status[0].toUpperCase() + viewLead.status.slice(1)} />
+            <LeadRow k="Received" v={fmtDate(viewLead.created_at) + " · " + fmtAddedTime(viewLead.created_at)} />
+          </div>
+          <div className="mt-5 flex items-center justify-between gap-3 flex-wrap">
+            <p className="text-[12px] text-[#5a8a76] max-w-xs">Basic lead details — not under any EPC. Use these to reach out and build the full profile.</p>
+            <button
+              type="button"
+              onClick={() => setDelLead(viewLead)}
+              className="text-[13px] font-semibold px-3.5 py-2 rounded-[8px] border border-red-300 text-red-700 hover:bg-red-50 hover:border-red-500 disabled:opacity-60 shrink-0 inline-flex items-center gap-1.5"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+              Delete lead
+            </button>
+          </div>
+        </Modal>
       )}
 
       {/* Type-DELETE confirm — replaces the old window.confirm. Deletes via the
           admin-only route (writes an activity-log entry). */}
-      <DeleteLeadModal
+      <ConfirmDeleteModal
         open={!!delLead}
         onClose={() => setDelLead(null)}
         onDeleted={(p) => {
@@ -245,10 +244,18 @@ export default function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
           setDelLead(null);
           setViewLead(null);
         }}
-        leadId={delLead?.id ?? ""}
-        name={delLead?.name ?? null}
-        mobile={delLead?.mobile ?? null}
-        leadType={delLead?.lead_type ?? null}
+        endpoint="/api/admin/delete-lead"
+        body={{ leadId: delLead?.id ?? "" }}
+        title="Delete lead permanently"
+        confirmLabel="Delete permanently"
+        message="You’re about to permanently delete this lead. This cannot be undone."
+        rows={[
+          { label: "Name", value: delLead?.name || "(no name)", className: "font-semibold" },
+          { label: "Mobile", value: `+91 ${delLead?.mobile || "—"}` },
+          { label: "Type", value: delLead?.lead_type || "—", className: "capitalize" },
+        ]}
+        stacked
+        narrow
       />
     </>
   );

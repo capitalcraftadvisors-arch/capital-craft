@@ -15,7 +15,7 @@ import { I, SectionCard, KV, Pill, DocGrid, StatusBtn, type ViewDocSlot } from "
 import InsuranceUpload from "@/components/InsuranceUpload";
 import OwnershipCard from "@/components/OwnershipCard";
 import ProfileTabBar, { TabButton } from "@/components/ProfileTabBar";
-import DeleteInsuranceModal from "@/components/DeleteInsuranceModal";
+import ConfirmDeleteModal from "@/components/ConfirmDeleteModal";
 import DateField from "@/components/ui/DateField";
 import { policyValidity } from "@/lib/insurance-validity";
 
@@ -354,7 +354,7 @@ function Inner() {
 
       </div>
 
-      <DeleteInsuranceModal
+      <ConfirmDeleteModal<{ id: string; display_id: string | null; applicant: string | null }>
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
         onDeleted={(payload) => {
@@ -362,9 +362,20 @@ function Inner() {
           alert(`Deleted ${payload.display_id ?? "insurance application"}${payload.applicant ? ` — ${payload.applicant}` : ""}.`);
           router.push("/admin");
         }}
-        applicationId={app.id}
-        displayId={app.insurance_display_id ?? null}
-        applicant={app.aadhaar_name ?? null}
+        endpoint="/api/admin/delete-insurance"
+        body={{ applicationId: app.id }}
+        title="Delete insurance application"
+        confirmLabel="Delete permanently"
+        message="You’re about to permanently delete this insurance application and every document attached to it. This cannot be undone."
+        rows={[
+          { label: "Display ID", value: app.insurance_display_id ?? "—", className: "font-mono font-semibold" },
+          { label: "Applicant", value: app.aadhaar_name || "(no name)", className: "font-semibold" },
+        ]}
+        deletes={[
+          "The insurance application row",
+          "All uploaded documents (PAN, Aadhaar, GST, e-bill, invoice, plant/panel/inverter/meter photos, policy)",
+          "Storage folder in Google Cloud Storage",
+        ]}
       />
     </main>
   );

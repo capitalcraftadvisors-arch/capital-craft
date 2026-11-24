@@ -17,6 +17,7 @@ import { fmtDateTime } from "@/lib/dates";
 
 import { useEffect, useState } from "react";
 import Button from "@/components/ui/Button";
+import Modal from "@/components/ui/Modal";
 import { supabase } from "@/lib/supabase";
 import { getBusiness } from "@/lib/auth";
 
@@ -111,121 +112,113 @@ export default function CommentsPanel({
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl bg-white rounded-lg shadow-lg flex flex-col max-h-[90vh]"
-      >
-        <div className="p-5 border-b border-line flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h3 className="font-display font-semibold text-[18px] text-text truncate">
-              Comments{epcName ? ` — ${epcName}` : ""}
-            </h3>
-            <p className="text-[12px] text-text-mid mt-0.5">Admin-only. EPCs never see these notes.</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-[20px] text-text-muted hover:text-text leading-none"
-            aria-label="Close"
-          >
-            ×
-          </button>
+    <Modal onClose={onClose} className="w-full max-w-xl bg-white rounded-lg shadow-lg flex flex-col max-h-[90vh]">
+      <div className="p-5 border-b border-line flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="font-display font-semibold text-[18px] text-text truncate">
+            Comments{epcName ? ` — ${epcName}` : ""}
+          </h3>
+          <p className="text-[12px] text-text-mid mt-0.5">Admin-only. EPCs never see these notes.</p>
         </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-[20px] text-text-muted hover:text-text leading-none"
+          aria-label="Close"
+        >
+          ×
+        </button>
+      </div>
 
-        <div className="flex-1 overflow-y-auto p-5 space-y-3">
-          {loading ? (
-            <p className="text-[13px] text-text-muted">Loading…</p>
-          ) : rows.length === 0 ? (
-            <p className="text-[13px] text-text-muted">No comments yet — add the first one below.</p>
-          ) : (
-            rows.map((r) => {
-              const mine = r.author_id && myId && r.author_id === myId;
-              const isEditing = editingId === r.id;
-              return (
-                <div key={r.id} className="border border-line rounded-input p-3 bg-bg-soft">
-                  <div className="flex items-center justify-between gap-3 mb-1.5">
-                    <div className="text-[12px] text-text-mid">
-                      <span className="font-semibold text-text">{r.author_name || "Admin"}</span>
-                      <span className="mx-1 text-text-muted">·</span>
-                      <span>{fmtWhen(r.created_at)}</span>
-                      {r.updated_at !== r.created_at && (
-                        <span className="ml-2 text-[11px] text-text-muted italic">(edited)</span>
-                      )}
-                    </div>
-                    {mine && !isEditing && (
-                      <div className="flex gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => { setEditingId(r.id); setEditingText(r.comment_text); }}
-                          className="text-[12px] text-blue hover:underline"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => remove(r.id)}
-                          className="text-[12px] text-text-muted hover:text-red-500"
-                        >
-                          Delete
-                        </button>
-                      </div>
+      <div className="flex-1 overflow-y-auto p-5 space-y-3">
+        {loading ? (
+          <p className="text-[13px] text-text-muted">Loading…</p>
+        ) : rows.length === 0 ? (
+          <p className="text-[13px] text-text-muted">No comments yet — add the first one below.</p>
+        ) : (
+          rows.map((r) => {
+            const mine = r.author_id && myId && r.author_id === myId;
+            const isEditing = editingId === r.id;
+            return (
+              <div key={r.id} className="border border-line rounded-input p-3 bg-bg-soft">
+                <div className="flex items-center justify-between gap-3 mb-1.5">
+                  <div className="text-[12px] text-text-mid">
+                    <span className="font-semibold text-text">{r.author_name || "Admin"}</span>
+                    <span className="mx-1 text-text-muted">·</span>
+                    <span>{fmtWhen(r.created_at)}</span>
+                    {r.updated_at !== r.created_at && (
+                      <span className="ml-2 text-[11px] text-text-muted italic">(edited)</span>
                     )}
                   </div>
-                  {isEditing ? (
-                    <div className="space-y-2">
-                      <textarea
-                        value={editingText}
-                        onChange={(e) => setEditingText(e.target.value)}
-                        rows={3}
-                        className="w-full border border-line rounded-input px-3 py-2 text-[13px] bg-white focus:border-blue outline-none"
-                      />
-                      <div className="flex justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => { setEditingId(null); setEditingText(""); }}
-                          className="text-[12px] px-2.5 py-1 border border-line rounded hover:border-blue"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          disabled={busy || !editingText.trim()}
-                          onClick={() => saveEdit(r.id)}
-                          className="text-[12px] px-3 py-1 bg-blue text-white rounded hover:bg-blue-dark disabled:opacity-50"
-                        >
-                          Save
-                        </button>
-                      </div>
+                  {mine && !isEditing && (
+                    <div className="flex gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => { setEditingId(r.id); setEditingText(r.comment_text); }}
+                        className="text-[12px] text-blue hover:underline"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => remove(r.id)}
+                        className="text-[12px] text-text-muted hover:text-red-500"
+                      >
+                        Delete
+                      </button>
                     </div>
-                  ) : (
-                    <p className="text-[13px] text-text whitespace-pre-wrap">{r.comment_text}</p>
                   )}
                 </div>
-              );
-            })
-          )}
-        </div>
+                {isEditing ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={editingText}
+                      onChange={(e) => setEditingText(e.target.value)}
+                      rows={3}
+                      className="w-full border border-line rounded-input px-3 py-2 text-[13px] bg-white focus:border-blue outline-none"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setEditingId(null); setEditingText(""); }}
+                        className="text-[12px] px-2.5 py-1 border border-line rounded hover:border-blue"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || !editingText.trim()}
+                        onClick={() => saveEdit(r.id)}
+                        className="text-[12px] px-3 py-1 bg-blue text-white rounded hover:bg-blue-dark disabled:opacity-50"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[13px] text-text whitespace-pre-wrap">{r.comment_text}</p>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
 
-        <div className="p-4 border-t border-line bg-white">
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            rows={2}
-            placeholder="Add a comment for internal review…"
-            className="w-full border border-line rounded-input px-3 py-2 text-[13px] bg-white focus:border-blue outline-none"
-          />
-          <div className="mt-2 flex justify-end">
-            <Button type="button" variant="primary" onClick={add} loading={busy} disabled={!text.trim()}>
-              Add comment
-            </Button>
-          </div>
+      <div className="p-4 border-t border-line bg-white">
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          rows={2}
+          placeholder="Add a comment for internal review…"
+          className="w-full border border-line rounded-input px-3 py-2 text-[13px] bg-white focus:border-blue outline-none"
+        />
+        <div className="mt-2 flex justify-end">
+          <Button type="button" variant="primary" onClick={add} loading={busy} disabled={!text.trim()}>
+            Add comment
+          </Button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 

@@ -17,6 +17,7 @@ import { fmtDateTime } from "@/lib/dates";
 //        otherwise the log already covers those transitions.
 
 import { useEffect, useState } from "react";
+import Modal from "@/components/ui/Modal";
 import { supabase } from "@/lib/supabase";
 import { useAdminNames } from "@/lib/use-admin-names";
 
@@ -246,37 +247,29 @@ export default function LoanActivityLogModal({ open, onClose, loan, borrowerName
   if (!open) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-2xl bg-white rounded-lg shadow-lg flex flex-col max-h-[90vh]"
-      >
-        <div className="p-5 border-b border-line flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h3 className="font-display font-semibold text-[18px] text-text truncate">
-              Activity log{borrowerName ? ` — ${borrowerName}` : ""}
-            </h3>
-            <p className="text-[12px] text-text-mid mt-0.5">
-              Chronological — every step save, submission, approval, rejection and status change.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-[20px] text-text-muted hover:text-text leading-none"
-            aria-label="Close"
-          >
-            ×
-          </button>
+    <Modal onClose={onClose} className="w-full max-w-2xl bg-white rounded-lg shadow-lg flex flex-col max-h-[90vh]">
+      <div className="p-5 border-b border-line flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="font-display font-semibold text-[18px] text-text truncate">
+            Activity log{borrowerName ? ` — ${borrowerName}` : ""}
+          </h3>
+          <p className="text-[12px] text-text-mid mt-0.5">
+            Chronological — every step save, submission, approval, rejection and status change.
+          </p>
         </div>
-
-        <div className="flex-1 overflow-y-auto p-5">
-          {loan ? <LoanActivityList loan={loan} /> : null}
-        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-[20px] text-text-muted hover:text-text leading-none"
+          aria-label="Close"
+        >
+          ×
+        </button>
       </div>
-    </div>
+
+      <div className="flex-1 overflow-y-auto p-5">
+        {loan ? <LoanActivityList loan={loan} /> : null}
+      </div>
+    </Modal>
   );
 }

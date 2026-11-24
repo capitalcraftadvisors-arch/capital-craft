@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import DateField from "@/components/ui/DateField";
+import Modal from "@/components/ui/Modal";
 import { fmtDate, localIsoDate, withLocalDate } from "@/lib/dates";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { invalidateLoanBoards } from "@/lib/ops-board";
@@ -106,30 +107,28 @@ export default function EditLoanDatesModal({
   const inputCls = "w-full border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] focus:border-[#185fa5] outline-none bg-white";
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => { if (!busy) onClose(); }}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
-        <h3 className="font-semibold text-[18px] text-[#0f3d2e]">Edit dates</h3>
-        <div className="mt-4 space-y-3">
-          {keys.map((k) => (
-            <div key={k}>
-              <p className="text-[12px] text-[#5a8a76] mb-1">{LABEL[k]}</p>
-              <DateField className={inputCls} value={val[k] ?? ""} max={today}
-                onChange={(iso) => setVal((v) => ({ ...v, [k]: iso }))} ariaLabel={LABEL[k]} />
-            </div>
-          ))}
-        </div>
-        {error && <p className="mt-3 text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-[8px] px-3 py-2">{error}</p>}
-        <div className="mt-5 flex justify-end gap-2">
-          <button type="button" onClick={onClose} disabled={busy}
-            className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border border-[#cdeadd] bg-white text-[#0f3d2e] hover:bg-[#f0faf5] disabled:opacity-60">
-            Cancel
-          </button>
-          <button type="button" onClick={() => void save()} disabled={busy}
-            className="text-[13px] font-semibold px-3 py-2 rounded-[8px] bg-[#178a5c] text-white hover:bg-[#12734c] disabled:opacity-60">
-            {busy ? "Saving…" : "Save"}
-          </button>
-        </div>
+    <Modal onClose={onClose} busy={busy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
+      <h3 className="font-semibold text-[18px] text-[#0f3d2e]">Edit dates</h3>
+      <div className="mt-4 space-y-3">
+        {keys.map((k) => (
+          <div key={k}>
+            <p className="text-[12px] text-[#5a8a76] mb-1">{LABEL[k]}</p>
+            <DateField className={inputCls} value={val[k] ?? ""} max={today}
+              onChange={(iso) => setVal((v) => ({ ...v, [k]: iso }))} ariaLabel={LABEL[k]} />
+          </div>
+        ))}
       </div>
-    </div>
+      {error && <p className="mt-3 text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-[8px] px-3 py-2">{error}</p>}
+      <div className="mt-5 flex justify-end gap-2">
+        <button type="button" onClick={onClose} disabled={busy}
+          className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border border-[#cdeadd] bg-white text-[#0f3d2e] hover:bg-[#f0faf5] disabled:opacity-60">
+          Cancel
+        </button>
+        <button type="button" onClick={() => void save()} disabled={busy}
+          className="text-[13px] font-semibold px-3 py-2 rounded-[8px] bg-[#178a5c] text-white hover:bg-[#12734c] disabled:opacity-60">
+          {busy ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </Modal>
   );
 }

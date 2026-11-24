@@ -20,6 +20,7 @@ import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
+import Modal from "@/components/ui/Modal";
 import FileUpload from "@/components/FileUpload";
 import { supabase } from "@/lib/supabase";
 import { getToken } from "@/lib/auth";
@@ -375,37 +376,35 @@ function Inner() {
         </Card>
 
         {epcPickOpen && (
-          <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => { if (!epcBusy) setEpcPickOpen(false); }}>
-            <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-white rounded-lg shadow-lg p-5">
-              <div className="flex items-start justify-between mb-3">
-                <h3 className="font-display font-semibold text-[18px] text-text">Change EPC</h3>
-                <button type="button" onClick={() => setEpcPickOpen(false)} disabled={epcBusy} aria-label="Close"
-                  className="text-[18px] text-text-muted hover:text-text leading-none disabled:opacity-40">×</button>
-              </div>
-              <input
-                autoFocus
-                value={epcSearch}
-                onChange={(e) => setEpcSearch(e.target.value)}
-                placeholder="Search approved EPCs…"
-                className="w-full rounded-input border border-line bg-white px-3 py-2 text-[14px] outline-none focus:border-blue mb-2"
-              />
-              <div className="max-h-[50vh] overflow-y-auto flex flex-col border border-line rounded-input">
-                {(() => {
-                  if (!epcList.length) return <div className="text-[13px] text-text-muted px-3 py-3">Loading partners…</div>;
-                  const q = epcSearch.trim().toLowerCase();
-                  const rows = epcList.filter((e) => !q || `${e.trade_name ?? ""} ${e.legal_name ?? ""} ${e.contact_name ?? ""} ${e.epc_display_id ?? ""}`.toLowerCase().includes(q));
-                  if (!rows.length) return <div className="text-[13px] text-text-muted px-3 py-3">No approved EPC matches.</div>;
-                  return rows.map((e) => (
-                    <button key={e.id} type="button" disabled={epcBusy} onClick={() => void chooseEpc(e)}
-                      className={["text-left px-3 py-2.5 border-b border-line/60 last:border-0 hover:bg-[#f7fcf9] transition disabled:opacity-60", e.id === loan?.epc_business_id ? "bg-[#f0faf5]" : ""].join(" ")}>
-                      <div className="text-[14px] font-semibold text-text">{e.trade_name || e.legal_name || e.contact_name || "(unnamed EPC)"}</div>
-                      {e.epc_display_id && <div className="text-[12px] text-text-muted font-mono">{e.epc_display_id}</div>}
-                    </button>
-                  ));
-                })()}
-              </div>
+          <Modal onClose={() => setEpcPickOpen(false)} busy={epcBusy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-5">
+            <div className="flex items-start justify-between mb-3">
+              <h3 className="font-display font-semibold text-[18px] text-text">Change EPC</h3>
+              <button type="button" onClick={() => setEpcPickOpen(false)} disabled={epcBusy} aria-label="Close"
+                className="text-[18px] text-text-muted hover:text-text leading-none disabled:opacity-40">×</button>
             </div>
-          </div>
+            <input
+              autoFocus
+              value={epcSearch}
+              onChange={(e) => setEpcSearch(e.target.value)}
+              placeholder="Search approved EPCs…"
+              className="w-full rounded-input border border-line bg-white px-3 py-2 text-[14px] outline-none focus:border-blue mb-2"
+            />
+            <div className="max-h-[50vh] overflow-y-auto flex flex-col border border-line rounded-input">
+              {(() => {
+                if (!epcList.length) return <div className="text-[13px] text-text-muted px-3 py-3">Loading partners…</div>;
+                const q = epcSearch.trim().toLowerCase();
+                const rows = epcList.filter((e) => !q || `${e.trade_name ?? ""} ${e.legal_name ?? ""} ${e.contact_name ?? ""} ${e.epc_display_id ?? ""}`.toLowerCase().includes(q));
+                if (!rows.length) return <div className="text-[13px] text-text-muted px-3 py-3">No approved EPC matches.</div>;
+                return rows.map((e) => (
+                  <button key={e.id} type="button" disabled={epcBusy} onClick={() => void chooseEpc(e)}
+                    className={["text-left px-3 py-2.5 border-b border-line/60 last:border-0 hover:bg-[#f7fcf9] transition disabled:opacity-60", e.id === loan?.epc_business_id ? "bg-[#f0faf5]" : ""].join(" ")}>
+                    <div className="text-[14px] font-semibold text-text">{e.trade_name || e.legal_name || e.contact_name || "(unnamed EPC)"}</div>
+                    {e.epc_display_id && <div className="text-[12px] text-text-muted font-mono">{e.epc_display_id}</div>}
+                  </button>
+                ));
+              })()}
+            </div>
+          </Modal>
         )}
 
         {/* Section: installation location */}

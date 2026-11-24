@@ -23,6 +23,7 @@ import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
 import DateField from "@/components/ui/DateField";
+import Modal, { OVERLAY } from "@/components/ui/Modal";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { getCached, setCached, invalidate } from "@/lib/list-cache";
@@ -502,66 +503,64 @@ function LeadWindow({ lead, added, busy, onUpdate, onLog, onClose }: {
     <div className="min-w-0"><div className="text-[11.5px] text-[#5a8a76]">{l}</div><div className="text-[14px] text-[#0f3d2e] break-words">{v || "—"}</div></div>
   );
   return (
-    <div className="fixed inset-0 z-50 bg-black/30 grid place-items-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-[680px] max-h-[92vh] overflow-y-auto p-6">
-        <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
-          <div>
-            <div className="text-[18px] font-display font-bold text-[#0f3d2e]">{lead.name || "—"}</div>
-            <div className="text-[13px] text-[#185fa5]">+91 {lead.mobile}</div>
-          </div>
-          <CallActions lead={lead} onLog={() => onLog()} />
+    <Modal onClose={onClose} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[680px] max-h-[92vh] overflow-y-auto p-6">
+      <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
+        <div>
+          <div className="text-[18px] font-display font-bold text-[#0f3d2e]">{lead.name || "—"}</div>
+          <div className="text-[13px] text-[#185fa5]">+91 {lead.mobile}</div>
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
-          {row("City", [lead.city, lead.pincode].filter(Boolean).join(" · "))}
-          {row("State", lead.state)}
-          {row("Monthly bill", lead.monthly_bill)}
-          {row("Looking for", words(lead.looking_for))}
-          {row("Timeline", words(lead.timeline))}
-          {row("Source", [lead.utm_source, lead.utm_campaign].filter(Boolean).join(" · "))}
-          {row("Received", fmtDateTime(lead.created_at))}
-        </div>
-        <div className="grid sm:grid-cols-2 gap-3 mb-4">
-          <label className="flex flex-col gap-1">
-            <span className="text-[12px] font-medium text-[#5a8a76]">Status</span>
-            <select disabled={busy} value={lead.status} onChange={(e) => void onUpdate({ status: e.target.value })}
-              className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none">
-              {LEAD_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[12px] font-medium text-[#5a8a76]">Next follow-up</span>
-            <DateField value={lead.follow_up_at ?? ""} disabled={busy} onChange={(v) => void onUpdate({ follow_up_at: v || null })}
-              className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none" />
-          </label>
-          <label className="flex flex-col gap-1 sm:col-span-2">
-            <span className="text-[12px] font-medium text-[#5a8a76]">Notes</span>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3}
-              onBlur={() => { if (notes.trim() !== (lead.notes ?? "").trim()) void onUpdate({ notes: notes.trim() || null }); }}
-              className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none resize-none" />
-          </label>
-        </div>
-        <div className="text-[12px] font-medium text-[#5a8a76] mb-1.5">Calls</div>
-        {!calls ? <p className="text-[13px] text-[#5a8a76]">Loading…</p>
-          : calls.length === 0 ? <p className="text-[13px] text-[#5a8a76]">No calls yet.</p>
-          : (
-            <div className="flex flex-col divide-y divide-[#eaf3ee] border border-[#eaf3ee] rounded-xl">
-              {calls.map((c) => (
-                <div key={c.id} className="px-3 py-2 text-[13px]">
-                  <div className="flex justify-between gap-3">
-                    <span className="font-semibold text-[#0f3d2e]">{OUTCOME_LABEL[c.outcome] ?? c.outcome}</span>
-                    <span className="text-[#5a8a76] whitespace-nowrap">{fmtDateTime(c.called_at)}</span>
-                  </div>
-                  {c.note && <div className="text-[#0f3d2e] mt-0.5">{c.note}</div>}
-                  {c.next_follow_up && <div className="text-[12px] text-[#5a8a76]">Follow-up {fmtDate(c.next_follow_up)}</div>}
-                </div>
-              ))}
-            </div>
-          )}
-        <div className="flex justify-end mt-5">
-          <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-[#5a8a76] hover:bg-[#f7fcfa]">Close</button>
-        </div>
+        <CallActions lead={lead} onLog={() => onLog()} />
       </div>
-    </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+        {row("City", [lead.city, lead.pincode].filter(Boolean).join(" · "))}
+        {row("State", lead.state)}
+        {row("Monthly bill", lead.monthly_bill)}
+        {row("Looking for", words(lead.looking_for))}
+        {row("Timeline", words(lead.timeline))}
+        {row("Source", [lead.utm_source, lead.utm_campaign].filter(Boolean).join(" · "))}
+        {row("Received", fmtDateTime(lead.created_at))}
+      </div>
+      <div className="grid sm:grid-cols-2 gap-3 mb-4">
+        <label className="flex flex-col gap-1">
+          <span className="text-[12px] font-medium text-[#5a8a76]">Status</span>
+          <select disabled={busy} value={lead.status} onChange={(e) => void onUpdate({ status: e.target.value })}
+            className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none">
+            {LEAD_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[12px] font-medium text-[#5a8a76]">Next follow-up</span>
+          <DateField value={lead.follow_up_at ?? ""} disabled={busy} onChange={(v) => void onUpdate({ follow_up_at: v || null })}
+            className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none" />
+        </label>
+        <label className="flex flex-col gap-1 sm:col-span-2">
+          <span className="text-[12px] font-medium text-[#5a8a76]">Notes</span>
+          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3}
+            onBlur={() => { if (notes.trim() !== (lead.notes ?? "").trim()) void onUpdate({ notes: notes.trim() || null }); }}
+            className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none resize-none" />
+        </label>
+      </div>
+      <div className="text-[12px] font-medium text-[#5a8a76] mb-1.5">Calls</div>
+      {!calls ? <p className="text-[13px] text-[#5a8a76]">Loading…</p>
+        : calls.length === 0 ? <p className="text-[13px] text-[#5a8a76]">No calls yet.</p>
+        : (
+          <div className="flex flex-col divide-y divide-[#eaf3ee] border border-[#eaf3ee] rounded-xl">
+            {calls.map((c) => (
+              <div key={c.id} className="px-3 py-2 text-[13px]">
+                <div className="flex justify-between gap-3">
+                  <span className="font-semibold text-[#0f3d2e]">{OUTCOME_LABEL[c.outcome] ?? c.outcome}</span>
+                  <span className="text-[#5a8a76] whitespace-nowrap">{fmtDateTime(c.called_at)}</span>
+                </div>
+                {c.note && <div className="text-[#0f3d2e] mt-0.5">{c.note}</div>}
+                {c.next_follow_up && <div className="text-[12px] text-[#5a8a76]">Follow-up {fmtDate(c.next_follow_up)}</div>}
+              </div>
+            ))}
+          </div>
+        )}
+      <div className="flex justify-end mt-5">
+        <button type="button" onClick={onClose} className="px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-[#5a8a76] hover:bg-[#f7fcfa]">Close</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -599,53 +598,51 @@ function LogCall({ lead, onLogged, onClose }: { lead: Lead; onLogged: (c: Call, 
   }
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/30 grid place-items-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-[520px] max-h-[92vh] overflow-y-auto p-6">
-        <div className="text-[16px] font-display font-bold text-[#0f3d2e]">Log call</div>
-        <div className="text-[13px] text-[#5a8a76] mb-4">{lead.name || "—"} · +91 {lead.mobile}</div>
-        <div className="flex flex-wrap gap-1.5 mb-4">
-          {OUTCOMES.map((o) => (
-            <button key={o} type="button" onClick={() => pick(o)} disabled={busy}
-              className={["px-3 py-1.5 rounded-full text-[12.5px] font-semibold border", outcome === o ? "text-white border-transparent" : "bg-white border-line text-[#0f3d2e]"].join(" ")}
-              style={outcome === o ? { background: ACCENTS.gzb.color } : undefined}>
-              {OUTCOME_LABEL[o]}
-            </button>
-          ))}
-        </div>
-        <label className="flex flex-col gap-1 mb-3">
-          <span className="text-[12px] font-medium text-[#5a8a76]">Note</span>
-          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} disabled={busy}
-            className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none resize-none" />
-        </label>
-        <div className="grid sm:grid-cols-2 gap-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-[12px] font-medium text-[#5a8a76]">Next follow-up</span>
-            <DateField value={next} onChange={setNext} disabled={busy} min={localIsoDate(new Date())}
-              className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none" />
-            <div className="flex gap-1.5 mt-1">
-              {QUICK.map(([l, n]) => (
-                <button key={l} type="button" onClick={() => setNext(inDays(n))} disabled={busy}
-                  className="px-2 py-1 rounded-lg text-[11.5px] font-semibold border border-line text-[#0f3d2e] hover:bg-[#f7fcfa]">{l}</button>
-              ))}
-            </div>
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-[12px] font-medium text-[#5a8a76]">Status</span>
-            <select value={status} onChange={(e) => setStatus(e.target.value)} disabled={busy}
-              className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none">
-              {LEAD_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
-          </label>
-        </div>
-        {error && <p className="text-[13px] text-red-600 mt-3">{error}</p>}
-        <div className="flex justify-end gap-2 mt-5">
-          <button type="button" onClick={onClose} disabled={busy} className="px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-[#5a8a76] hover:bg-[#f7fcfa]">Cancel</button>
-          <button type="button" onClick={() => void save()} disabled={busy}
-            className="px-5 py-2.5 rounded-xl text-white text-[13.5px] font-semibold disabled:opacity-60" style={{ background: ACCENTS.gzb.color }}>
-            {busy ? "Saving…" : "Save"}
+    <Modal onClose={onClose} busy={busy} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.softTop} className="bg-white rounded-2xl shadow-xl w-full max-w-[520px] max-h-[92vh] overflow-y-auto p-6">
+      <div className="text-[16px] font-display font-bold text-[#0f3d2e]">Log call</div>
+      <div className="text-[13px] text-[#5a8a76] mb-4">{lead.name || "—"} · +91 {lead.mobile}</div>
+      <div className="flex flex-wrap gap-1.5 mb-4">
+        {OUTCOMES.map((o) => (
+          <button key={o} type="button" onClick={() => pick(o)} disabled={busy}
+            className={["px-3 py-1.5 rounded-full text-[12.5px] font-semibold border", outcome === o ? "text-white border-transparent" : "bg-white border-line text-[#0f3d2e]"].join(" ")}
+            style={outcome === o ? { background: ACCENTS.gzb.color } : undefined}>
+            {OUTCOME_LABEL[o]}
           </button>
-        </div>
+        ))}
       </div>
-    </div>
+      <label className="flex flex-col gap-1 mb-3">
+        <span className="text-[12px] font-medium text-[#5a8a76]">Note</span>
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} disabled={busy}
+          className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none resize-none" />
+      </label>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <label className="flex flex-col gap-1">
+          <span className="text-[12px] font-medium text-[#5a8a76]">Next follow-up</span>
+          <DateField value={next} onChange={setNext} disabled={busy} min={localIsoDate(new Date())}
+            className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none" />
+          <div className="flex gap-1.5 mt-1">
+            {QUICK.map(([l, n]) => (
+              <button key={l} type="button" onClick={() => setNext(inDays(n))} disabled={busy}
+                className="px-2 py-1 rounded-lg text-[11.5px] font-semibold border border-line text-[#0f3d2e] hover:bg-[#f7fcfa]">{l}</button>
+            ))}
+          </div>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[12px] font-medium text-[#5a8a76]">Status</span>
+          <select value={status} onChange={(e) => setStatus(e.target.value)} disabled={busy}
+            className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none">
+            {LEAD_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+      </div>
+      {error && <p className="text-[13px] text-red-600 mt-3">{error}</p>}
+      <div className="flex justify-end gap-2 mt-5">
+        <button type="button" onClick={onClose} disabled={busy} className="px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-[#5a8a76] hover:bg-[#f7fcfa]">Cancel</button>
+        <button type="button" onClick={() => void save()} disabled={busy}
+          className="px-5 py-2.5 rounded-xl text-white text-[13.5px] font-semibold disabled:opacity-60" style={{ background: ACCENTS.gzb.color }}>
+          {busy ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </Modal>
   );
 }

@@ -19,6 +19,7 @@ import type { Tranche2 } from "@/lib/tranche2";
 import LoanLenderPickerModal, { type PickerLender } from "@/components/LoanLenderPickerModal";
 import Select from "@/components/ui/Select";
 import DateField from "@/components/ui/DateField";
+import Modal, { OVERLAY, BACKDROP } from "@/components/ui/Modal";
 import LoanActivityLogModal from "@/components/LoanActivityLogModal";
 import ActivityLogModal from "@/components/ActivityLogModal";
 import { supabase } from "@/lib/supabase";
@@ -601,151 +602,142 @@ function MyDayQueue({ items, onOpen, q, onSearch, showOwner, ownerControl, defau
 
       {/* WhatsApp composer — pick pending items → Hindi message → open WhatsApp. */}
       {waCase && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setWaCase(null)}>
-          <div className="absolute inset-0 bg-black/40" />
-          <div className="relative w-full max-w-md bg-white rounded-card-lg shadow-lg p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-2 mb-3">
-              <div>
-                <div className="text-[15px] font-bold text-text">Send WhatsApp</div>
-                <div className="text-[12px] text-text-muted">{waCase.name}</div>
-              </div>
-              <button type="button" onClick={() => setWaCase(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
+        <Modal onClose={() => setWaCase(null)} overlayClassName={OVERLAY.layered} backdropClassName={BACKDROP} className="relative w-full max-w-md bg-white rounded-card-lg shadow-lg p-5 max-h-[90vh] overflow-y-auto">
+          <div className="flex items-start justify-between gap-2 mb-3">
+            <div>
+              <div className="text-[15px] font-bold text-text">Send WhatsApp</div>
+              <div className="text-[12px] text-text-muted">{waCase.name}</div>
             </div>
+            <button type="button" onClick={() => setWaCase(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
+          </div>
 
-            {/* Message intent */}
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid mb-1.5">Message</div>
-            <div className="flex flex-wrap gap-1.5 mb-2.5">
-              {waIntents.map((t) => (
-                <button key={t.key} type="button" onClick={() => setWaIntent(t.key)}
-                  className={["text-[12px] rounded-lg border px-2.5 py-1.5 transition-colors", waIntent === t.key ? "border-[#0f766e] bg-[#0f766e] text-white font-semibold" : "border-line bg-white text-text-mid hover:bg-bg-tint"].join(" ")}>
-                  {t.label}
+          {/* Message intent */}
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid mb-1.5">Message</div>
+          <div className="flex flex-wrap gap-1.5 mb-2.5">
+            {waIntents.map((t) => (
+              <button key={t.key} type="button" onClick={() => setWaIntent(t.key)}
+                className={["text-[12px] rounded-lg border px-2.5 py-1.5 transition-colors", waIntent === t.key ? "border-[#0f766e] bg-[#0f766e] text-white font-semibold" : "border-line bg-white text-text-mid hover:bg-bg-tint"].join(" ")}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Message language (message text only) */}
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Language</span>
+            <div className="inline-flex border border-line rounded-lg overflow-hidden">
+              {WA_LANGS.map((l) => (
+                <button key={l.key} type="button" onClick={() => setWaLang(l.key)}
+                  className={["px-2.5 py-1 text-[12px] font-semibold border-r border-line last:border-r-0", waLang === l.key ? "bg-[#0f766e] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
+                  {l.label}
                 </button>
               ))}
             </div>
+          </div>
 
-            {/* Message language (message text only) */}
-            <div className="flex items-center gap-2 mb-3">
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Language</span>
-              <div className="inline-flex border border-line rounded-lg overflow-hidden">
-                {WA_LANGS.map((l) => (
-                  <button key={l.key} type="button" onClick={() => setWaLang(l.key)}
-                    className={["px-2.5 py-1 text-[12px] font-semibold border-r border-line last:border-r-0", waLang === l.key ? "bg-[#0f766e] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
-                    {l.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Documents — on-file vs still-needed (loan cases are auto-checked) */}
-            {waIntent === "docs" && (
-              <>
-                {waHave.size > 0 && (
-                  <div className="mb-2.5">
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid mb-1">Docs received ({waHave.size})</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {waPending.filter((it) => waHave.has(it.key)).map((it) => (
-                        <span key={it.key} className="text-[11.5px] rounded-lg border border-[#bfe6d3] bg-[#eefaf3] text-[#0f6b4b] px-2 py-1 inline-flex items-center gap-1">✓ {it.label}</span>
-                      ))}
-                    </div>
+          {/* Documents — on-file vs still-needed (loan cases are auto-checked) */}
+          {waIntent === "docs" && (
+            <>
+              {waHave.size > 0 && (
+                <div className="mb-2.5">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid mb-1">Docs received ({waHave.size})</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {waPending.filter((it) => waHave.has(it.key)).map((it) => (
+                      <span key={it.key} className="text-[11.5px] rounded-lg border border-[#bfe6d3] bg-[#eefaf3] text-[#0f6b4b] px-2 py-1 inline-flex items-center gap-1">✓ {it.label}</span>
+                    ))}
                   </div>
+                </div>
+              )}
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Request{waCase.source === "loan" ? " · missing pre-ticked" : ""}</span>
+                {waCase.source === "loan" && (
+                  <button type="button" onClick={() => void runDetect(waCase)} disabled={detecting}
+                    className="text-[11px] font-semibold text-[#185fa5] hover:underline disabled:opacity-50">
+                    {detecting ? "Checking…" : "Re-check"}
+                  </button>
                 )}
-                <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Request{waCase.source === "loan" ? " · missing pre-ticked" : ""}</span>
-                  {waCase.source === "loan" && (
-                    <button type="button" onClick={() => void runDetect(waCase)} disabled={detecting}
-                      className="text-[11px] font-semibold text-[#185fa5] hover:underline disabled:opacity-50">
-                      {detecting ? "Checking…" : "Re-check"}
-                    </button>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-1.5 mb-3">
-                  {waPending.filter((it) => !waHave.has(it.key)).map((it) => {
-                    const on = waSel.has(it.key);
-                    return (
-                      <button key={it.key} type="button" onClick={() => toggleItem(it.key)}
-                        className={["text-left text-[12px] rounded-lg border px-2.5 py-1.5 transition-colors", on ? "border-[#0f766e] bg-[#dcf3ef] text-[#0f3d2e] font-semibold" : "border-line bg-white text-text-mid hover:bg-bg-tint"].join(" ")}>
-                        {on ? "✓ " : ""}{it.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Send to</div>
-            <div className="flex items-center gap-2 mt-1 mb-3">
-              <span className="text-[13px] text-text-muted">+91</span>
-              <input value={waTo} onChange={(e) => setWaTo(e.target.value)} inputMode="numeric" placeholder="10-digit number"
-                className="flex-1 border border-line rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#0f766e]" />
-            </div>
-
-            <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Message preview</div>
-            <textarea value={waMsg} onChange={(e) => setWaMsg(e.target.value)} rows={9}
-              className="w-full mt-1 border border-line rounded-lg px-3 py-2 text-[13px] leading-relaxed outline-none focus:border-[#0f766e] resize-none" />
-
-            <div className="flex items-center justify-between gap-2 mt-3">
-              <span className="text-[11px] text-text-muted">Sent from your WhatsApp</span>
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setWaCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">Cancel</button>
-                <button type="button" onClick={sendWa} disabled={!waTel(waTo)}
-                  className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#128C7E] text-white hover:bg-[#0f766e] disabled:opacity-50 inline-flex items-center gap-1.5">
-                  Send on WhatsApp →
-                </button>
               </div>
+              <div className="grid grid-cols-2 gap-1.5 mb-3">
+                {waPending.filter((it) => !waHave.has(it.key)).map((it) => {
+                  const on = waSel.has(it.key);
+                  return (
+                    <button key={it.key} type="button" onClick={() => toggleItem(it.key)}
+                      className={["text-left text-[12px] rounded-lg border px-2.5 py-1.5 transition-colors", on ? "border-[#0f766e] bg-[#dcf3ef] text-[#0f3d2e] font-semibold" : "border-line bg-white text-text-mid hover:bg-bg-tint"].join(" ")}>
+                      {on ? "✓ " : ""}{it.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Send to</div>
+          <div className="flex items-center gap-2 mt-1 mb-3">
+            <span className="text-[13px] text-text-muted">+91</span>
+            <input value={waTo} onChange={(e) => setWaTo(e.target.value)} inputMode="numeric" placeholder="10-digit number"
+              className="flex-1 border border-line rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#0f766e]" />
+          </div>
+
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Message preview</div>
+          <textarea value={waMsg} onChange={(e) => setWaMsg(e.target.value)} rows={9}
+            className="w-full mt-1 border border-line rounded-lg px-3 py-2 text-[13px] leading-relaxed outline-none focus:border-[#0f766e] resize-none" />
+
+          <div className="flex items-center justify-between gap-2 mt-3">
+            <span className="text-[11px] text-text-muted">Sent from your WhatsApp</span>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setWaCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">Cancel</button>
+              <button type="button" onClick={sendWa} disabled={!waTel(waTo)}
+                className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#128C7E] text-white hover:bg-[#0f766e] disabled:opacity-50 inline-flex items-center gap-1.5">
+                Send on WhatsApp →
+              </button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Follow-up ("Remind me") — set / change / clear a call-back date. */}
       {remindCase && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setRemindCase(null)}>
-          <div className="absolute inset-0 bg-black/40" />
-          <div className="relative w-full max-w-sm bg-white rounded-card-lg shadow-lg p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-2 mb-3">
-              <div>
-                <div className="text-[15px] font-bold text-text">Follow-up date</div>
-                <div className="text-[12px] text-text-muted">{remindCase.name}</div>
-              </div>
-              <button type="button" onClick={() => setRemindCase(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
+        <Modal onClose={() => setRemindCase(null)} overlayClassName={OVERLAY.layered} backdropClassName={BACKDROP} className="relative w-full max-w-sm bg-white rounded-card-lg shadow-lg p-5">
+          <div className="flex items-start justify-between gap-2 mb-3">
+            <div>
+              <div className="text-[15px] font-bold text-text">Follow-up date</div>
+              <div className="text-[12px] text-text-muted">{remindCase.name}</div>
             </div>
-            <DateField value={remindDate} onChange={setRemindDate} min={todayStr}
-              className="border border-line rounded-lg px-3 py-2 text-[14px] outline-none focus:border-[#0f766e]" />
-            <div className="flex items-center justify-between gap-2 mt-4">
-              {remindCase.followUpAt
-                ? <button type="button" onClick={() => { onSetFollowUp(remindCase, null); setRemindCase(null); }} className="text-[12px] font-semibold text-[#b42318] hover:underline">Remove</button>
-                : <span />}
-              <div className="flex gap-2">
-                <button type="button" onClick={() => setRemindCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">Cancel</button>
-                <button type="button" onClick={() => { onSetFollowUp(remindCase, remindDate || null); setRemindCase(null); }} disabled={!remindDate}
-                  className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#0f766e] text-white hover:bg-[#0c5f58] disabled:opacity-50">Set</button>
-              </div>
+            <button type="button" onClick={() => setRemindCase(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
+          </div>
+          <DateField value={remindDate} onChange={setRemindDate} min={todayStr}
+            className="border border-line rounded-lg px-3 py-2 text-[14px] outline-none focus:border-[#0f766e]" />
+          <div className="flex items-center justify-between gap-2 mt-4">
+            {remindCase.followUpAt
+              ? <button type="button" onClick={() => { onSetFollowUp(remindCase, null); setRemindCase(null); }} className="text-[12px] font-semibold text-[#b42318] hover:underline">Remove</button>
+              : <span />}
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setRemindCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">Cancel</button>
+              <button type="button" onClick={() => { onSetFollowUp(remindCase, remindDate || null); setRemindCase(null); }} disabled={!remindDate}
+                className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#0f766e] text-white hover:bg-[#0c5f58] disabled:opacity-50">Set</button>
             </div>
           </div>
-        </div>
+        </Modal>
       )}
 
       {/* Inline note — a comment on the case (visible to everyone). */}
       {noteCase && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setNoteCase(null)}>
-          <div className="absolute inset-0 bg-black/40" />
-          <div className="relative w-full max-w-sm bg-white rounded-card-lg shadow-lg p-5" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-start justify-between gap-2 mb-2">
-              <div>
-                <div className="text-[15px] font-bold text-text">Add comment</div>
-                <div className="text-[12px] text-text-muted">{noteCase.name} · visible to everyone</div>
-              </div>
-              <button type="button" onClick={() => setNoteCase(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
+        <Modal onClose={() => setNoteCase(null)} overlayClassName={OVERLAY.layered} backdropClassName={BACKDROP} className="relative w-full max-w-sm bg-white rounded-card-lg shadow-lg p-5">
+          <div className="flex items-start justify-between gap-2 mb-2">
+            <div>
+              <div className="text-[15px] font-bold text-text">Add comment</div>
+              <div className="text-[12px] text-text-muted">{noteCase.name} · visible to everyone</div>
             </div>
-            <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} rows={4} autoFocus placeholder="Write a comment…"
-              className="w-full border border-line rounded-lg px-3 py-2 text-[13px] leading-relaxed outline-none focus:border-[#0f766e] resize-none" />
-            <div className="flex justify-end gap-2 mt-3">
-              <button type="button" onClick={() => setNoteCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">Cancel</button>
-              <button type="button" onClick={() => { onAddNote(noteCase, noteText); setNoteCase(null); }} disabled={!noteText.trim()}
-                className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#0f766e] text-white hover:bg-[#0c5f58] disabled:opacity-50">Add</button>
-            </div>
+            <button type="button" onClick={() => setNoteCase(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
           </div>
-        </div>
+          <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} rows={4} autoFocus placeholder="Write a comment…"
+            className="w-full border border-line rounded-lg px-3 py-2 text-[13px] leading-relaxed outline-none focus:border-[#0f766e] resize-none" />
+          <div className="flex justify-end gap-2 mt-3">
+            <button type="button" onClick={() => setNoteCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">Cancel</button>
+            <button type="button" onClick={() => { onAddNote(noteCase, noteText); setNoteCase(null); }} disabled={!noteText.trim()}
+              className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#0f766e] text-white hover:bg-[#0c5f58] disabled:opacity-50">Add</button>
+          </div>
+        </Modal>
       )}
 
       {/* Activity log — the case's audit trail (loan / EPC). */}
@@ -1656,20 +1648,18 @@ function Inner() {
         const opensScreen = c.source === "loan" && !!drop.column && LOAN_OPENS_SCREEN.has(drop.column);
         const title = !chk.ok ? "Can’t move there" : opensScreen ? "Continue to the loan?" : "Move this case?";
         return (
-          <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 px-4" onClick={() => !busy && setDrop(null)}>
-            <div className="w-full max-w-sm rounded-[12px] bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-              <div className="text-[15px] font-semibold text-text">{title}</div>
-              <p className={"text-[13px] mt-2 " + (chk.ok ? "text-text-mid" : "text-red-700")}>{chk.msg}</p>
-              <div className="mt-4 flex items-center justify-end gap-2">
-                <button className="btn-act ghost" onClick={() => setDrop(null)} disabled={busy}>{chk.ok ? "Cancel" : "OK"}</button>
-                {chk.ok && (
-                  <button className="btn-act primary" onClick={() => void confirmDrop()} disabled={busy}>
-                    {busy ? "Working…" : opensScreen ? "Continue →" : "Yes, move"}
-                  </button>
-                )}
-              </div>
+          <Modal onClose={() => setDrop(null)} busy={busy} overlayClassName={OVERLAY.grid} className="w-full max-w-sm rounded-[12px] bg-white p-5 shadow-xl">
+            <div className="text-[15px] font-semibold text-text">{title}</div>
+            <p className={"text-[13px] mt-2 " + (chk.ok ? "text-text-mid" : "text-red-700")}>{chk.msg}</p>
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button className="btn-act ghost" onClick={() => setDrop(null)} disabled={busy}>{chk.ok ? "Cancel" : "OK"}</button>
+              {chk.ok && (
+                <button className="btn-act primary" onClick={() => void confirmDrop()} disabled={busy}>
+                  {busy ? "Working…" : opensScreen ? "Continue →" : "Yes, move"}
+                </button>
+              )}
             </div>
-          </div>
+          </Modal>
         );
       })()}
 

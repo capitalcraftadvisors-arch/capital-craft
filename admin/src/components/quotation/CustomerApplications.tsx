@@ -18,6 +18,7 @@ import { MODULE_BRANDS, INVERTER_BRANDS, BRAND_FIELDS, SARVATRA, sarvatraTerms }
 import { EMAIL_RE } from "@/lib/validators";
 import { waTel, waUrl, WA_LANGS, type WaLang } from "@/lib/wa-link";
 import { ChipField } from "@/components/EmailComposerModal";
+import Modal, { OVERLAY, BACKDROP } from "@/components/ui/Modal";
 import { SUBSCRIPTION_MSG } from "@/lib/custom-template";
 import SearchableSelect from "./SearchableSelect";
 import {
@@ -302,15 +303,13 @@ export default function CustomerApplications({ serialNext, onSerial, whatsapp }:
 
 function Confirm({ text, onYes, onNo }: { text: string; onYes: () => void; onNo: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 grid place-items-center px-4">
-      <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-[400px]">
-        <p className="text-[15px] font-semibold text-text">{text}</p>
-        <div className="mt-6 flex justify-end gap-2">
-          <button onClick={onNo} className="px-4 py-2 rounded-xl border border-line text-[13px] font-semibold text-text-mid">Cancel</button>
-          <button onClick={onYes} autoFocus className="px-5 py-2 rounded-xl text-white text-[13px] font-semibold" style={{ background: NAVY }}>Yes</button>
-        </div>
+    <Modal onClose={onNo} closeOnBackdrop={false} overlayClassName={OVERLAY.grid} className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-[400px]">
+      <p className="text-[15px] font-semibold text-text">{text}</p>
+      <div className="mt-6 flex justify-end gap-2">
+        <button onClick={onNo} className="px-4 py-2 rounded-xl border border-line text-[13px] font-semibold text-text-mid">Cancel</button>
+        <button onClick={onYes} autoFocus className="px-5 py-2 rounded-xl text-white text-[13px] font-semibold" style={{ background: NAVY }}>Yes</button>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -408,30 +407,28 @@ function CustomerForm({ doc: start, row, quoteNo, onClose, onSaved }: {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto">
-      <div className="max-w-[900px] mx-auto my-4 sm:my-10 px-4">
-        <div className="bg-bg-soft rounded-2xl shadow-xl p-5 sm:p-7" ref={formRef} onKeyDown={onFormKey}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="font-display text-[22px] sm:text-[26px] font-bold text-text">{isNew ? "Quotation builder" : fullName(row.data)}</h2>
-            </div>
-            <button onClick={onClose} aria-label="Close" className="w-9 h-9 grid place-items-center rounded-xl text-text-muted hover:text-text hover:bg-white text-[18px]">✕</button>
+    <Modal onClose={onClose} closeOnBackdrop={false} overlayClassName={OVERLAY.scroll} className="max-w-[900px] mx-auto my-4 sm:my-10 px-4">
+      <div className="bg-bg-soft rounded-2xl shadow-xl p-5 sm:p-7" ref={formRef} onKeyDown={onFormKey}>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="font-display text-[22px] sm:text-[26px] font-bold text-text">{isNew ? "Quotation builder" : fullName(row.data)}</h2>
           </div>
-          {row && <DocTabs active={doc} onPick={setDoc} open={(d) => made(row, d) || d === start} />}
+          <button onClick={onClose} aria-label="Close" className="w-9 h-9 grid place-items-center rounded-xl text-text-muted hover:text-text hover:bg-white text-[18px]">✕</button>
+        </div>
+        {row && <DocTabs active={doc} onPick={setDoc} open={(d) => made(row, d) || d === start} />}
 
-          {spec.sections.map(([title, keys]) => <Section key={title} title={title}>{keys.map(control)}</Section>)}
+        {spec.sections.map(([title, keys]) => <Section key={title} title={title}>{keys.map(control)}</Section>)}
 
-          {error && <p className="text-[13px] text-red-600 mt-4">{error}</p>}
-          <div className="mt-6 flex items-center gap-3">
-            <button onClick={() => void save()} disabled={busy}
-              className="px-5 py-2.5 rounded-xl text-white text-[14px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
-              {busy ? "Saving…" : isNew ? "Build quotation" : `Save & download ${docOf(doc).save}`}
-            </button>
-            <button onClick={onClose} className="px-4 py-2.5 rounded-xl border border-line bg-white text-[13.5px] font-semibold text-text-mid">Cancel</button>
-          </div>
+        {error && <p className="text-[13px] text-red-600 mt-4">{error}</p>}
+        <div className="mt-6 flex items-center gap-3">
+          <button onClick={() => void save()} disabled={busy}
+            className="px-5 py-2.5 rounded-xl text-white text-[14px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
+            {busy ? "Saving…" : isNew ? "Build quotation" : `Save & download ${docOf(doc).save}`}
+          </button>
+          <button onClick={onClose} className="px-4 py-2.5 rounded-xl border border-line bg-white text-[13.5px] font-semibold text-text-mid">Cancel</button>
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -528,47 +525,45 @@ function QuotationEmail({ row, onClose }: { row: Row; onClose: () => void }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 overflow-y-auto" onClick={busy ? undefined : onClose}>
-      <div className="max-w-[640px] mx-auto my-4 sm:my-10 px-4" onClick={(e) => e.stopPropagation()}>
-        <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-6">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="font-display text-[20px] font-bold text-text">Email</h2>
-              <div className="text-[13px] text-text-muted mt-0.5">{fullName(row.data)} · From {SARVATRA.sender}</div>
-            </div>
-            <button onClick={onClose} aria-label="Close" className="w-9 h-9 grid place-items-center rounded-xl text-text-muted hover:text-text hover:bg-bg-soft text-[18px]">✕</button>
+    <Modal onClose={onClose} busy={busy} overlayClassName={OVERLAY.scroll} className="max-w-[640px] mx-auto my-4 sm:my-10 px-4">
+      <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-6">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="font-display text-[20px] font-bold text-text">Email</h2>
+            <div className="text-[13px] text-text-muted mt-0.5">{fullName(row.data)} · From {SARVATRA.sender}</div>
           </div>
-          <DocTabs active={doc} onPick={(d) => { setDoc(d); setError(null); }} open={(d) => made(row, d)} />
-
-          {sent[doc] ? (
-            <div className="mt-5 space-y-4">
-              <div className="p-3 rounded-input bg-[#e9f7f0] border border-[#cdeadd] text-[13px] text-[#0f3d2e]">✓ {sent[doc]}</div>
-              <div className="flex justify-end"><button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-white text-[13px] font-semibold" style={{ background: NAVY }}>Done</button></div>
-            </div>
-          ) : (
-            <div className="mt-5 space-y-3">
-              <label className="block text-[13px] font-medium text-text-mid">TO
-                <input value={m.to} onChange={(e) => edit({ to: e.target.value })} inputMode="email" placeholder="customer@example.com" className={field} />
-              </label>
-              <ChipField key={doc + "-cc"} label="CC" values={m.cc} onChange={(cc) => edit({ cc })} />
-              <ChipField key={doc + "-bcc"} label="BCC" values={m.bcc} onChange={(bcc) => edit({ bcc })} />
-              <label className="block text-[13px] font-medium text-text-mid">Subject
-                <input value={m.subject} onChange={(e) => edit({ subject: e.target.value })} className={field} />
-              </label>
-              <label className="block text-[13px] font-medium text-text-mid">Message
-                <textarea value={m.message} onChange={(e) => edit({ message: e.target.value })} rows={9} className={field + " resize-y leading-relaxed"} />
-              </label>
-              <div className="text-[12.5px] text-text-muted">Attached: {docOf(doc).label} (PDF)</div>
-              {error && <div className="p-2.5 rounded-input bg-red-50 border border-red-200 text-[12px] text-red-700">{error}</div>}
-              <div className="flex justify-end gap-2 pt-1">
-                <button type="button" onClick={onClose} disabled={busy} className="px-4 py-2 rounded-xl border border-line text-[13px] font-semibold text-text-mid disabled:opacity-60">Cancel</button>
-                <button type="button" onClick={() => void send()} disabled={busy} className="px-5 py-2 rounded-xl text-white text-[13px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>{busy ? "Sending…" : "Send"}</button>
-              </div>
-            </div>
-          )}
+          <button onClick={onClose} aria-label="Close" className="w-9 h-9 grid place-items-center rounded-xl text-text-muted hover:text-text hover:bg-bg-soft text-[18px]">✕</button>
         </div>
+        <DocTabs active={doc} onPick={(d) => { setDoc(d); setError(null); }} open={(d) => made(row, d)} />
+
+        {sent[doc] ? (
+          <div className="mt-5 space-y-4">
+            <div className="p-3 rounded-input bg-[#e9f7f0] border border-[#cdeadd] text-[13px] text-[#0f3d2e]">✓ {sent[doc]}</div>
+            <div className="flex justify-end"><button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-white text-[13px] font-semibold" style={{ background: NAVY }}>Done</button></div>
+          </div>
+        ) : (
+          <div className="mt-5 space-y-3">
+            <label className="block text-[13px] font-medium text-text-mid">TO
+              <input value={m.to} onChange={(e) => edit({ to: e.target.value })} inputMode="email" placeholder="customer@example.com" className={field} />
+            </label>
+            <ChipField key={doc + "-cc"} label="CC" values={m.cc} onChange={(cc) => edit({ cc })} />
+            <ChipField key={doc + "-bcc"} label="BCC" values={m.bcc} onChange={(bcc) => edit({ bcc })} />
+            <label className="block text-[13px] font-medium text-text-mid">Subject
+              <input value={m.subject} onChange={(e) => edit({ subject: e.target.value })} className={field} />
+            </label>
+            <label className="block text-[13px] font-medium text-text-mid">Message
+              <textarea value={m.message} onChange={(e) => edit({ message: e.target.value })} rows={9} className={field + " resize-y leading-relaxed"} />
+            </label>
+            <div className="text-[12.5px] text-text-muted">Attached: {docOf(doc).label} (PDF)</div>
+            {error && <div className="p-2.5 rounded-input bg-red-50 border border-red-200 text-[12px] text-red-700">{error}</div>}
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" onClick={onClose} disabled={busy} className="px-4 py-2 rounded-xl border border-line text-[13px] font-semibold text-text-mid disabled:opacity-60">Cancel</button>
+              <button type="button" onClick={() => void send()} disabled={busy} className="px-5 py-2 rounded-xl text-white text-[13px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>{busy ? "Sending…" : "Send"}</button>
+            </div>
+          </div>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -662,61 +657,59 @@ function QuotationWhatsApp({ row, onClose }: { row: Row; onClose: () => void }) 
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={busy ? undefined : onClose}>
-      <div className="absolute inset-0 bg-black/40" />
-      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-5 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <div className="text-[15px] font-bold text-text">Send WhatsApp</div>
-            <div className="text-[12px] text-text-muted">{fullName(row.data)}</div>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Close" className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
+    <Modal onClose={onClose} busy={busy} overlayClassName={OVERLAY.layered} backdropClassName={BACKDROP}
+      className="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-5 max-h-[90vh] overflow-y-auto">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="text-[15px] font-bold text-text">Send WhatsApp</div>
+          <div className="text-[12px] text-text-muted">{fullName(row.data)}</div>
         </div>
-        <DocTabs active={doc} onPick={setDoc} open={(d) => made(row, d)} />
+        <button type="button" onClick={onClose} aria-label="Close" className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
+      </div>
+      <DocTabs active={doc} onPick={setDoc} open={(d) => made(row, d)} />
 
-        <div className="flex items-center gap-2 mt-4 mb-3">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Language</span>
-          <div className="inline-flex border border-line rounded-lg overflow-hidden">
-            {WA_LANGS.map((l) => (
-              <button key={l.key} type="button" onClick={() => setLang(l.key)}
-                className={["px-2.5 py-1 text-[12px] font-semibold border-r border-line last:border-r-0", lang === l.key ? "bg-[#128C7E] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
-                {l.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Send to</div>
-        <div className="flex items-center gap-2 mt-1 mb-3">
-          <span className="text-[13px] text-text-muted">+91</span>
-          <input value={to} onChange={(e) => setTo(e.target.value)} inputMode="numeric" placeholder="10-digit number"
-            className="flex-1 border border-line rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#128C7E]" />
-        </div>
-
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Message preview</div>
-        <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={8}
-          className="w-full mt-1 border border-line rounded-lg px-3 py-2 text-[13px] leading-relaxed outline-none focus:border-[#128C7E] resize-none" />
-        <div className="text-[11.5px] text-text-muted mt-1">📄 {docOf(doc).label} link is added on send</div>
-
-        {error && <div className="mt-3 p-2.5 rounded-input bg-red-50 border border-red-200 text-[12px] text-red-700">{error}</div>}
-        <div className="flex items-center justify-between gap-2 mt-3 flex-wrap">
-          <span className="text-[11px] text-text-muted">Sent from your WhatsApp</span>
-          <div className="flex gap-2 flex-wrap">
-            <button type="button" onClick={onClose} disabled={busy} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint disabled:opacity-50">Cancel</button>
-            {share && (
-              <button type="button" onClick={() => void sharePdf()} disabled={busy}
-                className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-[#128C7E] text-[#128C7E] hover:bg-[#128C7E]/[0.06] disabled:opacity-50">
-                Share PDF
-              </button>
-            )}
-            <button type="button" onClick={() => void send()} disabled={busy || !waTel(to)}
-              className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#128C7E] text-white hover:bg-[#0f766e] disabled:opacity-50">
-              {busy ? "Preparing…" : "Send on WhatsApp →"}
+      <div className="flex items-center gap-2 mt-4 mb-3">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Language</span>
+        <div className="inline-flex border border-line rounded-lg overflow-hidden">
+          {WA_LANGS.map((l) => (
+            <button key={l.key} type="button" onClick={() => setLang(l.key)}
+              className={["px-2.5 py-1 text-[12px] font-semibold border-r border-line last:border-r-0", lang === l.key ? "bg-[#128C7E] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
+              {l.label}
             </button>
-          </div>
+          ))}
         </div>
       </div>
-    </div>
+
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Send to</div>
+      <div className="flex items-center gap-2 mt-1 mb-3">
+        <span className="text-[13px] text-text-muted">+91</span>
+        <input value={to} onChange={(e) => setTo(e.target.value)} inputMode="numeric" placeholder="10-digit number"
+          className="flex-1 border border-line rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#128C7E]" />
+      </div>
+
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Message preview</div>
+      <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={8}
+        className="w-full mt-1 border border-line rounded-lg px-3 py-2 text-[13px] leading-relaxed outline-none focus:border-[#128C7E] resize-none" />
+      <div className="text-[11.5px] text-text-muted mt-1">📄 {docOf(doc).label} link is added on send</div>
+
+      {error && <div className="mt-3 p-2.5 rounded-input bg-red-50 border border-red-200 text-[12px] text-red-700">{error}</div>}
+      <div className="flex items-center justify-between gap-2 mt-3 flex-wrap">
+        <span className="text-[11px] text-text-muted">Sent from your WhatsApp</span>
+        <div className="flex gap-2 flex-wrap">
+          <button type="button" onClick={onClose} disabled={busy} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint disabled:opacity-50">Cancel</button>
+          {share && (
+            <button type="button" onClick={() => void sharePdf()} disabled={busy}
+              className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-[#128C7E] text-[#128C7E] hover:bg-[#128C7E]/[0.06] disabled:opacity-50">
+              Share PDF
+            </button>
+          )}
+          <button type="button" onClick={() => void send()} disabled={busy || !waTel(to)}
+            className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#128C7E] text-white hover:bg-[#0f766e] disabled:opacity-50">
+            {busy ? "Preparing…" : "Send on WhatsApp →"}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

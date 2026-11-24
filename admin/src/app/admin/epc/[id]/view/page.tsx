@@ -36,7 +36,7 @@ import LenderPickerModal, { LenderKey } from "@/components/LenderPickerModal";
 import CommentsSection from "@/components/CommentsSection";
 import OwnershipCard from "@/components/OwnershipCard";
 import ActivityLog from "@/components/ActivityLog";
-import DeleteEpcModal from "@/components/DeleteEpcModal";
+import ConfirmDeleteModal from "@/components/ConfirmDeleteModal";
 import EpcPasswordEmailModal from "@/components/EpcPasswordEmailModal";
 import CustomTemplateCard from "@/components/CustomTemplateCard";
 import SubscriptionCard from "@/components/SubscriptionCard";
@@ -47,6 +47,7 @@ import { DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
 import { computeEpcHealth, scoreTone, type TatBands, type HealthBucket } from "@/lib/epc-score";
 import { fmtDate, fmtDateTime, localIsoDate } from "@/lib/dates";
 import DateField from "@/components/ui/DateField";
+import Modal, { OVERLAY } from "@/components/ui/Modal";
 // Shared view chrome — the SAME kit the Loan Application View imports, so the
 // two dashboards can't drift apart. EPC-specific pieces stay in this file.
 import {
@@ -910,24 +911,22 @@ function Inner() {
       />
       {/* Lender approved — the date the lender approved. */}
       {approveFor && (
-        <div className="fixed inset-0 z-50 bg-black/40 grid place-items-center px-4" onClick={() => setApproveFor(null)}>
-          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-white rounded-xl shadow-lg p-6 space-y-4">
-            <h3 className="text-[17px] font-semibold text-[#0f3d2e]">Approved by {lenderLabel(approveFor)}</h3>
-            <label className="block">
-              <span className="block mb-1 text-[12.5px] text-[#5a8a76]">Date of approval</span>
-              <DateField value={approveDate} onChange={setApproveDate} max={localIsoDate(new Date())}
-                className="border border-line rounded-input px-3 py-2 text-[14px] focus:outline-none focus:border-[#178a5c]" />
-            </label>
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setApproveFor(null)} className="px-4 py-2 rounded-[8px] border border-line text-[13px] text-text-mid hover:bg-bg-soft">Cancel</button>
-              <button type="button" disabled={!approveDate}
-                onClick={() => { const l = approveFor; setApproveFor(null); void setLenderExclusive(l, "approved", approveDate); }}
-                className="px-4 py-2 rounded-[8px] bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">
-                Save
-              </button>
-            </div>
+        <Modal onClose={() => setApproveFor(null)} overlayClassName={OVERLAY.grid} className="w-full max-w-sm bg-white rounded-xl shadow-lg p-6 space-y-4">
+          <h3 className="text-[17px] font-semibold text-[#0f3d2e]">Approved by {lenderLabel(approveFor)}</h3>
+          <label className="block">
+            <span className="block mb-1 text-[12.5px] text-[#5a8a76]">Date of approval</span>
+            <DateField value={approveDate} onChange={setApproveDate} max={localIsoDate(new Date())}
+              className="border border-line rounded-input px-3 py-2 text-[14px] focus:outline-none focus:border-[#178a5c]" />
+          </label>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setApproveFor(null)} className="px-4 py-2 rounded-[8px] border border-line text-[13px] text-text-mid hover:bg-bg-soft">Cancel</button>
+            <button type="button" disabled={!approveDate}
+              onClick={() => { const l = approveFor; setApproveFor(null); void setLenderExclusive(l, "approved", approveDate); }}
+              className="px-4 py-2 rounded-[8px] bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">
+              Save
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
       <EmailComposerModal
         open={emailOpen}
@@ -941,7 +940,7 @@ function Inner() {
         epcName={trade}
         onConfirm={(lender) => downloadZip(lender)}
       />
-      <DeleteEpcModal
+      <ConfirmDeleteModal
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
         onDeleted={() => {
@@ -949,38 +948,50 @@ function Inner() {
           invalidate("dash.epcs");
           router.push("/admin");
         }}
-        businessId={biz.id}
-        displayId={biz.epc_display_id ?? null}
-        contactName={biz.contact_name ?? null}
-        contactMobile={biz.contact_mobile ?? null}
+        endpoint="/api/admin/delete-epc"
+        body={{ businessId: biz.id }}
+        title="Delete profile permanently"
+        confirmLabel="Delete profile permanently"
+        message="You’re about to permanently delete this EPC and everything attached to it. This cannot be undone."
+        rows={[
+          { label: "Display ID", value: biz.epc_display_id ?? "—", className: "font-mono font-semibold" },
+          { label: "Name", value: biz.contact_name || "(no name)", className: "font-semibold" },
+          { label: "Mobile", value: `+91 ${biz.contact_mobile || "—"}` },
+        ]}
+        deletes={[
+          "The EPC business row",
+          "All uploaded documents (business, stakeholders, cheque, GST R3B, office photos)",
+          "All loan applications and their attached documents",
+          "All lender status ticks (Credit Fair / Aerem / Solfin)",
+          "All admin comments and activity-log entries",
+          "Storage folder in Google Cloud Storage",
+        ]}
       />
       {/* Reject-reason picker — choose a reason (or type one) before rejecting. */}
       {rejectOpen && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={statusBusy ? undefined : () => setRejectOpen(false)}>
-          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-white rounded-[12px] shadow-lg p-5">
-            <div className="flex items-start justify-between gap-2 mb-3">
-              <h3 className="text-[17px] font-bold text-[#0f3d2e]">Reject this EPC</h3>
-              <button type="button" onClick={() => setRejectOpen(false)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
-            </div>
-            <label className="block text-[13px] font-medium text-text-mid">Reason for rejection
-              <select value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}
-                className="mt-1 w-full rounded-input border border-line bg-white px-3 py-2.5 text-[14px] outline-none focus:border-blue">
-                <option value="">Select a reason…</option>
-                {EPC_REJECT_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </label>
-            {rejectReason === "Other" && (
-              <textarea value={rejectOther} onChange={(e) => setRejectOther(e.target.value)} rows={3} autoFocus placeholder="Type the reason…"
-                className="mt-2 w-full rounded-input border border-line px-3 py-2 text-[13px] outline-none focus:border-blue resize-none" />
-            )}
-            <div className="flex justify-end gap-2 mt-4">
-              <button type="button" onClick={() => setRejectOpen(false)} disabled={statusBusy} className="px-4 py-2 rounded-lg border border-line text-[13px] text-text-mid disabled:opacity-60">Cancel</button>
-              <button type="button" disabled={statusBusy || !rejectReason || (rejectReason === "Other" && !rejectOther.trim())}
-                onClick={() => { const reason = rejectReason === "Other" ? rejectOther.trim() : rejectReason; void changeStatus("rejected", reason).then(() => setRejectOpen(false)); }}
-                className="px-5 py-2 rounded-lg bg-red-600 text-white text-[13px] font-semibold hover:bg-red-700 disabled:opacity-60">{statusBusy ? "Rejecting…" : "Reject EPC"}</button>
-            </div>
+        <Modal onClose={() => setRejectOpen(false)} busy={statusBusy} className="w-full max-w-md bg-white rounded-[12px] shadow-lg p-5">
+          <div className="flex items-start justify-between gap-2 mb-3">
+            <h3 className="text-[17px] font-bold text-[#0f3d2e]">Reject this EPC</h3>
+            <button type="button" onClick={() => setRejectOpen(false)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
           </div>
-        </div>
+          <label className="block text-[13px] font-medium text-text-mid">Reason for rejection
+            <select value={rejectReason} onChange={(e) => setRejectReason(e.target.value)}
+              className="mt-1 w-full rounded-input border border-line bg-white px-3 py-2.5 text-[14px] outline-none focus:border-blue">
+              <option value="">Select a reason…</option>
+              {EPC_REJECT_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </label>
+          {rejectReason === "Other" && (
+            <textarea value={rejectOther} onChange={(e) => setRejectOther(e.target.value)} rows={3} autoFocus placeholder="Type the reason…"
+              className="mt-2 w-full rounded-input border border-line px-3 py-2 text-[13px] outline-none focus:border-blue resize-none" />
+          )}
+          <div className="flex justify-end gap-2 mt-4">
+            <button type="button" onClick={() => setRejectOpen(false)} disabled={statusBusy} className="px-4 py-2 rounded-lg border border-line text-[13px] text-text-mid disabled:opacity-60">Cancel</button>
+            <button type="button" disabled={statusBusy || !rejectReason || (rejectReason === "Other" && !rejectOther.trim())}
+              onClick={() => { const reason = rejectReason === "Other" ? rejectOther.trim() : rejectReason; void changeStatus("rejected", reason).then(() => setRejectOpen(false)); }}
+              className="px-5 py-2 rounded-lg bg-red-600 text-white text-[13px] font-semibold hover:bg-red-700 disabled:opacity-60">{statusBusy ? "Rejecting…" : "Reject EPC"}</button>
+          </div>
+        </Modal>
       )}
     </main>
   );

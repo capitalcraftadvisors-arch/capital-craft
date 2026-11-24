@@ -16,6 +16,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
+import Modal from "@/components/ui/Modal";
 import { beginImpersonation, getToken } from "@/lib/auth";
 
 type Props = {
@@ -109,77 +110,69 @@ export default function AddNewEpcModal({ open, onClose }: Props) {
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
-      onClick={close}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-md bg-white rounded-lg shadow-lg p-6"
-      >
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h3 className="font-display font-semibold text-[18px] text-text">Add new EPC</h3>
-            <p className="text-[12px] text-text-mid mt-0.5">
-              Enter the EPC&rsquo;s mobile number, then build the profile in a guided chat &mdash; or use the classic form.
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={close}
-            className="text-[18px] text-text-muted hover:text-text leading-none"
-            aria-label="Close"
-          >
-            ×
-          </button>
+    <Modal onClose={close} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h3 className="font-display font-semibold text-[18px] text-text">Add new EPC</h3>
+          <p className="text-[12px] text-text-mid mt-0.5">
+            Enter the EPC&rsquo;s mobile number, then build the profile in a guided chat &mdash; or use the classic form.
+          </p>
         </div>
-
-        <div className="space-y-3">
-          <Input
-            label="Mobile number"
-            placeholder="10-digit mobile"
-            inputMode="numeric"
-            maxLength={10}
-            value={mobile}
-            onChange={(e) => setMobile(e.target.value.replace(/\D/g, ""))}
-            error={error ?? undefined}
-          />
-
-          {duplicate && (
-            <div className="p-3 rounded-input bg-amber-50 border border-amber-300 text-[13px] text-amber-900">
-              <p className="font-medium">An EPC with this mobile already exists.</p>
-              <p className="text-[12px] mt-0.5">
-                {duplicate.contact_name ? `${duplicate.contact_name} · ` : ""}
-                {duplicate.display_id ?? duplicate.id.slice(0, 8)}
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  router.push(`/admin/epc/${duplicate.id}` as any);
-                }}
-                className="mt-2 text-[12px] font-semibold text-amber-900 underline"
-              >
-                Open existing EPC →
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="mt-5 flex justify-end gap-2 flex-wrap">
-          <Button type="button" variant="outline" onClick={close} disabled={busy}>
-            Cancel
-          </Button>
-          {/* Classic step-by-step wizard (unchanged) — kept for parity with the chat. */}
-          <Button type="button" variant="outline" onClick={submit} loading={busy}>
-            Classic form
-          </Button>
-          {/* Guided chat — the primary way to onboard now. */}
-          <Button type="button" variant="primary" onClick={goChat} disabled={busy}>
-            Build in chat
-          </Button>
-        </div>
+        <button
+          type="button"
+          onClick={close}
+          className="text-[18px] text-text-muted hover:text-text leading-none"
+          aria-label="Close"
+        >
+          ×
+        </button>
       </div>
-    </div>
+
+      <div className="space-y-3">
+        <Input
+          label="Mobile number"
+          placeholder="10-digit mobile"
+          inputMode="numeric"
+          maxLength={10}
+          value={mobile}
+          onChange={(e) => setMobile(e.target.value.replace(/\D/g, ""))}
+          error={error ?? undefined}
+        />
+
+        {duplicate && (
+          <div className="p-3 rounded-input bg-amber-50 border border-amber-300 text-[13px] text-amber-900">
+            <p className="font-medium">An EPC with this mobile already exists.</p>
+            <p className="text-[12px] mt-0.5">
+              {duplicate.contact_name ? `${duplicate.contact_name} · ` : ""}
+              {duplicate.display_id ?? duplicate.id.slice(0, 8)}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                router.push(`/admin/epc/${duplicate.id}` as any);
+              }}
+              className="mt-2 text-[12px] font-semibold text-amber-900 underline"
+            >
+              Open existing EPC →
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-5 flex justify-end gap-2 flex-wrap">
+        <Button type="button" variant="outline" onClick={close} disabled={busy}>
+          Cancel
+        </Button>
+        {/* Classic step-by-step wizard (unchanged) — kept for parity with the chat. */}
+        <Button type="button" variant="outline" onClick={submit} loading={busy}>
+          Classic form
+        </Button>
+        {/* Guided chat — the primary way to onboard now. */}
+        <Button type="button" variant="primary" onClick={goChat} disabled={busy}>
+          Build in chat
+        </Button>
+      </div>
+    </Modal>
   );
 }

@@ -17,6 +17,7 @@ import AuthGuard from "@/components/AuthGuard";
 import { fmtRupees } from "@/lib/money";
 import Button from "@/components/ui/Button";
 import Select from "@/components/ui/Select";
+import Modal, { OVERLAY } from "@/components/ui/Modal";
 import CommentsSection from "@/components/CommentsSection";
 import OwnershipCard from "@/components/OwnershipCard";
 import { I, SectionCard, KV } from "@/components/view/ViewKit";
@@ -302,39 +303,37 @@ function Inner() {
 
       {/* ── ABORT MODAL ── */}
       {abortOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 px-4" onClick={() => !aborting && setAbortOpen(false)}>
-          <div className="w-full max-w-md rounded-[12px] bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="text-[16px] font-semibold text-[#0f3d2e]">Abort this lead?</div>
-            <p className="text-[13px] text-[#5a8a76] mt-1">
-              It will drop off the Lead dashboard but stay on record. Add a reason (optional).
-            </p>
-            <textarea
-              value={abortReason}
-              onChange={(e) => setAbortReason(e.target.value)}
-              rows={3}
-              placeholder="Reason for aborting…"
-              className="mt-3 w-full border border-[#cdeadd] rounded-input px-3 py-2 text-[13px] bg-white focus:border-[#185fa5] outline-none resize-none"
-            />
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setAbortOpen(false)}
-                disabled={aborting}
-                className="px-4 py-2 rounded-btn text-[13px] font-semibold text-[#5a8a76] border-[1.5px] border-[#cdeadd] hover:bg-[#f0faf5] disabled:opacity-60"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void doAbort()}
-                disabled={aborting}
-                className="px-4 py-2 rounded-btn text-[13px] font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-60"
-              >
-                {aborting ? "Aborting…" : "Abort lead"}
-              </button>
-            </div>
+        <Modal onClose={() => setAbortOpen(false)} busy={aborting} overlayClassName={OVERLAY.grid} className="w-full max-w-md rounded-[12px] bg-white p-5 shadow-xl">
+          <div className="text-[16px] font-semibold text-[#0f3d2e]">Abort this lead?</div>
+          <p className="text-[13px] text-[#5a8a76] mt-1">
+            It will drop off the Lead dashboard but stay on record. Add a reason (optional).
+          </p>
+          <textarea
+            value={abortReason}
+            onChange={(e) => setAbortReason(e.target.value)}
+            rows={3}
+            placeholder="Reason for aborting…"
+            className="mt-3 w-full border border-[#cdeadd] rounded-input px-3 py-2 text-[13px] bg-white focus:border-[#185fa5] outline-none resize-none"
+          />
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setAbortOpen(false)}
+              disabled={aborting}
+              className="px-4 py-2 rounded-btn text-[13px] font-semibold text-[#5a8a76] border-[1.5px] border-[#cdeadd] hover:bg-[#f0faf5] disabled:opacity-60"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void doAbort()}
+              disabled={aborting}
+              className="px-4 py-2 rounded-btn text-[13px] font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-60"
+            >
+              {aborting ? "Aborting…" : "Abort lead"}
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
     </main>
   );

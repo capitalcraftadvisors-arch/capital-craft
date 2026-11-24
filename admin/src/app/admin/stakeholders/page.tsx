@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import SetPasswordModal from "@/components/SetPasswordModal";
+import Modal, { OVERLAY } from "@/components/ui/Modal";
 import StakeholderShell from "@/components/StakeholderShell";
 import { FieldInput } from "@/components/StakeholderDetails";
 import { supabase } from "@/lib/supabase";
@@ -204,22 +205,20 @@ function AddPartnerModal({ kind, onClose }: { kind: PartnerKind; onClose: () => 
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 grid place-items-center px-4" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md bg-white rounded-xl shadow-lg p-6 space-y-3">
-        <h3 className="text-[17px] font-semibold text-[#0f3d2e]">Add {label.toLowerCase()}</h3>
-        <FieldInput f={{ key: "name", label: "Name" }} value={name} onChange={setName} />
-        {ADD_FIELDS.map((f) => (
-          <FieldInput key={f.key} f={f} value={details[f.key] ?? ""} onChange={(v) => setDetails((d) => ({ ...d, [f.key]: v }))} />
-        ))}
-        {error && <p className="text-[12px] text-red-600">{error}</p>}
-        <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onClose} className="px-4 py-2 rounded-[8px] border border-line text-[13px] text-text-mid hover:bg-bg-soft">Cancel</button>
-          <button type="button" onClick={() => void save()} disabled={busy}
-            className="px-4 py-2 rounded-[8px] bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-60">
-            {busy ? "Adding…" : `Add ${label.toLowerCase()}`}
-          </button>
-        </div>
+    <Modal onClose={onClose} overlayClassName={OVERLAY.grid} className="w-full max-w-md bg-white rounded-xl shadow-lg p-6 space-y-3">
+      <h3 className="text-[17px] font-semibold text-[#0f3d2e]">Add {label.toLowerCase()}</h3>
+      <FieldInput f={{ key: "name", label: "Name" }} value={name} onChange={setName} />
+      {ADD_FIELDS.map((f) => (
+        <FieldInput key={f.key} f={f} value={details[f.key] ?? ""} onChange={(v) => setDetails((d) => ({ ...d, [f.key]: v }))} />
+      ))}
+      {error && <p className="text-[12px] text-red-600">{error}</p>}
+      <div className="flex justify-end gap-2 pt-2">
+        <button type="button" onClick={onClose} className="px-4 py-2 rounded-[8px] border border-line text-[13px] text-text-mid hover:bg-bg-soft">Cancel</button>
+        <button type="button" onClick={() => void save()} disabled={busy}
+          className="px-4 py-2 rounded-[8px] bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-60">
+          {busy ? "Adding…" : `Add ${label.toLowerCase()}`}
+        </button>
       </div>
-    </div>
+    </Modal>
   );
 }

@@ -13,6 +13,7 @@ import { NAVY } from "@/components/partner/PartnerShell";
 import ProjectMoney from "@/components/partner/ProjectMoney";
 import ProjectDocuments from "@/components/partner/ProjectDocuments";
 import ProjectInvoices from "@/components/partner/ProjectInvoices";
+import Modal, { OVERLAY } from "@/components/ui/Modal";
 import { input, decimal, digits, Field } from "@/components/quotation/form-kit";
 import { getBusiness } from "@/lib/auth";
 import { canManageOrg, canWork, epcRole, isSiteStaff, portalV2 } from "@/lib/epc-roles";
@@ -213,127 +214,125 @@ function ProjectEditor({ project, crew, assign, site, canEdit, canDelete, onGo, 
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/30 grid place-items-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-[760px] max-h-[92vh] overflow-y-auto p-6">
-        <div className="flex items-start justify-between gap-3 mb-4">
-          <div className="text-[17px] font-display font-bold text-[#0f3d2e]">{p ? p.customer_name : "New project"}</div>
-          {p?.application_id && !site && (
-            <button type="button" onClick={() => onGo(`/dashboard/${p.application_id}`)} className="text-[13px] font-semibold text-[#1e3a8a] hover:underline">Open loan</button>
-          )}
+    <Modal onClose={onClose} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[760px] max-h-[92vh] overflow-y-auto p-6">
+      <div className="flex items-start justify-between gap-3 mb-4">
+        <div className="text-[17px] font-display font-bold text-[#0f3d2e]">{p ? p.customer_name : "New project"}</div>
+        {p?.application_id && !site && (
+          <button type="button" onClick={() => onGo(`/dashboard/${p.application_id}`)} className="text-[13px] font-semibold text-[#1e3a8a] hover:underline">Open loan</button>
+        )}
+      </div>
+
+      {/* Stages */}
+      {p && (
+        <div className="mb-5">
+          <div className="flex flex-wrap gap-1.5">
+            {stages.map((s, i) => (
+              <span key={s} className={["px-2.5 py-1 rounded-full text-[12px] font-semibold border",
+                i < at ? "bg-[#e6f6ee] text-[#178a5c] border-transparent" : i === at ? "text-white border-transparent" : "bg-white text-text-muted border-line"].join(" ")}
+                style={i === at ? { background: NAVY } : undefined}>
+                {i < at ? "✓ " : ""}{STAGE_LABEL[s]}
+              </span>
+            ))}
+          </div>
+          <div className="flex items-center gap-3 flex-wrap mt-3 text-[13px]">
+            <span className="text-text-mid">{p.stage === "closed" ? STAGE_LABEL.closed : `${STAGE_LABEL[p.stage]} · ${days(daysInStage(p.stage_at))}`}</span>
+            {work && next && (
+              <button type="button" onClick={() => void move(next)} disabled={busy}
+                className="px-3.5 py-1.5 rounded-xl text-white text-[13px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
+                Move to {STAGE_LABEL[next]}
+              </button>
+            )}
+            {work && (
+              <select className={input + " max-w-[220px]"} value={p.stage} disabled={busy} onChange={(e) => void move(e.target.value as ProjectStage)}>
+                {stages.map((s) => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
+              </select>
+            )}
+          </div>
         </div>
+      )}
 
-        {/* Stages */}
-        {p && (
-          <div className="mb-5">
-            <div className="flex flex-wrap gap-1.5">
-              {stages.map((s, i) => (
-                <span key={s} className={["px-2.5 py-1 rounded-full text-[12px] font-semibold border",
-                  i < at ? "bg-[#e6f6ee] text-[#178a5c] border-transparent" : i === at ? "text-white border-transparent" : "bg-white text-text-muted border-line"].join(" ")}
-                  style={i === at ? { background: NAVY } : undefined}>
-                  {i < at ? "✓ " : ""}{STAGE_LABEL[s]}
-                </span>
-              ))}
-            </div>
-            <div className="flex items-center gap-3 flex-wrap mt-3 text-[13px]">
-              <span className="text-text-mid">{p.stage === "closed" ? STAGE_LABEL.closed : `${STAGE_LABEL[p.stage]} · ${days(daysInStage(p.stage_at))}`}</span>
-              {work && next && (
-                <button type="button" onClick={() => void move(next)} disabled={busy}
-                  className="px-3.5 py-1.5 rounded-xl text-white text-[13px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
-                  Move to {STAGE_LABEL[next]}
-                </button>
-              )}
-              {work && (
-                <select className={input + " max-w-[220px]"} value={p.stage} disabled={busy} onChange={(e) => void move(e.target.value as ProjectStage)}>
-                  {stages.map((s) => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
-                </select>
-              )}
-            </div>
+      {/* Site photos */}
+      {p && (
+        <div className="mb-5">
+          <div className="text-[12.5px] font-medium text-text-mid mb-2">Site photos {photos ? `${photos.length}/${PHOTOS_NEEDED}` : ""}</div>
+          <div className="flex flex-wrap gap-2">
+            {(photos ?? []).map((ph) => (
+              <div key={ph.path} className="relative w-24 h-24 rounded-xl overflow-hidden border border-line bg-bg-soft">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <a href={ph.url} target="_blank" rel="noreferrer"><img src={ph.url} alt="" className="w-full h-full object-cover" /></a>
+                {work && (
+                  <button type="button" onClick={() => unphoto(ph.path)} disabled={busy} aria-label="Delete photo"
+                    className="absolute top-1 right-1 w-6 h-6 rounded-full bg-white/90 text-red-600 text-[13px] font-bold grid place-items-center">×</button>
+                )}
+              </div>
+            ))}
+            {work && (
+              <button type="button" onClick={() => fileRef.current?.click()} disabled={busy}
+                className="w-24 h-24 rounded-xl border-2 border-dashed border-line text-text-muted text-[22px] grid place-items-center hover:border-[#1e3a8a] hover:text-[#1e3a8a] disabled:opacity-60">+</button>
+            )}
+            <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f); }} />
           </div>
-        )}
+        </div>
+      )}
 
-        {/* Site photos */}
-        {p && (
-          <div className="mb-5">
-            <div className="text-[12.5px] font-medium text-text-mid mb-2">Site photos {photos ? `${photos.length}/${PHOTOS_NEEDED}` : ""}</div>
-            <div className="flex flex-wrap gap-2">
-              {(photos ?? []).map((ph) => (
-                <div key={ph.path} className="relative w-24 h-24 rounded-xl overflow-hidden border border-line bg-bg-soft">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <a href={ph.url} target="_blank" rel="noreferrer"><img src={ph.url} alt="" className="w-full h-full object-cover" /></a>
-                  {work && (
-                    <button type="button" onClick={() => unphoto(ph.path)} disabled={busy} aria-label="Delete photo"
-                      className="absolute top-1 right-1 w-6 h-6 rounded-full bg-white/90 text-red-600 text-[13px] font-bold grid place-items-center">×</button>
-                  )}
-                </div>
-              ))}
-              {work && (
-                <button type="button" onClick={() => fileRef.current?.click()} disabled={busy}
-                  className="w-24 h-24 rounded-xl border-2 border-dashed border-line text-text-muted text-[22px] grid place-items-center hover:border-[#1e3a8a] hover:text-[#1e3a8a] disabled:opacity-60">+</button>
-              )}
-              <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden"
-                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f); }} />
-            </div>
-          </div>
-        )}
+      {/* Money, documents, invoices (Site staff: documents only) */}
+      {p && !site && <ProjectMoney project={p} canEdit={canEdit} onChanged={(r) => onSaved(r, false)} />}
+      {p && <ProjectDocuments project={p} canUpload={work} />}
+      {p && !site && <ProjectInvoices project={p} canIssue={canEdit} />}
 
-        {/* Money, documents, invoices (Site staff: documents only) */}
-        {p && !site && <ProjectMoney project={p} canEdit={canEdit} onChanged={(r) => onSaved(r, false)} />}
-        {p && <ProjectDocuments project={p} canUpload={work} />}
-        {p && !site && <ProjectInvoices project={p} canIssue={canEdit} />}
-
-        {/* Details */}
-        <fieldset disabled={busy} className="grid sm:grid-cols-2 gap-3">
-          <fieldset disabled={!canEdit} className="contents">
-            <Field l="Customer name" req><input className={input} value={d.customer_name} onChange={(e) => set("customer_name", e.target.value)} /></Field>
-            <Field l="Mobile"><input className={input} inputMode="numeric" value={d.mobile} onChange={(e) => set("mobile", digits(e.target.value).slice(0, 10))} placeholder="10-digit mobile" /></Field>
-            <Field l="City"><input className={input} value={d.city} onChange={(e) => set("city", e.target.value)} /></Field>
-            <Field l="System size (kW)"><input className={input} inputMode="decimal" value={d.kw} onChange={(e) => set("kw", decimal(e.target.value))} /></Field>
-            {!site && <Field l="Project cost ₹"><input className={input} inputMode="decimal" value={d.project_cost} onChange={(e) => set("project_cost", decimal(e.target.value))} /></Field>}
-            <Field l="Payment">
-              <select className={input} value={d.payment_mode} onChange={(e) => set("payment_mode", e.target.value as PaymentMode)}>
-                {PAYMENT_MODES.map((m) => <option key={m} value={m}>{PAYMENT_LABEL[m]}</option>)}
+      {/* Details */}
+      <fieldset disabled={busy} className="grid sm:grid-cols-2 gap-3">
+        <fieldset disabled={!canEdit} className="contents">
+          <Field l="Customer name" req><input className={input} value={d.customer_name} onChange={(e) => set("customer_name", e.target.value)} /></Field>
+          <Field l="Mobile"><input className={input} inputMode="numeric" value={d.mobile} onChange={(e) => set("mobile", digits(e.target.value).slice(0, 10))} placeholder="10-digit mobile" /></Field>
+          <Field l="City"><input className={input} value={d.city} onChange={(e) => set("city", e.target.value)} /></Field>
+          <Field l="System size (kW)"><input className={input} inputMode="decimal" value={d.kw} onChange={(e) => set("kw", decimal(e.target.value))} /></Field>
+          {!site && <Field l="Project cost ₹"><input className={input} inputMode="decimal" value={d.project_cost} onChange={(e) => set("project_cost", decimal(e.target.value))} /></Field>}
+          <Field l="Payment">
+            <select className={input} value={d.payment_mode} onChange={(e) => set("payment_mode", e.target.value as PaymentMode)}>
+              {PAYMENT_MODES.map((m) => <option key={m} value={m}>{PAYMENT_LABEL[m]}</option>)}
+            </select>
+          </Field>
+          {assign && (
+            <Field l="Site staff">
+              <select className={input} value={d.site_member_id} onChange={(e) => set("site_member_id", e.target.value)}>
+                <option value="">—</option>
+                {crew.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                {p?.site_member_id && p.site && !crew.some((m) => m.id === p.site_member_id) && <option value={p.site_member_id}>{p.site.name}</option>}
               </select>
             </Field>
-            {assign && (
-              <Field l="Site staff">
-                <select className={input} value={d.site_member_id} onChange={(e) => set("site_member_id", e.target.value)}>
-                  <option value="">—</option>
-                  {crew.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-                  {p?.site_member_id && p.site && !crew.some((m) => m.id === p.site_member_id) && <option value={p.site_member_id}>{p.site.name}</option>}
-                </select>
-              </Field>
-            )}
-          </fieldset>
-          <div className="sm:col-span-2">
-            <Field l="Notes"><textarea className={input + " min-h-[70px]"} value={d.notes} disabled={!work} onChange={(e) => set("notes", e.target.value)} /></Field>
-          </div>
+          )}
         </fieldset>
-
-        {/* Stage moves */}
-        {history.length > 0 && (
-          <div className="mt-5">
-            <div className="text-[12.5px] font-medium text-text-mid mb-1.5">History</div>
-            <div className="flex flex-col gap-1 text-[13px]">
-              {[...history].reverse().map((h, i) => (
-                <div key={i} className="flex justify-between gap-3"><span className="text-text">{STAGE_LABEL[h.stage] ?? h.stage}</span><span className="text-text-muted">{fmtDate(h.at)}</span></div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {error && <p className="text-[13px] text-red-600 mt-3">{error}</p>}
-        <div className="flex items-center gap-2 mt-5">
-          {canDelete && p && (
-            <button type="button" onClick={remove} disabled={busy} className="px-3 py-2 rounded-xl text-[13.5px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60">Delete</button>
-          )}
-          <button type="button" onClick={onClose} className="ml-auto px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-text-mid hover:bg-bg-soft">{work ? "Cancel" : "Close"}</button>
-          {work && (
-            <button type="button" onClick={() => void save()} disabled={busy} className="px-5 py-2.5 rounded-xl text-white text-[13.5px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
-              {busy ? "Saving…" : "Save"}
-            </button>
-          )}
+        <div className="sm:col-span-2">
+          <Field l="Notes"><textarea className={input + " min-h-[70px]"} value={d.notes} disabled={!work} onChange={(e) => set("notes", e.target.value)} /></Field>
         </div>
+      </fieldset>
+
+      {/* Stage moves */}
+      {history.length > 0 && (
+        <div className="mt-5">
+          <div className="text-[12.5px] font-medium text-text-mid mb-1.5">History</div>
+          <div className="flex flex-col gap-1 text-[13px]">
+            {[...history].reverse().map((h, i) => (
+              <div key={i} className="flex justify-between gap-3"><span className="text-text">{STAGE_LABEL[h.stage] ?? h.stage}</span><span className="text-text-muted">{fmtDate(h.at)}</span></div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {error && <p className="text-[13px] text-red-600 mt-3">{error}</p>}
+      <div className="flex items-center gap-2 mt-5">
+        {canDelete && p && (
+          <button type="button" onClick={remove} disabled={busy} className="px-3 py-2 rounded-xl text-[13.5px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60">Delete</button>
+        )}
+        <button type="button" onClick={onClose} className="ml-auto px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-text-mid hover:bg-bg-soft">{work ? "Cancel" : "Close"}</button>
+        {work && (
+          <button type="button" onClick={() => void save()} disabled={busy} className="px-5 py-2.5 rounded-xl text-white text-[13.5px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
+            {busy ? "Saving…" : "Save"}
+          </button>
+        )}
       </div>
-    </div>
+    </Modal>
   );
 }

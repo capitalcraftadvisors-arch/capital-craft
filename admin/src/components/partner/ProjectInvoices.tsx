@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { NAVY } from "@/components/partner/PartnerShell";
 import { input, Field } from "@/components/quotation/form-kit";
 import DateField from "@/components/ui/DateField";
+import Modal, { OVERLAY } from "@/components/ui/Modal";
 import { getBusiness } from "@/lib/auth";
 import { canManageOrg, isSiteStaff, portalV2 } from "@/lib/epc-roles";
 import { fetchSubscription, hasFeature, SUBSCRIPTION_MSG } from "@/lib/subscription";
@@ -171,19 +172,17 @@ export function CancelInvoice({ invoice, onDone, onClose }: { invoice: InvoiceRo
     catch (e) { setError((e as Error).message || "Couldn't cancel the invoice."); setBusy(false); }
   }
   return (
-    <div className="fixed inset-0 z-[60] bg-black/30 grid place-items-center p-4" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onClose(); }}>
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-[440px] p-6">
-        <div className="text-[16px] font-display font-bold text-[#0f3d2e] mb-4">Cancel {invoice.invoice_no}</div>
-        <Field l="Reason" req><textarea className={input + " min-h-[80px]"} value={reason} disabled={busy} onChange={(e) => setReason(e.target.value)} autoFocus /></Field>
-        {error && <p className="text-[13px] text-red-600 mt-3">{error}</p>}
-        <div className="flex items-center gap-2 mt-5">
-          <button type="button" onClick={onClose} disabled={busy} className="ml-auto px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-text-mid hover:bg-bg-soft">Close</button>
-          <button type="button" onClick={() => void go()} disabled={busy} className="px-5 py-2.5 rounded-xl text-white text-[13.5px] font-semibold bg-red-600 hover:bg-red-700 disabled:opacity-60">
-            {busy ? "Cancelling…" : "Cancel invoice"}
-          </button>
-        </div>
+    <Modal onClose={onClose} busy={busy} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.softTop} className="bg-white rounded-2xl shadow-xl w-full max-w-[440px] p-6">
+      <div className="text-[16px] font-display font-bold text-[#0f3d2e] mb-4">Cancel {invoice.invoice_no}</div>
+      <Field l="Reason" req><textarea className={input + " min-h-[80px]"} value={reason} disabled={busy} onChange={(e) => setReason(e.target.value)} autoFocus /></Field>
+      {error && <p className="text-[13px] text-red-600 mt-3">{error}</p>}
+      <div className="flex items-center gap-2 mt-5">
+        <button type="button" onClick={onClose} disabled={busy} className="ml-auto px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-text-mid hover:bg-bg-soft">Close</button>
+        <button type="button" onClick={() => void go()} disabled={busy} className="px-5 py-2.5 rounded-xl text-white text-[13.5px] font-semibold bg-red-600 hover:bg-red-700 disabled:opacity-60">
+          {busy ? "Cancelling…" : "Cancel invoice"}
+        </button>
       </div>
-    </div>
+    </Modal>
   );
 }
 

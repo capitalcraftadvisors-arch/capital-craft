@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import Card from "@/components/ui/Card";
 import Select from "@/components/ui/Select";
 import Button from "@/components/ui/Button";
+import Modal, { OVERLAY } from "@/components/ui/Modal";
 import AddNewLoanAppModal from "@/components/AddNewLoanAppModal";
 import { ACCENTS } from "@/components/AdminSidebar";
 import { supabase } from "@/lib/supabase";
@@ -565,24 +566,22 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
 
       {/* Report → "Lender-wise disbursements": which month. */}
       {monthPick !== null && (
-        <div className="fixed inset-0 z-50 bg-black/40 grid place-items-center px-4" onClick={() => setMonthPick(null)}>
-          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-sm bg-white rounded-xl shadow-lg p-6 space-y-4">
-            <h3 className="text-[17px] font-semibold text-[#0f3d2e]">Lender-wise disbursements</h3>
-            <label className="block">
-              <span className="block mb-1 text-[12.5px] text-[#5a8a76]">Month</span>
-              <input type="month" value={monthPick} max={localIsoDate(new Date()).slice(0, 7)} onChange={(e) => setMonthPick(e.target.value)}
-                className="w-full border border-line rounded-input px-3 py-2 text-[14px] focus:outline-none focus:border-[#178a5c]" />
-            </label>
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setMonthPick(null)} className="px-4 py-2 rounded-[8px] border border-line text-[13px] text-text-mid hover:bg-bg-soft">Cancel</button>
-              <button type="button" disabled={!monthPick}
-                onClick={() => { const m = monthPick; setMonthPick(null); void downloadLoanReport("monthly", m); }}
-                className="px-4 py-2 rounded-[8px] bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">
-                Download
-              </button>
-            </div>
+        <Modal onClose={() => setMonthPick(null)} overlayClassName={OVERLAY.grid} className="w-full max-w-sm bg-white rounded-xl shadow-lg p-6 space-y-4">
+          <h3 className="text-[17px] font-semibold text-[#0f3d2e]">Lender-wise disbursements</h3>
+          <label className="block">
+            <span className="block mb-1 text-[12.5px] text-[#5a8a76]">Month</span>
+            <input type="month" value={monthPick} max={localIsoDate(new Date()).slice(0, 7)} onChange={(e) => setMonthPick(e.target.value)}
+              className="w-full border border-line rounded-input px-3 py-2 text-[14px] focus:outline-none focus:border-[#178a5c]" />
+          </label>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setMonthPick(null)} className="px-4 py-2 rounded-[8px] border border-line text-[13px] text-text-mid hover:bg-bg-soft">Cancel</button>
+            <button type="button" disabled={!monthPick}
+              onClick={() => { const m = monthPick; setMonthPick(null); void downloadLoanReport("monthly", m); }}
+              className="px-4 py-2 rounded-[8px] bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">
+              Download
+            </button>
           </div>
-        </div>
+        </Modal>
       )}
 
       <ListToolbar placeholder="Search by borrower or mobile…" q={q} onQ={setQ}
