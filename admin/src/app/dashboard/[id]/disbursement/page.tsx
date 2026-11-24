@@ -4,7 +4,7 @@
 //
 // Where an approved application lands when the EPC clicks it. Shows what they
 // received, what's still pending, how long they have left, and gives them the
-// SAME three completion-document slots the admin sees — whoever uploads first
+// SAME completion-document slots the admin sees — whoever uploads first
 // fills the slot for both.
 //
 // Amounts are READ-ONLY here. That isn't just a UI choice: migration 0044's
@@ -24,7 +24,7 @@ import CompletionDocsSection from "@/components/CompletionDocsSection";
 import { I, SectionCard, KV, Pill } from "@/components/view/ViewKit";
 import {
   deadlineState, DEADLINE_PILL, remainingAmount, firstCharges,
-  DISBURSEMENT_WINDOW_DAYS, tranche2Lock,
+  DISBURSEMENT_WINDOW_DAYS, COMPLETION_CATEGORIES, tranche2Lock,
 } from "@/lib/disbursement";
 import { fmtRupeesExact } from "@/lib/money";
 import { fmtDate } from "@/lib/dates";
@@ -45,7 +45,7 @@ function Inner() {
   const [loan, setLoan] = useState<Loan | null>(null);
   const [loading, setLoading] = useState(true);
   const [docsUploaded, setDocsUploaded] = useState(0);
-  const [docsTotal, setDocsTotal] = useState(3);
+  const [docsTotal, setDocsTotal] = useState(COMPLETION_CATEGORIES.length);
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
@@ -147,17 +147,17 @@ function Inner() {
             <p>
               Your first disbursement hasn&rsquo;t been released yet. Once it is, you&rsquo;ll have{" "}
               <span className="font-semibold">{DISBURSEMENT_WINDOW_DAYS} days</span> to complete the work and upload the
-              three documents below.
+              {" "}{docsTotal} documents below.
             </p>
           ) : dl.overdue ? (
             <p>
               <span className="font-semibold">The {DISBURSEMENT_WINDOW_DAYS}-day window has passed ({dl.label}).</span>{" "}
-              Upload the three completion documents as soon as possible — the second disbursement is held until they&rsquo;re
+              Upload the {docsTotal} completion documents as soon as possible — the second disbursement is held until they&rsquo;re
               reviewed.
             </p>
           ) : (
             <p>
-              <span className="font-semibold">{dl.label}</span> to finish the work and upload the three completion
+              <span className="font-semibold">{dl.label}</span> to finish the work and upload the {docsTotal} completion
               documents. The second disbursement is released after our team reviews them.
             </p>
           )}
