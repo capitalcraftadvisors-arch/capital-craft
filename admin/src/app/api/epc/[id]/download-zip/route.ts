@@ -26,6 +26,7 @@ import { err, dbAs, requireLogin } from "@/lib/api";
 import { fetchLenders, lenderLabelIn } from "@/lib/loan-lenders";
 import { BUSINESS_TYPE_LABEL } from "@/lib/epc-labels";
 import { todayIST } from "@/lib/dates";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -152,7 +153,7 @@ export async function GET(
             included++;
             console.log(`[download-zip] included ${doc.category} ${doc.storage_path} (${buf.length}B) -> ${zipPath}`);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
+            const msg = errText(e);
             console.warn(
               `[download-zip] missing/failed: ${doc.storage_path} — ${msg}`,
             );
@@ -188,7 +189,7 @@ export async function GET(
       },
     });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[download-zip] error:", msg);
     return err(msg, 500);
   }

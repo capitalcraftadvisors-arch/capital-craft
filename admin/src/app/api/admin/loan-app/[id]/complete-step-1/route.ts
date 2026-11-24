@@ -29,6 +29,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { err, dbAs, requireLogin, loadLoanRow } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { logLoanActivityServer } from "@/lib/loan-activity-server";
+import { errText } from "@/lib/errors";
 // Note: sendWhatsAppConfirmation is intentionally NOT imported here —
 // the WhatsApp step is dropped from the current build. See header
 // comment. The stub in @/lib/whatsapp stays for later re-enablement.
@@ -162,7 +163,7 @@ export async function PATCH(
 
     return NextResponse.json({ ok: true, next_step: patch.current_step });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[complete-step-1] error:", msg);
     return err(msg, 500);
   }

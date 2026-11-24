@@ -274,8 +274,8 @@ export function nameOptions<T>(rows: T[], nameOf: (r: T) => string): { value: st
 export function CreatedOnCell({ at }: { at: string }) {
   return (
     <td className="px-3 py-3 text-center">
-      <p className="text-[13px] font-semibold text-[#0f3d2e]">{fmtDate(at)}</p>
-      <p className="text-[11px] text-[#5a8a76] mt-0.5">{fmtAddedTime(at)}</p>
+      <p className="text-[13px] font-semibold text-cc-ink">{fmtDate(at)}</p>
+      <p className="text-[11px] text-cc-muted mt-0.5">{fmtAddedTime(at)}</p>
     </td>
   );
 }
@@ -285,7 +285,7 @@ export function CreatedOnCell({ at }: { at: string }) {
 // or "No <noun> yet.".
 export function EmptyRow({ cols, loaded, hasRows, noun }: { cols: number; loaded: boolean; hasRows: boolean; noun: string }) {
   return (
-    <tr><td colSpan={cols} className="px-5 py-10 text-center text-[#5a8a76]">{!loaded ? "Loading…" : hasRows ? `No ${noun} match.` : `No ${noun} yet.`}</td></tr>
+    <tr><td colSpan={cols} className="px-5 py-10 text-center text-cc-muted">{!loaded ? "Loading…" : hasRows ? `No ${noun} match.` : `No ${noun} yet.`}</td></tr>
   );
 }
 
@@ -293,7 +293,7 @@ export function EmptyRow({ cols, loaded, hasRows, noun }: { cols: number; loaded
 export function UnseenBadge({ n }: { n: number }) {
   if (!(n > 0)) return null;
   return (
-    <span className="absolute -top-1.5 -right-1.5 min-w-[17px] h-[17px] px-1 grid place-items-center rounded-full bg-[#dc2626] text-white text-[10px] font-bold leading-none">
+    <span className="absolute -top-1.5 -right-1.5 min-w-[17px] h-[17px] px-1 grid place-items-center rounded-full bg-red-600 text-white text-[10px] font-bold leading-none">
       {n > 9 ? "9+" : n}
     </span>
   );

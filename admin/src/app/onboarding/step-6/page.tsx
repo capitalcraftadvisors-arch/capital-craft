@@ -140,7 +140,7 @@ export default function Step6Page() {
     <>
       <button
         type="button"
-        onClick={() => router.push("/onboarding/step-5" as any)}
+        onClick={() => router.push("/onboarding/step-5")}
         className="inline-flex items-center gap-1 text-[13px] text-text-mid hover:text-text mb-4"
       >
         <span aria-hidden>←</span> Back
@@ -180,6 +180,7 @@ export default function Step6Page() {
         <Card className="p-6 sm:p-7">
           <h3 className="font-display font-semibold text-[18px] mb-4">How did you know about us?</h3>
           <select
+            aria-label="How did you know about us?"
             value={referralSource}
             onChange={(e) => setReferralSource(e.target.value)}
             className="w-full rounded-input border border-line bg-white pl-3.5 pr-9 py-3 text-[15px] outline-none focus:border-blue appearance-none bg-[url('data:image/svg+xml;utf8,<svg fill=%22%236B8294%22 viewBox=%220 0 20 20%22 xmlns=%22http://www.w3.org/2000/svg%22><path d=%22M5 8l5 5 5-5z%22/></svg>')] bg-no-repeat bg-[length:20px] bg-[right_12px_center]"

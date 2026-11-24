@@ -13,12 +13,13 @@
 // All operations call /api/upload or /api/document/[id] which already
 // audit-log to admin_edit_log on the backend.
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   uploadDocument, getDocumentUrl, deleteDocument,
 } from "@/lib/storage";
 import { isAcceptedFileType } from "@/lib/validators";
+import { askConfirm } from "@/lib/confirm";
 
 type Props = {
   businessId: string;
@@ -55,7 +56,7 @@ export default function AdminDocSlot({
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
-  async function load() {
+  const load = useCallback(async () => {
     let q = supabase()
       .from("epc_documents")
       .select("id, storage_path, mime_type, file_name")
@@ -73,9 +74,9 @@ export default function AdminDocSlot({
       setThumb(null);
     }
     setLoaded(true);
-  }
+  }, [businessId, stakeholderId, category]);
 
-  useEffect(() => { void load(); }, [businessId, stakeholderId, category]);
+  useEffect(() => { void load(); }, [load]);
 
   async function handleFiles(files: FileList | null, replaceMode: boolean) {
     if (!files || files.length === 0) return;
@@ -106,7 +107,7 @@ export default function AdminDocSlot({
 
   async function remove() {
     if (!doc) return;
-    if (!confirm(`Remove ${label}?`)) return;
+    if (!(await askConfirm(`Remove ${label}?`, { danger: true }))) return;
     setBusy("remove");
     const ok = await deleteDocument(doc.id);
     setBusy(null);
@@ -168,8 +169,8 @@ export default function AdminDocSlot({
         </div>
       ) : (
         <label className={[
-          "flex flex-col items-center justify-center min-h-[120px] gap-0.5 border-2 border-dashed border-[#185fa5] rounded-input bg-white text-[#185fa5]",
-          "px-3 py-4 text-center cursor-pointer hover:bg-[#f2f7fc] transition-colors",
+          "flex flex-col items-center justify-center min-h-[120px] gap-0.5 border-2 border-dashed border-cc-blue rounded-input bg-white text-cc-blue",
+          "px-3 py-4 text-center cursor-pointer hover:bg-cc-blue-wash transition-colors",
           busy ? "opacity-60 pointer-events-none" : "",
         ].join(" ")}>
           <input
@@ -185,7 +186,7 @@ export default function AdminDocSlot({
             <line x1="12" y1="3" x2="12" y2="15" />
           </svg>
           <p className="text-[14px] font-semibold">{busy === "upload" ? "Uploading…" : "Click to upload"}</p>
-          <p className="text-[12px] text-[#5a86b3]">Photo, scan, or PDF</p>
+          <p className="text-[12px] text-cc-blue-muted">Photo, scan, or PDF</p>
         </label>
       )}
 

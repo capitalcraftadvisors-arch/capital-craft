@@ -165,12 +165,10 @@ export function WelcomePhoto({ photo }: { photo: WelcomePhotoKey }) {
     <div className={`ccwp ccwp-${p.fit}`} style={{ background: p.fill }}>
       {p.fit === "whole" ? (
         <div className="ccwp-frame" style={{ aspectRatio: `${p.w} / ${p.h}`, height: `min(100cqh, ${((p.h / p.w) * 100).toFixed(2)}cqw)` }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={p.src} alt="" aria-hidden className="ccwp-img" />
         </div>
       ) : (
         <>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={p.src} alt="" aria-hidden className="ccwp-img" style={{ objectPosition: p.position }} />
           <span className="ccwp-wash" style={{ background: p.wash }} aria-hidden />
         </>

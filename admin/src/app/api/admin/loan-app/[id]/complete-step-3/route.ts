@@ -19,6 +19,7 @@ import { err, dbAs, requireLogin, loadLoanRow, strOrNull, numOrNull } from "@/li
 import { UUID_RE, MOBILE_RE, EMAIL_RE, PAN_RE, PINCODE_RE, AADHAAR_RE } from "@/lib/validators";
 import { maskAadhaar } from "@/lib/aadhaar-mask";
 import { logLoanActivityServer } from "@/lib/loan-activity-server";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -233,7 +234,7 @@ export async function POST(
 
     return NextResponse.json({ ok: true, next_step: nextStep });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[complete-step-3] error:", msg);
     return err(msg, 500);
   }

@@ -68,8 +68,8 @@ export function policyValidity(
 }
 
 export const VALIDITY_TEXT: Record<ValidityTone, string> = {
-  green: "text-[#178a5c]",
-  amber: "text-[#854f0b]",
+  green: "text-cc-green",
+  amber: "text-warn-ink",
   red: "text-red-700",
 };
 

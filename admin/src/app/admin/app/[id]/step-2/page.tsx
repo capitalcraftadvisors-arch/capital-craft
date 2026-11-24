@@ -11,15 +11,15 @@
 // scanned photocopies often lose fields). Every KYC field on this page
 // is editable — the OCR is prefill-only, never a hard source of truth.
 //
-// PRIVACY: the 12-digit Aadhaar number never leaves the OCR route in
-// unmasked form. If OCR missed it, admin types just the LAST 4 digits;
-// the client always constructs the "xxxxxxxx####" masked form before
-// submitting. The unmasked number is never accepted from the client.
+// The FULL 12-digit Aadhaar number is kept (KYC needs it; epc_applications
+// is admin-only via RLS). OCR prefills it, the admin can type or correct it,
+// and the "xxxxxxxx####" masked form is derived from it at save time. A
+// number that isn't exactly 12 digits is saved as NULL, never truncated.
 //
 // The page frame, section cards and the save / OCR calls come from the
 // shared loan-form kit (components/loan-form).
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
@@ -93,6 +93,7 @@ function Inner() {
   const [aadhaarNumber, setAadhaarNumber] = useState("");
   const [careOf,   setCareOf]   = useState("");
   const [address,  setAddress]  = useState("");
+  const aadhaarInputId = useId(); // ties the "Aadhaar number" label to its box
 
   // Save
   const [saving, setSaving] = useState(false);
@@ -219,13 +220,12 @@ function Inner() {
     try {
       // Skippable: send only what's present. A partial Aadhaar number is stored
       // as NULL (never a truncated value), and missing docs send null paths.
-      const validNum = AADHAAR_RE.test(aadhaarNumber);
       const body = {
         aadhaar_name:          name.trim() || null,
         aadhaar_dob:           dob.trim() || null,
         aadhaar_gender:        gender.trim() || null,
-        aadhaar_number:        validNum ? aadhaarNumber : null,
-        aadhaar_number_masked: validNum ? "xxxxxxxx" + aadhaarNumber.slice(-4) : null,
+        aadhaar_number:        validAadhaar ? aadhaarNumber : null,
+        aadhaar_number_masked: validAadhaar ? "xxxxxxxx" + aadhaarNumber.slice(-4) : null,
         aadhaar_care_of:       careOf.trim() || null,
         aadhaar_address:       address.trim() || null,
         aadhaar_front_path:    uploaded?.storage_paths.front ?? null,
@@ -235,7 +235,7 @@ function Inner() {
       const error = await saveStep(loan.id, 2, body);
       if (error) { setSaveError(error); setSaving(false); return; }
       // Came here via a Step-6 "Edit" link? Go back to the review.
-      router.push(nextStepPath(loan.id, "step-3") as any);
+      router.push(nextStepPath(loan.id, "step-3"));
     } catch (e) {
       setSaveError((e as Error)?.message || "Network error.");
       setSaving(false);
@@ -315,14 +315,14 @@ function Inner() {
             <div className="flex items-center justify-between pt-1 border-t border-line pt-4">
               <div className="flex items-center gap-2">
                 <TickCircle small />
-                <span className="text-[13px] font-semibold text-[#0f3d2e]">
+                <span className="text-[13px] font-semibold text-cc-ink">
                   Uploads captured
                 </span>
               </div>
               <button
                 type="button"
                 onClick={clearUploads}
-                className="text-[12px] font-semibold text-[#854f0b] border border-[#854f0b] px-3 py-1.5 rounded hover:bg-amber-50"
+                className="text-[12px] font-semibold text-warn-ink border border-warn-ink px-3 py-1.5 rounded hover:bg-amber-50"
               >
                 Re-upload Aadhaar
               </button>
@@ -332,17 +332,17 @@ function Inner() {
 
         {/* ─── Extracted / editable details ───────────────────── */}
         {uploaded && (
-          <Card className="p-7 space-y-6 bg-white border-[#cdeadd]">
+          <Card className="p-7 space-y-6 bg-white border-cc-line">
             <div className="flex flex-wrap items-center gap-3 justify-between">
               <div>
-                <h2 className="font-display font-semibold text-[18px] text-[#0f3d2e]">
+                <h2 className="font-display font-semibold text-[18px] text-cc-ink">
                   Identity details
                 </h2>
                 <p className="text-[13px] text-text-mid mt-1">
                   Prefilled from your Aadhaar upload. Correct anything that looks wrong — every field is editable.
                 </p>
               </div>
-              <span className="text-[11px] px-2.5 py-1 rounded-full bg-[#f0faf5] text-[#0f3d2e] font-semibold uppercase tracking-wide border border-[#cdeadd]">
+              <span className="text-[11px] px-2.5 py-1 rounded-full bg-cc-wash text-cc-ink font-semibold uppercase tracking-wide border border-cc-line">
                 Details Extracted
               </span>
             </div>
@@ -375,8 +375,8 @@ function Inner() {
                         className={[
                           "flex-1 px-3 py-2.5 rounded-input border-2 text-[13px] font-medium transition-colors",
                           gender === g
-                            ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
-                            : "border-line bg-white text-text hover:border-[#185fa5]",
+                            ? "border-cc-green bg-cc-wash text-cc-ink"
+                            : "border-line bg-white text-text hover:border-cc-blue",
                         ].join(" ")}
                       >
                         {g}
@@ -385,10 +385,11 @@ function Inner() {
                   </div>
                 </div>
                 <div>
-                  <label className={FIELD_LABEL}>
+                  <label htmlFor={aadhaarInputId} className={FIELD_LABEL}>
                     Aadhaar number
                   </label>
                   <input
+                    id={aadhaarInputId}
                     value={aadhaarNumber.replace(/(\d{4})(?=\d)/g, "$1 ")}
                     onChange={(e) => setAadhaarNumber(e.target.value.replace(/\D/g, "").slice(0, 12))}
                     maxLength={14}
@@ -399,8 +400,8 @@ function Inner() {
                       aadhaarNumber && !validAadhaar
                         ? "border-red-400 focus:border-red-500"
                         : validAadhaar
-                        ? "border-[#178a5c] focus:border-[#178a5c]"
-                        : "border-line focus:border-[#185fa5]",
+                        ? "border-cc-green focus:border-cc-green"
+                        : "border-line focus:border-cc-blue",
                     ].join(" ")}
                   />
                   <p className="mt-1.5 text-[11px] text-text-muted">
@@ -425,7 +426,7 @@ function Inner() {
                 <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold mb-2">
                   {uploaded.face_signed_url ? "Detected face" : "Front upload"}
                 </p>
-                <div className="w-full h-[220px] rounded-input border-2 border-[#cdeadd] bg-white overflow-hidden flex items-center justify-center">
+                <div className="w-full h-[220px] rounded-input border-2 border-cc-line bg-white overflow-hidden flex items-center justify-center">
                   {(() => {
                     const src = uploaded.face_signed_url || frontPreviewUrl || frontStoredUrl;
                     if (!src) {
@@ -454,7 +455,7 @@ function Inner() {
                   <button
                     type="button"
                     onClick={() => setFrontRotate((r) => (r + 90) % 360)}
-                    className="mt-2 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#185fa5] hover:underline"
+                    className="mt-2 inline-flex items-center gap-1.5 text-[12px] font-semibold text-cc-blue hover:underline"
                   >
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M23 4v6h-6" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
                     Rotate
@@ -473,7 +474,7 @@ function Inner() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => router.push(`/admin/app/${loan.id}/step-1` as any)}
+                onClick={() => router.push(`/admin/app/${loan.id}/step-1`)}
               >
                 ← Previous
               </Button>
@@ -533,8 +534,8 @@ function UploadTile({
         className={[
           "w-full h-[108px] rounded-input border-2 border-dashed transition-colors flex items-center justify-center text-center px-4 relative",
           has
-            ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
-            : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
+            ? "border-cc-green bg-cc-wash text-cc-ink"
+            : "border-cc-blue bg-white text-cc-blue hover:bg-cc-blue-wash",
           disabled ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
         ].join(" ")}
       >
@@ -562,7 +563,7 @@ function UploadTile({
               disabled={file ? !previewUrl : !onViewExisting}
               title="View uploaded file"
               aria-label="View uploaded file"
-              className="absolute top-2 right-2 p-1.5 rounded bg-white/90 border border-[#cdeadd] text-[#185fa5] hover:bg-white hover:border-[#185fa5] disabled:opacity-50 transition-colors"
+              className="absolute top-2 right-2 p-1.5 rounded bg-white/90 border border-cc-line text-cc-blue hover:bg-white hover:border-cc-blue disabled:opacity-50 transition-colors"
             >
               <EyeIcon size="16" />
             </button>

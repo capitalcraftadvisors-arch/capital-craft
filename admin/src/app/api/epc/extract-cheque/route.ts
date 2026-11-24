@@ -16,6 +16,7 @@ import sharp from "sharp";
 import { err, requireLogin } from "@/lib/api";
 import { visionDocumentText } from "@/lib/vision-server";
 import { parseChequeFields } from "@/lib/cheque-parser";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
     try {
       rawText = await visionDocumentText(buffer, mime);
     } catch (e) {
-      visionError = e instanceof Error ? e.message : String(e);
+      visionError = errText(e);
       console.error("[extract-cheque] vision error:", visionError);
       return err(visionError, 502);
     }
@@ -68,7 +69,7 @@ export async function POST(req: NextRequest) {
       raw_text:      (rawText || "").slice(0, RAW_TEXT_CAP),
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[extract-cheque] error:", msg);
     return err(msg, 500);
   }

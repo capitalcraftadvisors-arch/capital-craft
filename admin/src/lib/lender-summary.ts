@@ -16,7 +16,7 @@ function kwOf(loan: Record<string, any>): string {
   const v = loan.project_size_unit === "mw" ? s * 1000 : s;
   return `${v} kW`;
 }
-function useTypeLabel(loan: Record<string, any>): string {
+function plantUseLabel(loan: Record<string, any>): string {
   return loan.plant_use_type === "commercial" ? "Commercial" : loan.plant_use_type === "residential" ? "Residential" : "—";
 }
 function installAddress(loan: Record<string, any>): string {
@@ -138,7 +138,7 @@ export function creditFairEmailRows(loan: Record<string, any>, epcName?: string 
     ["Permanent Address", loan.borrower_address ?? loan.aadhaar_address ?? "—"],
     ["Installation Address Status", "Owned"],
     ["Permanent Address Status", "Owned"],
-    ["Solar finance for", useTypeLabel(loan)],
+    ["Solar finance for", plantUseLabel(loan)],
     ["KW installation", kwOf(loan)],
     ["Monthly electricity bill", rupees(loan.monthly_bill_amount)],
     ["Merchant ID", ""], // blank for Credit Fair

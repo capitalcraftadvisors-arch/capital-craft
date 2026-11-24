@@ -27,12 +27,12 @@ export default function CustomTemplateBanner({ tpl }: { tpl: QuoteTemplate | nul
 
   const close = () => { markCustomTemplateSeen(tpl); setSeen(tpl.ready_at); };
   return (
-    <div className="mb-4 flex items-center gap-3 flex-wrap rounded-2xl border border-[#cdeadd] bg-[#f0faf5] px-4 py-3">
-      <span className="grid place-items-center w-8 h-8 rounded-full bg-[#178a5c] text-white text-[15px] font-bold shrink-0">✓</span>
-      <p className="text-[14px] font-semibold text-[#0f3d2e]">Your custom template is ready. You can use it now.</p>
+    <div className="mb-4 flex items-center gap-3 flex-wrap rounded-2xl border border-cc-line bg-cc-wash px-4 py-3">
+      <span className="grid place-items-center w-8 h-8 rounded-full bg-cc-green text-white text-[15px] font-bold shrink-0">✓</span>
+      <p className="text-[14px] font-semibold text-cc-ink">Your custom template is ready. You can use it now.</p>
       <div className="ml-auto flex items-center gap-2">
         {canWork(getBusiness()) && (
-          <button type="button" onClick={() => { close(); router.push("/dashboard/quotation" as any); }}
+          <button type="button" onClick={() => { close(); router.push("/dashboard/quotation"); }}
             className="px-4 py-2 rounded-xl text-white text-[13px] font-semibold" style={{ background: NAVY }}>
             Use it
           </button>

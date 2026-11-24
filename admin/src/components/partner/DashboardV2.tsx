@@ -19,6 +19,7 @@ import { getBusiness, loanAccess, insuranceAccess } from "@/lib/auth";
 import { canManageOrg, canWork, hasModule } from "@/lib/epc-roles";
 import { fetchSubscription, hasFeature } from "@/lib/subscription";
 import { remindPayment } from "@/lib/project-payments";
+import { notify } from "@/lib/notify";
 import { fmtDate, localIsoDate } from "@/lib/dates";
 import { fmtRupees, inrPlain, rupeesShort } from "@/lib/money";
 import { LEAD_STATUS_LABEL } from "@/lib/leads";
@@ -51,8 +52,8 @@ function Card({ title, onTitle, id, className = "", children }: { title: string;
   return (
     <div id={id} className={`bg-white rounded-2xl border border-line p-5 min-w-0 ${className}`}>
       {onTitle
-        ? <button type="button" onClick={onTitle} className="flex items-center gap-1.5 text-[13px] font-semibold text-[#0f3d2e] mb-3 hover:text-[#1e3a8a]">{title}{ARROW}</button>
-        : <div className="text-[13px] font-semibold text-[#0f3d2e] mb-3">{title}</div>}
+        ? <button type="button" onClick={onTitle} className="flex items-center gap-1.5 text-[13px] font-semibold text-cc-ink mb-3 hover:text-navy">{title}{ARROW}</button>
+        : <div className="text-[13px] font-semibold text-cc-ink mb-3">{title}</div>}
       {children}
     </div>
   );
@@ -67,7 +68,7 @@ export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, on
   onOpenMessage: (loanId: string) => void; // CC's message on a loan
 }) {
   const router = useRouter();
-  const go = (href: string) => router.push(href as any);
+  const go = (href: string) => router.push(href);
   const me = getBusiness();
   const work = canWork(me), manage = canManageOrg(me);
   const seeLoans = loanAccess(me) && hasModule(me, "loans");
@@ -99,7 +100,7 @@ export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, on
   async function remind(p: PaymentDueRow) {
     setReminding(p.id);
     try { await remindPayment({ customer: p.customer, mobile: p.mobile, balance: p.balance }); }
-    catch (e) { alert((e as Error).message || "Couldn't send the reminder."); }
+    catch (e) { notify.error((e as Error).message || "Couldn't send the reminder."); }
     finally { setReminding(null); }
   }
 
@@ -120,11 +121,11 @@ export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, on
   const attention = (d?.attention ?? []).filter((a) => (a.kind === "insurance" || a.kind === "not_insured" ? seeIns : a.kind === "loan" ? seeLoans : true));
 
   const tiles: { label: string; value: string; tone: string; onClick: () => void }[] = [
-    { label: "Total project value", value: dash(rupeesShort(d?.summary.project_value ?? 0)), tone: "text-[#0f3d2e]", onClick: () => go("/dashboard/projects") },
-    { label: "Projects confirmed", value: dash(String(d?.summary.projects ?? 0)), tone: "text-[#0f3d2e]", onClick: () => go("/dashboard/projects") },
-    { label: "Capacity", value: dash(kwText(d?.summary.kw ?? 0)), tone: "text-[#0f3d2e]", onClick: () => go("/dashboard/projects") },
-    { label: "Amount received", value: dash(rupeesShort(d?.summary.received ?? 0)), tone: "text-[#178a5c]", onClick: () => go("/dashboard/projects") },
-    { label: "Amount pending", value: dash(rupeesShort(d?.summary.pending ?? 0)), tone: "text-[#854f0b]", onClick: toPayments },
+    { label: "Total project value", value: dash(rupeesShort(d?.summary.project_value ?? 0)), tone: "text-cc-ink", onClick: () => go("/dashboard/projects") },
+    { label: "Projects confirmed", value: dash(String(d?.summary.projects ?? 0)), tone: "text-cc-ink", onClick: () => go("/dashboard/projects") },
+    { label: "Capacity", value: dash(kwText(d?.summary.kw ?? 0)), tone: "text-cc-ink", onClick: () => go("/dashboard/projects") },
+    { label: "Amount received", value: dash(rupeesShort(d?.summary.received ?? 0)), tone: "text-cc-green", onClick: () => go("/dashboard/projects") },
+    { label: "Amount pending", value: dash(rupeesShort(d?.summary.pending ?? 0)), tone: "text-warn-ink", onClick: toPayments },
   ];
 
   const p = d?.pipeline;
@@ -169,20 +170,20 @@ export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, on
           )}
           {work && quotes && (
             <button type="button" onClick={onQuotation}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-[#1e3a8a] text-[#1e3a8a] text-[13.5px] font-semibold hover:bg-[#1e3a8a]/[0.06] active:scale-[0.98] transition">
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-navy text-navy text-[13.5px] font-semibold hover:bg-navy/[0.06] active:scale-[0.98] transition">
               New quotation
             </button>
           )}
           {work && seeLoans && (
             <button type="button" onClick={() => go("/dashboard/apply/chat")}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-[#1e3a8a] text-[#1e3a8a] text-[13.5px] font-semibold hover:bg-[#1e3a8a]/[0.06] active:scale-[0.98] transition">
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-navy text-navy text-[13.5px] font-semibold hover:bg-navy/[0.06] active:scale-[0.98] transition">
               Apply for loan
             </button>
           )}
         </div>
         <div className="relative shrink-0">
           <select value={period} onChange={(e) => pick(e.target.value as DashPeriod)}
-            className="appearance-none bg-white border border-line rounded-xl pl-3.5 pr-9 py-2 text-[13px] font-semibold text-[#0f3d2e] cursor-pointer hover:border-[#1e3a8a] focus:outline-none focus:border-[#1e3a8a]">
+            className="appearance-none bg-white border border-line rounded-xl pl-3.5 pr-9 py-2 text-[13px] font-semibold text-cc-ink cursor-pointer hover:border-navy focus:outline-none focus:border-navy">
             {DASH_PERIODS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
           </select>
           <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5a8a76" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
@@ -213,12 +214,12 @@ export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, on
                   <div key={gi} className={gi > 0 ? "pt-4 border-t border-line" : ""}>
                     {g.rows.map((r) => (
                       <button key={r.label} type="button" onClick={r.open}
-                        className="w-full grid grid-cols-[minmax(0,140px)_1fr_48px] items-center gap-3 py-1.5 text-left rounded-lg hover:bg-[#f7f9fe] px-1.5">
+                        className="w-full grid grid-cols-[minmax(0,140px)_1fr_48px] items-center gap-3 py-1.5 text-left rounded-lg hover:bg-navy-mist px-1.5">
                         <span className="text-[13px] text-text-mid truncate">{r.label}</span>
-                        <span className="h-2.5 rounded-full bg-[#eef1f5] overflow-hidden">
+                        <span className="h-2.5 rounded-full bg-grey-chip overflow-hidden">
                           <span className="block h-full rounded-full transition-[width] duration-300" style={{ width: `${(r.n / max) * 100}%`, background: g.color }} />
                         </span>
-                        <span className="text-[14px] font-bold text-[#0f3d2e] tabular-nums text-right">{dash(String(r.n))}</span>
+                        <span className="text-[14px] font-bold text-cc-ink tabular-nums text-right">{dash(String(r.n))}</span>
                       </button>
                     ))}
                   </div>
@@ -236,7 +237,7 @@ export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, on
                     <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: s.color }} />
                     <span className="text-[13px] text-text-mid flex-1">{s.label}</span>
                     <span className="text-[12px] text-text-muted tabular-nums">{dash(rupeesShort(s.amount))}</span>
-                    <span className="text-[14px] font-bold text-[#0f3d2e] tabular-nums w-8 text-right">{dash(String(s.value))}</span>
+                    <span className="text-[14px] font-bold text-cc-ink tabular-nums w-8 text-right">{dash(String(s.value))}</span>
                   </div>
                 ))}
               </div>
@@ -253,7 +254,7 @@ export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, on
                 <div className="flex flex-col gap-2">
                   {attention.map((a) => (
                     <button key={`${a.kind}.${a.id}`} type="button" onClick={() => openItem(a)}
-                      className="flex items-center gap-3 rounded-xl border border-line px-3.5 py-2.5 hover:bg-[#f7f9fe] text-left">
+                      className="flex items-center gap-3 rounded-xl border border-line px-3.5 py-2.5 hover:bg-navy-mist text-left">
                       <span className="w-2 h-2 rounded-full shrink-0" style={{ background: KIND_DOT[a.kind] }} />
                       <span className="min-w-0 flex-1">
                         <span className="block text-[13.5px] font-semibold text-text truncate">{a.title}</span>
@@ -273,14 +274,14 @@ export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, on
                 <div className="flex flex-col gap-2">
                   {d.followups_today.map((f) => (
                     <button key={f.id} type="button" onClick={() => go("/dashboard/leads?f=due")}
-                      className="flex items-center justify-between gap-3 rounded-xl border border-line px-3.5 py-2.5 hover:bg-[#f7f9fe] text-left">
+                      className="flex items-center justify-between gap-3 rounded-xl border border-line px-3.5 py-2.5 hover:bg-navy-mist text-left">
                       <span className="min-w-0">
                         <span className="block text-[13.5px] font-semibold text-text truncate">{f.name}</span>
                         <span className="block text-[11.5px] text-text-muted truncate">
                           {[f.mobile ? `+91 ${f.mobile}` : null, manage ? f.owner : null].filter(Boolean).join(" · ")}
                         </span>
                       </span>
-                      <span className={`shrink-0 text-[12px] font-semibold whitespace-nowrap ${f.follow_up_at < today ? "text-[#dc2626]" : "text-[#b45309]"}`}>{fmtDate(f.follow_up_at)}</span>
+                      <span className={`shrink-0 text-[12px] font-semibold whitespace-nowrap ${f.follow_up_at < today ? "text-red-600" : "text-amber-700"}`}>{fmtDate(f.follow_up_at)}</span>
                     </button>
                   ))}
                 </div>
@@ -307,8 +308,8 @@ export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, on
                       className="border-b border-line last:border-0 hover:bg-bg-soft cursor-pointer">
                       <td className="px-2 py-2.5 font-medium text-text">{o.name}</td>
                       <td className="px-2 py-2.5 text-right tabular-nums">{o.leads}</td>
-                      <td className="px-2 py-2.5 text-right tabular-nums text-[#178a5c] font-semibold">{o.won}</td>
-                      <td className={`px-2 py-2.5 text-right tabular-nums ${o.due > 0 ? "text-[#dc2626] font-semibold" : "text-text-mid"}`}>{o.due}</td>
+                      <td className="px-2 py-2.5 text-right tabular-nums text-cc-green font-semibold">{o.won}</td>
+                      <td className={`px-2 py-2.5 text-right tabular-nums ${o.due > 0 ? "text-red-600 font-semibold" : "text-text-mid"}`}>{o.due}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -343,9 +344,9 @@ export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, on
                             {r.mobile && <div className="text-[11.5px] text-text-muted">+91 {r.mobile}</div>}
                           </td>
                           <td className="px-2 py-2.5 text-right whitespace-nowrap">{fmtRupees(r.cost)}</td>
-                          <td className="px-2 py-2.5 text-right whitespace-nowrap text-[#178a5c]">{fmtRupees(r.received)}</td>
-                          <td className="px-2 py-2.5 text-right whitespace-nowrap font-semibold text-[#0f3d2e]">{fmtRupees(r.balance)}</td>
-                          <td className={`px-2 py-2.5 whitespace-nowrap ${r.due_on && r.due_on < today ? "text-[#dc2626] font-semibold" : "text-text-mid"}`}>{fmtDate(r.due_on)}</td>
+                          <td className="px-2 py-2.5 text-right whitespace-nowrap text-cc-green">{fmtRupees(r.received)}</td>
+                          <td className="px-2 py-2.5 text-right whitespace-nowrap font-semibold text-cc-ink">{fmtRupees(r.balance)}</td>
+                          <td className={`px-2 py-2.5 whitespace-nowrap ${r.due_on && r.due_on < today ? "text-red-600 font-semibold" : "text-text-mid"}`}>{fmtDate(r.due_on)}</td>
                           {work && (
                             <td className="px-2 py-2.5">
                               {r.mobile && <WhatsAppButton on={wa} busy={reminding === r.id} onClick={() => void remind(r)} label="Send reminder" />}
@@ -373,9 +374,9 @@ export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, on
               <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
                 {loanTiles.map((t) => (
                   <button key={t.label} type="button" onClick={() => onLoans(t.f)}
-                    className="rounded-xl bg-bg-soft px-3.5 py-3 text-left hover:bg-[#eef3fc] transition-colors">
+                    className="rounded-xl bg-bg-soft px-3.5 py-3 text-left hover:bg-navy-wash transition-colors">
                     <div className="text-[11.5px] text-text-muted">{t.label}</div>
-                    <div className="text-[18px] font-bold text-[#0f3d2e] mt-0.5 tabular-nums truncate">{t.value}</div>
+                    <div className="text-[18px] font-bold text-cc-ink mt-0.5 tabular-nums truncate">{t.value}</div>
                   </button>
                 ))}
               </div>
@@ -385,7 +386,7 @@ export default function DashboardV2({ rms, onQuotation, onLoans, onInsurance, on
           <Card title="Your relationship managers">
             <div className="flex flex-col gap-3">
               {rms.map((rm) => (
-                <a key={rm.phone} href={`tel:+${rm.phone}`} className="flex items-center gap-3 rounded-xl hover:bg-[#f7f9fe] -mx-1.5 px-1.5 py-1">
+                <a key={rm.phone} href={`tel:+${rm.phone}`} className="flex items-center gap-3 rounded-xl hover:bg-navy-mist -mx-1.5 px-1.5 py-1">
                   <div className="w-9 h-9 rounded-full grid place-items-center text-white font-bold text-[13px] shrink-0" style={{ background: NAVY_ACCENT }}>{rm.name.slice(0, 1)}</div>
                   <div className="min-w-0 flex-1">
                     <div className="text-[13.5px] font-semibold text-text truncate">{rm.name}</div>
@@ -435,7 +436,7 @@ export function Donut({ segments, size = 176, stroke = 22, unit = "Files" }: {
         </g>
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        <div className="text-[28px] font-bold text-[#0f3d2e] leading-none tabular-nums">{centre.big}</div>
+        <div className="text-[28px] font-bold text-cc-ink leading-none tabular-nums">{centre.big}</div>
         <div className="text-[11px] text-text-muted mt-1 max-w-[90px] text-center truncate">{centre.small}</div>
       </div>
     </div>

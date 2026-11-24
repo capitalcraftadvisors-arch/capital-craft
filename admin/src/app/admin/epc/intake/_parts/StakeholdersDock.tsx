@@ -129,32 +129,32 @@ export default function StakeholdersDock({ epcId, businessType, initial, busy, o
             {list.length > 1 && <button onClick={() => remove(s.id)} className="text-[12px] text-text-muted hover:text-red-500">Delete</button>}
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <input value={s.name} onChange={(e) => update(s.id, "name", e.target.value)} placeholder="Name" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#185fa5]" />
-            <input value={s.designation} onChange={(e) => update(s.id, "designation", e.target.value)} placeholder="Designation" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#185fa5]" />
-            <input value={s.mobile} onChange={(e) => update(s.id, "mobile", e.target.value.replace(/\D/g, "").slice(0, 10))} inputMode="numeric" placeholder="Mobile" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#185fa5]" />
-            <input value={s.email} onChange={(e) => update(s.id, "email", e.target.value)} placeholder="Email" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#185fa5]" />
-            <input value={s.father_name} onChange={(e) => update(s.id, "father_name", e.target.value)} placeholder="Father's name" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#185fa5]" />
-            <DateField value={toIsoDate(s.dob) ?? ""} onChange={(iso) => update(s.id, "dob", iso)} className="rounded-lg border border-line py-2 text-[13px] px-2.5 outline-none focus:border-[#185fa5]" />
-            <input value={s.aadhaar_number} onChange={(e) => update(s.id, "aadhaar_number", e.target.value.replace(/\D/g, "").slice(0, 12))} inputMode="numeric" placeholder="Aadhaar no." className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#185fa5]" />
-            <input value={s.aadhaar_address} onChange={(e) => update(s.id, "aadhaar_address", e.target.value)} placeholder="Address (as per Aadhaar)" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#185fa5]" />
+            <input value={s.name} onChange={(e) => update(s.id, "name", e.target.value)} placeholder="Name" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-cc-blue" />
+            <input value={s.designation} onChange={(e) => update(s.id, "designation", e.target.value)} placeholder="Designation" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-cc-blue" />
+            <input value={s.mobile} onChange={(e) => update(s.id, "mobile", e.target.value.replace(/\D/g, "").slice(0, 10))} inputMode="numeric" placeholder="Mobile" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-cc-blue" />
+            <input value={s.email} onChange={(e) => update(s.id, "email", e.target.value)} placeholder="Email" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-cc-blue" />
+            <input value={s.father_name} onChange={(e) => update(s.id, "father_name", e.target.value)} placeholder="Father's name" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-cc-blue" />
+            <DateField value={toIsoDate(s.dob) ?? ""} onChange={(iso) => update(s.id, "dob", iso)} className="rounded-lg border border-line py-2 text-[13px] px-2.5 outline-none focus:border-cc-blue" />
+            <input value={s.aadhaar_number} onChange={(e) => update(s.id, "aadhaar_number", e.target.value.replace(/\D/g, "").slice(0, 12))} inputMode="numeric" placeholder="Aadhaar no." className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-cc-blue" />
+            <input value={s.aadhaar_address} onChange={(e) => update(s.id, "aadhaar_address", e.target.value)} placeholder="Address (as per Aadhaar)" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-cc-blue" />
           </div>
           <div className="grid grid-cols-3 gap-2 mt-2">
             <div className="rounded-lg border border-line p-2">
               <FileUpload key={`pan-${s.id}-${panKey}`} businessId={epcId} stakeholderId={s.id} table="epc_documents" category="stakeholder_pan" maxFiles={1} uploadedBy="admin" label="PAN" onUploaded={({ file }) => void ocrMember(s.id, "pan", file)} />
             </div>
             <div className="rounded-lg border border-line p-2">
-              <FileUpload businessId={epcId} stakeholderId={s.id} table="epc_documents" category={"stakeholder_aadhaar_front" as any} maxFiles={1} uploadedBy="admin" label="Aadhaar front" onUploaded={({ file }) => void ocrMember(s.id, "aadhaar_front", file)} />
+              <FileUpload businessId={epcId} stakeholderId={s.id} table="epc_documents" category="stakeholder_aadhaar_front" maxFiles={1} uploadedBy="admin" label="Aadhaar front" onUploaded={({ file }) => void ocrMember(s.id, "aadhaar_front", file)} />
             </div>
             <div className="rounded-lg border border-line p-2">
-              <FileUpload businessId={epcId} stakeholderId={s.id} table="epc_documents" category={"stakeholder_aadhaar_back" as any} maxFiles={1} uploadedBy="admin" label="Aadhaar back" onUploaded={({ file }) => void ocrMember(s.id, "aadhaar_back", file)} />
+              <FileUpload businessId={epcId} stakeholderId={s.id} table="epc_documents" category="stakeholder_aadhaar_back" maxFiles={1} uploadedBy="admin" label="Aadhaar back" onUploaded={({ file }) => void ocrMember(s.id, "aadhaar_back", file)} />
             </div>
           </div>
         </div>
       ))}
       {stkError && <div className="text-[12px] text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-1.5">{stkError}</div>}
       <div className="flex items-center gap-2">
-        {cfg.addLabel && list.length < cfg.maxRows && <button onClick={add} className="px-3 py-2 rounded-lg border border-line text-[13px] text-text-mid hover:border-[#185fa5]">{cfg.addLabel}</button>}
-        <button onClick={cont} disabled={busy} className="ml-auto px-4 py-2 rounded-lg bg-[#185fa5] text-white text-[13px] font-semibold hover:bg-[#124a82] disabled:opacity-60">Save members & continue →</button>
+        {cfg.addLabel && list.length < cfg.maxRows && <button onClick={add} className="px-3 py-2 rounded-lg border border-line text-[13px] text-text-mid hover:border-cc-blue">{cfg.addLabel}</button>}
+        <button onClick={cont} disabled={busy} className="ml-auto px-4 py-2 rounded-lg bg-cc-blue text-white text-[13px] font-semibold hover:bg-cc-blue-dark disabled:opacity-60">Save members & continue →</button>
       </div>
     </div>
   );

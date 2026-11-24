@@ -5,11 +5,12 @@
 // box (pre-filled with the account's email). Sending again replaces it — the
 // old password stops working. Nobody can read a password back.
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import Modal from "@/components/ui/Modal";
 import { emailLoginPassword, loginPasswordStatus } from "@/lib/passwords";
 import { fmtDate } from "@/lib/dates";
 import { EMAIL_RE } from "@/lib/validators";
+import { askConfirm } from "@/lib/confirm";
 
 export default function SetPasswordModal({
   open, account, onClose,
@@ -23,6 +24,8 @@ export default function SetPasswordModal({
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const titleId = useId();
+  const emailId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -36,7 +39,7 @@ export default function SetPasswordModal({
     if (busy) return;
     const to = email.trim();
     if (!EMAIL_RE.test(to)) { setError("Enter a valid email."); return; }
-    if (setAt && !window.confirm(`Send a new password to ${to}? ${account.name}'s current password will stop working.`)) return;
+    if (setAt && !(await askConfirm(`Send a new password to ${to}? ${account.name}'s current password will stop working.`))) return;
     setBusy(true); setError(null);
     const r = await emailLoginPassword(account.id, to);
     setBusy(false);
@@ -46,22 +49,22 @@ export default function SetPasswordModal({
   }
 
   return (
-    <Modal onClose={onClose} busy={busy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
-      <h3 className="font-semibold text-[18px] text-[#0f3d2e]">Login password</h3>
-      <p className="text-[13px] text-[#5a8a76] mt-0.5">
+    <Modal onClose={onClose} busy={busy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6" aria-labelledby={titleId}>
+      <h3 id={titleId} className="font-semibold text-[18px] text-cc-ink">Login password</h3>
+      <p className="text-[13px] text-cc-muted mt-0.5">
         {account.name}{account.mobile ? ` · ${account.mobile}` : ""}
         {setAt ? ` · set on ${fmtDate(setAt)}` : ""}
       </p>
 
       {sentTo ? (
-        <p className="mt-4 text-[13px] text-[#178a5c] bg-[#e6f6ee] border border-[#cdeadd] rounded-[8px] px-3 py-2">
+        <p className="mt-4 text-[13px] text-cc-green bg-cc-tint border border-cc-line rounded-[8px] px-3 py-2">
           Password emailed to <span className="font-semibold">{sentTo}</span>.
         </p>
       ) : (
         <div className="mt-4">
-          <p className="text-[12px] text-[#5a8a76] mb-1">Email</p>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={busy}
-            className="w-full border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] focus:border-[#185fa5] outline-none bg-white" />
+          <label htmlFor={emailId} className="block text-[12px] text-cc-muted mb-1">Email</label>
+          <input id={emailId} type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={busy}
+            className="w-full border border-cc-line rounded-[8px] px-3 py-2.5 text-[14px] focus:border-cc-blue outline-none bg-white" />
         </div>
       )}
 
@@ -69,12 +72,12 @@ export default function SetPasswordModal({
 
       <div className="mt-5 flex justify-end gap-2">
         <button type="button" onClick={onClose} disabled={busy}
-          className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border border-[#cdeadd] bg-white text-[#0f3d2e] hover:bg-[#f0faf5] disabled:opacity-60">
+          className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border border-cc-line bg-white text-cc-ink hover:bg-cc-wash disabled:opacity-60">
           {sentTo ? "Done" : "Cancel"}
         </button>
         {!sentTo && (
           <button type="button" onClick={() => void send()} disabled={busy}
-            className="text-[13px] font-semibold px-3 py-2 rounded-[8px] bg-[#178a5c] text-white hover:bg-[#12734c] disabled:opacity-60">
+            className="text-[13px] font-semibold px-3 py-2 rounded-[8px] bg-cc-green text-white hover:bg-cc-green-hover disabled:opacity-60">
             {busy ? "Sending…" : setAt ? "Email new password" : "Email password"}
           </button>
         )}

@@ -59,7 +59,7 @@ export function PeriodPicker({ period, onPeriod, from, onFrom, to, onTo }: {
       <select
         value={period}
         onChange={(e) => onPeriod(e.target.value as Period)}
-        className="rounded-input border border-line bg-white px-3 py-2 text-[13px] font-medium text-[#0f3d2e] outline-none focus:border-[#185fa5] cursor-pointer"
+        className="rounded-input border border-line bg-white px-3 py-2 text-[13px] font-medium text-cc-ink outline-none focus:border-cc-blue cursor-pointer"
       >
         {PERIOD_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>

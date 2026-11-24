@@ -248,7 +248,7 @@ function StakeholderDocs({
 }) {
   return (
     <div>
-      <p className="text-[12px] font-semibold text-[#0f3d2e] mb-1.5">{header}</p>
+      <p className="text-[12px] font-semibold text-cc-ink mb-1.5">{header}</p>
       <DocGrid slots={toViewSlots(slots, openDoc, removeDoc, downloadDoc)} eyeIcon={eyeIcon} />
     </div>
   );

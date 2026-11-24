@@ -18,6 +18,7 @@ import { canManageOrg, canWork, isSiteStaff, portalV2 } from "@/lib/epc-roles";
 import { fetchSubscription, hasFeature } from "@/lib/subscription";
 import { fmtDate } from "@/lib/dates";
 import { fmtRupees } from "@/lib/money";
+import { notify } from "@/lib/notify";
 import {
   fetchInvoices, fetchBillTo, canReissue, downloadInvoicePdf,
   INVOICE_STATUSES, INVOICE_STATUS_LABEL, INVOICE_STATUS_PILL, type BillTo, type InvoiceRow, type InvoiceStatus,
@@ -40,7 +41,7 @@ export default function InvoicesPage() {
   const [reissuing, setReissuing] = useState<{ invoice: InvoiceRow; start: BillTo } | null>(null);
   const [issuing, setIssuing] = useState(false); // the re-issue pop-up stays open while it issues
 
-  useEffect(() => { if (!allowed) router.replace("/dashboard" as any); }, [allowed, router]);
+  useEffect(() => { if (!allowed) router.replace("/dashboard"); }, [allowed, router]);
   useEffect(() => {
     if (!allowed) return;
     fetchInvoices().then(setRows, () => setFailed(true));
@@ -57,7 +58,7 @@ export default function InvoicesPage() {
 
   async function act(key: string, fn: () => Promise<void>) {
     setBusy(key);
-    try { await fn(); } catch (e) { alert((e as Error).message || "Something went wrong."); } finally { setBusy(null); }
+    try { await fn(); } catch (e) { notify.error((e as Error).message || "Something went wrong."); } finally { setBusy(null); }
   }
 
   if (!allowed) return null;
@@ -73,7 +74,7 @@ export default function InvoicesPage() {
             </button>
           ))}
         </div>
-        <input className={input + " max-w-[260px] ml-auto"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search number, customer" />
+        <input className={input + " max-w-[260px] ml-auto"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search number, customer" aria-label="Search number, customer" />
       </div>
 
       {failed ? (
@@ -96,8 +97,8 @@ export default function InvoicesPage() {
             </thead>
             <tbody>
               {shown.map((r) => (
-                <tr key={r.id} onClick={() => router.push(`/dashboard/projects?open=${r.project_id}` as any)} className="border-b border-line last:border-0 hover:bg-bg-soft cursor-pointer">
-                  <td className="px-4 py-3 font-semibold text-[#1e3a8a] whitespace-nowrap">{r.invoice_no}</td>
+                <tr key={r.id} onClick={() => router.push(`/dashboard/projects?open=${r.project_id}`)} className="border-b border-line last:border-0 hover:bg-bg-soft cursor-pointer">
+                  <td className="px-4 py-3 font-semibold text-navy whitespace-nowrap">{r.invoice_no}</td>
                   <td className="px-4 py-3 whitespace-nowrap">{fmtDate(r.invoice_date)}</td>
                   <td className="px-4 py-3 font-medium text-text">{r.customer_name}</td>
                   <td className="px-4 py-3 text-right whitespace-nowrap">{r.kw ? `${+Number(r.kw).toFixed(2)} kW` : "—"}</td>
@@ -115,7 +116,7 @@ export default function InvoicesPage() {
                           onClick={() => void act(`re:${r.id}`, async () => setReissuing({ invoice: r, start: await fetchBillTo(r.id) }))} />
                       )}
                       <button type="button" onClick={(e) => { e.stopPropagation(); void act(`pdf:${r.id}`, () => downloadInvoicePdf(r.id)); }} disabled={busy === `pdf:${r.id}`}
-                        className="text-[13px] font-semibold text-[#1e3a8a] hover:underline disabled:opacity-60">
+                        className="text-[13px] font-semibold text-navy hover:underline disabled:opacity-60">
                         {busy === `pdf:${r.id}` ? "Preparing…" : "PDF"}
                       </button>
                     </div>
@@ -132,7 +133,7 @@ export default function InvoicesPage() {
 
       {cancelling && <CancelInvoice invoice={cancelling} onDone={(r) => { put(r); setCancelling(null); }} onClose={() => setCancelling(null)} />}
       {reissuing && (
-        <Modal onClose={() => setReissuing(null)} busy={issuing} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[680px] max-h-[92vh] overflow-y-auto">
+        <Modal onClose={() => setReissuing(null)} busy={issuing} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[680px] max-h-[92vh] overflow-y-auto" aria-label={`Re-issue ${reissuing.invoice.invoice_no}`}>
           <InvoiceForm className="p-6" projectId={reissuing.invoice.project_id} kw={reissuing.invoice.kw} start={reissuing.start} replaces={reissuing.invoice}
             onBusy={setIssuing} onIssued={(r) => { put(r); setIssuing(false); setReissuing(null); }} onClose={() => setReissuing(null)} />
         </Modal>

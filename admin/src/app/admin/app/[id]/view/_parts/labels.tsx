@@ -62,13 +62,13 @@ export function StatusBadge({ status, lender }: { status: string | null | undefi
     lender && s === "rejected" ? `Rejected by ${lender}` :
     generic;
   const cls =
-    s === "approved" ? "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd]" :
+    s === "approved" ? "bg-cc-tint text-cc-green border-cc-line" :
     s === "rejected" ? "bg-red-50 text-red-700 border-red-200" :
-    s === "docs_sent" ? "bg-[#dceffb] text-[#185fa5] border-[#bfe0f5]" :
-    s === "rfd" ? "bg-[#d6efe3] text-[#0f7a52] border-[#bfe0d3]" :
-    s === "on_hold" ? "bg-[#fff2cc] text-[#8a6500] border-[#f3d9a4]" :
+    s === "docs_sent" ? "bg-cc-blue-tint text-cc-blue border-[#bfe0f5]" :
+    s === "rfd" ? "bg-cc-tint-strong text-cc-green-text border-[#bfe0d3]" :
+    s === "on_hold" ? "bg-[#fff2cc] text-warn-ochre border-warn-line" :
     s === "aborted" ? "bg-red-50 text-red-700 border-red-200" :
-    s === "under_review" ? "bg-[#fef0d6] text-[#854f0b] border-[#f3d9a4]" :
+    s === "under_review" ? "bg-warn-tint text-warn-ink border-warn-line" :
                        "bg-slate-100 text-slate-600 border-slate-200";
   return (
     <span className={["shrink-0 inline-flex px-2.5 py-0.5 rounded-full border text-[12px] font-medium whitespace-nowrap", cls].join(" ")}>

@@ -41,7 +41,7 @@ export default function BoardCard({ c, srcFilter, sla, picked, canDrag, isMainAd
         )}
       </div>
       <div className="flex items-center justify-between gap-2 mt-1 min-w-0">
-        <span className="text-[12.5px] font-bold text-[#0f3d2e] truncate">
+        <span className="text-[12.5px] font-bold text-cc-ink truncate">
           {c.amount ? fmtRupees(c.amount) : <span className="text-[11px] font-normal text-text-muted">{c.statusLabel}</span>}
         </span>
         <span className="text-[11px] font-semibold shrink-0" style={{ color: late ? "#b45309" : "#5a8a76" }}>
@@ -52,7 +52,7 @@ export default function BoardCard({ c, srcFilter, sla, picked, canDrag, isMainAd
         {c.epcName ? <span className="text-[11px] text-text-muted truncate">{c.epcName}</span> : <span />}
         {isMainAdmin && c.ownerName && <span className="text-[10px] font-medium text-text-muted shrink-0">{c.ownerName}</span>}
       </div>
-      {c.onHold && <div className="text-[10px] font-semibold text-[#b45309] mt-0.5">⏸ On hold</div>}
+      {c.onHold && <div className="text-[10px] font-semibold text-amber-700 mt-0.5">⏸ On hold</div>}
       {c.blocker && <div className="text-[10px] text-text-muted truncate mt-0.5">{c.blocker.slice(0, 30)}</div>}
     </button>
   );

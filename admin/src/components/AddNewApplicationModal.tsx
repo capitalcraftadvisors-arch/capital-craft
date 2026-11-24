@@ -10,7 +10,7 @@
 // create the application: the Application maker chat, or the classic form
 // (the EPC dropdown); the EPC list is only read once the classic form is picked.
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
@@ -59,6 +59,7 @@ export default function AddNewApplicationModal({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const uid = useId(); // ids that tie the heading and label to the pop-up and its field
 
   // Back to the chooser whenever the modal closes, so the next open starts there
   // (resetting on open ran alongside the classic-form load and re-read the EPC list).
@@ -67,7 +68,7 @@ export default function AddNewApplicationModal({
     setMode("choose");
     setError(null);
     setSelected("");
-  }, [open]);
+  }, [open, hasChooser]);
 
   // Load EPCs only when the classic form shows (straight away when there is no chooser).
   useEffect(() => {
@@ -97,7 +98,7 @@ export default function AddNewApplicationModal({
       }
       setLoading(false);
     })();
-  }, [open, mode]);
+  }, [open, mode, lenderApprovedOnly]);
 
   const sortedEpcs = useMemo(
     () => [...epcs].sort((a, b) => bestName(a).localeCompare(bestName(b))),
@@ -115,7 +116,7 @@ export default function AddNewApplicationModal({
 
   function startChat() {
     onClose();
-    router.push(chooser!.chatPath as any);
+    router.push(chooser!.chatPath);
   }
 
   async function submit() {
@@ -135,7 +136,7 @@ export default function AddNewApplicationModal({
         return;
       }
       onClose();
-      router.push(stepOnePath(data.application.id) as any);
+      router.push(stepOnePath(data.application.id));
     } catch (e) {
       setError((e as Error)?.message || "Network error.");
       setBusy(false);
@@ -143,10 +144,10 @@ export default function AddNewApplicationModal({
   }
 
   return (
-    <Modal onClose={close} busy={busy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
+    <Modal onClose={close} busy={busy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6" aria-labelledby={`${uid}-title`}>
       <div className="flex items-start justify-between mb-4">
         <div>
-          <h3 className="font-display font-semibold text-[18px] text-text">{title}</h3>
+          <h3 id={`${uid}-title`} className="font-display font-semibold text-[18px] text-text">{title}</h3>
           <p className="text-[12px] text-text-mid mt-0.5">
             {mode === "choose" && chooser ? chooser.hint : pickHint}
           </p>
@@ -167,15 +168,15 @@ export default function AddNewApplicationModal({
           <button
             type="button"
             onClick={startChat}
-            className="text-left rounded-xl border border-line hover:border-[#178a5c] hover:bg-[#f7fcf9] transition p-4 flex items-center gap-3"
+            className="text-left rounded-xl border border-line hover:border-cc-green hover:bg-cc-mist transition p-4 flex items-center gap-3"
           >
-            <span className="w-10 h-10 rounded-full bg-gradient-to-br from-[#2fbd82] to-[#0f3d2e] text-white grid place-items-center text-[16px] shrink-0">💬</span>
+            <span className="w-10 h-10 rounded-full bg-gradient-to-br from-[#2fbd82] to-cc-ink text-white grid place-items-center text-[16px] shrink-0">💬</span>
             <span className="text-[15px] font-semibold text-text">Application maker</span>
           </button>
           <button
             type="button"
             onClick={() => setMode("classic")}
-            className="text-left rounded-xl border border-line hover:border-[#178a5c] hover:bg-[#f7fcf9] transition p-4 flex items-center gap-3"
+            className="text-left rounded-xl border border-line hover:border-cc-green hover:bg-cc-mist transition p-4 flex items-center gap-3"
           >
             <span className="w-10 h-10 rounded-full bg-bg-soft text-text grid place-items-center text-[16px] shrink-0">📝</span>
             <span className="text-[15px] font-semibold text-text">Classic form</span>
@@ -185,7 +186,7 @@ export default function AddNewApplicationModal({
         <>
           <div className="space-y-3">
             <div>
-              <label className="block mb-1.5 text-[13px] font-medium text-text-mid">
+              <label htmlFor={`${uid}-epc`} className="block mb-1.5 text-[13px] font-medium text-text-mid">
                 EPC partner
               </label>
               {loading ? (
@@ -196,6 +197,7 @@ export default function AddNewApplicationModal({
                 </div>
               ) : (
                 <select
+                  id={`${uid}-epc`}
                   value={selected}
                   onChange={(e) => setSelected(e.target.value)}
                   disabled={busy}

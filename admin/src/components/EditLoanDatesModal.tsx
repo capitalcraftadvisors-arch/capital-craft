@@ -5,7 +5,7 @@
 // approval date and the 1st / 2nd disbursement dates; only the dates that apply
 // to the file are shown. A timestamp keeps its time of day, only the day moves.
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import DateField from "@/components/ui/DateField";
 import Modal from "@/components/ui/Modal";
@@ -45,6 +45,7 @@ export default function EditLoanDatesModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [partly, setPartly] = useState(false); // the loan's dates saved, the lender's record not
+  const titleId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -97,10 +98,11 @@ export default function EditLoanDatesModal({
           .maybeSingle();
         if (le) { setError("Couldn't save — " + le.message); setPartly(true); return; }
         if (lr) {
+          const row = lr as { id: string; approval_details: Record<string, unknown> | null };
           const { error: ue } = await supabase().from("loan_application_lenders").update({
             approved_at: patch.approved_at,
-            approval_details: { ...((lr as Loan).approval_details ?? {}), approval_date: val.approval },
-          }).eq("id", (lr as Loan).id);
+            approval_details: { ...(row.approval_details ?? {}), approval_date: val.approval },
+          }).eq("id", row.id);
           if (ue) { setError("Couldn't save — " + ue.message); setPartly(true); return; }
         }
       }
@@ -116,15 +118,15 @@ export default function EditLoanDatesModal({
     onSaved();
   }
 
-  const inputCls = "w-full border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] focus:border-[#185fa5] outline-none bg-white";
+  const inputCls = "w-full border border-cc-line rounded-[8px] px-3 py-2.5 text-[14px] focus:border-cc-blue outline-none bg-white";
 
   return (
-    <Modal onClose={close} busy={busy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
-      <h3 className="font-semibold text-[18px] text-[#0f3d2e]">Edit dates</h3>
+    <Modal onClose={close} busy={busy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6" aria-labelledby={titleId}>
+      <h3 id={titleId} className="font-semibold text-[18px] text-cc-ink">Edit dates</h3>
       <div className="mt-4 space-y-3">
         {keys.map((k) => (
           <div key={k}>
-            <p className="text-[12px] text-[#5a8a76] mb-1">{LABEL[k]}</p>
+            <p className="text-[12px] text-cc-muted mb-1">{LABEL[k]}</p>
             <DateField className={inputCls} value={val[k] ?? ""} max={today}
               onChange={(iso) => setVal((v) => ({ ...v, [k]: iso }))} ariaLabel={LABEL[k]} />
           </div>
@@ -133,11 +135,11 @@ export default function EditLoanDatesModal({
       {error && <p className="mt-3 text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-[8px] px-3 py-2">{error}</p>}
       <div className="mt-5 flex justify-end gap-2">
         <button type="button" onClick={close} disabled={busy}
-          className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border border-[#cdeadd] bg-white text-[#0f3d2e] hover:bg-[#f0faf5] disabled:opacity-60">
+          className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border border-cc-line bg-white text-cc-ink hover:bg-cc-wash disabled:opacity-60">
           Cancel
         </button>
         <button type="button" onClick={() => void save()} disabled={busy}
-          className="text-[13px] font-semibold px-3 py-2 rounded-[8px] bg-[#178a5c] text-white hover:bg-[#12734c] disabled:opacity-60">
+          className="text-[13px] font-semibold px-3 py-2 rounded-[8px] bg-cc-green text-white hover:bg-cc-green-hover disabled:opacity-60">
           {busy ? "Saving…" : "Save"}
         </button>
       </div>

@@ -27,6 +27,7 @@ import { getBusiness, setBusiness, isImpersonating } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { MOBILE_RE, EMAIL_RE } from "@/lib/validators";
 import { normalizeStakeholder, type Stakeholder } from "@/lib/epc-stakeholders";
+import { notify } from "@/lib/notify";
 
 type BizType = "proprietorship" | "pvt_ltd" | "partnership" | "llp" | null;
 
@@ -226,7 +227,7 @@ export default function Step3Page() {
     if (!biz || !businessId) return;
 
     if (displayed.length < cfg.minRows && !isImpersonating()) {
-      alert(
+      notify.error(
         businessType === "proprietorship"
           ? "Please add the proprietor's details."
           : `Please add at least ${cfg.minRows} ${cfg.roleLabel.toLowerCase()}s' details.`,
@@ -238,14 +239,14 @@ export default function Step3Page() {
     setErrors(errs);
     // Admin (impersonating) may proceed with whatever is filled.
     if (Object.keys(errs).length > 0 && !isImpersonating()) {
-      alert("Please fix the highlighted fields.");
+      notify.error("Please fix the highlighted fields.");
       return;
     }
 
     if (isDraft) {
       const missing = await missingMemberDocs();
       if (missing.length > 0) {
-        alert("Please upload the following documents:\n\n" + missing.join("\n"));
+        notify.error("Please upload the following documents:\n\n" + missing.join("\n"));
         return;
       }
     }
@@ -282,7 +283,7 @@ export default function Step3Page() {
       .update({ stakeholders: cleaned, current_step: 4 })
       .eq("id", biz.id);
     setSaving(false);
-    if (error) return alert(error.message);
+    if (error) return notify.error(error.message);
     setBusiness({ ...biz, current_step: 4 });
     router.push("/onboarding/step-4");
   }
@@ -291,7 +292,7 @@ export default function Step3Page() {
     <>
       <button
         type="button"
-        onClick={() => router.push("/onboarding/step-2" as any)}
+        onClick={() => router.push("/onboarding/step-2")}
         className="inline-flex items-center gap-1 text-[13px] text-text-mid hover:text-text mb-4"
       >
         <span aria-hidden>←</span> Back
@@ -366,6 +367,7 @@ export default function Step3Page() {
               <div className="w-full">
                 <label className="block mb-1.5 text-[13px] font-medium text-text-mid">Date of Birth</label>
                 <DateField
+                  ariaLabel="Date of Birth"
                   value={s.dob}
                   onChange={(iso) => updateField(s.id, "dob", iso)}
                   className="rounded-input border bg-white py-3 text-[15px] text-text px-3.5 outline-none border-line focus:border-blue"
@@ -408,7 +410,7 @@ export default function Step3Page() {
                       businessId={businessId}
                       stakeholderId={s.id}
                       table="epc_documents"
-                      category={"stakeholder_aadhaar_front" as any}
+                      category="stakeholder_aadhaar_front"
                       maxFiles={1}
                       label="Aadhaar card (front)"
                     />
@@ -418,7 +420,7 @@ export default function Step3Page() {
                       businessId={businessId}
                       stakeholderId={s.id}
                       table="epc_documents"
-                      category={"stakeholder_aadhaar_back" as any}
+                      category="stakeholder_aadhaar_back"
                       maxFiles={1}
                       label="Aadhaar card (back)"
                     />

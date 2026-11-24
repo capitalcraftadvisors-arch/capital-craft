@@ -12,7 +12,7 @@
 //                      to /onboarding/step-1. The wizard now runs against
 //                      the new EPC using admin RLS.
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
@@ -37,6 +37,7 @@ export default function AddNewEpcModal({ open, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateWarning | null>(null);
+  const titleId = useId();
 
   if (!open) return null;
 
@@ -59,7 +60,7 @@ export default function AddNewEpcModal({ open, onClose }: Props) {
     const m = mobile.replace(/\D/g, "");
     if (!MOBILE_RE.test(m)) { setError("Enter a valid 10-digit Indian mobile."); return; }
     onClose();
-    router.push(`/admin/epc/intake?mobile=${m}` as any);
+    router.push(`/admin/epc/intake?mobile=${m}`);
   }
 
   async function submit() {
@@ -108,10 +109,10 @@ export default function AddNewEpcModal({ open, onClose }: Props) {
   }
 
   return (
-    <Modal onClose={close} busy={busy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
+    <Modal onClose={close} busy={busy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6" aria-labelledby={titleId}>
       <div className="flex items-start justify-between mb-4">
         <div>
-          <h3 className="font-display font-semibold text-[18px] text-text">Add new EPC</h3>
+          <h3 id={titleId} className="font-display font-semibold text-[18px] text-text">Add new EPC</h3>
           <p className="text-[12px] text-text-mid mt-0.5">
             Enter the EPC&rsquo;s mobile number, then build the profile in a guided chat &mdash; or use the classic form.
           </p>
@@ -149,7 +150,7 @@ export default function AddNewEpcModal({ open, onClose }: Props) {
               type="button"
               onClick={() => {
                 onClose();
-                router.push(`/admin/epc/${duplicate.id}` as any);
+                router.push(`/admin/epc/${duplicate.id}`);
               }}
               className="mt-2 text-[12px] font-semibold text-amber-900 underline"
             >

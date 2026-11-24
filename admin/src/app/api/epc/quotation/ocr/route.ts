@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
 import { err, requireLogin } from "@/lib/api";
 import { geminiExtractQuotation } from "@/lib/doc-extractors";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest) {
     if (!fields) return NextResponse.json({ ok: true, fields: {} });
     return NextResponse.json({ ok: true, fields });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[quotation/ocr] error:", msg);
     return err(msg, 500);
   }

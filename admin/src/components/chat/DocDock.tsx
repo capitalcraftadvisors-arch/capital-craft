@@ -86,7 +86,7 @@ export function DocDock({ theme, uploads, files, thumbs, onPick, onClear, onRun,
                   <span className="block text-[11px] text-text-muted truncate">{has ? files[u.name].name : "Tap, drop, or paste"}</span>
                 </span>
                 {has
-                  ? <button type="button" onClick={(e) => { e.preventDefault(); onClear(u.name); }} className="text-text-muted hover:text-red-500 text-[15px] leading-none px-1">×</button>
+                  ? <button type="button" onClick={(e) => { e.preventDefault(); onClear(u.name); }} aria-label="Remove" className="text-text-muted hover:text-red-500 text-[15px] leading-none px-1">×</button>
                   : <span className={`${theme.accentText} text-[12px] font-semibold`}>Add</span>}
                 <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(u.name, f); e.currentTarget.value = ""; }} />
               </label>

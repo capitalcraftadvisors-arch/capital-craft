@@ -25,6 +25,8 @@ import FileUpload, { UPLOAD_BOX_COMPACT } from "@/components/FileUpload";
 import GeoOfficeUpload from "@/components/GeoOfficeUpload";
 import { supabase } from "@/lib/supabase";
 import { getDocumentUrl, deleteDocument, downloadDocument } from "@/lib/storage";
+import { askConfirm } from "@/lib/confirm";
+import { notify } from "@/lib/notify";
 import { I } from "@/components/view/ViewKit";
 
 export const COMPLETION_CATEGORIES = [
@@ -107,9 +109,9 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
   // refresh so the slot falls back to its uploader. The docsUploaded/docsTotal
   // gate recomputes from the new set, so a removed required doc re-blocks review.
   async function removeDoc(id: string) {
-    if (!window.confirm("Delete this document? This can't be undone.")) return;
+    if (!(await askConfirm("Delete this document? This can't be undone.", { danger: true }))) return;
     const ok = await deleteDocument(id);
-    if (!ok) { alert("Couldn't remove the document."); return; }
+    if (!ok) { notify.error("Couldn't remove the document."); return; }
     setTick((n) => n + 1);
   }
 
@@ -128,7 +130,7 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
           out of the EPC mirror so EPC-facing flows are unchanged. */}
       {mode !== "tranche2" && uploadedBy === "admin" && (
         <>
-          <p className="text-[12px] font-bold uppercase tracking-wide text-[#5a8a76]">1st Tranche Docs</p>
+          <p className="text-[12px] font-bold uppercase tracking-wide text-cc-muted">1st Tranche Docs</p>
           <div className={grid}>
             {TRANCHE1_DOCS.filter((d) => !(noAdvanceReceipt && d.category === "mmr_advance_receipt" && !byCat(d.category))).map((d) => (
               <DocSlot key={d.category} title={d.title} doc={byCat(d.category)} onOpen={open} onRemove={removeDoc}>
@@ -150,7 +152,7 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
       {mode === "tranche1" ? null : (
       <>
       {uploadedBy === "admin" && (
-        <p className="text-[12px] font-bold uppercase tracking-wide text-[#5a8a76] pt-2 border-t border-[#eaf3ee]">2nd Tranche Docs</p>
+        <p className="text-[12px] font-bold uppercase tracking-wide text-cc-muted pt-2 border-t border-cc-row-line">2nd Tranche Docs</p>
       )}
       <div className={grid}>
       {/* 1 — Invoice / tax invoice */}
@@ -228,7 +230,7 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
 }
 
 function SlotTitle({ title }: { title: string }) {
-  return <p className="text-[13px] font-semibold text-[#0f3d2e] mb-1.5 truncate" title={title}>{title}</p>;
+  return <p className="text-[13px] font-semibold text-cc-ink mb-1.5 truncate" title={title}>{title}</p>;
 }
 
 // Shows the existing upload (View, Download, Remove) when present, otherwise the
@@ -246,14 +248,14 @@ function DocSlot({
     <div>
       <SlotTitle title={title} />
       {doc ? (
-        <div className={`${UPLOAD_BOX_COMPACT} flex items-center justify-between gap-3 px-3 bg-[#f7fcfa] border border-[#e0f0e8] rounded-input`}>
-          <span className="text-[13px] text-[#0f3d2e] truncate">{doc.file_name || "Uploaded"}</span>
+        <div className={`${UPLOAD_BOX_COMPACT} flex items-center justify-between gap-3 px-3 bg-cc-row-hover border border-cc-line-soft rounded-input`}>
+          <span className="text-[13px] text-cc-ink truncate">{doc.file_name || "Uploaded"}</span>
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               onClick={() => onOpen(doc.id)}
               title="View document" aria-label="View document"
-              className="text-[#185fa5] hover:text-[#144d84]"
+              className="text-cc-blue hover:text-[#144d84]"
             >
               {I.eye}
             </button>
@@ -261,7 +263,7 @@ function DocSlot({
               type="button"
               onClick={() => void downloadDocument(doc.id)}
               title="Download" aria-label="Download"
-              className="text-[#185fa5] hover:text-[#144d84]"
+              className="text-cc-blue hover:text-[#144d84]"
             >
               {I.download}
             </button>

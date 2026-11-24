@@ -8,6 +8,7 @@ import WizardProgress from "@/components/WizardProgress";
 import GeoOfficeUpload from "@/components/GeoOfficeUpload";
 import { getBusiness, setBusiness, isImpersonating } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
+import { notify } from "@/lib/notify";
 
 // Step 5 — Office verification.
 //
@@ -76,7 +77,7 @@ export default function Step5Page() {
     if (isDraft) {
       const missing = await missingPhotos();
       if (missing.length > 0) {
-        alert("Please upload the following photos:\n\n" + missing.join("\n"));
+        notify.error("Please upload the following photos:\n\n" + missing.join("\n"));
         return;
       }
     }
@@ -103,7 +104,7 @@ export default function Step5Page() {
     <>
       <button
         type="button"
-        onClick={() => router.push("/onboarding/step-4" as any)}
+        onClick={() => router.push("/onboarding/step-4")}
         className="inline-flex items-center gap-1 text-[13px] text-text-mid hover:text-text mb-4"
       >
         <span aria-hidden>←</span> Back

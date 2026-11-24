@@ -18,14 +18,13 @@
 //   #fef0d6  amber pill bg
 //   #854f0b  amber pill text
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { authHeaders, getBusiness, isMainAdmin } from "@/lib/auth";
 import { epcReviewPatch, approveEpcReview, epcLocked, invalidatePendingCount, saveEpcLenderState } from "@/lib/review";
 import AdminPendingPill from "@/components/AdminPendingPill";
-import { toast } from "sonner";
 import { getDocumentUrl, deleteDocument, downloadDocument, saveDownload } from "@/lib/storage";
 import { BUSINESS_TYPE_LABEL, EPC_STATUS_LABEL, maskAcct, peopleHeading } from "@/lib/epc-labels";
 import { logAudit } from "@/lib/auditLog";
@@ -47,6 +46,8 @@ import { computeEpcHealth } from "@/lib/epc-score";
 import { fmtDate, fmtDateTime, localIsoDate } from "@/lib/dates";
 import DateField from "@/components/ui/DateField";
 import Modal, { OVERLAY } from "@/components/ui/Modal";
+import { notify } from "@/lib/notify";
+import { askConfirm } from "@/lib/confirm";
 // Shared view chrome — the SAME kit the Loan Application View imports, so the
 // two dashboards can't drift apart. EPC-specific pieces live in ./_parts.
 import {
@@ -93,6 +94,7 @@ function Inner() {
   // Marking a lender Approved asks for the date the lender approved.
   const [approveFor, setApproveFor] = useState<string | null>(null);
   const [approveDate, setApproveDate] = useState("");
+  const approveTitleId = useId(); // names the approval-date pop-up for screen readers
   const [deleteOpen, setDeleteOpen] = useState(false);
   // The open stage (null = wherever the profile stands now).
   const [tab, setTab] = useState<EpcStage | null>(null);
@@ -155,7 +157,7 @@ function Inner() {
   const missingDocs = missingEpcDocs(nonR3bDocs, stakeholders, (biz?.business_type as string | null) ?? null);
   function approveBlocked(): boolean {
     if (!missingDocs.length) return false;
-    toast.error(`Upload all documents before approving. Missing: ${missingDocs.join(", ")}.`);
+    notify.error(`Upload all documents before approving. Missing: ${missingDocs.join(", ")}.`);
     return true;
   }
   const refs = ((biz?.business_references ?? []) as Array<{ type: "customer" | "supplier"; name: string; mobile: string }>);
@@ -190,7 +192,7 @@ function Inner() {
   // Remove an EPC document (epc_documents row + its GCS object) — immediate.
   async function removeDoc(id: string) {
     const ok = await deleteDocument(id);
-    if (!ok) { alert("Couldn't remove the document."); return; }
+    if (!ok) { notify.error("Couldn't remove the document."); return; }
     setDocs((arr) => arr.filter((d) => d.id !== id));
   }
 
@@ -221,7 +223,7 @@ function Inner() {
         .update(patch)
         .eq("id", biz.id);
       if (error) {
-        alert("Status update failed: " + error.message);
+        notify.error("Status update failed: " + error.message);
         return false;
       }
       await logAudit(biz.id, "field_edit", "status", biz.status, next);
@@ -233,13 +235,18 @@ function Inner() {
     }
   }
 
+  // "Change review": back to Under Review, after a yes.
+  async function revertReview() {
+    if (await askConfirm("Revert the CC review back to Under Review?")) await changeStatus("under_review");
+  }
+
   // Main admin's check of a profile the team approved (same as on Pendings).
   async function approveAdminCheck() {
     if (!biz || statusBusy) return;
     setStatusBusy(true);
     try {
       const msg = await approveEpcReview(biz.id);
-      if (msg) { alert("Couldn't approve: " + msg); return; }
+      if (msg) { notify.error("Couldn't approve: " + msg); return; }
       await logAudit(biz.id, "field_edit", "admin_review", "pending", "approved");
       setBiz({ ...biz, admin_review_status: "approved" });
       invalidatePendingCount();
@@ -253,17 +260,17 @@ function Inner() {
   // Approved / Rejected are gated behind Docs Sent in the UI below.
   async function setLenderExclusive(lenderKey: string, target: "none" | "docs" | "approved" | "rejected", approvedOn?: string) {
     if (!biz) return;
-    if (epcLocked(biz)) { alert("This profile is waiting for admin approval."); return; }
+    if (epcLocked(biz)) { notify.error("This profile is waiting for admin approval."); return; }
     // Gate: docs can't go to a lender until the EPC profile is approved. The main
     // admin can approve it now and continue in one step; a team member's approval
     // goes to the admin's check first, so the lender step waits.
     if ((target === "docs" || target === "approved") && biz.status !== "approved") {
       if (approveBlocked()) return;
       if (!isMainAdmin(getBusiness())) {
-        if (window.confirm("This EPC profile hasn't been approved yet.\n\nApprove it now and send it for admin approval?")) await changeStatus("approved");
+        if (await askConfirm("This EPC profile hasn't been approved yet.\n\nApprove it now and send it for admin approval?")) await changeStatus("approved");
         return;
       }
-      if (!window.confirm("This EPC profile hasn't been approved yet.\n\nApprove it now and continue?")) return;
+      if (!(await askConfirm("This EPC profile hasn't been approved yet.\n\nApprove it now and continue?"))) return;
       if (!(await changeStatus("approved"))) return; // approval failed: no lender write
     }
     const flags = { docs_given: target === "docs", approved: target === "approved", rejected: target === "rejected" };
@@ -282,7 +289,7 @@ function Inner() {
       await logAudit(biz.id, "field_edit", `lender_${lenderKey}`, null, target);
     } catch (e) {
       setLender(prev);
-      alert("Couldn't save lender state: " + (e as Error).message);
+      notify.error("Couldn't save lender state: " + (e as Error).message);
     }
   }
 
@@ -290,8 +297,8 @@ function Inner() {
   async function addLender(name: string) {
     if (!name.trim()) return;
     const r = await addRegistryLender(name);
-    if (r.error) alert(r.error);
-    else if (r.existed) alert("That lender already exists.");
+    if (r.error) notify.error(r.error);
+    else if (r.existed) notify.error("That lender already exists.");
   }
 
   async function downloadZip(lender: LenderKey) {
@@ -304,13 +311,13 @@ function Inner() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       await saveDownload(res, `EPC_${biz.id.slice(0, 8)}.zip`);
     } catch (e) {
-      alert("Download failed: " + (e as Error).message);
+      notify.error("Download failed: " + (e as Error).message);
     } finally {
       setDownloading(false);
     }
   }
 
-  if (!biz) return <div className="p-10 text-center text-[#5a8a76]">Loading…</div>;
+  if (!biz) return <div className="p-10 text-center text-cc-muted">Loading…</div>;
 
   const trade = biz.trade_name || biz.legal_name || biz.contact_name || "—";
   const btLabel = BUSINESS_TYPE_LABEL[biz.business_type ?? ""] ?? biz.business_type;
@@ -439,12 +446,12 @@ function Inner() {
     : ccApproved ? "Approved by Manish"
     : ccRejected ? "Rejected by CC"
     : EPC_STATUS_LABEL[biz.status] ?? biz.status;
-  const statusCls = approvedRows.length || reviewDone ? "bg-[#e6f6ee] text-[#0f7a52] border-[#bfe6d5]"
+  const statusCls = approvedRows.length || reviewDone ? "bg-cc-tint text-cc-green-text border-[#bfe6d5]"
     : ccRejected ? "bg-red-50 text-red-700 border-red-200"
-    : "bg-[#fef8ee] text-[#854f0b] border-[#f3dcb4]";
+    : "bg-warn-wash text-warn-ink border-[#f3dcb4]";
   const editItems = [
-    { label: "Continue in chat", onClick: () => router.push(`/admin/epc/intake?epc=${biz.id}&edit=1` as any) },
-    { label: "Edit in form", onClick: () => router.push(`/admin/epc/${biz.id}` as any) },
+    { label: "Continue in chat", onClick: () => router.push(`/admin/epc/intake?epc=${biz.id}&edit=1`) },
+    { label: "Edit in form", onClick: () => router.push(`/admin/epc/${biz.id}`) },
   ];
   const kebabItems = [
     { label: "Download ZIP", icon: I.download, onClick: () => setZipPickerOpen(true) },
@@ -459,28 +466,28 @@ function Inner() {
   return (
     <main className="min-h-screen bg-white">
       {/* ── HEADER — who it is, one quiet info line · plain buttons ── */}
-      <header className="border-b border-[#eef3f1] bg-white/95 backdrop-blur sticky top-0 z-30">
+      <header className="border-b border-cc-rule bg-white/95 backdrop-blur sticky top-0 z-30">
         <div className="w-full px-5 sm:px-8 py-4 flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3.5 min-w-0">
             <button
               onClick={() => router.push("/admin")}
               title="Back to console"
               aria-label="Back to console"
-              className="w-9 h-9 -ml-2 rounded-full grid place-items-center text-[#5a8a76] hover:bg-[#eef6f1] hover:text-[#0f3d2e] shrink-0"
+              className="w-9 h-9 -ml-2 rounded-full grid place-items-center text-cc-muted hover:bg-cc-icon-hover hover:text-cc-ink shrink-0"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
             </button>
-            <div className="w-12 h-12 rounded-full bg-[#e6f6ee] text-[#178a5c] grid place-items-center shrink-0">
+            <div className="w-12 h-12 rounded-full bg-cc-tint text-cc-green grid place-items-center shrink-0">
               {I.building}
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2.5 min-w-0">
-                <h1 className="text-[22px] font-semibold text-[#0f3d2e] truncate leading-tight">{trade}</h1>
+                <h1 className="text-[22px] font-semibold text-cc-ink truncate leading-tight">{trade}</h1>
                 <span className={"shrink-0 inline-flex items-center px-2.5 py-0.5 rounded-full text-[12px] font-semibold border whitespace-nowrap " + statusCls}>{statusLabel}</span>
               </div>
-              <div className="flex items-center gap-2 mt-1 text-[13px] text-[#7a958a] min-w-0">
+              <div className="flex items-center gap-2 mt-1 text-[13px] text-cc-faint min-w-0">
                 {biz.epc_display_id && (
-                  <span className="group inline-flex items-center gap-1 font-medium text-[#185fa5] shrink-0">
+                  <span className="group inline-flex items-center gap-1 font-medium text-cc-blue shrink-0">
                     {biz.epc_display_id}
                     <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex"><CopyButton value={biz.epc_display_id} label="Copy EPC ID" /></span>
                   </span>
@@ -516,15 +523,15 @@ function Inner() {
           <StatCards
             items={[
               { label: "Documents", value: fillText(docsHave, docSlots.length), tone: fillTone(docsHave, docSlots.length) },
-              { label: "Sent to lenders", value: String(sentRows.length), sub: sentRows.length ? names(sentRows) : undefined, tone: sentRows.length ? "text-[#185fa5]" : "text-[#c3cbc7]" },
-              { label: "Approved by lenders", value: String(approvedRows.length), sub: approvedRows.length ? names(approvedRows) : undefined, tone: approvedRows.length ? "text-[#178a5c]" : "text-[#c3cbc7]" },
-              { label: "Loan applications", value: String(liveApps), tone: liveApps ? undefined : "text-[#c3cbc7]" },
+              { label: "Sent to lenders", value: String(sentRows.length), sub: sentRows.length ? names(sentRows) : undefined, tone: sentRows.length ? "text-cc-blue" : "text-cc-blank" },
+              { label: "Approved by lenders", value: String(approvedRows.length), sub: approvedRows.length ? names(approvedRows) : undefined, tone: approvedRows.length ? "text-cc-green" : "text-cc-blank" },
+              { label: "Loan applications", value: String(liveApps), tone: liveApps ? undefined : "text-cc-blank" },
             ]}
           />
         </div>
 
         {/* ── PROGRESS BAR = TABS ── */}
-        <div className="pt-7 pb-2 border-b border-[#eef3f1]">
+        <div className="pt-7 pb-2 border-b border-cc-rule">
           <ProgressTabs items={stages} value={activeTab} onChange={(k) => setTab(k as EpcStage)} />
         </div>
 
@@ -547,7 +554,7 @@ function Inner() {
                   </Section>
                   <Section card dropdown inline={stacked} icon={I.users} title={peopleHeading(biz.business_type)} summary={stakeholders.length ? fillOf(...memberRows) : undefined}>
                     {stakeholders.length === 0 ? (
-                      <p className="text-[14px] text-[#9aa5a0] py-[5px]">No members recorded</p>
+                      <p className="text-[14px] text-cc-empty py-[5px]">No members recorded</p>
                     ) : (
                       <div className="grid gap-x-12 gap-y-6 md:grid-cols-2 xl:grid-cols-1">
                         {stakeholders.map((s, i) => (
@@ -586,8 +593,8 @@ function Inner() {
                       <StepBlock title="GSTR-3B">
                         <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0">
-                            <div className="text-[20px] font-semibold text-[#0f3d2e]">₹{r3bTotal.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</div>
-                            <div className="text-[12px] text-[#5a8a76]">{r3bDocs.length} file{r3bDocs.length === 1 ? "" : "s"} · Grand total taxable</div>
+                            <div className="text-[20px] font-semibold text-cc-ink">₹{r3bTotal.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</div>
+                            <div className="text-[12px] text-cc-muted">{r3bDocs.length} file{r3bDocs.length === 1 ? "" : "s"} · Grand total taxable</div>
                           </div>
                           {r3bDocs.length > 0 && (
                             <button
@@ -595,7 +602,7 @@ function Inner() {
                               onClick={() => void openDoc(r3bDocs[0].id)}
                               title="View GSTR-3B"
                               aria-label="View GSTR-3B"
-                              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[#cdeadd] bg-white text-[#178a5c] text-[14px] font-semibold hover:bg-[#f0faf5]"
+                              className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-cc-line bg-white text-cc-green text-[14px] font-semibold hover:bg-cc-wash"
                             >
                               {I.eye} View
                             </button>
@@ -624,7 +631,7 @@ function Inner() {
                       ? <HAction variant="primary" disabled={statusBusy} onClick={() => void approveAdminCheck()}>Admin approve</HAction>
                       : <AdminPendingPill />)}
                     {(ccApproved || ccRejected) && biz.business_type !== "admin" && (
-                      <HAction variant="outline" disabled={statusBusy} onClick={() => { if (window.confirm("Revert the CC review back to Under Review?")) void changeStatus("under_review"); }}>Change review</HAction>
+                      <HAction variant="outline" disabled={statusBusy} onClick={() => void revertReview()}>Change review</HAction>
                     )}
                   </>
                 }
@@ -660,7 +667,7 @@ function Inner() {
               <Section title="Lender decision" right={lenderControl}>
                 {sentRows.length
                   ? <LenderLines keys={sentRows.map((r) => r.lender)} lender={lender} lenderLabel={lenderLabel} />
-                  : <p className="text-[14px] text-[#9aa5a0] py-1">Pending</p>}
+                  : <p className="text-[14px] text-cc-empty py-1">Pending</p>}
               </Section>
             )}
 
@@ -718,18 +725,18 @@ function Inner() {
       />
       {/* Lender approved — the date the lender approved. */}
       {approveFor && (
-        <Modal onClose={() => setApproveFor(null)} overlayClassName={OVERLAY.grid} className="w-full max-w-sm bg-white rounded-xl shadow-lg p-6 space-y-4">
-          <h3 className="text-[17px] font-semibold text-[#0f3d2e]">Approved by {lenderLabel(approveFor)}</h3>
+        <Modal onClose={() => setApproveFor(null)} overlayClassName={OVERLAY.grid} className="w-full max-w-sm bg-white rounded-xl shadow-lg p-6 space-y-4" aria-labelledby={approveTitleId}>
+          <h3 id={approveTitleId} className="text-[17px] font-semibold text-cc-ink">Approved by {lenderLabel(approveFor)}</h3>
           <label className="block">
-            <span className="block mb-1 text-[12.5px] text-[#5a8a76]">Date of approval</span>
+            <span className="block mb-1 text-[12.5px] text-cc-muted">Date of approval</span>
             <DateField value={approveDate} onChange={setApproveDate} max={localIsoDate(new Date())}
-              className="border border-line rounded-input px-3 py-2 text-[14px] focus:outline-none focus:border-[#178a5c]" />
+              className="border border-line rounded-input px-3 py-2 text-[14px] focus:outline-none focus:border-cc-green" />
           </label>
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setApproveFor(null)} className="px-4 py-2 rounded-[8px] border border-line text-[13px] text-text-mid hover:bg-bg-soft">Cancel</button>
             <button type="button" disabled={!approveDate}
               onClick={() => { const l = approveFor; setApproveFor(null); void setLenderExclusive(l, "approved", approveDate); }}
-              className="px-4 py-2 rounded-[8px] bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">
+              className="px-4 py-2 rounded-[8px] bg-cc-green text-white text-[13px] font-semibold hover:bg-cc-green-hover disabled:opacity-50">
               Save
             </button>
           </div>

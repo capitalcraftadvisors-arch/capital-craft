@@ -75,16 +75,16 @@ export function EditPickList({ form, pickSel, setPickSel, onEditSelected, onBack
       <div className="rounded-xl border border-line bg-white overflow-hidden max-h-[46vh] overflow-y-auto">
         {groups.map((g) => (
           <div key={g.title}>
-            <div className="px-3 py-1.5 bg-[#eef7f2] border-y border-[#d7ebe1] text-[11px] font-semibold text-[#0f3d2e]">{g.title}</div>
+            <div className="px-3 py-1.5 bg-[#eef7f2] border-y border-[#d7ebe1] text-[11px] font-semibold text-cc-ink">{g.title}</div>
             {g.rows.map((r) => {
               const on = pickSel.includes(r.key);
               return (
                 <div key={r.key} onClick={() => setPickSel((s) => (on ? s.filter((x) => x !== r.key) : [...s, r.key]))}
-                  className="flex items-center gap-2.5 px-3 py-2 border-b border-line/70 last:border-b-0 cursor-pointer hover:bg-[#f7fcf9]">
-                  <input type="checkbox" checked={on} onChange={() => {}} onClick={(e) => e.stopPropagation()} className="w-4 h-4 accent-[#178a5c] cursor-pointer shrink-0" aria-label={r.label} />
+                  className="flex items-center gap-2.5 px-3 py-2 border-b border-line/70 last:border-b-0 cursor-pointer hover:bg-cc-mist">
+                  <input type="checkbox" checked={on} onChange={() => {}} onClick={(e) => e.stopPropagation()} className="w-4 h-4 accent-cc-green cursor-pointer shrink-0" aria-label={r.label} />
                   <span className="flex-1 text-[12.5px] text-text leading-snug">{r.label}</span>
                   {r.doc
-                    ? (r.on ? <span className="text-[11px] font-semibold text-[#178a5c] shrink-0">On file</span> : <span className="text-[11px] font-semibold text-amber-600 shrink-0">Missing</span>)
+                    ? (r.on ? <span className="text-[11px] font-semibold text-cc-green shrink-0">On file</span> : <span className="text-[11px] font-semibold text-amber-600 shrink-0">Missing</span>)
                     : <span className="text-[11.5px] text-text-muted text-right max-w-[46%] truncate shrink-0">{r.value}</span>}
                 </div>
               );
@@ -93,7 +93,7 @@ export function EditPickList({ form, pickSel, setPickSel, onEditSelected, onBack
         ))}
       </div>
       <div className="flex gap-2 mt-1">
-        <button onClick={onEditSelected} disabled={!pickSel.length} className="px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold disabled:opacity-50 hover:bg-[#12734c]">Edit selected{pickSel.length ? ` (${pickSel.length})` : ""} →</button>
+        <button onClick={onEditSelected} disabled={!pickSel.length} className="px-4 py-2.5 rounded-xl bg-cc-green text-white text-[14px] font-semibold disabled:opacity-50 hover:bg-cc-green-hover">Edit selected{pickSel.length ? ` (${pickSel.length})` : ""} →</button>
         <button onClick={onBack} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid">Back</button>
       </div>
     </div>

@@ -51,12 +51,12 @@ export default function SubscriptionCard({ businessId }: { businessId: string })
     <div className="pt-1 flex flex-col gap-2.5">
       {SWITCHES.map(([k, label]) => (
         <div key={k} className="flex items-center justify-between gap-2">
-          <span className={["text-[13px] font-semibold", isOn(k) ? "text-[#178a5c]" : "text-[#0f3d2e]"].join(" ")}>
+          <span className={["text-[13px] font-semibold", isOn(k) ? "text-cc-green" : "text-cc-ink"].join(" ")}>
             {label} · {isOn(k) ? "On" : sub[k] ? "Ended" : "Off"}
           </span>
           {admin && (
-            <label className="inline-flex items-center gap-2 text-[12.5px] font-semibold text-[#0f3d2e] cursor-pointer select-none">
-              <input type="checkbox" className="w-4 h-4 accent-[#178a5c]" checked={sub[k]} disabled={busy} onChange={(e) => void save({ [k]: e.target.checked })} />
+            <label className="inline-flex items-center gap-2 text-[12.5px] font-semibold text-cc-ink cursor-pointer select-none">
+              <input type="checkbox" className="w-4 h-4 accent-cc-green" checked={sub[k]} disabled={busy} onChange={(e) => void save({ [k]: e.target.checked })} />
               On
             </label>
           )}

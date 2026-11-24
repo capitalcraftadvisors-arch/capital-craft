@@ -17,7 +17,7 @@
 // The page frame, section cards, choice cards, consent row and the pincode
 // lookup come from the shared loan-form kit (components/loan-form).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
@@ -99,6 +99,11 @@ function Inner() {
   const [photoUploaded, setPhotoUploaded] = useState(false);
   const [photoPath, setPhotoPath]         = useState<string | null>(null);
 
+  // Ties the PAN-number and father's-name labels to their boxes, and names the Change EPC pop-up.
+  const panInputId = useId();
+  const fatherInputId = useId();
+  const epcPickTitleId = useId();
+
   const [consented, setConsented]     = useState(false);
   const [sending, setSending]         = useState(false);
   const [sendError, setSendError]     = useState<string | null>(null);
@@ -156,7 +161,8 @@ function Inner() {
       setEpc(e as Epc | null);
       setLoading(false);
     })();
-  }, [params.id]);
+    // The four pincode setters are useState setters (usePincode) — they never change.
+  }, [params.id, setPin, setState, setDistrict, setCity]);
 
   async function openEpcPicker() {
     setEpcSearch(""); setEpcPickOpen(true);
@@ -252,7 +258,7 @@ function Inner() {
         return;
       }
       // Came here via a Step-6 "Edit" link? Go back to the review.
-      router.push(nextStepPath(loan.id, "step-2") as any);
+      router.push(nextStepPath(loan.id, "step-2"));
     } catch (e) {
       setSendError((e as Error)?.message || "Network error.");
       setSending(false);
@@ -276,29 +282,29 @@ function Inner() {
         </StepTitle>
 
         {/* EPC banner */}
-        <Card className="p-4 flex items-center justify-between flex-wrap gap-3 bg-[#f0faf5] border-[#cdeadd]">
+        <Card className="p-4 flex items-center justify-between flex-wrap gap-3 bg-[#f0faf5] border-cc-line">
           <div>
-            <p className="text-[11px] uppercase tracking-wide text-[#5a8a76] font-semibold">Selected EPC</p>
-            <p className="font-display text-[16px] font-bold text-[#0f3d2e] mt-0.5">
+            <p className="text-[11px] uppercase tracking-wide text-cc-muted font-semibold">Selected EPC</p>
+            <p className="font-display text-[16px] font-bold text-cc-ink mt-0.5">
               {epcName}
               {epc?.epc_display_id && (
-                <span className="ml-2 text-[12px] font-mono font-normal text-[#5a8a76]">{epc.epc_display_id}</span>
+                <span className="ml-2 text-[12px] font-mono font-normal text-cc-muted">{epc.epc_display_id}</span>
               )}
             </p>
           </div>
           <button
             type="button"
             onClick={() => void openEpcPicker()}
-            className="text-[12px] text-[#178a5c] hover:underline"
+            className="text-[12px] text-cc-green hover:underline"
           >
             Change EPC
           </button>
         </Card>
 
         {epcPickOpen && (
-          <Modal onClose={() => setEpcPickOpen(false)} busy={epcBusy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-5">
+          <Modal onClose={() => setEpcPickOpen(false)} busy={epcBusy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-5" aria-labelledby={epcPickTitleId}>
             <div className="flex items-start justify-between mb-3">
-              <h3 className="font-display font-semibold text-[18px] text-text">Change EPC</h3>
+              <h3 id={epcPickTitleId} className="font-display font-semibold text-[18px] text-text">Change EPC</h3>
               <button type="button" onClick={() => setEpcPickOpen(false)} disabled={epcBusy} aria-label="Close"
                 className="text-[18px] text-text-muted hover:text-text leading-none disabled:opacity-40">×</button>
             </div>
@@ -317,7 +323,7 @@ function Inner() {
                 if (!rows.length) return <div className="text-[13px] text-text-muted px-3 py-3">No approved EPC matches.</div>;
                 return rows.map((e) => (
                   <button key={e.id} type="button" disabled={epcBusy} onClick={() => void chooseEpc(e)}
-                    className={["text-left px-3 py-2.5 border-b border-line/60 last:border-0 hover:bg-[#f7fcf9] transition disabled:opacity-60", e.id === loan?.epc_business_id ? "bg-[#f0faf5]" : ""].join(" ")}>
+                    className={["text-left px-3 py-2.5 border-b border-line/60 last:border-0 hover:bg-cc-mist transition disabled:opacity-60", e.id === loan?.epc_business_id ? "bg-cc-wash" : ""].join(" ")}>
                     <div className="text-[14px] font-semibold text-text">{e.trade_name || e.legal_name || e.contact_name || "(unnamed EPC)"}</div>
                     {e.epc_display_id && <div className="text-[12px] text-text-muted font-mono">{e.epc_display_id}</div>}
                   </button>
@@ -403,7 +409,7 @@ function Inner() {
           {/* Proper editable PAN Number field — prefilled from OCR when detected. */}
           <div className="rounded-input border-2 border-line bg-[#f8fafc] p-4">
             <div className="flex items-baseline justify-between mb-2">
-              <label className="text-[13px] font-semibold text-text">
+              <label htmlFor={panInputId} className="text-[13px] font-semibold text-text">
                 PAN Number
               </label>
               {panUploaded && (
@@ -411,6 +417,7 @@ function Inner() {
               )}
             </div>
             <input
+              id={panInputId}
               type="text"
               value={panNumber}
               onChange={(e) => setPanNumber(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10))}
@@ -421,8 +428,8 @@ function Inner() {
                 panNumber && !panValid
                   ? "border-red-400 focus:border-red-500"
                   : panValid
-                  ? "border-[#178a5c] focus:border-[#178a5c]"
-                  : "border-line focus:border-[#185fa5]",
+                  ? "border-cc-green focus:border-cc-green"
+                  : "border-line focus:border-cc-blue",
               ].join(" ")}
             />
             <p className="mt-2 text-[11px] text-text-muted">
@@ -433,15 +440,16 @@ function Inner() {
 
           {/* Father's name — prefilled from the PAN OCR, editable. */}
           <div className="rounded-input border-2 border-line bg-[#f8fafc] p-4">
-            <label className="text-[13px] font-semibold text-text block mb-2">
+            <label htmlFor={fatherInputId} className="text-[13px] font-semibold text-text block mb-2">
               Father&rsquo;s name <span className="font-normal text-text-muted">(from PAN)</span>
             </label>
             <input
+              id={fatherInputId}
               type="text"
               value={panFatherName}
               onChange={(e) => setPanFatherName(e.target.value)}
               placeholder="As printed on the PAN card"
-              className="w-full rounded-input border-2 border-line focus:border-[#185fa5] px-4 py-3 text-[15px] outline-none transition-colors bg-white"
+              className="w-full rounded-input border-2 border-line focus:border-cc-blue px-4 py-3 text-[15px] outline-none transition-colors bg-white"
             />
           </div>
         </FormSection>

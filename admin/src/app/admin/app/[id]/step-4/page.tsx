@@ -295,7 +295,7 @@ function Inner() {
         setSaving(false);
         return;
       }
-      router.push(nextStepPath(loan.id, "step-5") as any);
+      router.push(nextStepPath(loan.id, "step-5"));
     } catch (e) {
       setSaveError((e as Error)?.message || "Network error.");
       setSaving(false);
@@ -323,11 +323,12 @@ function Inner() {
           <button
             type="button"
             onClick={() => setKycOpen((v) => !v)}
+            aria-expanded={kycOpen}
             className="w-full flex items-center justify-between px-6 py-4 hover:bg-bg-tint transition-colors"
           >
             <div className="flex items-center gap-2">
               <TickCircle />
-              <span className="text-[14px] font-semibold text-[#0f3d2e]">
+              <span className="text-[14px] font-semibold text-cc-ink">
                 Details verified via KYC
               </span>
             </div>
@@ -340,7 +341,7 @@ function Inner() {
             </svg>
           </button>
           {kycOpen && (
-            <div className="px-6 pb-6 pt-1 border-t border-line bg-[#f0faf5]">
+            <div className="px-6 pb-6 pt-1 border-t border-line bg-cc-wash">
               <dl className="grid gap-2 sm:grid-cols-2 text-[13px] pt-4">
                 <KycRow label="Name"    value={loan.aadhaar_name} />
                 <KycRow label="DOB"     value={loan.aadhaar_dob} />
@@ -495,7 +496,7 @@ function Inner() {
 
         {/* e. Retrieved Bank Information */}
         {bankDoc && (
-          <Card className="p-6 bg-[#f0faf5] border-[#cdeadd] space-y-4">
+          <Card className="p-6 bg-[#f0faf5] border-cc-line space-y-4">
             <div className="flex items-center gap-2">
               <TickCircle />
               <h2 className={H16_GREEN}>
@@ -613,8 +614,8 @@ function BankDocSlot({
           onClick={() => inputRef.current?.click()}
           disabled={uploading}
           className={[
-            "w-full min-h-[140px] rounded-input border-2 border-dashed border-[#185fa5] bg-white text-[#185fa5] transition-colors flex flex-col items-center justify-center text-center px-4",
-            "hover:bg-[#f2f7fc]",
+            "w-full min-h-[140px] rounded-input border-2 border-dashed border-cc-blue bg-white text-cc-blue transition-colors flex flex-col items-center justify-center text-center px-4",
+            "hover:bg-cc-blue-wash",
             uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
           ].join(" ")}
         >
@@ -626,7 +627,7 @@ function BankDocSlot({
           <p className="text-[14px] font-semibold">
             {uploading ? "Uploading & extracting…" : "Click to upload"}
           </p>
-          <p className="text-[12px] text-[#5a86b3] mt-0.5">Photo, scan, or PDF</p>
+          <p className="text-[12px] text-cc-blue-muted mt-0.5">Photo, scan, or PDF</p>
         </button>
       )}
       <HiddenFileInput ref={inputRef} onFile={onFile} />
@@ -644,8 +645,8 @@ function KycRow({
 }) {
   return (
     <div className={full ? "sm:col-span-2" : ""}>
-      <dt className="text-[11px] uppercase tracking-wide text-[#5a8a76] font-semibold">{label}</dt>
-      <dd className={(mono ? "font-mono " : "") + "text-[13px] font-semibold text-[#0f3d2e] break-words"}>
+      <dt className="text-[11px] uppercase tracking-wide text-cc-muted font-semibold">{label}</dt>
+      <dd className={(mono ? "font-mono " : "") + "text-[13px] font-semibold text-cc-ink break-words"}>
         {value || <span className="text-text-muted font-normal">—</span>}
       </dd>
     </div>

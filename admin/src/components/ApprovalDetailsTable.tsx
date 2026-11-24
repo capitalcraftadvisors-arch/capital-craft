@@ -1,5 +1,4 @@
 "use client";
-import { fmtDate } from "@/lib/dates";
 
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  APPROVAL DETAILS TABLE — EDIT THE FIELDS HERE                    ║
@@ -28,6 +27,7 @@ import { rupeesInWords, yearsInWords } from "@/lib/numberToWords";
 import { useLenders } from "@/lib/lenders";
 import { lenderLabelIn } from "@/lib/loan-lenders";
 import { amountInput, fmtRupees, numberInput } from "@/lib/money";
+import { fmtDate } from "@/lib/dates";
 
 // Persisted shape → epc_applications.approval_details (jsonb).
 export type ApprovalDetails = {
@@ -188,39 +188,40 @@ export default function ApprovalDetailsTable({ value, onChange, readOnly }: Prop
   }
 
   const inputCls =
-    "w-full border border-[#cdeadd] rounded-[8px] px-3 py-2 text-[14px] " +
-    "focus:border-[#185fa5] outline-none bg-white text-right";
+    "w-full border border-cc-line rounded-[8px] px-3 py-2 text-[14px] " +
+    "focus:border-cc-blue outline-none bg-white text-right";
 
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-[14px] border-collapse">
         <tbody>
           {/* Approved By — the lender chosen in the confirmation popup. */}
-          <tr className="border-b border-[#e0f0e8]">
-            <td className="py-5 pr-4 text-[14px] text-[#5a8a76] font-medium w-[26%]">Approved By</td>
-            <td className="py-5 px-3 text-[17px] font-bold text-[#178a5c]" colSpan={3}>
+          <tr className="border-b border-cc-line-soft">
+            <td className="py-5 pr-4 text-[14px] text-cc-muted font-medium w-[26%]">Approved By</td>
+            <td className="py-5 px-3 text-[17px] font-bold text-cc-green" colSpan={3}>
               {lender}
             </td>
           </tr>
 
           {ROWS.map((row) => (
-            <tr key={row.approvedKey} className="border-b border-[#e0f0e8]">
-              <td className="py-5 pr-4 text-[14px] text-[#5a8a76] font-medium w-[26%]">
+            <tr key={row.approvedKey} className="border-b border-cc-line-soft">
+              <td className="py-5 pr-4 text-[14px] text-cc-muted font-medium w-[26%]">
                 {row.appliedLabel}
               </td>
-              <td className="py-5 px-3 text-right text-[15px] font-semibold text-[#0f3d2e] w-[24%]">
+              <td className="py-5 px-3 text-right text-[15px] font-semibold text-cc-ink w-[24%]">
                 {fmt(value[row.appliedKey] as number | null, row.money, row.suffix)}
               </td>
-              <td className="py-5 pl-6 pr-4 text-[14px] text-[#5a8a76] font-medium w-[26%]">
+              <td className="py-5 pl-6 pr-4 text-[14px] text-cc-muted font-medium w-[26%]">
                 {row.approvedLabel}
               </td>
               <td className="py-5 px-3 w-[24%]">
                 {ro ? (
-                  <div className="text-right font-semibold text-[#0f3d2e]">
+                  <div className="text-right font-semibold text-cc-ink">
                     {fmt(value[row.approvedKey] as number | null, row.money, row.suffix)}
                   </div>
                 ) : (
                   <input
+                    aria-label={row.approvedLabel}
                     type="text"
                     inputMode="decimal"
                     className={inputCls}
@@ -237,7 +238,7 @@ export default function ApprovalDetailsTable({ value, onChange, readOnly }: Prop
                   if (n === null || n === undefined || !Number.isFinite(Number(n))) return null;
                   return (
                     <p className="mt-2 text-right">
-                      <span className="inline-block rounded-[6px] bg-[#f0faf5] border border-[#cdeadd] px-2.5 py-1 text-[12px] font-bold text-[#178a5c] leading-snug">
+                      <span className="inline-block rounded-[6px] bg-cc-wash border border-cc-line px-2.5 py-1 text-[12px] font-bold text-cc-green leading-snug">
                         {row.words(Number(n))}
                       </span>
                     </p>
@@ -248,18 +249,18 @@ export default function ApprovalDetailsTable({ value, onChange, readOnly }: Prop
           ))}
 
           {/* Date of Approval — the date the lender approved (captured at approval). */}
-          <tr className="border-b border-[#e0f0e8]">
-            <td className="py-5 pr-4 text-[14px] text-[#5a8a76] font-medium w-[26%]">Date of Approval</td>
+          <tr className="border-b border-cc-line-soft">
+            <td className="py-5 pr-4 text-[14px] text-cc-muted font-medium w-[26%]">Date of Approval</td>
             <td className="py-5 px-3" colSpan={3}>
               {ro ? (
-                <span className="text-[15px] font-semibold text-[#0f3d2e]">{fmtDate(value.approval_date)}</span>
+                <span className="text-[15px] font-semibold text-cc-ink">{fmtDate(value.approval_date)}</span>
               ) : (
                 <div className="w-48">
                   <DateField
                     value={value.approval_date ?? ""}
                     onChange={(iso) => onChange?.({ ...value, approval_date: iso || null })}
                     ariaLabel="Date of approval"
-                    className="border border-[#cdeadd] rounded-[8px] px-3 py-2 text-[14px] focus:border-[#185fa5] outline-none bg-white"
+                    className="border border-cc-line rounded-[8px] px-3 py-2 text-[14px] focus:border-cc-blue outline-none bg-white"
                   />
                 </div>
               )}
@@ -268,36 +269,37 @@ export default function ApprovalDetailsTable({ value, onChange, readOnly }: Prop
 
           {/* ROI — the lender enters one basis (Flat for Credit Fair, Reducing
               for Solfin/Aerem); the counterpart is auto-calculated on the right. */}
-          <tr className="border-b border-[#e0f0e8]">
-            <td className="py-5 pr-4 text-[14px] text-[#5a8a76] font-medium w-[26%]">
+          <tr className="border-b border-cc-line-soft">
+            <td className="py-5 pr-4 text-[14px] text-cc-muted font-medium w-[26%]">
               {roiKind(value.approved_by as string) === "flat" ? "Flat ROI (%)" : "Reducing Balance ROI (%)"}
               {auto && <span className="block text-[11px] text-[#93a7b8] font-normal">auto-calculated from the EMI</span>}
             </td>
             <td className="py-5 px-3 w-[24%]">
               {auto ? (
-                <div className="text-right font-semibold text-[#178a5c]">{auto.roi != null && auto.roi !== "" ? `${auto.roi}%` : "—"}</div>
+                <div className="text-right font-semibold text-cc-green">{auto.roi != null && auto.roi !== "" ? `${auto.roi}%` : "—"}</div>
               ) : ro ? (
-                <div className="text-right font-semibold text-[#0f3d2e]">{value.roi != null && value.roi !== "" ? `${value.roi}%` : "—"}</div>
+                <div className="text-right font-semibold text-cc-ink">{value.roi != null && value.roi !== "" ? `${value.roi}%` : "—"}</div>
               ) : (
                 <div className="flex items-center justify-end gap-1.5">
                   <input
+                    aria-label={roiKind(value.approved_by as string) === "flat" ? "Flat ROI (%)" : "Reducing Balance ROI (%)"}
                     type="text"
                     inputMode="decimal"
                     value={value.roi == null ? "" : String(value.roi)}
                     onChange={(e) => { const c = numberInput(e.target.value); onChange?.({ ...value, roi: c === "" ? null : c }); }}
                     placeholder="0"
-                    className="w-24 border border-[#cdeadd] rounded-[8px] px-3 py-2 text-[14px] text-right focus:border-[#185fa5] outline-none bg-white"
+                    className="w-24 border border-cc-line rounded-[8px] px-3 py-2 text-[14px] text-right focus:border-cc-blue outline-none bg-white"
                   />
-                  <span className="text-[14px] text-[#5a8a76]">%</span>
+                  <span className="text-[14px] text-cc-muted">%</span>
                 </div>
               )}
             </td>
-            <td className="py-5 pl-6 pr-4 text-[14px] text-[#5a8a76] font-medium w-[26%]">
+            <td className="py-5 pl-6 pr-4 text-[14px] text-cc-muted font-medium w-[26%]">
               {roiKind(value.approved_by as string) === "flat" ? "Reducing Balance (%)" : "Flat ROI (%)"}
               <span className="block text-[11px] text-[#93a7b8] font-normal">auto-calculated</span>
             </td>
             <td className="py-5 px-3 w-[24%]">
-              <div className="text-right font-semibold text-[#178a5c]">
+              <div className="text-right font-semibold text-cc-green">
                 {(() => { const c = roiCounterpart(auto ?? value); return c != null ? `${c.toFixed(2)}%` : "—"; })()}
               </div>
             </td>

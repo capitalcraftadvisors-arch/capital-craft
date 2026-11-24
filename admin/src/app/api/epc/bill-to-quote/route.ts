@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { err, requireLogin } from "@/lib/api";
 import { compressUpload } from "@/lib/image-compress";
 import { geminiExtractBillForQuote } from "@/lib/doc-extractors";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,7 +42,7 @@ export async function POST(req: NextRequest) {
     if (!fields) return err("Couldn't read this bill. Try a clearer photo.", 422);
     return NextResponse.json({ ok: true, fields });
   } catch (e) {
-    console.error("[bill-to-quote] error:", e instanceof Error ? e.message : String(e));
+    console.error("[bill-to-quote] error:", errText(e));
     return err("Couldn't read this bill. Please try again.", 500);
   }
 }

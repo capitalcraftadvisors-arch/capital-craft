@@ -1,5 +1,4 @@
 "use client";
-import { fmtAgo } from "@/lib/dates";
 
 // A bell + dropdown that surfaces comments OTHER admins (e.g. the manager) have
 // left on the cases assigned to the signed-in user — across the loan, EPC, and
@@ -13,6 +12,7 @@ import { fmtAgo } from "@/lib/dates";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { fmtAgo } from "@/lib/dates";
 import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { REVIEW_COLS, REVIEW_LABEL, loanReviews, reviewNotices } from "@/lib/review";
 import { markNotifSeen, notifSeen, onNotifSeen } from "@/lib/notif-seen";
@@ -75,7 +75,7 @@ export default function NotificationBell() {
   const first = useRef(true);
   const boxRef = useRef<HTMLDivElement>(null);
   // The "cases assigned to me" name maps change rarely (only on reassignment),
-  // so cache them for 5 min and reuse across polls — halves the bell's queries.
+  // so cache them for 5 min and reuse them each time the bell is opened.
   const caseMaps = useRef<{ at: number; loanName: Map<string, string>; epcName: Map<string, string>; leadName: Map<string, string>; insName: Map<string, string> } | null>(null);
 
   const load = useCallback(async () => {
@@ -224,7 +224,7 @@ export default function NotificationBell() {
           <path d="M13.73 21a2 2 0 0 1-3.46 0" />
         </svg>
         {unread > 0 && (
-          <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 grid place-items-center rounded-full bg-[#dc2626] text-white text-[10px] font-bold">
+          <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 grid place-items-center rounded-full bg-red-600 text-white text-[10px] font-bold">
             {unread > 9 ? "9+" : unread}
           </span>
         )}
@@ -235,8 +235,8 @@ export default function NotificationBell() {
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-line sticky top-0 bg-white">
             <span className="text-[13px] font-bold text-text">Notifications</span>
             {unread > 0
-              ? <button type="button" onClick={markAllRead} className="text-[11px] font-semibold text-[#178a5c] hover:underline">Mark all read</button>
-              : <span className="text-[11px] text-text-muted">You're all caught up</span>}
+              ? <button type="button" onClick={markAllRead} className="text-[11px] font-semibold text-cc-green hover:underline">Mark all read</button>
+              : <span className="text-[11px] text-text-muted">You&apos;re all caught up</span>}
           </div>
           {loading && all.length === 0 ? (
             <div className="px-4 py-6 text-[12px] text-text-muted text-center">Checking…</div>
@@ -250,9 +250,9 @@ export default function NotificationBell() {
                 return (
                   <li key={n.id}>
                     <button type="button" onClick={() => openItem(n)}
-                      className={"w-full text-left px-4 py-2.5 hover:bg-bg-tint transition-colors " + (isNew ? "bg-[#f0faf5]" : "")}>
+                      className={"w-full text-left px-4 py-2.5 hover:bg-bg-tint transition-colors " + (isNew ? "bg-cc-wash" : "")}>
                       <div className="flex items-center gap-1.5 mb-0.5">
-                        {isNew && <span className="w-2 h-2 rounded-full bg-[#178a5c] shrink-0" />}
+                        {isNew && <span className="w-2 h-2 rounded-full bg-cc-green shrink-0" />}
                         <span className="text-[12px] font-bold text-text truncate">{n.author}</span>
                         <span className="text-[11px] text-text-muted">{n.kind === "assign" ? "assigned you" : n.kind === "review" ? (n.ok ? "approved" : "sent back") : n.kind === "request" ? "wants a custom quotation" : n.kind === "tranche" ? "uploaded" : "commented on"}</span>
                         <span className="text-[9px] font-bold px-1.5 py-0.5 rounded ml-auto shrink-0" style={{ backgroundColor: tint.bg, color: tint.fg }}>{SRC_LABEL[n.source]}</span>
@@ -261,12 +261,12 @@ export default function NotificationBell() {
                       {n.kind === "comment"
                         ? <div className="text-[12px] text-text-mid line-clamp-2 mt-0.5">{n.text}</div>
                         : n.kind === "review"
-                        ? <div className={["text-[12px] font-medium line-clamp-2 mt-0.5", n.ok ? "text-[#178a5c]" : "text-red-700"].join(" ")}>{n.ok ? "✓ " : "↩ "}{n.text}</div>
+                        ? <div className={["text-[12px] font-medium line-clamp-2 mt-0.5", n.ok ? "text-cc-green" : "text-red-700"].join(" ")}>{n.ok ? "✓ " : "↩ "}{n.text}</div>
                         : n.kind === "request"
-                        ? <div className="text-[12px] font-medium text-[#185fa5] mt-0.5">{n.text}</div>
+                        ? <div className="text-[12px] font-medium text-cc-blue mt-0.5">{n.text}</div>
                         : n.kind === "tranche"
-                        ? <div className={["text-[12px] font-medium mt-0.5", n.ok ? "text-[#178a5c]" : "text-[#b45309]"].join(" ")}>{n.ok ? "✓ " : ""}{n.text}</div>
-                        : <div className="text-[11px] text-[#178a5c] font-medium mt-0.5">New assignment — tap to open</div>}
+                        ? <div className={["text-[12px] font-medium mt-0.5", n.ok ? "text-cc-green" : "text-amber-700"].join(" ")}>{n.ok ? "✓ " : ""}{n.text}</div>
+                        : <div className="text-[11px] text-cc-green font-medium mt-0.5">New assignment — tap to open</div>}
                       <div className="text-[10px] text-text-muted mt-1">{fmtAgo(n.at)}</div>
                     </button>
                   </li>

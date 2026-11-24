@@ -1,5 +1,4 @@
 "use client";
-import { fmtDateTime } from "@/lib/dates";
 
 // Chronological audit feed for one EPC. Reads admin_edit_log directly via
 // Supabase (admin JWT + admin_all_edit_log policy). Renders one line per
@@ -21,6 +20,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { lenderName, useLenders } from "@/lib/lenders";
 import { useAdminNames } from "@/lib/use-admin-names";
+import { fmtDateTime } from "@/lib/dates";
 
 type LogRow = {
   id: string;
@@ -61,8 +61,8 @@ export default function ActivityLog({ businessId, refreshKey }: Props) {
     return () => { cancelled = true; };
   }, [businessId, refreshKey]);
 
-  if (loading) return <p className="text-[13px] text-[#5a8a76]">Loading activity…</p>;
-  if (rows.length === 0) return <p className="text-[13px] text-[#5a8a76]">No activity recorded yet.</p>;
+  if (loading) return <p className="text-[13px] text-cc-muted">Loading activity…</p>;
+  if (rows.length === 0) return <p className="text-[13px] text-cc-muted">No activity recorded yet.</p>;
 
   return (
     <ol className="space-y-2">
@@ -71,16 +71,16 @@ export default function ActivityLog({ businessId, refreshKey }: Props) {
         return (
           <li
             key={r.id}
-            className="border-l-4 border-[#cdeadd] pl-4 py-2 bg-[#f7fcfa] rounded-r-[8px]"
+            className="border-l-4 border-cc-line pl-4 py-2 bg-cc-row-hover rounded-r-[8px]"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="flex items-start gap-2.5 min-w-0">
                 <span className={["shrink-0 mt-0.5", icon.tone].join(" ")}>{icon.svg}</span>
-                <p className="text-[14px] text-[#0f3d2e]">{describe(r)}</p>
+                <p className="text-[14px] text-cc-ink">{describe(r)}</p>
               </div>
-              <span className="text-[11px] text-[#5a8a76] shrink-0">{fmtDateTime(r.created_at)}</span>
+              <span className="text-[11px] text-cc-muted shrink-0">{fmtDateTime(r.created_at)}</span>
             </div>
-            <p className="text-[12px] text-[#5a8a76] mt-0.5 pl-[26px]">
+            <p className="text-[12px] text-cc-muted mt-0.5 pl-[26px]">
               by {r.actor === "epc" ? "the EPC" : (adminNames.get(r.actor_id) || "Admin")}
             </p>
           </li>
@@ -124,10 +124,10 @@ const I_CHAT_X      = (<svg {...SVG_PROPS}><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V
 const I_DOT         = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>);
 
 function iconFor(r: LogRow): IconChoice {
-  const NEUTRAL = "text-[#5a8a76]";
-  const GREEN   = "text-[#178a5c]";
-  const BLUE    = "text-[#185fa5]";
-  const AMBER   = "text-[#854f0b]";
+  const NEUTRAL = "text-cc-muted";
+  const GREEN   = "text-cc-green";
+  const BLUE    = "text-cc-blue";
+  const AMBER   = "text-warn-ink";
   const RED     = "text-red-600";
 
   switch (r.action) {

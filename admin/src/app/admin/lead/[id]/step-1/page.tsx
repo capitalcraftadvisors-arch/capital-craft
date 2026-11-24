@@ -143,7 +143,7 @@ function Inner() {
           <div className="text-[12px] font-semibold uppercase tracking-wide text-[#4338ca]">
             New lead {displayId && <span className="text-text-muted">· {displayId}</span>}
           </div>
-          <h1 className="font-display text-[26px] sm:text-[30px] font-bold text-[#0f3d2e] mt-1">
+          <h1 className="font-display text-[26px] sm:text-[30px] font-bold text-cc-ink mt-1">
             Lead details
           </h1>
         </div>

@@ -32,6 +32,7 @@ import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES } fr
 import { amountInWords } from "@/lib/numberToWords";
 import { PINCODE_RE } from "@/lib/validators";
 import { invalidateLoanBoards } from "@/lib/ops-board";
+import { askConfirm } from "@/lib/confirm";
 import { withoutThumbs } from "@/lib/chat-draft";
 import LoanShareChips from "@/components/LoanShareChips";
 // The chat kit (src/components/chat) — this chat's green palette is LOAN_INTAKE_THEME.
@@ -180,7 +181,7 @@ function Inner() {
         // the edit questions); the edit flow operates on the latest saved data.
         if (editFlag) {
           const app = await loadApp(appParam);
-          if (!app) { router.replace(`/admin/app/${appParam}/step-1` as any); return; }
+          if (!app) { router.replace(`/admin/app/${appParam}/step-1`); return; }
           const pf = prefillFromApp(app);
           setForm(pf);
           setAppId(appParam);
@@ -215,7 +216,7 @@ function Inner() {
           return;
         }
         // 3) ?app but nothing saved and not an edit → fall back to the classic wizard.
-        router.replace(`/admin/app/${appParam}/step-1` as any);
+        router.replace(`/admin/app/${appParam}/step-1`);
       } finally {
         setResuming(false);
       }
@@ -412,8 +413,12 @@ function Inner() {
   async function closeChat() {
     if (donId) { router.push("/admin"); return; }
     const started = !!appId;
-    if (started && !window.confirm("Close this chat? Your progress is saved — you can reopen this application to continue.")) return;
-    if (started) await saveChat({ markUnderReview: mode === "create" });
+    if (started && !(await askConfirm("Close this chat? Your progress is saved — you can reopen this application to continue."))) return;
+    if (started) {
+      // This save covers an autosave still waiting on its timer — drop that one.
+      if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+      await saveChat({ markUnderReview: mode === "create" });
+    }
     router.push("/admin");
   }
   // Header ← — a save still waiting on the autosave timer goes out first, so
@@ -840,15 +845,15 @@ function Inner() {
                   <span className="flex items-center gap-1.5">
                     <input autoFocus value={cfVal} onChange={(e) => setCfVal(e.target.value)}
                       onKeyDown={(e) => { if (e.key === "Enter") { saveConfirmField(f.field!, cfVal.trim()); setCfEdit(null); } if (e.key === "Escape") setCfEdit(null); }}
-                      className="border border-[#178a5c] rounded-lg px-2.5 py-1 text-[13px] w-44 text-right outline-none" />
-                    <button onClick={() => { saveConfirmField(f.field!, cfVal.trim()); setCfEdit(null); }} className="text-[#178a5c] text-[11.5px] font-semibold">Save</button>
+                      className="border border-cc-green rounded-lg px-2.5 py-1 text-[13px] w-44 text-right outline-none" />
+                    <button onClick={() => { saveConfirmField(f.field!, cfVal.trim()); setCfEdit(null); }} className="text-cc-green text-[11.5px] font-semibold">Save</button>
                   </span>
                 ) : (
                   <span className="flex items-center gap-2 min-w-0">
                     {f.ok
                       ? <span className="text-text font-medium text-right break-words">{f.value}</span>
                       : <span className="text-amber-600 text-[12px] italic">not found</span>}
-                    {f.field && <button onClick={() => { setCfEdit(f.field!); setCfVal(f.ok ? f.value : ""); }} className="opacity-60 hover:opacity-100 text-[#178a5c] text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>}
+                    {f.field && <button onClick={() => { setCfEdit(f.field!); setCfVal(f.ok ? f.value : ""); }} className="opacity-60 hover:opacity-100 text-cc-green text-[11px] hover:underline shrink-0" aria-label="Edit">✎</button>}
                   </span>
                 )}
               </div>
@@ -887,7 +892,7 @@ function Inner() {
         <ChatDock>
           {editStep === "q1" && (
             <div className="flex gap-2">
-              <button onClick={() => answerQ1(true)} className="flex-1 px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c]">Yes — edit details</button>
+              <button onClick={() => answerQ1(true)} className="flex-1 px-4 py-2.5 rounded-xl bg-cc-green text-white text-[14px] font-semibold hover:bg-cc-green-hover">Yes — edit details</button>
               <button onClick={() => answerQ1(false)} className="flex-1 px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">No</button>
             </div>
           )}
@@ -896,7 +901,7 @@ function Inner() {
           )}
           {editStep === "q2" && (
             <div className="flex gap-2">
-              <button onClick={() => answerQ2(true)} className="flex-1 px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c]">Yes — complete it</button>
+              <button onClick={() => answerQ2(true)} className="flex-1 px-4 py-2.5 rounded-xl bg-cc-green text-white text-[14px] font-semibold hover:bg-cc-green-hover">Yes — complete it</button>
               <button onClick={() => answerQ2(false)} className="flex-1 px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">No, later</button>
             </div>
           )}
@@ -937,14 +942,14 @@ function Inner() {
                 editing={!!editing} onCancelEdit={cancelEdit} placeholder={active.placeholder || "Type a message…"}
                 skipLabel={active.optional ? "Skip" : "Don't have it"} onSkip={() => void skipText()} />
               {active.field && AMOUNT_FIELDS.has(active.field) && amountInWords(Number(input)) && (
-                <div className="text-[11.5px] text-[#0f3d2e] px-3">₹{Number(input).toLocaleString("en-IN")} — <span className="font-medium">{amountInWords(Number(input))} rupees</span></div>
+                <div className="text-[11.5px] text-cc-ink px-3">₹{Number(input).toLocaleString("en-IN")} — <span className="font-medium">{amountInWords(Number(input))} rupees</span></div>
               )}
             </div>
           )}
 
           {active.kind === "consent" && (
             <div className="flex gap-2">
-              <button onClick={() => void answer("yes", "Yes, consent given")} className="flex-1 px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c]">Yes, consent given</button>
+              <button onClick={() => void answer("yes", "Yes, consent given")} className="flex-1 px-4 py-2.5 rounded-xl bg-cc-green text-white text-[14px] font-semibold hover:bg-cc-green-hover">Yes, consent given</button>
               {!editing && <button onClick={() => void skipText()} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft" title="Continue without this — you can record it later">Skip</button>}
               <button onClick={() => router.push("/admin")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid">Cancel</button>
             </div>
@@ -954,9 +959,9 @@ function Inner() {
             <div className="flex flex-col gap-2">
               <textarea autoFocus value={input} onChange={(e) => setInput(e.target.value)} rows={6}
                 placeholder={active.placeholder || "Paste the applicant's info sheet here…"}
-                className="w-full border border-line rounded-xl px-3.5 py-2.5 text-[13.5px] leading-snug bg-white focus:outline-none focus:border-[#178a5c] focus:ring-2 focus:ring-[#178a5c]/15 resize-y" />
+                className="w-full border border-line rounded-xl px-3.5 py-2.5 text-[13.5px] leading-snug bg-white focus:outline-none focus:border-cc-green focus:ring-2 focus:ring-cc-green/15 resize-y" />
               <div className="flex items-center gap-2">
-                <button onClick={parseSheet} disabled={!input.trim()} className="px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">Read the sheet →</button>
+                <button onClick={parseSheet} disabled={!input.trim()} className="px-4 py-2 rounded-lg bg-cc-green text-white text-[13px] font-semibold hover:bg-cc-green-hover disabled:opacity-50">Read the sheet →</button>
                 <button onClick={skipSheet} className="px-3 py-2 rounded-lg text-[12.5px] text-text-muted hover:text-text hover:bg-bg-soft">Skip</button>
               </div>
             </div>

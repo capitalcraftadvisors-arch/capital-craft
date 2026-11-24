@@ -13,7 +13,7 @@
 // The table itself lives in @/components/ApprovalDetailsTable — that's the
 // single place to change its fields (stored as jsonb, so no migration).
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getBusiness } from "@/lib/auth";
 import { logLoanActivity } from "@/lib/loanAudit";
@@ -33,9 +33,9 @@ import ReviewBar from "@/components/ReviewBar";
 type Loan = Record<string, any>;
 
 // The sanction / disbursement-advice choice buttons; `on` fills them (green by default).
-const choiceBtn = (on: boolean, onCls = "bg-[#178a5c] text-white border-[#178a5c]") => [
+const choiceBtn = (on: boolean, onCls = "bg-cc-green text-white border-cc-green") => [
   "px-4 py-2 rounded-[8px] text-[13px] font-semibold border transition-colors",
-  on ? onCls : "bg-white text-[#0f3d2e] border-[#cdeadd] hover:bg-[#f0faf5]",
+  on ? onCls : "bg-white text-cc-ink border-cc-line hover:bg-cc-wash",
 ].join(" ");
 
 export default function LoanApprovalForm({
@@ -59,6 +59,7 @@ export default function LoanApprovalForm({
   const [creditNtc, setCreditNtc] = useState(false); // New To Credit — may go with a score, never with "None"
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const creditId = useId();
 
   useEffect(() => {
     // Seed the table: lender as chosen, "applied" columns snapshotted from what
@@ -135,7 +136,7 @@ export default function LoanApprovalForm({
 
     // Typed amounts back to numbers; Solfin's ROI is the one worked out from the EMI.
     const saved = withAutoRoi(asNumbers(details));
-    const patch: Record<string, any> = {
+    const patch: Record<string, unknown> = {
       approved_lender:  details.approved_by,
       approval_details: saved,
       // The approval-complete gate — unlocks the Disbursement action + RFD.
@@ -242,33 +243,34 @@ export default function LoanApprovalForm({
           <ApprovalDetailsTable value={details} onChange={setDetails} />
 
           {/* Credit score — optional: a positive integer or "None"; NTC may go with a score. */}
-          <div className="mt-4 pt-4 border-t border-[#eef1f4]">
-            <label className="block text-[13px] font-medium text-[#0f3d2e] mb-1.5">Credit score <span className="text-[#5a8a76] font-normal">(optional)</span></label>
+          <div className="mt-4 pt-4 border-t border-grey-line">
+            <label htmlFor={creditId} className="block text-[13px] font-medium text-cc-ink mb-1.5">Credit score <span className="text-cc-muted font-normal">(optional)</span></label>
             <div className="flex items-center gap-4 flex-wrap">
               <input
+                id={creditId}
                 type="text"
                 inputMode="numeric"
                 value={creditNone ? "" : creditScore}
                 disabled={creditNone}
                 onChange={(e) => setCreditScore(e.target.value.replace(/\D/g, ""))}
                 placeholder="e.g. 750"
-                className="w-40 rounded-input border-2 border-line px-3.5 py-2.5 text-[15px] outline-none focus:border-[#178a5c] disabled:bg-bg-tint disabled:opacity-60"
+                className="w-40 rounded-input border-2 border-line px-3.5 py-2.5 text-[15px] outline-none focus:border-cc-green disabled:bg-bg-tint disabled:opacity-60"
               />
-              <label className="flex items-center gap-2 text-[14px] text-[#0f3d2e] cursor-pointer">
+              <label className="flex items-center gap-2 text-[14px] text-cc-ink cursor-pointer">
                 <input
                   type="checkbox"
                   checked={creditNone}
                   onChange={(e) => { setCreditNone(e.target.checked); if (e.target.checked) { setCreditScore(""); setCreditNtc(false); } }}
-                  className="h-4 w-4 accent-[#178a5c]"
+                  className="h-4 w-4 accent-cc-green"
                 />
                 None
               </label>
-              <label className="flex items-center gap-2 text-[14px] text-[#0f3d2e] cursor-pointer">
+              <label className="flex items-center gap-2 text-[14px] text-cc-ink cursor-pointer">
                 <input
                   type="checkbox"
                   checked={creditNtc}
                   onChange={(e) => { setCreditNtc(e.target.checked); if (e.target.checked) setCreditNone(false); }}
-                  className="h-4 w-4 accent-[#178a5c]"
+                  className="h-4 w-4 accent-cc-green"
                 />
                 NTC
               </label>
@@ -285,7 +287,7 @@ export default function LoanApprovalForm({
             <button type="button" onClick={() => setSanctionChoice("upload")} className={choiceBtn(sanctionChoice === "upload")}>
               Upload sanction letter
             </button>
-            <button type="button" onClick={() => setSanctionChoice("unavailable")} className={choiceBtn(sanctionChoice === "unavailable", "bg-[#854f0b] text-white border-[#854f0b]")}>
+            <button type="button" onClick={() => setSanctionChoice("unavailable")} className={choiceBtn(sanctionChoice === "unavailable", "bg-warn-ink text-white border-warn-ink")}>
               I don&rsquo;t have it now
             </button>
           </div>
@@ -300,7 +302,7 @@ export default function LoanApprovalForm({
             />
           )}
           {sanctionChoice === "unavailable" && (
-            <p className="text-[12px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2">
+            <p className="text-[12px] text-warn-ink bg-warn-wash border border-warn-line rounded-[8px] px-3 py-2">
               Will be recorded as not available at the time of filling. You can upload it later.
             </p>
           )}
@@ -333,7 +335,7 @@ export default function LoanApprovalForm({
             type="button"
             onClick={onCancel}
             disabled={saving}
-            className="px-5 py-2.5 text-[14px] font-semibold bg-white border border-[#cdeadd] text-[#5a8a76] rounded-[10px] hover:bg-[#f0faf5] disabled:opacity-60"
+            className="px-5 py-2.5 text-[14px] font-semibold bg-white border border-cc-line text-cc-muted rounded-[10px] hover:bg-cc-wash disabled:opacity-60"
           >
             Cancel
           </button>
@@ -342,7 +344,7 @@ export default function LoanApprovalForm({
           type="button"
           onClick={() => void save()}
           disabled={saving}
-          className="px-6 py-2.5 text-[14px] font-semibold bg-[#178a5c] text-white rounded-[10px] hover:bg-[#12734c] disabled:opacity-70 inline-flex items-center gap-2"
+          className="px-6 py-2.5 text-[14px] font-semibold bg-cc-green text-white rounded-[10px] hover:bg-cc-green-hover disabled:opacity-70 inline-flex items-center gap-2"
         >
           {I.check} {saving ? "Saving…" : "Save approval"}
         </button>

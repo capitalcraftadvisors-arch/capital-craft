@@ -16,6 +16,7 @@ import { err, dbAs, requireLogin } from "@/lib/api";
 import { fetchLenders, lenderLabelIn, type Lender } from "@/lib/loan-lenders";
 import { deadlineState, remainingAmount, firstCharges, FIRST_CHARGE_COLS } from "@/lib/disbursement";
 import { fmtDate, fmtDateIST, todayIST } from "@/lib/dates";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -80,7 +81,7 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[loan-reports] error:", msg);
     return err(msg, 500);
   }

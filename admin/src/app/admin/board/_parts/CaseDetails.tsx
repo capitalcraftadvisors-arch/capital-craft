@@ -26,7 +26,7 @@ function Field({ k, v, wide }: { k: string; v: React.ReactNode; wide?: boolean }
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="border-t border-line pt-2.5">
-      <div className="text-[10px] font-bold uppercase tracking-wider text-[#5a8a76] mb-1.5">{title}</div>
+      <div className="text-[10px] font-bold uppercase tracking-wider text-cc-muted mb-1.5">{title}</div>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2">{children}</div>
     </div>
   );

@@ -58,7 +58,7 @@ function Inner() {
   );
 
   if (loading) {
-    return <main className="min-h-screen grid place-items-center"><p className="text-[#5a8a76]">Loading…</p></main>;
+    return <main className="min-h-screen grid place-items-center"><p className="text-cc-muted">Loading…</p></main>;
   }
   if (!loan) {
     return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Application not found.</p></main>;
@@ -72,38 +72,38 @@ function Inner() {
 
   return (
     <main className="min-h-screen bg-white">
-      <header className="border-b border-[#cdeadd] bg-white sticky top-0 z-30">
+      <header className="border-b border-cc-line bg-white sticky top-0 z-30">
         <div className="w-full px-5 sm:px-8 h-14 flex items-center justify-between">
           <button
             onClick={() => router.push("/dashboard")}
-            className="text-[14px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1"
+            className="text-[14px] text-cc-muted hover:text-cc-ink inline-flex items-center gap-1"
           >
             ← Back
           </button>
-          <span className="font-display font-bold text-[18px] text-[#0f3d2e]">Capital Craft</span>
+          <span className="font-display font-bold text-[18px] text-cc-ink">Capital Craft</span>
         </div>
       </header>
 
       <div className="w-full max-w-4xl mx-auto px-5 sm:px-8 py-6" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
 
         {/* Header — what they got, what's left, how long they have. */}
-        <div className="rounded-[12px] border border-[#cdeadd] bg-[#f0faf5] p-5 sm:p-6 mb-4">
+        <div className="rounded-[12px] border border-cc-line bg-cc-wash p-5 sm:p-6 mb-4">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="min-w-0">
-              <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">{applicantName}</div>
+              <div className="text-[24px] font-semibold text-cc-ink truncate">{applicantName}</div>
               <div className="flex gap-2 items-center flex-wrap mt-3">
                 <Pill tint="blue" icon={I.id}>{loan.loan_display_id ?? loan.id.slice(0, 8).toUpperCase()}</Pill>
                 <Pill tint="amber">Approved by lender</Pill>
               </div>
             </div>
             <div className="text-right shrink-0">
-              <div className="text-[11px] font-semibold text-[#5a8a76] uppercase tracking-wider mb-1">Sanctioned</div>
-              <div className="text-[26px] font-bold text-[#178a5c] leading-none">{fmtRupeesExact(sanctioned)}</div>
+              <div className="text-[11px] font-semibold text-cc-muted uppercase tracking-wider mb-1">Sanctioned</div>
+              <div className="text-[26px] font-bold text-cc-green leading-none">{fmtRupeesExact(sanctioned)}</div>
               <div className={["inline-block mt-3 px-3 py-1.5 rounded-[8px] text-[13px] font-semibold", DEADLINE_PILL[dl.tone]].join(" ")}>
                 {dl.label}
               </div>
               {dl.started && (
-                <div className="text-[11px] text-[#5a8a76] mt-1">Deadline {fmtDate(loan.disbursement_deadline)}</div>
+                <div className="text-[11px] text-cc-muted mt-1">Deadline {fmtDate(loan.disbursement_deadline)}</div>
               )}
             </div>
           </div>
@@ -113,7 +113,7 @@ function Inner() {
         {!dl.done && <div
           className={[
             "rounded-[12px] border p-4 sm:p-5 mb-4 text-[13px]",
-            dl.overdue ? "border-red-200 bg-red-50 text-red-800" : "border-[#d3e9f7] bg-[#f4fafe] text-[#0f3d2e]",
+            dl.overdue ? "border-red-200 bg-red-50 text-red-800" : "border-cc-blue-line bg-[#f4fafe] text-cc-ink",
           ].join(" ")}
         >
           {!firstSaved ? (
@@ -142,7 +142,7 @@ function Inner() {
             <KV
               k="First disbursement (received)"
               v={firstSaved ? `${fmtRupeesExact(loan.first_disbursement_amount)} · ${fmtDate(loan.first_disbursement_date)}` : "Not released yet"}
-              valueClass={firstSaved ? "text-[#178a5c]" : undefined}
+              valueClass={firstSaved ? "text-cc-green" : undefined}
             />
             <KV k="Remaining (pending)" v={firstSaved ? fmtRupeesExact(remaining) : "—"} />
             <KV
@@ -150,7 +150,7 @@ function Inner() {
               v={loan.second_disbursement_amount != null
                 ? `${fmtRupeesExact(loan.second_disbursement_amount)} · ${fmtDate(loan.second_disbursement_date)}`
                 : "After work completion & review"}
-              valueClass={loan.second_disbursement_amount != null ? "text-[#178a5c]" : undefined}
+              valueClass={loan.second_disbursement_amount != null ? "text-cc-green" : undefined}
             />
             {loan.completion_docs_status && (
               <KV k="Document review" v={String(loan.completion_docs_status)[0].toUpperCase() + String(loan.completion_docs_status).slice(1)} />
@@ -158,7 +158,7 @@ function Inner() {
           </SectionCard>
 
           <SectionCard title={`Completion documents (${docsUploaded}/${docsTotal})`} accent="blue" icon={I.files}>
-            <p className="text-[13px] text-[#5a8a76] mb-4">
+            <p className="text-[13px] text-cc-muted mb-4">
               Upload all three to release the second disbursement.
             </p>
             <CompletionDocsSection
@@ -167,7 +167,7 @@ function Inner() {
               onCountChange={(u, t) => { setDocsUploaded(u); setDocsTotal(t); }}
             />
             {allDocsIn && loan.completion_docs_status !== "approved" && (
-              <p className="text-[13px] text-[#178a5c] font-medium mt-4">
+              <p className="text-[13px] text-cc-green font-medium mt-4">
                 All three uploaded — our team will review them shortly.
               </p>
             )}

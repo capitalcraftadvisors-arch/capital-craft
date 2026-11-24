@@ -9,6 +9,7 @@
 // address). No API key, no migration, no stored secrets.
 
 import { NextRequest, NextResponse } from "next/server";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,7 +65,7 @@ export async function GET(req: NextRequest) {
       country: country || null,
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }

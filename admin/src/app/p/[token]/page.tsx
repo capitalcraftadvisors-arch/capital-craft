@@ -123,7 +123,7 @@ export default function ProposalPage({ params }: { params: { token: string } }) 
       <section className="mt-4 mb-10 rounded-[18px] bg-white border border-line p-5 shadow-sm">
         {p.accepted_at ? (
           <div className="flex items-center gap-3.5">
-            <span className="h-11 w-11 shrink-0 rounded-full grid place-items-center bg-[#e6f6ee] text-[#178a5c]">
+            <span className="h-11 w-11 shrink-0 rounded-full grid place-items-center bg-cc-tint text-cc-green">
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5 10 17 19 7" /></svg>
             </span>
             <div className="min-w-0">
@@ -137,7 +137,7 @@ export default function ProposalPage({ params }: { params: { token: string } }) 
               onChange={(e) => { setName(e.target.value.slice(0, 120)); setError(null); }}
               onKeyDown={(e) => { if (e.key === "Enter") void accept(); }} />
             {error && <p className="mt-2 text-[13px] text-red-600">{error}</p>}
-            {expired && <p className="mt-2 text-[13px] text-[#b45309]">This proposal has expired.</p>}
+            {expired && <p className="mt-2 text-[13px] text-amber-700">This proposal has expired.</p>}
             <button type="button" onClick={() => void accept()} disabled={expired || busy || !name.trim()}
               className="mt-3 w-full rounded-[14px] py-3.5 text-[15px] font-semibold text-white disabled:opacity-50" style={{ background: NAVY }}>
               {busy ? "Accepting…" : "Accept proposal"}
@@ -161,7 +161,7 @@ function Row({ l, v, strong, warn }: { l: string; v: string; strong?: boolean; w
   return (
     <div className="flex items-center justify-between gap-4 py-3 border-t border-line-soft first:border-t-0">
       <span className="text-[14px] text-text-mid">{l}</span>
-      <span className={["whitespace-nowrap", strong ? "text-[18px] font-bold text-[#178a5c]" : "text-[15px] font-semibold text-text", warn ? "!text-[#b45309]" : ""].join(" ")}>{v}</span>
+      <span className={["whitespace-nowrap", strong ? "text-[18px] font-bold text-cc-green" : "text-[15px] font-semibold text-text", warn ? "!text-amber-700" : ""].join(" ")}>{v}</span>
     </div>
   );
 }

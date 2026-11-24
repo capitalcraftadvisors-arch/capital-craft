@@ -30,7 +30,7 @@ export default function StatusLines({ statusMsg, rejected, aborted, loan, lender
   return (
     <div className="w-full px-5 sm:px-8 pb-3 -mt-1 space-y-0.5">
       {lines.map((l) => (
-        <div key={l.key} className={["text-[12.5px]", l.red ? "font-medium text-red-700" : "text-[#7a958a]"].join(" ")}>{l.text}</div>
+        <div key={l.key} className={["text-[12.5px]", l.red ? "font-medium text-red-700" : "text-cc-faint"].join(" ")}>{l.text}</div>
       ))}
     </div>
   );

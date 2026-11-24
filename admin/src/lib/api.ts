@@ -30,7 +30,7 @@ export function strOrNull(v: unknown): string | null {
 
 /** A request-body value as a finite number, or null when missing / blank / not a number. */
 export function numOrNull(v: unknown): number | null {
-  if (v == null || v === "") return null;
+  if (v == null || (typeof v === "string" && v.trim() === "")) return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }

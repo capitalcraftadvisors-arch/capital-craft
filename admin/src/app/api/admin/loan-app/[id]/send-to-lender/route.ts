@@ -20,6 +20,7 @@ import { creditFairEmailRows } from "@/lib/lender-summary";
 import { esc, readSendFields, sendLenderPack, titleCaseCategory, type ComposerBody } from "@/lib/lender-pack";
 import { fetchLenders, lenderLabelIn } from "@/lib/loan-lenders";
 import { logLoanActivityServer } from "@/lib/loan-activity-server";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -192,7 +193,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     return NextResponse.json({ ok: true, sent_to: to, documents });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[send-to-lender] error:", msg);
     return err(msg, 500);
   }

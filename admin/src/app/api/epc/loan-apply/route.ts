@@ -35,6 +35,7 @@ import { maskAadhaar } from "@/lib/aadhaar-mask";
 import { DEFAULT_INDICATIVE_ROI } from "@/lib/emi";
 import { isUndefinedColumn, omitKeys, UNDEFINED_COLUMN } from "@/lib/optional-column";
 import { toIsoDate } from "@/lib/dates";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -64,6 +65,16 @@ async function customerCheck(db: SupabaseClient, mobile: string | null, pan: str
   const v2 = !!(t?.v2 ?? t?.demo);
   return { taken: v2 && (!!t?.mobile || !!t?.pan), v2 };
 }
+// The stored application the submit phase reads (its select, below).
+type SubmitRow = {
+  id: string; epc_business_id: string; current_step: number | null; status: string;
+  borrower_mobile: string | null; borrower_email: string | null; plant_use_type: string | null;
+  submitted_at: string | null; edit_locked: boolean | null; edit_allow: string[] | null;
+  aadhaar_front_path: string | null; aadhaar_back_path: string | null;
+  project_size: number | null; total_project_cost: number | null;
+  loan_amount_required: number | null; selected_tenure_years: number | null;
+  attention_status: string | null;
+};
 function firstIp(req: NextRequest): string | null {
   const xff = req.headers.get("x-forwarded-for");
   if (xff) { const f = xff.split(",")[0].trim(); if (f) return f; }
@@ -185,15 +196,15 @@ export async function POST(req: NextRequest) {
         .from("epc_applications")
         .select("id, epc_business_id, current_step, status, borrower_mobile, borrower_email, plant_use_type, submitted_at, edit_locked, edit_allow, aadhaar_front_path, aadhaar_back_path, project_size, total_project_cost, loan_amount_required, selected_tenure_years, attention_status")
         .eq("id", appId)
-        .maybeSingle();
+        .maybeSingle<SubmitRow>();
       if (loadErr) return err(loadErr.message, 500);
       if (!app || app.epc_business_id !== claims.business_id) return err("forbidden", 403);
       // A submitted file is LOCKED. The Capital Craft team opens editing by
       // granting specific rows (edit_allow, set from the Message-to-EPC window);
       // a resubmit is allowed only while that grant is non-empty, and is cleared
       // below so the grant is single-use. (The first submit is never locked.)
-      const grant = Array.isArray((app as any).edit_allow) ? ((app as any).edit_allow as string[]) : [];
-      if ((app as any).submitted_at && (app as any).edit_locked && grant.length === 0) {
+      const grant = Array.isArray(app.edit_allow) ? app.edit_allow : [];
+      if (app.submitted_at && app.edit_locked && grant.length === 0) {
         return err("This application is locked. The Capital Craft team will open it for edits when a change is needed.", 403);
       }
 
@@ -219,8 +230,8 @@ export async function POST(req: NextRequest) {
       const borrower_mobile = String(b.borrower_mobile ?? "").replace(/\D/g, "") || null;
       if (borrower_mobile && !MOBILE_RE.test(borrower_mobile)) return err("Enter a valid 10-digit mobile.", 400);
       // First submit only: the final applicant's mobile / PAN filed by another EPC → stop.
-      const firstSubmit = !(app as any).submitted_at;
-      const check = firstSubmit ? await customerCheck(supabase, borrower_mobile ?? (app as any).borrower_mobile ?? null, borrower_pan) : null;
+      const firstSubmit = !app.submitted_at;
+      const check = firstSubmit ? await customerCheck(supabase, borrower_mobile ?? app.borrower_mobile ?? null, borrower_pan) : null;
       if (check?.taken) return err(TAKEN_MSG, 409);
 
       // Co-applicant contact. Must NOT duplicate the applicant's own
@@ -230,8 +241,8 @@ export async function POST(req: NextRequest) {
       const coapp_mobile = String(b.coapp_mobile ?? "").replace(/\D/g, "") || null;
       const coapp_email  = strOrNull(b.coapp_email);
       if (has_coapp) {
-        const applicantMobile = borrower_mobile ?? String((app as any).borrower_mobile ?? "").trim();
-        const applicantEmail  = String((b.borrower_email !== undefined ? b.borrower_email : (app as any).borrower_email) ?? "").trim().toLowerCase();
+        const applicantMobile = borrower_mobile ?? String(app.borrower_mobile ?? "").trim();
+        const applicantEmail  = String((b.borrower_email !== undefined ? b.borrower_email : app.borrower_email) ?? "").trim().toLowerCase();
         if (coapp_mobile && applicantMobile && coapp_mobile === applicantMobile) {
           return err("Co-applicant mobile cannot be the same as the applicant's.", 400);
         }
@@ -286,10 +297,10 @@ export async function POST(req: NextRequest) {
       // blank on legacy/seeded rows). So on an edit we coalesce every such field
       // with the value already stored, and skip the first-submit "required" gates.
       const isEdit = b.edit === true;
-      const prevSize = numOrNull((app as any).project_size);
-      const prevCost = numOrNull((app as any).total_project_cost);
-      const prevLoan = numOrNull((app as any).loan_amount_required);
-      const prevTenure = numOrNull((app as any).selected_tenure_years);
+      const prevSize = numOrNull(app.project_size);
+      const prevCost = numOrNull(app.total_project_cost);
+      const prevLoan = numOrNull(app.loan_amount_required);
+      const prevTenure = numOrNull(app.selected_tenure_years);
 
       // Page 3 — project + loan + tenure (coalesced with stored on an edit).
       const project_size         = numOrNull(b.project_size)         ?? (isEdit ? prevSize : null);
@@ -325,8 +336,8 @@ export async function POST(req: NextRequest) {
       // A blank profile can't be FIRST-submitted — the applicant's Aadhaar (front &
       // back) is the minimum. Accept it from this submit or already on the app; on
       // an edit it's coalesced (and the gate below only runs for a fresh submit).
-      const aadhaarFront = strOrNull(b.aadhaar_front_path) ?? (app as any).aadhaar_front_path;
-      const aadhaarBack  = strOrNull(b.aadhaar_back_path)  ?? (app as any).aadhaar_back_path;
+      const aadhaarFront = strOrNull(b.aadhaar_front_path) ?? app.aadhaar_front_path;
+      const aadhaarBack  = strOrNull(b.aadhaar_back_path)  ?? app.aadhaar_back_path;
       if (!isEdit && (!aadhaarFront || !aadhaarBack)) {
         return err("Please upload the applicant's Aadhaar (front and back) before submitting.", 400);
       }
@@ -334,7 +345,7 @@ export async function POST(req: NextRequest) {
       const now = new Date().toISOString();
       // In the docs-first chatbot, plant_use_type (and other register fields)
       // arrive at submit rather than register — use the freshest value.
-      const useType = strOrNull(b.plant_use_type) ?? (app as any).plant_use_type;
+      const useType = strOrNull(b.plant_use_type) ?? app.plant_use_type;
       const payload: Record<string, unknown> = {
           // Page 2 — applicant docs
           borrower_pan,
@@ -444,11 +455,11 @@ export async function POST(req: NextRequest) {
           step5_completed_at: now,
           // A RESUBMIT (the app was already submitted once) marks the case
           // "Updated" on the EPC portal + floats it up by recency of change.
-          ...((app as any).submitted_at ? { epc_updated_at: now } : {}),
+          ...(app.submitted_at ? { epc_updated_at: now } : {}),
           // The EPC re-submitting an edited application AUTO-RESOLVES any open
           // attention — editing IS the fix, so they never mark it resolved by
           // hand. Notify the admin via epc_last_activity_at (unseen update).
-          ...((app as any).attention_status === "open" ? {
+          ...(app.attention_status === "open" ? {
             attention_status: "resolved", attention_resolved_at: now,
             attention_resolved_by: "epc", epc_last_activity_at: now,
           } : {}),
@@ -456,7 +467,7 @@ export async function POST(req: NextRequest) {
           // must NOT move the file backward — an approved/disbursed/rfd app stays
           // where it is (only a still-draft app becomes "submitted"). Always LOCK
           // and clear the (single-use) grant.
-          ...(!isEdit || (app as any).status === "draft"
+          ...(!isEdit || app.status === "draft"
             ? { status: "submitted", submitted_at: now, current_step: 6 }
             : {}),
           edit_locked: true,
@@ -503,7 +514,7 @@ export async function POST(req: NextRequest) {
 
     return err("Unknown phase.", 400);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[epc/loan-apply] error:", msg);
     return err(msg, 500);
   }

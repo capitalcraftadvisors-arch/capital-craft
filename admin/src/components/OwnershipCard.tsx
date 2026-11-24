@@ -14,6 +14,7 @@ import Select from "@/components/ui/Select";
 import { I, SectionCard, KV } from "@/components/view/ViewKit";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, authHeaders } from "@/lib/auth";
+import { notify } from "@/lib/notify";
 
 type ModuleKey = "epcs" | "apps" | "loanleads" | "leads" | "insurance";
 
@@ -64,7 +65,7 @@ export default function OwnershipCard({
         body: JSON.stringify({ module, record_id: recordId, assigned_to_user_id: next }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j?.ok) { alert(j?.error || "Reassign failed."); return; }
+      if (!res.ok || !j?.ok) { notify.error(j?.error || "Reassign failed."); return; }
       setAssignee(next);
       onChanged?.(next);
     } finally {
@@ -75,10 +76,10 @@ export default function OwnershipCard({
   const body = (
     <>
       <KV k="Created by" v={createdByUserId ? nameOf(createdByUserId) : "System / legacy"} />
-      <KV k="Assigned to" v={assignee ? nameOf(assignee) : "Unassigned"} valueClass="text-[#185fa5]" />
+      <KV k="Assigned to" v={assignee ? nameOf(assignee) : "Unassigned"} valueClass="text-cc-blue" />
       {isMainAdmin && (
-        <div className="mt-2 pt-2 border-t border-[#eef3f0]">
-          <div className="text-[12px] text-[#5a8a76] mb-1">Reassign to</div>
+        <div className="mt-2 pt-2 border-t border-cc-track">
+          <div className="text-[12px] text-cc-muted mb-1">Reassign to</div>
           <Select
             value={assignee ?? ""}
             onChange={(e) => void reassign(e.target.value)}

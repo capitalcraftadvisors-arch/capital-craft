@@ -14,7 +14,7 @@ export default function Home() {
     if (!token || !biz) {
       router.replace("/login");
     } else {
-      router.replace(routeForBusiness(biz) as any);
+      router.replace(routeForBusiness(biz));
     }
   }, [router]);
 

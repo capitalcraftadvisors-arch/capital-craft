@@ -12,6 +12,7 @@ import { UUID_RE } from "@/lib/validators";
 import { epcSummaryRows } from "@/lib/lender-summary";
 import { fetchLenders, lenderLabelIn } from "@/lib/loan-lenders";
 import { esc, readSendFields, sendLenderPack, titleCaseCategory, type ComposerBody } from "@/lib/lender-pack";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -91,7 +92,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     } catch (e) { console.warn("[epc-send-to-lender] activity log failed:", e); }
     return NextResponse.json({ ok: true, sent_to: to, documents });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[epc-send-to-lender] error:", msg);
     return err(msg, 500);
   }

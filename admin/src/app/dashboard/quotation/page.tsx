@@ -16,6 +16,7 @@ import { fmtDateIST } from "@/lib/dates";
 import { stateSubsidyFor } from "@/lib/emi";
 import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template";
 import { customState } from "@/lib/custom-template";
+import { useCloseOnOutsideClick } from "@/lib/use-close-on-outside-click";
 import { markCustomTemplateSeen } from "@/components/partner/CustomTemplateBanner";
 import SearchableSelect from "@/components/quotation/SearchableSelect";
 import {
@@ -65,8 +66,8 @@ function Builder() {
   // Quotations, whose "New quotation" says so.
   const locked = !!tpl && customState(tpl) === "locked";
   useEffect(() => {
-    if (customers) router.replace("/dashboard" as any);
-    else if (tpl === null || locked) router.replace("/dashboard/quotes" as any);
+    if (customers) router.replace("/dashboard");
+    else if (tpl === null || locked) router.replace("/dashboard/quotes");
     else if (tpl) markCustomTemplateSeen(tpl);
   }, [customers, tpl, locked, router]);
   if (failed) {
@@ -78,10 +79,10 @@ function Builder() {
     );
   }
   if (!tpl || customers || locked) return null;
-  if (tpl?.storage_path === BIJLEE.key) return <BijleeForm serialNext={tpl.serial_next} />;
-  if (tpl?.storage_path === SARVATRA_ENERGY.key) return <SarvatraEnergyForm serialNext={tpl.serial_next} />;
-  if (tpl?.storage_path === RVS.key) return <RvsForm />;
-  if (tpl?.storage_path === POTALIYA.key) return <PotaliyaForm serialNext={tpl.serial_next} />;
+  if (tpl.storage_path === BIJLEE.key) return <BijleeForm serialNext={tpl.serial_next} />;
+  if (tpl.storage_path === SARVATRA_ENERGY.key) return <SarvatraEnergyForm serialNext={tpl.serial_next} />;
+  if (tpl.storage_path === RVS.key) return <RvsForm />;
+  if (tpl.storage_path === POTALIYA.key) return <PotaliyaForm serialNext={tpl.serial_next} />;
   return <Inner />;
 }
 
@@ -123,12 +124,7 @@ function Inner() {
   const [dlOpen, setDlOpen] = useState(false);
   const dlRef = useRef<HTMLDivElement>(null);
   const set = (k: keyof Form, v: string | boolean) => setF((p) => ({ ...p, [k]: v }));
-
-  useEffect(() => {
-    const onDoc = (e: MouseEvent) => { if (dlRef.current && !dlRef.current.contains(e.target as Node)) setDlOpen(false); };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
+  useCloseOnOutsideClick(dlRef, dlOpen, setDlOpen);
 
   const { formRef, onFormKey } = useKeyNav();
 
@@ -218,7 +214,7 @@ function Inner() {
             {/* Blank details form to write on (pen), print, photograph, and auto-fill */}
             <div className="relative" ref={dlRef}>
               <button type="button" onClick={() => setDlOpen((o) => !o)}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-[13.5px] font-semibold border border-line bg-white text-text hover:border-[#1e3a8a]">
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-[13.5px] font-semibold border border-line bg-white text-text hover:border-navy">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
                 Download blank form
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
@@ -395,7 +391,7 @@ function BoqTable({ title, rows, cells, columns, grid, onPick, extra }: {
   const merge = useBrandOptions();
   return (
     <div className="bg-white rounded-2xl border border-line p-5 mt-5">
-      <div className="text-[13px] font-semibold text-[#0f3d2e] mb-3">{title}</div>
+      <div className="text-[13px] font-semibold text-cc-ink mb-3">{title}</div>
       <div className={`hidden sm:grid ${grid} gap-2 mb-1.5 text-[12px] font-medium text-text-muted`}>
         <span>Product</span>{columns.map(([c, head]) => <span key={c}>{head}</span>)}{extra && <span>{extra.head}</span>}
       </div>

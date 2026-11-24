@@ -22,7 +22,7 @@ export type InvoiceStatus = "issued" | "cancelled";
 export const INVOICE_STATUSES: InvoiceStatus[] = ["issued", "cancelled"];
 export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = { issued: "Issued", cancelled: "Cancelled" };
 export const INVOICE_STATUS_PILL: Record<InvoiceStatus, string> = {
-  issued: "bg-[#e6f6ee] text-[#178a5c]", cancelled: "bg-red-50 text-red-700",
+  issued: "bg-cc-tint text-cc-green", cancelled: "bg-red-50 text-red-700",
 };
 
 export type InvoiceRow = {

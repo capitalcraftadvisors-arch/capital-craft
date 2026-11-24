@@ -24,7 +24,7 @@ import { useAdminNames } from "@/lib/use-admin-names";
 import { useEpcUpdates } from "@/lib/use-epc-updates";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import RowLink from "@/components/RowLink";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { nameCase, initialsOf } from "@/lib/names";
 import {
   deadlineState, DEADLINE_PILL, firstDisbursedShown, FIRST_CHARGE_COLS,
@@ -47,12 +47,12 @@ import {
 // Loan Status-column pills with a fixed label. Aborted is the inactive grey, so
 // it can't be mistaken for a rejection.
 const LOAN_PILL: Record<string, { label: string; cls: string }> = {
-  aborted:         { label: "Aborted",               cls: "bg-[#eef1f4] text-[#64748b]" },
-  draft:           { label: "Draft",                 cls: "bg-[#eef1f0] text-[#5a8a76]" },
-  docs_sent:       { label: "Docs Sent",             cls: "bg-[#dceffb] text-[#185fa5]" },
+  aborted:         { label: "Aborted",               cls: "bg-grey-line text-[#64748b]" },
+  draft:           { label: "Draft",                 cls: "bg-cc-chip text-cc-muted" },
+  docs_sent:       { label: "Docs Sent",             cls: "bg-cc-blue-tint text-cc-blue" },
   hold:            { label: "Hold",                  cls: "bg-[#e5edf5] text-[#3b5a76]" },
-  fully_disbursed: { label: "Fully Disbursed",       cls: "bg-[#e6f6ee] text-[#0f7a52]" },
-  tranche1:        { label: "1st Disbursement Done", cls: "bg-[#dceffb] text-[#185fa5]" },
+  fully_disbursed: { label: "Fully Disbursed",       cls: "bg-cc-tint text-cc-green-text" },
+  tranche1:        { label: "1st Disbursement Done", cls: "bg-cc-blue-tint text-cc-blue" },
 };
 
 // Per-application lender maps from each row's embedded lender rows: the latest
@@ -194,7 +194,7 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
       q, statusFilter, epcFilter, lenderFilter,
       dateFrom, dateTo, categoryFilter, sortKey,
     }));
-    router.push(`/admin/app/${row.id}/view` as any);
+    router.push(`/admin/app/${row.id}/view`);
   }
 
   // Loader — one request: the list with each file's lender rows embedded. A send
@@ -366,7 +366,7 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
     // Finalized for disbursement — the approval by that lender (not the latest
     // event, which may be a different lender's later rejection).
     if (r.approved_lender) {
-      return { label: `Approved by ${lenderLabelIn(lenders, String(r.approved_lender))}`, cls: "bg-[#e6f6ee] text-[#0f7a52]" };
+      return { label: `Approved by ${lenderLabelIn(lenders, String(r.approved_lender))}`, cls: "bg-cc-tint text-cc-green-text" };
     }
     // Latest status across all lenders: a rejection is red, other events indigo.
     const latest = lenderLatest[r.id];
@@ -548,7 +548,7 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
     try {
       const qs = type === "monthly" ? `type=monthly&month=${month}` : "type=pending";
       const res = await fetch(`/api/admin/loan-reports?${qs}`, { headers: authHeaders() });
-      if (!res.ok) { const j = await res.json().catch(() => ({})); toast.error(j?.error || "Couldn't build the report."); return; }
+      if (!res.ok) { const j = await res.json().catch(() => ({})); notify.error(j?.error || "Couldn't build the report."); return; }
       await saveDownload(res, "report.xlsx");
     } finally {
       setReportBusy(null);
@@ -562,18 +562,18 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
 
       {/* Report → "Lender-wise disbursements": which month. */}
       {monthPick !== null && (
-        <Modal onClose={() => setMonthPick(null)} overlayClassName={OVERLAY.grid} className="w-full max-w-sm bg-white rounded-xl shadow-lg p-6 space-y-4">
-          <h3 className="text-[17px] font-semibold text-[#0f3d2e]">Lender-wise disbursements</h3>
+        <Modal onClose={() => setMonthPick(null)} overlayClassName={OVERLAY.grid} className="w-full max-w-sm bg-white rounded-xl shadow-lg p-6 space-y-4" aria-label="Lender-wise disbursements">
+          <h3 className="text-[17px] font-semibold text-cc-ink">Lender-wise disbursements</h3>
           <label className="block">
-            <span className="block mb-1 text-[12.5px] text-[#5a8a76]">Month</span>
+            <span className="block mb-1 text-[12.5px] text-cc-muted">Month</span>
             <input type="month" value={monthPick} max={localIsoDate(new Date()).slice(0, 7)} onChange={(e) => setMonthPick(e.target.value)}
-              className="w-full border border-line rounded-input px-3 py-2 text-[14px] focus:outline-none focus:border-[#178a5c]" />
+              className="w-full border border-line rounded-input px-3 py-2 text-[14px] focus:outline-none focus:border-cc-green" />
           </label>
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setMonthPick(null)} className="px-4 py-2 rounded-[8px] border border-line text-[13px] text-text-mid hover:bg-bg-soft">Cancel</button>
             <button type="button" disabled={!monthPick}
               onClick={() => { const m = monthPick; setMonthPick(null); void downloadLoanReport("monthly", m); }}
-              className="px-4 py-2 rounded-[8px] bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-50">
+              className="px-4 py-2 rounded-[8px] bg-cc-green text-white text-[13px] font-semibold hover:bg-cc-green-hover disabled:opacity-50">
               Download
             </button>
           </div>
@@ -679,7 +679,7 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
                 data-highlighted={isHighlighted ? "yes" : undefined}
                 style={highlightRowStyle(isHighlighted)}
                 onClick={() => navigateToView(r)}
-                className="border-b border-[#eef3f1] last:border-b-0 cursor-pointer hover:bg-[#f7fcfa] transition-colors"
+                className="border-b border-cc-rule last:border-b-0 cursor-pointer hover:bg-cc-row-hover transition-colors"
               >
                 {/* Borrower: initials + name + loan ID · documents */}
                 <td className="px-4 py-3">
@@ -688,15 +688,15 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
                       {initialsOf(displayBorrower(r))}
                     </span>
                     <div className="min-w-0">
-                      <p className="text-[13.5px] font-semibold text-[#0f3d2e] truncate flex items-center gap-1">
+                      <p className="text-[13.5px] font-semibold text-cc-ink truncate flex items-center gap-1">
                         <RowLink href={`/admin/app/${r.id}/view`} onOpen={() => navigateToView(r)} className="truncate">{displayBorrower(r)}</RowLink>
                         {isDup(r) && <span title="Same person as another application — matches on PAN / mobile, or name + father's name — possible duplicate" className="text-[#d97706] shrink-0">⚠</span>}
                       </p>
                       <p className="text-[11.5px] mt-0.5 flex items-center gap-1.5 min-w-0">
-                        {r.loan_display_id && <span className="font-mono text-[#185fa5] truncate">{r.loan_display_id}</span>}
+                        {r.loan_display_id && <span className="font-mono text-cc-blue truncate">{r.loan_display_id}</span>}
                         <span
                           title={d.have >= d.need ? "All documents uploaded" : "Some documents still pending"}
-                          className={["shrink-0 font-semibold tabular-nums", d.have >= d.need ? "text-[#178a5c]" : "text-[#d4900f]"].join(" ")}
+                          className={["shrink-0 font-semibold tabular-nums", d.have >= d.need ? "text-cc-green" : "text-[#d4900f]"].join(" ")}
                         >
                           {r.loan_display_id ? "· " : ""}{d.have}/{d.need} docs
                         </span>
@@ -705,7 +705,7 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
                   </div>
                 </td>
                 <td className="px-3 py-3 text-center">
-                  <p className="text-[13px] text-[#0f3d2e] truncate">{displayEpc(r)}</p>
+                  <p className="text-[13px] text-cc-ink truncate">{displayEpc(r)}</p>
                 </td>
                 <td className="px-3 py-3 text-center">
                   {(() => {
@@ -715,8 +715,8 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
                     const over = differs && Number(shown) > Number(applied);
                     return (
                       <>
-                        <p className={["text-[13px] font-semibold", over ? "text-red-700" : "text-[#0f3d2e]"].join(" ")}>{displayAmount(r)}</p>
-                        {differs && <p className={["text-[11px] mt-0.5", over ? "text-red-700" : "text-[#7a958a]"].join(" ")}>Applied {fmtRupees(applied)}</p>}
+                        <p className={["text-[13px] font-semibold", over ? "text-red-700" : "text-cc-ink"].join(" ")}>{displayAmount(r)}</p>
+                        {differs && <p className={["text-[11px] mt-0.5", over ? "text-red-700" : "text-cc-faint"].join(" ")}>Applied {fmtRupees(applied)}</p>}
                       </>
                     );
                   })()}
@@ -733,8 +733,8 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
                     <>
                       {r.first_disbursement_amount != null && (
                         <>
-                          <p className="text-[13px] font-semibold text-[#0f3d2e]">{fmtRupees(firstDisbursedShown(r))}</p>
-                          <p className="text-[11px] text-[#7a958a] mt-0.5">{fmtDate(r.first_disbursement_date)}</p>
+                          <p className="text-[13px] font-semibold text-cc-ink">{fmtRupees(firstDisbursedShown(r))}</p>
+                          <p className="text-[11px] text-cc-faint mt-0.5">{fmtDate(r.first_disbursement_date)}</p>
                         </>
                       )}
                       {(() => {
@@ -750,8 +750,8 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
                 </td>
                 {/* Created — date, then time · who. */}
                 <td className="px-3 py-3 text-center">
-                  <p className="text-[13px] font-medium text-[#0f3d2e]">{fmtDate(r.created_at)}</p>
-                  <p className="text-[11px] text-[#7a958a] mt-0.5 truncate">
+                  <p className="text-[13px] font-medium text-cc-ink">{fmtDate(r.created_at)}</p>
+                  <p className="text-[11px] text-cc-faint mt-0.5 truncate">
                     {fmtAddedTime(r.created_at)} · {createdBy(r)}
                   </p>
                 </td>
@@ -765,16 +765,16 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
                         onClick={() => setEmailRow(r)}
                         title="Email to lender"
                         aria-label="Email to lender"
-                        className="grid place-items-center w-8 h-8 rounded-[8px] border border-[#cdeadd] bg-white text-[#178a5c] hover:bg-[#f0faf5] hover:border-[#178a5c] transition-colors"
+                        className="grid place-items-center w-8 h-8 rounded-[8px] border border-cc-line bg-white text-cc-green hover:bg-cc-wash hover:border-cc-green transition-colors"
                       >
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
                       </button>
                       <button
                         type="button"
-                        onClick={() => router.push(`/admin/app/${r.id}/messages` as any)}
+                        onClick={() => router.push(`/admin/app/${r.id}/messages`)}
                         title="Message to EPC"
                         aria-label="Message to EPC"
-                        className="relative grid place-items-center w-8 h-8 rounded-[8px] border border-[#cdeadd] bg-white text-[#178a5c] hover:bg-[#f0faf5] hover:border-[#178a5c] transition-colors"
+                        className="relative grid place-items-center w-8 h-8 rounded-[8px] border border-cc-line bg-white text-cc-green hover:bg-cc-wash hover:border-cc-green transition-colors"
                       >
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                         <UnseenBadge n={unseen} />
@@ -782,7 +782,7 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
                     </div>
                     {/* When the documents were last emailed to a lender. */}
                     {r.aborted_at == null && lenderSentAt[r.id] && (
-                      <p className="text-[11px] text-[#7a958a] whitespace-nowrap">Sent {fmtDate(lenderSentAt[r.id])}</p>
+                      <p className="text-[11px] text-cc-faint whitespace-nowrap">Sent {fmtDate(lenderSentAt[r.id])}</p>
                     )}
                   </div>
                 </td>

@@ -243,6 +243,13 @@ export function invalidateLoanBoards(): void {
   invalidate("dash.apps");                               // admin Loans list
 }
 
+// The rows loadOpsCases reads. The wide case rows stay loose (Row, the shape
+// loanColumn / epcColumn / loanReviews / tranche2Of take); the small ones are spelled out.
+type Row = Record<string, any>;
+type TeamRow = { id: string; contact_name: string | null; role: string | null; parent_user_id: string | null };
+type EpcLenderRow = { business_id: string; docs_given: boolean | null; approved: boolean | null; rejected: boolean | null };
+type TouchRow = { source: string; case_id: string; follow_up_at: string | null; last_contacted_at: string | null };
+
 export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ cases: OpsCase[]; users: TeamUser[] }> {
   const db = supabase();
   const nowISO = new Date().toISOString(); // active cases → current month
@@ -283,23 +290,23 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
     db.from("ops_case_touch").select("source, case_id, follow_up_at, last_contacted_at"),
   ]);
 
-  const users: TeamUser[] = ((team.data ?? []) as any[]).map((u) => ({ id: u.id, name: u.contact_name || "(unnamed)", role: u.role, parentUserId: u.parent_user_id ?? null }));
+  const users: TeamUser[] = ((team.data ?? []) as TeamRow[]).map((u) => ({ id: u.id, name: u.contact_name || "(unnamed)", role: u.role, parentUserId: u.parent_user_id ?? null }));
   const nameOf = new Map(users.map((u) => [u.id, u.name]));
 
   const lenderByApp = new Map<string, Record<string, any>[]>();
-  for (const r of (lenders.data ?? []) as any[]) {
+  for (const r of (lenders.data ?? []) as Row[]) {
     const arr = lenderByApp.get(r.application_id) ?? [];
     arr.push(r); lenderByApp.set(r.application_id, arr);
   }
   // EPC id → display name (reused from the epc_business fetch above; approved
   // EPCs that own loans are included, so no extra query needed).
   const epcNameById = new Map<string, string>();
-  for (const r of (epcs.data ?? []) as any[]) {
+  for (const r of (epcs.data ?? []) as Row[]) {
     const nm = r.trade_name || r.legal_name || r.contact_name;
     if (nm) epcNameById.set(r.id, nm);
   }
   const epcLenderBy = new Map<string, { docs: boolean; approved: boolean; rejected: boolean }>();
-  for (const r of (epcLenders.data ?? []) as any[]) {
+  for (const r of (epcLenders.data ?? []) as EpcLenderRow[]) {
     const cur = epcLenderBy.get(r.business_id) ?? { docs: false, approved: false, rejected: false };
     cur.docs = cur.docs || !!r.docs_given; cur.approved = cur.approved || !!r.approved; cur.rejected = cur.rejected || !!r.rejected;
     epcLenderBy.set(r.business_id, cur);
@@ -308,19 +315,19 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
   // Comment counts keyed by `${source}:${id}` (insurance has no comment table).
   const commentCount = new Map<string, number>();
   const bump = (k: string) => commentCount.set(k, (commentCount.get(k) ?? 0) + 1);
-  for (const r of (loanComments.data ?? []) as any[]) if (r.application_id) bump(`loan:${r.application_id}`);
-  for (const r of (epcComments.data ?? []) as any[]) if (r.business_id) bump(`epc:${r.business_id}`);
-  for (const r of (leadComments.data ?? []) as any[]) if (r.lead_id) bump(`lead:${r.lead_id}`);
+  for (const r of (loanComments.data ?? []) as { application_id: string | null }[]) if (r.application_id) bump(`loan:${r.application_id}`);
+  for (const r of (epcComments.data ?? []) as { business_id: string | null }[]) if (r.business_id) bump(`epc:${r.business_id}`);
+  for (const r of (leadComments.data ?? []) as { lead_id: string | null }[]) if (r.lead_id) bump(`lead:${r.lead_id}`);
 
   // Follow-up / last-contacted keyed by `${source}:${case_id}`.
   const touchBy = new Map<string, { followUpAt: string | null; lastContactedAt: string | null }>();
-  for (const r of (touches.data ?? []) as any[]) {
+  for (const r of (touches.data ?? []) as TouchRow[]) {
     touchBy.set(`${r.source}:${r.case_id}`, { followUpAt: r.follow_up_at ?? null, lastContactedAt: r.last_contacted_at ?? null });
   }
 
   const cases: OpsCase[] = [];
 
-  for (const r of (loans.data ?? []) as any[]) {
+  for (const r of (loans.data ?? []) as Row[]) {
     const lrows = lenderByApp.get(r.id) ?? [];
     const midDecision = lrows.some((l) => l.docs_sent_at && !l.approved_at && !l.rejected_at);
     const { column, label, stageSince } = loanColumn(r, midDecision, lrows);
@@ -369,7 +376,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
     });
   }
 
-  for (const r of (insurance.data ?? []) as any[]) {
+  for (const r of (insurance.data ?? []) as Row[]) {
     const { column, label } = insuranceColumn(r.status);
     cases.push({
       id: r.id, source: "insurance",
@@ -396,7 +403,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
     });
   }
 
-  for (const r of (leads.data ?? []) as any[]) {
+  for (const r of (leads.data ?? []) as Row[]) {
     if (r.dead_at || r.aborted_at) continue; // dead/aborted leads are written off — off the Task Manager entirely
     // Abandoned blank drafts ("+ Add lead" creates a nameless draft; if the RM
     // never fills it, it has no name and can't be acted on). Keep these off My Day
@@ -427,7 +434,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
     });
   }
 
-  for (const r of (epcs.data ?? []) as any[]) {
+  for (const r of (epcs.data ?? []) as Row[]) {
     if (isRm && r.assigned_to_user_id !== myId) continue; // epc_business isn't RLS-scoped
     const { column, label } = epcColumn(r, epcLenderBy.get(r.id) ?? { docs: false, approved: false, rejected: false });
     cases.push({
@@ -457,7 +464,7 @@ export async function loadOpsCases(opts: { force?: boolean } = {}): Promise<{ ca
   const result = { cases, users };
   setCached(cacheKey, result);
   // Skipped when tranche2_* aren't there yet (pre-0125), so a stored list isn't wiped.
-  if ((loans.data ?? []).some((r: any) => "tranche2_epc_at" in r)) {
+  if (((loans.data ?? []) as Row[]).some((r) => "tranche2_epc_at" in r)) {
     publishTranche2(cases.map((c) => c.tranche2).filter((t): t is Tranche2 => !!t));
   }
   return result;

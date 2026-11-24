@@ -30,6 +30,7 @@ import AdminDocSlot from "@/components/AdminDocSlot";
 import FileUpload from "@/components/FileUpload";
 import { supabase } from "@/lib/supabase";
 import { logAudit } from "@/lib/auditLog";
+import { notify } from "@/lib/notify";
 import { EMAIL_RE, PAN_RE, IFSC_RE, ACCOUNT_RE, GSTIN_RE } from "@/lib/validators";
 import { EPC_STATUS_LABEL } from "@/lib/epc-labels";
 import {
@@ -66,12 +67,12 @@ function Inner() {
   const router = useRouter();
   const [biz, setBiz] = useState<Biz | null>(null);
 
-  useEffect(() => { void load(); }, [params.id]);
-
-  async function load() {
-    const { data: b } = await supabase().from("epc_business").select("*").eq("id", params.id).maybeSingle();
-    setBiz(b);
-  }
+  useEffect(() => {
+    void (async () => {
+      const { data: b } = await supabase().from("epc_business").select("*").eq("id", params.id).maybeSingle();
+      setBiz(b);
+    })();
+  }, [params.id]);
 
   // Generic field-update helper used by EditableField onSave callbacks.
   // Saves the new value via PostgREST, writes one audit row, refreshes
@@ -121,7 +122,7 @@ function Inner() {
     <main className="min-h-screen bg-bg-soft">
       <header className="border-b border-line bg-white">
         <div className="max-w-container mx-auto px-7 h-16 flex items-center">
-          <button type="button" onClick={() => router.push(`/admin/epc/${params.id}/view` as any)} className="text-[13px] text-text-muted hover:text-text inline-flex items-center gap-1">← Back to profile</button>
+          <button type="button" onClick={() => router.push(`/admin/epc/${params.id}/view`)} className="text-[13px] text-text-muted hover:text-text inline-flex items-center gap-1">← Back to profile</button>
         </div>
       </header>
 
@@ -134,7 +135,7 @@ function Inner() {
           {(() => {
             const s = biz.status;
             const label = EPC_STATUS_LABEL[s] ?? "Draft";
-            const cls = s === "approved" ? "bg-green-50 text-green-dark" : s === "rejected" ? "bg-red-50 text-red-700" : s === "under_review" ? "bg-[#fef0d6] text-[#854f0b]" : s === "on_hold" ? "bg-[#e5edf5] text-[#3b5a76]" : "bg-[#eef1f0] text-[#5a8a76]";
+            const cls = s === "approved" ? "bg-green-50 text-green-dark" : s === "rejected" ? "bg-red-50 text-red-700" : s === "under_review" ? "bg-warn-tint text-warn-ink" : s === "on_hold" ? "bg-[#e5edf5] text-[#3b5a76]" : "bg-cc-chip text-cc-muted";
             return <span className={`inline-block px-3 py-1 rounded-full text-[12px] font-semibold ${cls}`}>{label}</span>;
           })()}
         </div>
@@ -385,8 +386,8 @@ function Inner() {
           <Button
             variant="primary"
             onClick={() => {
-              alert("All changes saved.");
-              router.push(`/admin/epc/${params.id}/view` as any);
+              notify.success("All changes saved.");
+              router.push(`/admin/epc/${params.id}/view`);
             }}
           >
             Save Draft

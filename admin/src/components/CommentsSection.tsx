@@ -1,5 +1,4 @@
 "use client";
-import { fmtWhen } from "@/lib/dates";
 
 // Inline "chat-box" comments component. Rendered on:
 //   - the View page (Col 3, replacing the old "Latest comment" card)
@@ -25,9 +24,11 @@ import { fmtWhen } from "@/lib/dates";
 // automatically. onChanged fires so the View page can bump its activity
 // log refresh key.
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getBusiness } from "@/lib/auth";
+import { fmtWhen } from "@/lib/dates";
+import { notify } from "@/lib/notify";
 
 // Row shape shared by epc_comments and loan_comments (the owning key —
 // business_id / application_id — isn't needed for rendering).
@@ -75,7 +76,7 @@ export default function CommentsSection({
   const keyCol = kind === "loan" ? "application_id" : kind === "lead" ? "lead_id" : "business_id";
   const keyVal = (kind === "loan" ? applicationId : kind === "lead" ? leadId : businessId) ?? "";
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!keyVal) { setRows([]); setLoading(false); return; }
     setLoading(true);
     const { data, error } = await supabase()
@@ -86,9 +87,9 @@ export default function CommentsSection({
     if (error) console.warn("[comments-section] load failed:", error.message);
     setRows((data ?? []) as unknown as Row[]);
     setLoading(false);
-  }
+  }, [table, keyCol, keyVal]);
 
-  useEffect(() => { void load(); }, [table, keyCol, keyVal]);
+  useEffect(() => { void load(); }, [load]);
 
   async function add() {
     const t = text.trim();
@@ -102,7 +103,7 @@ export default function CommentsSection({
       comment_text: t,
     }).select("id, author_id, author_name, comment_text, created_at, updated_at").single();
     setBusy(false);
-    if (error) { alert("Couldn't save comment: " + error.message); return; }
+    if (error) { notify.error("Couldn't save comment: " + error.message); return; }
     setText("");
     if (data) setRows((r) => [data as unknown as Row, ...r]);
     onChanged?.();
@@ -127,7 +128,7 @@ export default function CommentsSection({
             type="button"
             onClick={add}
             disabled={busy || !text.trim()}
-            className="shrink-0 self-start px-4 py-2 bg-[#178a5c] text-white text-[13px] font-semibold rounded-input hover:bg-[#12734c] disabled:opacity-50"
+            className="shrink-0 self-start px-4 py-2 bg-cc-green text-white text-[13px] font-semibold rounded-input hover:bg-cc-green-hover disabled:opacity-50"
           >
             {busy ? "Saving…" : "Post"}
           </button>
@@ -136,7 +137,7 @@ export default function CommentsSection({
 
       {/* Scrollable list */}
       <div
-        className="border border-[#cdeadd] rounded-input bg-white overflow-y-auto"
+        className="border border-cc-line rounded-input bg-white overflow-y-auto"
         style={{ maxHeight: maxListHeight }}
       >
         {loading ? (
@@ -144,18 +145,18 @@ export default function CommentsSection({
         ) : rows.length === 0 ? (
           <p className="text-[13px] text-text-muted p-4">No comments yet — add the first one above.</p>
         ) : (
-          <ul className="divide-y divide-[#eaf3ee]">
+          <ul className="divide-y divide-cc-row-line">
             {rows.map((r) => (
               <li key={r.id} className="p-3">
                 <div className="text-[12px] text-text-mid min-w-0 mb-1">
-                  <span className="font-semibold text-[#0f3d2e]">{r.author_name || "Admin"}</span>
+                  <span className="font-semibold text-cc-ink">{r.author_name || "Admin"}</span>
                   <span className="mx-1 text-text-muted">·</span>
                   <span>{fmtWhen(r.created_at)}</span>
                   {r.updated_at !== r.created_at && (
                     <span className="ml-2 text-[11px] text-text-muted italic">(edited)</span>
                   )}
                 </div>
-                <p className="text-[13px] text-[#0f3d2e] whitespace-pre-wrap break-words">{r.comment_text}</p>
+                <p className="text-[13px] text-cc-ink whitespace-pre-wrap break-words">{r.comment_text}</p>
               </li>
             ))}
           </ul>

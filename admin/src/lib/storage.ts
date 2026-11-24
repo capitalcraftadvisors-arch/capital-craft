@@ -3,6 +3,7 @@
 // in /api/upload and /api/document/[id].
 
 import { authHeaders } from "./auth";
+import { notify } from "./notify";
 
 type UploadMeta = {
   table: "epc_documents" | "user_application_docs" | "stakeholder_docs";
@@ -113,11 +114,11 @@ export async function downloadDocument(docId: string): Promise<void> {
 const OPEN_FAILED = "Couldn't open the document.";
 const openTab = (url: string) => window.open(url, "_blank", "noopener");
 
-/** Opens a stored document row in a new tab; alerts when it can't be signed. */
+/** Opens a stored document row in a new tab; shows an error when it can't be signed. */
 export async function openDocument(docId: string, opts?: { download?: boolean }): Promise<void> {
   const url = await getDocumentUrl(docId, opts);
   if (url) openTab(url);
-  else alert(OPEN_FAILED);
+  else notify.error(OPEN_FAILED);
 }
 
 // The loan application's sign-doc route: a signed link for one of its *_path
@@ -138,25 +139,25 @@ export async function signLoanPath(appId: string, path: string, opts?: { downloa
 }
 
 /** Opens a loan document in a new tab, trying in order: a link already signed
- *  (`url`), a *_path column (`path`), a document row (`rowId`). Alerts when none opens. */
+ *  (`url`), a *_path column (`path`), a document row (`rowId`). Shows an error when none opens. */
 export async function openLoanDoc(appId: string, src: { url?: string; path?: string | null; rowId?: string }): Promise<void> {
   try {
     if (src.url) { openTab(src.url); return; }
     if (src.path) { const u = await postSignDoc(appId, src.path); if (u) { openTab(u); return; } }
     if (src.rowId) { const u = await getDocumentUrl(src.rowId); if (u) { openTab(u); return; } }
-    alert(OPEN_FAILED);
-  } catch { alert(OPEN_FAILED); }
+    notify.error(OPEN_FAILED);
+  } catch { notify.error(OPEN_FAILED); }
 }
 
 /** Opens a loan application's stored *_path document in a new tab (the admin
- *  steps' "view existing"); a network error alerts with its message. */
+ *  steps' "view existing"); a network error is shown with its message. */
 export async function openLoanPath(appId: string, path: string): Promise<void> {
   try {
     const u = await postSignDoc(appId, path);
     if (u) openTab(u);
-    else alert(OPEN_FAILED);
+    else notify.error(OPEN_FAILED);
   } catch (e) {
-    alert("Couldn't open the document: " + (e as Error).message);
+    notify.error("Couldn't open the document: " + (e as Error).message);
   }
 }
 

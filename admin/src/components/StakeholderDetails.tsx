@@ -9,7 +9,7 @@ import DateField from "@/components/ui/DateField";
 import { fmtDate } from "@/lib/dates";
 import type { Details, FieldGroup, FieldSpec } from "@/lib/stakeholders";
 
-export const inputCls = "w-full border border-line rounded-input px-3 py-2 text-[14px] bg-white focus:outline-none focus:border-[#178a5c]";
+export const inputCls = "w-full border border-line rounded-input px-3 py-2 text-[14px] bg-white focus:outline-none focus:border-cc-green";
 
 function shown(f: FieldSpec, v: string | undefined): string | null {
   if (!v) return null;
@@ -19,7 +19,7 @@ function shown(f: FieldSpec, v: string | undefined): string | null {
 export function FieldInput({ f, value, onChange }: { f: FieldSpec; value: string; onChange: (v: string) => void }) {
   return (
     <label className="block">
-      <span className="block mb-1 text-[12.5px] text-[#5a8a76]">{f.label}</span>
+      <span className="block mb-1 text-[12.5px] text-cc-muted">{f.label}</span>
       {f.type === "date" ? (
         <DateField className={inputCls} value={value} onChange={onChange} ariaLabel={f.label} />
       ) : f.type === "textarea" ? (

@@ -2,6 +2,7 @@
 
 // EPC View · the "Reject this EPC" pop-up: pick a reason (or type one) before rejecting.
 
+import { useId } from "react";
 import Modal from "@/components/ui/Modal";
 
 // Reasons offered when an admin rejects an EPC (last option = free text).
@@ -20,11 +21,12 @@ export default function RejectEpcModal({ busy, reason, onReason, other, onOther,
   busy: boolean; reason: string; onReason: (v: string) => void; other: string; onOther: (v: string) => void;
   onClose: () => void; onReject: (reason: string) => void;
 }) {
+  const titleId = useId();
   return (
-    <Modal onClose={onClose} busy={busy} className="w-full max-w-md bg-white rounded-[12px] shadow-lg p-5">
+    <Modal onClose={onClose} busy={busy} className="w-full max-w-md bg-white rounded-[12px] shadow-lg p-5" aria-labelledby={titleId}>
       <div className="flex items-start justify-between gap-2 mb-3">
-        <h3 className="text-[17px] font-bold text-[#0f3d2e]">Reject this EPC</h3>
-        <button type="button" onClick={onClose} disabled={busy} className="text-[18px] text-text-muted hover:text-text leading-none p-1 disabled:opacity-60">✕</button>
+        <h3 id={titleId} className="text-[17px] font-bold text-cc-ink">Reject this EPC</h3>
+        <button type="button" onClick={onClose} disabled={busy} aria-label="Close" className="text-[18px] text-text-muted hover:text-text leading-none p-1 disabled:opacity-60">✕</button>
       </div>
       <label className="block text-[13px] font-medium text-text-mid">Reason for rejection
         <select value={reason} onChange={(e) => onReason(e.target.value)}

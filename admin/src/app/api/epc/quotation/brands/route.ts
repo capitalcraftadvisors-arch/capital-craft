@@ -7,6 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { BRAND_FIELDS, BOQ_COLUMNS, SARVATRA_ENERGY_BOQ, RVS_BOM, STANDARD_BOM, POTALIYA_BOM, boqField } from "@/lib/quotation-brands";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,7 +30,7 @@ export async function GET(req: NextRequest) {
     }
     return NextResponse.json({ ok: true, options });
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e), 500);
+    return err(errText(e), 500);
   }
 }
 
@@ -49,6 +50,6 @@ export async function POST(req: NextRequest) {
     if (error) return err(error.message, 500);
     return NextResponse.json({ ok: true });
   } catch (e) {
-    return err(e instanceof Error ? e.message : String(e), 500);
+    return err(errText(e), 500);
   }
 }

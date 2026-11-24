@@ -52,14 +52,14 @@ export default function BrandingSettings() {
               const on = c.toLowerCase() === accent.toLowerCase();
               return (
                 <button key={c} type="button" onClick={() => void pick(c)} aria-label={c} title={c}
-                  className={["w-9 h-9 rounded-full border-2 grid place-items-center", on ? "border-[#0f3d2e]" : "border-transparent"].join(" ")}>
+                  className={["w-9 h-9 rounded-full border-2 grid place-items-center", on ? "border-cc-ink" : "border-transparent"].join(" ")}>
                   <span className="w-7 h-7 rounded-full block" style={{ background: c }} />
                 </button>
               );
             })}
             {/* Custom: previewed while dragging, saved once when the picker closes. */}
             <label className="relative w-9 h-9 rounded-full border-2 border-dashed border-line grid place-items-center cursor-pointer overflow-hidden" title="Custom colour">
-              <input type="color" value={draft ?? accent} onChange={(e) => setDraft(e.target.value)}
+              <input type="color" aria-label="Custom colour" value={draft ?? accent} onChange={(e) => setDraft(e.target.value)}
                 onBlur={() => { if (draft) void pick(draft); setDraft(null); }}
                 className="absolute inset-0 w-full h-full cursor-pointer opacity-0" />
               <span className="w-7 h-7 rounded-full block" style={{ background: draft ?? (ACCENTS.some((c) => c.toLowerCase() === accent.toLowerCase()) ? "conic-gradient(red, yellow, lime, cyan, blue, magenta, red)" : accent) }} />

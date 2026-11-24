@@ -15,6 +15,7 @@ import { getCached, setCached, invalidate } from "@/lib/list-cache";
 import { nameCase } from "@/lib/names";
 import { fmtRupees } from "@/lib/money";
 import { fmtDate, fmtDateTime } from "@/lib/dates";
+import { notify } from "@/lib/notify";
 import { LEAD_STATUS_PILL } from "@/lib/lead-status";
 import { inPeriod, usePeriodRows, type TabPeriodProps } from "./console-period";
 import {
@@ -63,7 +64,7 @@ export default function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
   async function setStatus(r: Lead, status: string) {
     setBusy(r.id);
     const { error } = await supabase().from("customer_leads").update({ status }).eq("id", r.id);
-    if (error) alert("Couldn't update status: " + error.message);
+    if (error) notify.error("Couldn't update status: " + error.message);
     else { setRows((rs) => rs.map((x) => (x.id === r.id ? { ...x, status } : x))); invalidate("dash.leads"); }
     setBusy(null);
   }
@@ -148,27 +149,27 @@ export default function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
             {filtered.length === 0 ? (
               <EmptyRow cols={6} loaded={loaded} hasRows={rows.length > 0} noun="leads" />
             ) : filtered.map((r) => (
-              <tr key={r.id} onClick={() => setViewLead(r)} className="border-b border-[#eaf3ee] hover:bg-[#f7fcfa] align-top cursor-pointer">
+              <tr key={r.id} onClick={() => setViewLead(r)} className="border-b border-cc-row-line hover:bg-cc-row-hover align-top cursor-pointer">
                 <td className="px-3 py-3">
-                  <p className="text-[15px] font-semibold text-[#0f3d2e]">
+                  <p className="text-[15px] font-semibold text-cc-ink">
                     <button type="button" onClick={(e) => { e.stopPropagation(); setViewLead(r); }} className="text-left hover:underline">{r.name || "—"}</button>
                   </p>
-                  <p className="text-[12px] text-[#5a8a76] mt-0.5">+91 {r.mobile}</p>
-                  {(r.city || r.pincode) && <p className="text-[12px] text-[#5a8a76]">{[r.city, r.pincode].filter(Boolean).join(" · ")}</p>}
+                  <p className="text-[12px] text-cc-muted mt-0.5">+91 {r.mobile}</p>
+                  {(r.city || r.pincode) && <p className="text-[12px] text-cc-muted">{[r.city, r.pincode].filter(Boolean).join(" · ")}</p>}
                 </td>
                 <td className="px-3 py-3 text-center">
-                  <span className={`${PILL} bg-[#dceffb] text-[#185fa5]`}>{nameCase(r.lead_type)}</span>
+                  <span className={`${PILL} bg-cc-blue-tint text-cc-blue`}>{nameCase(r.lead_type)}</span>
                 </td>
-                <td className="px-3 py-3 text-[13px] text-[#0f3d2e]">
+                <td className="px-3 py-3 text-[13px] text-cc-ink">
                   {r.lead_type === "loan" ? (
                     <><div>Project: <b>{fmtRupees(r.project_cost)}</b></div><div>Loan: <b>{fmtRupees(r.loan_amount)}</b></div></>
                   ) : (
-                    <><div>Plant: <b>{fmtRupees(r.plant_value)}</b></div>{r.gstin && <div className="text-[#5a8a76]">GST {r.gstin}</div>}</>
+                    <><div>Plant: <b>{fmtRupees(r.plant_value)}</b></div>{r.gstin && <div className="text-cc-muted">GST {r.gstin}</div>}</>
                   )}
                 </td>
-                <td className="px-3 py-3 text-[13px] text-[#0f3d2e]">
+                <td className="px-3 py-3 text-[13px] text-cc-ink">
                   <div>PAN {r.pan || "—"}</div>
-                  <div className="text-[#5a8a76]">{maskAadhaar(r.aadhaar)}</div>
+                  <div className="text-cc-muted">{maskAadhaar(r.aadhaar)}</div>
                 </td>
                 <CreatedOnCell at={r.created_at} />
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
@@ -191,13 +192,13 @@ export default function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
       </Card>
 
       {viewLead && (
-        <Modal onClose={() => setViewLead(null)} className="w-full max-w-lg bg-white rounded-card-lg shadow-lg p-6 max-h-[90vh] overflow-y-auto">
+        <Modal onClose={() => setViewLead(null)} className="w-full max-w-lg bg-white rounded-card-lg shadow-lg p-6 max-h-[90vh] overflow-y-auto" aria-label={viewLead.name || "Lead"}>
           <div className="flex items-start justify-between mb-4">
             <div>
-              <h3 className="font-display font-semibold text-[19px] text-[#0f3d2e]">{viewLead.name || "(no name given)"}</h3>
-              <p className="text-[13px] text-[#5a8a76] mt-0.5">Non-EPC lead · <span className="uppercase font-semibold text-[#185fa5]">{viewLead.lead_type}</span></p>
+              <h3 className="font-display font-semibold text-[19px] text-cc-ink">{viewLead.name || "(no name given)"}</h3>
+              <p className="text-[13px] text-cc-muted mt-0.5">Non-EPC lead · <span className="uppercase font-semibold text-cc-blue">{viewLead.lead_type}</span></p>
             </div>
-            <button type="button" onClick={() => setViewLead(null)} className="text-[22px] text-[#5a8a76] hover:text-[#0f3d2e] leading-none" aria-label="Close">×</button>
+            <button type="button" onClick={() => setViewLead(null)} className="text-[22px] text-cc-muted hover:text-cc-ink leading-none" aria-label="Close">×</button>
           </div>
           <div className="border border-[#e6f1ec] rounded-[12px] px-4">
             <LeadRow k="Mobile" v={"+91 " + viewLead.mobile} />
@@ -220,7 +221,7 @@ export default function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
             <LeadRow k="Received" v={fmtDate(viewLead.created_at) + " · " + fmtAddedTime(viewLead.created_at)} />
           </div>
           <div className="mt-5 flex items-center justify-between gap-3 flex-wrap">
-            <p className="text-[12px] text-[#5a8a76] max-w-xs">Basic lead details — not under any EPC. Use these to reach out and build the full profile.</p>
+            <p className="text-[12px] text-cc-muted max-w-xs">Basic lead details — not under any EPC. Use these to reach out and build the full profile.</p>
             <button
               type="button"
               onClick={() => setDelLead(viewLead)}
@@ -264,9 +265,9 @@ export default function LeadsTab({ period, pFrom, pTo }: TabPeriodProps) {
 function LeadRow({ k, v }: { k: string; v: unknown }) {
   const display = v === null || v === undefined || v === "" ? "—" : String(v);
   return (
-    <div className="flex justify-between items-center gap-4 py-2.5 border-b border-[#eef1f0] last:border-0 text-[14px]">
-      <span className="text-[#5a8a76] shrink-0">{k}</span>
-      <span className="font-medium text-[#0f3d2e] text-right break-all">{display}</span>
+    <div className="flex justify-between items-center gap-4 py-2.5 border-b border-cc-chip last:border-0 text-[14px]">
+      <span className="text-cc-muted shrink-0">{k}</span>
+      <span className="font-medium text-cc-ink text-right break-all">{display}</span>
     </div>
   );
 }

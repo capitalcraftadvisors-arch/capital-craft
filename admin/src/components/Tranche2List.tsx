@@ -28,11 +28,11 @@ export default function Tranche2List({ items, onOpen }: { items: Tranche2[]; onO
           return (
             <li key={t.id}>
               <button type="button" onClick={() => onOpen(tranche2Href(t.id))} className="w-full text-left px-4 py-2 flex items-center gap-3 hover:bg-bg-tint">
-                <span className={["w-2 h-2 rounded-full shrink-0", new Date(t.at).getTime() > seen ? "bg-[#178a5c]" : "bg-transparent"].join(" ")} />
+                <span className={["w-2 h-2 rounded-full shrink-0", new Date(t.at).getTime() > seen ? "bg-cc-green" : "bg-transparent"].join(" ")} />
                 <span className="text-[13px] font-semibold text-text truncate">{t.name}</span>
                 {t.epc && <span className="text-[12px] text-text-muted truncate">{t.epc}</span>}
                 <span className={["ml-auto shrink-0 text-[11.5px] font-semibold px-2 py-0.5 rounded-[8px] border whitespace-nowrap",
-                  full ? "border-[#cdeadd] bg-[#f0faf5] text-[#178a5c]" : "border-amber-200 bg-amber-50 text-[#b45309]"].join(" ")}>
+                  full ? "border-cc-line bg-cc-wash text-cc-green" : "border-amber-200 bg-amber-50 text-amber-700"].join(" ")}>
                   {t.docs}/{TRANCHE2_TOTAL}
                 </span>
                 <span className="shrink-0 text-[11px] text-text-muted whitespace-nowrap">{fmtDate(t.at)}</span>

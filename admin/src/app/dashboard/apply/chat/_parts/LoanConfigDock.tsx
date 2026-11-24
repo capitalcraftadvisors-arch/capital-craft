@@ -19,28 +19,28 @@ export default function LoanConfigDock({ loanAmt, subsidyCase, setSubsidyCase, c
         <div className="text-[12px] text-text-muted mb-1">Subsidy</div>
         <div className="flex gap-2">
           {(["subsidy", "non_subsidy"] as const).map((s) => (
-            <button key={s} onClick={() => setSubsidyCase(s)} className={["px-3.5 py-1.5 rounded-lg text-[13px] font-semibold border", subsidyCase === s ? "bg-[#1e3a8a] text-white border-[#1e3a8a]" : "bg-white border-line text-text-mid hover:border-[#1e3a8a]"].join(" ")}>{s === "subsidy" ? "With subsidy" : "No subsidy"}</button>
+            <button key={s} onClick={() => setSubsidyCase(s)} className={["px-3.5 py-1.5 rounded-lg text-[13px] font-semibold border", subsidyCase === s ? "bg-navy text-white border-navy" : "bg-white border-line text-text-mid hover:border-navy"].join(" ")}>{s === "subsidy" ? "With subsidy" : "No subsidy"}</button>
           ))}
         </div>
       </div>
       {subsidyCase === "subsidy" && (
         <div className="grid grid-cols-2 gap-2">
           <label className="text-[12px] text-text-muted">Central subsidy (₹)
-            <input value={centralSub} inputMode="numeric" onChange={(e) => setCentralSub(amountInput(e.target.value))} className="mt-1 w-full border border-line rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus:border-[#1e3a8a]" /></label>
+            <input value={centralSub} inputMode="numeric" onChange={(e) => setCentralSub(amountInput(e.target.value))} className="mt-1 w-full border border-line rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus:border-navy" /></label>
         </div>
       )}
       <div>
         <div className="text-[12px] text-text-muted mb-1">Tenure — live EMI on ₹{loanAmt.toLocaleString("en-IN")}</div>
         <div className="grid grid-cols-5 gap-1.5">
           {TENURES.map((t) => (
-            <button key={t} onClick={() => setTenure(t)} className={["px-1 py-2 rounded-lg text-center border transition", tenure === t ? "bg-[#1e3a8a] text-white border-[#1e3a8a]" : "bg-white border-line text-text-mid hover:border-[#1e3a8a]"].join(" ")}>
+            <button key={t} onClick={() => setTenure(t)} className={["px-1 py-2 rounded-lg text-center border transition", tenure === t ? "bg-navy text-white border-navy" : "bg-white border-line text-text-mid hover:border-navy"].join(" ")}>
               <div className="text-[13px] font-bold">{t}y</div>
               <div className="text-[10px] opacity-80">{loanAmt > 0 ? fmtRupees(computeEmi(loanAmt, DEFAULT_INDICATIVE_ROI, t)) : "—"}</div>
             </button>
           ))}
         </div>
       </div>
-      <button onClick={onFinish} disabled={tenure == null} className="mt-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a] disabled:opacity-50">Continue →</button>
+      <button onClick={onFinish} disabled={tenure == null} className="mt-1 px-4 py-2.5 rounded-xl bg-navy text-white text-[14px] font-semibold hover:bg-navy-hover disabled:opacity-50">Continue →</button>
     </div>
   );
 }

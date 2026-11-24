@@ -18,6 +18,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     if (error) return NextResponse.json({ ok: true, chat: null, note: error.message });
     return NextResponse.json({ ok: true, chat: data ?? null });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[intake-chat GET] error:", msg);
     return err(msg, 500);
   }
@@ -102,7 +103,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       note: chatErr?.message ?? null,
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[intake-chat POST] error:", msg);
     return err(msg, 500);
   }

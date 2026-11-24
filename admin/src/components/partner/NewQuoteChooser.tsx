@@ -6,7 +6,7 @@
 //             uploads (0122): free for 3 months once ready, then locked until CC
 //             switches it on (lib/custom-template).
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { NAVY } from "@/components/partner/PartnerShell";
 import FileUpload from "@/components/FileUpload";
@@ -27,25 +27,26 @@ export default function NewQuoteChooser({ segment, tpl, onClose }: {
   const me = getBusiness();
   const state = tpl ? customState(tpl) : null;
   const [samples, setSamples] = useState(0); // the sample quotations uploaded (no template yet)
+  const titleId = useId();
 
   const tile = "flex-1 min-w-[240px] rounded-2xl border border-line bg-white p-5 flex flex-col gap-3";
   const primary = "self-start px-4 py-2.5 rounded-xl text-white text-[13.5px] font-semibold";
   const note = "text-[13px] leading-relaxed";
 
   return (
-    <Modal onClose={onClose} closeOnEscape overlayClassName="fixed inset-0 z-50 bg-black/40 grid place-items-center p-4" className="w-full max-w-[720px] bg-bg-soft rounded-2xl shadow-xl p-5 sm:p-6 max-h-[90vh] overflow-y-auto">
+    <Modal onClose={onClose} closeOnEscape overlayClassName="fixed inset-0 z-50 bg-black/40 grid place-items-center p-4" className="w-full max-w-[720px] bg-bg-soft rounded-2xl shadow-xl p-5 sm:p-6 max-h-[90vh] overflow-y-auto" aria-labelledby={titleId}>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="font-display text-[20px] font-bold text-[#0f3d2e]">New {segment} quotation</h2>
+        <h2 id={titleId} className="font-display text-[20px] font-bold text-cc-ink">New {segment} quotation</h2>
         <button type="button" onClick={onClose} aria-label="Close" className="w-8 h-8 grid place-items-center rounded-lg text-text-muted hover:bg-white">✕</button>
       </div>
 
       <div className="flex gap-4 flex-wrap">
         <div className={tile}>
           <div>
-            <div className="text-[16px] font-bold text-[#0f3d2e]">Simple template</div>
+            <div className="text-[16px] font-bold text-cc-ink">Simple template</div>
             <div className="text-[13px] text-text-muted mt-0.5">Capital Craft standard quotation</div>
           </div>
-          <button type="button" onClick={() => router.push(`/dashboard/quotes/new?segment=${segment}` as any)}
+          <button type="button" onClick={() => router.push(`/dashboard/quotes/new?segment=${segment}`)}
             className={primary + " mt-auto"} style={{ background: NAVY }}>
             Make quotation
           </button>
@@ -53,25 +54,25 @@ export default function NewQuoteChooser({ segment, tpl, onClose }: {
 
         <div className={tile}>
           <div>
-            <div className="text-[16px] font-bold text-[#0f3d2e]">Custom template</div>
+            <div className="text-[16px] font-bold text-cc-ink">Custom template</div>
             <div className="text-[13px] text-text-muted mt-0.5">Your company&apos;s own quotation format</div>
           </div>
 
           {state === "ready" && tpl ? (
             <>
               {!tpl.unlocked && tpl.ready_at && <p className="text-[12.5px] text-text-muted">Free till {fmtDate(freeUntil(tpl.ready_at).toISOString())}</p>}
-              <button type="button" onClick={() => { markCustomTemplateSeen(tpl); router.push("/dashboard/quotation" as any); }}
+              <button type="button" onClick={() => { markCustomTemplateSeen(tpl); router.push("/dashboard/quotation"); }}
                 className={primary + " mt-auto"} style={{ background: NAVY }}>
                 Make quotation
               </button>
             </>
           ) : state === "locked" ? (
-            <p className={note + " text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-xl px-3 py-2.5"}>🔒 {CUSTOM_LOCKED_MSG}</p>
+            <p className={note + " text-warn-ink bg-warn-wash border border-warn-line rounded-xl px-3 py-2.5"}>🔒 {CUSTOM_LOCKED_MSG}</p>
           ) : state === "making" ? (
-            <p className={note + " text-[#0f3d2e]"}>We&apos;re making your custom template. We&apos;ll let you know when it&apos;s ready.</p>
+            <p className={note + " text-cc-ink"}>We&apos;re making your custom template. We&apos;ll let you know when it&apos;s ready.</p>
           ) : canManageOrg(me) ? (
             <>
-              <p className={note + " text-[#0f3d2e]"}>
+              <p className={note + " text-cc-ink"}>
                 {samples > 0
                   ? "We're making your custom template. We'll let you know when it's ready."
                   : "Upload a sample of your company's quotation. We'll make your custom template from it."}

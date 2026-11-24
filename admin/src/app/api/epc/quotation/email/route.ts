@@ -11,6 +11,7 @@ import { buildSarvatraFile } from "@/lib/quotation-sarvatra";
 import { SARVATRA } from "@/lib/quotation-brands";
 import { sendMailAs } from "@/lib/mailer";
 import { EMAIL_RE } from "@/lib/validators";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json({ ok: true, sent_to: to, file: file.name });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[epc/quotation/email] error:", msg);
     return err(msg, 500);
   }

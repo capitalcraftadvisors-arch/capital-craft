@@ -33,7 +33,7 @@ export default function LoginForm() {
     const r = await changePassword(changeToken!, pw);
     setLoading(false);
     if (!r.ok) { setPwError(r.error); return; }
-    router.replace(routeForBusiness(r.business) as any);
+    router.replace(routeForBusiness(r.business));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -62,13 +62,13 @@ export default function LoginForm() {
     // Route straight to the destination. The "Namaste" welcome (login sets the
     // cc_greet flag) now plays ON the dashboard via <LoginWelcome/>, so it covers
     // the dashboard as it loads — no flash of the login page in between.
-    router.replace(routeForBusiness(r.business) as any);
+    router.replace(routeForBusiness(r.business));
   }
 
   if (changeToken) {
     return (
       <form onSubmit={handleChange} className="space-y-5">
-        <h2 className="font-display text-[18px] font-bold text-[#0f1f4d]">Set your password</h2>
+        <h2 className="font-display text-[18px] font-bold text-navy-deep">Set your password</h2>
         <Input label="New password" type="password" autoComplete="new-password" autoFocus value={newPw} onChange={(e) => setNewPw(e.target.value)} className={FIELD} />
         <Input label="Confirm password" type="password" autoComplete="new-password" value={confirmPw} onChange={(e) => setConfirmPw(e.target.value)} error={pwError ?? undefined} className={FIELD} />
         <Button type="submit" variant="primary" fullWidth loading={loading} className={CTA}>
@@ -86,7 +86,7 @@ export default function LoginForm() {
         autoComplete="tel"
         maxLength={10}
         placeholder="9876543210"
-        leftIcon={<span className="text-[15px] font-medium text-[#0f1f4d]/80">+91</span>}
+        leftIcon={<span className="text-[15px] font-medium text-navy-deep/80">+91</span>}
         className={`${FIELD} !pl-12 tracking-wide`}
         value={mobile}
         onChange={(e) => { setMobile(e.target.value.replace(/\D/g, "")); setNeedPassword(false); setPassword(""); setPwError(null); }}
@@ -105,7 +105,7 @@ export default function LoginForm() {
           rightSlot={
             <button type="button" onClick={() => setShowPw((s) => !s)}
               aria-label={showPw ? "Hide password" : "Show password"} title={showPw ? "Hide password" : "Show password"}
-              className="p-1.5 rounded text-[#0f1f4d]/50 hover:text-[#0f1f4d]">
+              className="p-1.5 rounded text-navy-deep/50 hover:text-navy-deep">
               {showPw ? (
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9.9 4.24A9.1 9.1 0 0 1 12 4c7 0 10 8 10 8a13.2 13.2 0 0 1-1.67 2.68M6.6 6.6A13.5 13.5 0 0 0 2 12s3 8 10 8a9.7 9.7 0 0 0 5.4-1.6" /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" /><path d="M2 2l20 20" /></svg>
               ) : (
@@ -125,5 +125,5 @@ export default function LoginForm() {
 
 // The login page's look: tall white fields with a hairline border and navy
 // text, a deep navy button with a soft highlight.
-const FIELD = "!py-3.5 !rounded-[12px] !bg-white !border-[#dfe3ec] !text-[#0f1f4d] placeholder:!text-[#0f1f4d]/30 focus:!border-[#1a3a9c]/60 focus:!shadow-[0_0_0_3px_rgba(26,58,156,0.12)]";
+const FIELD = "!py-3.5 !rounded-[12px] !bg-white !border-[#dfe3ec] !text-navy-deep placeholder:!text-navy-deep/30 focus:!border-[#1a3a9c]/60 focus:!shadow-[0_0_0_3px_rgba(26,58,156,0.12)]";
 const CTA = "!bg-gradient-to-b !from-[#1f3f9e] !to-[#0f2a6e] hover:!brightness-110 !text-white !rounded-[12px] !py-3.5 tracking-wide !shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_14px_30px_-14px_rgba(15,42,110,0.6)]";

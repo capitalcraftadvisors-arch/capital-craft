@@ -1,0 +1,9 @@
+{
+  "extends": "next/core-web-vitals",
+  "rules": {
+    "@next/next/no-img-element": [
+      "off",
+      "Plain <img> on purpose: we show user uploads from signed storage URLs and local blobs; next/image would proxy every one of them through our own server."
+    ]
+  }
+}

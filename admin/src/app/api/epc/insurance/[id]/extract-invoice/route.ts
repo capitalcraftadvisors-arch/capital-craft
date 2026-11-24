@@ -12,6 +12,7 @@ import { geminiExtractInvoice } from "@/lib/doc-extractors";
 import { parseInvoiceAmount } from "@/lib/insurance-server";
 import { storeInsuranceFile } from "@/lib/extract-server";
 import { UUID_RE } from "@/lib/validators";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,7 +53,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     return NextResponse.json({ ok: true, amount });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[insurance/extract-invoice] error:", msg);
     return err(msg, 500);
   }

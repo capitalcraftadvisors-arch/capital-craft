@@ -98,10 +98,10 @@ function MyPasswordCard({ id }: { id: string }) {
         <Input label="Confirm password" type={show ? "text" : "password"} autoComplete="new-password" value={pw2} onChange={(e) => setPw2(e.target.value)} />
       </div>
       {error && <p className="mx-4 mb-3 text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-[8px] px-3 py-2">{error}</p>}
-      {msg && <p className="mx-4 mb-3 text-[13px] text-[#178a5c] bg-[#e6f6ee] border border-[#cdeadd] rounded-[8px] px-3 py-2">{msg}</p>}
+      {msg && <p className="mx-4 mb-3 text-[13px] text-cc-green bg-cc-tint border border-cc-line rounded-[8px] px-3 py-2">{msg}</p>}
       <div className="px-4 pb-4">
         <button type="button" onClick={() => void save()} disabled={busy || !pw}
-          className="text-[13px] font-semibold px-4 py-2 rounded-[8px] bg-[#178a5c] text-white hover:bg-[#12734c] disabled:opacity-60">
+          className="text-[13px] font-semibold px-4 py-2 rounded-[8px] bg-cc-green text-white hover:bg-cc-green-hover disabled:opacity-60">
           {busy ? "Saving…" : "Save password"}
         </button>
       </div>

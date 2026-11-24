@@ -46,7 +46,7 @@ function Inner() {
       <div role="tablist" className="inline-flex gap-1 p-1 mb-4 rounded-[10px] bg-white border border-line">
         {(["team", "partners"] as Tab[]).map((t) => (
           <button key={t} role="tab" aria-selected={tab === t} onClick={() => pick(t)}
-            className={["px-4 py-1.5 rounded-[8px] text-[13px] font-semibold", tab === t ? "bg-[#178a5c] text-white" : "text-text-mid hover:bg-bg-tint"].join(" ")}>
+            className={["px-4 py-1.5 rounded-[8px] text-[13px] font-semibold", tab === t ? "bg-cc-green text-white" : "text-text-mid hover:bg-bg-tint"].join(" ")}>
             {t === "team" ? "Team" : "Partners"}
           </button>
         ))}
@@ -93,15 +93,15 @@ function TeamTab() {
               return (
                 <tr key={m.id} className="border-t border-line">
                   <td className="px-4 py-2.5">
-                    <a href={`/admin/stakeholders/team/${m.id}`} className="font-semibold text-[#185fa5] hover:underline">{m.contact_name || "—"}</a>
+                    <a href={`/admin/stakeholders/team/${m.id}`} className="font-semibold text-cc-blue hover:underline">{m.contact_name || "—"}</a>
                   </td>
                   <td className={td}>{m.contact_mobile || "—"}</td>
                   <td className={td}>{m.contact_email || "—"}</td>
                   <td className={td}>{roleLabel(m.role)}</td>
                   <td className="px-4 py-2.5">
                     {at
-                      ? <span className="text-[#178a5c] font-semibold">Set on {fmtDate(at)}</span>
-                      : <span className="text-[#854f0b] font-semibold">Not set</span>}
+                      ? <span className="text-cc-green font-semibold">Set on {fmtDate(at)}</span>
+                      : <span className="text-warn-ink font-semibold">Not set</span>}
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     <button type="button" onClick={() => setEditing(m)}
@@ -157,7 +157,7 @@ function PartnersTab() {
               {rows.map((p) => (
                 <tr key={p.id} className="border-t border-line">
                   <td className="px-4 py-2.5">
-                    <a href={`/admin/stakeholders/partner/${p.id}`} className="font-semibold text-[#185fa5] hover:underline">{p.name}</a>
+                    <a href={`/admin/stakeholders/partner/${p.id}`} className="font-semibold text-cc-blue hover:underline">{p.name}</a>
                   </td>
                   <td className={td}>{p.details.rm_name || "—"}</td>
                   <td className={td}>{p.details.rm_phone || "—"}</td>
@@ -201,12 +201,12 @@ function AddPartnerModal({ kind, onClose }: { kind: PartnerKind; onClose: () => 
     const r = await createPartner(kind, name, details);
     setBusy(false);
     if (r.error || !r.id) { setError(r.error || "Couldn't add."); return; }
-    router.push(`/admin/stakeholders/partner/${r.id}` as never);
+    router.push(`/admin/stakeholders/partner/${r.id}`);
   }
 
   return (
-    <Modal onClose={onClose} busy={busy} overlayClassName={OVERLAY.grid} className="w-full max-w-md bg-white rounded-xl shadow-lg p-6 space-y-3">
-      <h3 className="text-[17px] font-semibold text-[#0f3d2e]">Add {label.toLowerCase()}</h3>
+    <Modal onClose={onClose} busy={busy} overlayClassName={OVERLAY.grid} className="w-full max-w-md bg-white rounded-xl shadow-lg p-6 space-y-3" aria-label={`Add ${label.toLowerCase()}`}>
+      <h3 className="text-[17px] font-semibold text-cc-ink">Add {label.toLowerCase()}</h3>
       <FieldInput f={{ key: "name", label: "Name" }} value={name} onChange={setName} />
       {ADD_FIELDS.map((f) => (
         <FieldInput key={f.key} f={f} value={details[f.key] ?? ""} onChange={(v) => setDetails((d) => ({ ...d, [f.key]: v }))} />
@@ -215,7 +215,7 @@ function AddPartnerModal({ kind, onClose }: { kind: PartnerKind; onClose: () => 
       <div className="flex justify-end gap-2 pt-2">
         <button type="button" onClick={onClose} disabled={busy} className="px-4 py-2 rounded-[8px] border border-line text-[13px] text-text-mid hover:bg-bg-soft disabled:opacity-60">Cancel</button>
         <button type="button" onClick={() => void save()} disabled={busy}
-          className="px-4 py-2 rounded-[8px] bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-60">
+          className="px-4 py-2 rounded-[8px] bg-cc-green text-white text-[13px] font-semibold hover:bg-cc-green-hover disabled:opacity-60">
           {busy ? "Adding…" : `Add ${label.toLowerCase()}`}
         </button>
       </div>

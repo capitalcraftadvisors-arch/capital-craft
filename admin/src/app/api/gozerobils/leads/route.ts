@@ -14,6 +14,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { err, publicDb } from "@/lib/api";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest) {
     if (!r.ok) return err(r.error || "not_saved", r.error === "invalid_key" ? 401 : 400);
     return NextResponse.json({ ok: true, id: r.id, created: !!r.created }, { status: r.created ? 201 : 200 });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[gozerobils/leads] error:", msg);
     return err(msg, 500);
   }

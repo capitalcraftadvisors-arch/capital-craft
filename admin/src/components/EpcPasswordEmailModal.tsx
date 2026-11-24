@@ -11,12 +11,13 @@
 // always goes from the Capital Craft Gmail. Only after the mail is sent is the
 // password saved — so a resend gives a new one and the old one stops working.
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { generateStrongPassword, issuedPasswordOk, ISSUED_PASSWORD_RULE } from "@/lib/password-gen";
 import { loginPasswordStatus, sendPasswordDraft } from "@/lib/passwords";
 import { DEFAULT_MAIL_SENDER } from "@/lib/mail-sender";
 import { fmtDate } from "@/lib/dates";
 import { EMAIL_RE } from "@/lib/validators";
+import { askConfirm } from "@/lib/confirm";
 import Modal from "@/components/ui/Modal";
 
 type Epc = { id: string; tradeName: string; contactName?: string | null; mobile?: string | null; email?: string | null };
@@ -66,6 +67,7 @@ export default function EpcPasswordEmailModal({ open, epc, onClose }: { open: bo
   const [busy, setBusy] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const uid = useId(); // ids that tie the heading and labels to the pop-up and its fields
 
   // A fresh one-time password + draft every time it opens — the "reset" wording
   // once the EPC already has a password.
@@ -95,7 +97,7 @@ export default function EpcPasswordEmailModal({ open, epc, onClose }: { open: bo
     const password = passwordIn(body);
     if (!password) { setError("Keep the password in the message."); return; }
     if (!issuedPasswordOk(password)) { setError(ISSUED_PASSWORD_RULE); return; }
-    if (setAt && !window.confirm(`Send a new password to ${epc.tradeName}? The current password will stop working.`)) return;
+    if (setAt && !(await askConfirm(`Send a new password to ${epc.tradeName}? The current password will stop working.`, { danger: true }))) return;
     setBusy(true); setError(null);
     const r = await sendPasswordDraft(epc.id, { to: to.trim(), cc: ccList, subject, body, password });
     setBusy(false);
@@ -103,28 +105,29 @@ export default function EpcPasswordEmailModal({ open, epc, onClose }: { open: bo
     setSentTo(r.sentTo ?? to.trim());
   }
 
-  const inputCls = "w-full border border-[#cdeadd] rounded-[8px] px-3 py-2 text-[14px] focus:border-[#185fa5] outline-none bg-white";
+  const inputCls = "w-full border border-cc-line rounded-[8px] px-3 py-2 text-[14px] focus:border-cc-blue outline-none bg-white";
   const row = "grid grid-cols-[64px_1fr] items-center gap-2";
-  const lbl = "text-[12px] text-[#5a8a76]";
+  const lbl = "text-[12px] text-cc-muted";
 
   return (
-    <Modal onClose={onClose} busy={busy} className="w-full max-w-xl bg-white rounded-lg shadow-lg p-6 max-h-[92vh] overflow-y-auto">
-      <h3 className="font-semibold text-[18px] text-[#0f3d2e]">Email password</h3>
-      <p className="text-[13px] text-[#5a8a76] mt-0.5">
+    <Modal onClose={onClose} busy={busy} className="w-full max-w-xl bg-white rounded-lg shadow-lg p-6 max-h-[92vh] overflow-y-auto"
+      aria-labelledby={`${uid}-title`}>
+      <h3 id={`${uid}-title`} className="font-semibold text-[18px] text-cc-ink">Email password</h3>
+      <p className="text-[13px] text-cc-muted mt-0.5">
         {epc.tradeName}{epc.mobile ? ` · ${epc.mobile}` : ""}{setAt ? ` · last sent ${fmtDate(setAt)}` : ""}
       </p>
 
       {sentTo ? (
-        <p className="mt-4 text-[13px] text-[#178a5c] bg-[#e6f6ee] border border-[#cdeadd] rounded-[8px] px-3 py-2">
+        <p className="mt-4 text-[13px] text-cc-green bg-cc-tint border border-cc-line rounded-[8px] px-3 py-2">
           Password emailed to <span className="font-semibold">{sentTo}</span>.
         </p>
       ) : (
         <div className="mt-4 space-y-2.5">
-          <div className={row}><span className={lbl}>From</span><span className="text-[14px] text-[#0f3d2e]">{DEFAULT_MAIL_SENDER}</span></div>
-          <div className={row}><span className={lbl}>To</span><input type="email" className={inputCls} value={to} onChange={(e) => setTo(e.target.value)} /></div>
-          <div className={row}><span className={lbl}>CC</span><input className={inputCls} value={cc} onChange={(e) => setCc(e.target.value)} /></div>
-          <div className={row}><span className={lbl}>Subject</span><input className={inputCls} value={subject} onChange={(e) => setSubject(e.target.value)} /></div>
-          <textarea className={inputCls + " font-[inherit] leading-relaxed"} rows={13} value={body} onChange={(e) => setBody(e.target.value)} />
+          <div className={row}><span className={lbl}>From</span><span className="text-[14px] text-cc-ink">{DEFAULT_MAIL_SENDER}</span></div>
+          <div className={row}><label htmlFor={`${uid}-to`} className={lbl}>To</label><input id={`${uid}-to`} type="email" className={inputCls} value={to} onChange={(e) => setTo(e.target.value)} /></div>
+          <div className={row}><label htmlFor={`${uid}-cc`} className={lbl}>CC</label><input id={`${uid}-cc`} className={inputCls} value={cc} onChange={(e) => setCc(e.target.value)} /></div>
+          <div className={row}><label htmlFor={`${uid}-subject`} className={lbl}>Subject</label><input id={`${uid}-subject`} className={inputCls} value={subject} onChange={(e) => setSubject(e.target.value)} /></div>
+          <textarea aria-label="Message" className={inputCls + " font-[inherit] leading-relaxed"} rows={13} value={body} onChange={(e) => setBody(e.target.value)} />
         </div>
       )}
 
@@ -132,12 +135,12 @@ export default function EpcPasswordEmailModal({ open, epc, onClose }: { open: bo
 
       <div className="mt-5 flex justify-end gap-2">
         <button type="button" onClick={onClose} disabled={busy}
-          className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border border-[#cdeadd] bg-white text-[#0f3d2e] hover:bg-[#f0faf5] disabled:opacity-60">
+          className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border border-cc-line bg-white text-cc-ink hover:bg-cc-wash disabled:opacity-60">
           {sentTo ? "Done" : "Cancel"}
         </button>
         {!sentTo && (
           <button type="button" onClick={() => void send()} disabled={busy}
-            className="text-[13px] font-semibold px-4 py-2 rounded-[8px] bg-[#178a5c] text-white hover:bg-[#12734c] disabled:opacity-60">
+            className="text-[13px] font-semibold px-4 py-2 rounded-[8px] bg-cc-green text-white hover:bg-cc-green-hover disabled:opacity-60">
             {busy ? "Sending…" : "Send"}
           </button>
         )}

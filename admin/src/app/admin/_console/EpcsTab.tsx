@@ -15,9 +15,9 @@ import { getCached, setCached, invalidate } from "@/lib/list-cache";
 import { useAdminNames } from "@/lib/use-admin-names";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import RowLink from "@/components/RowLink";
-import { toast } from "sonner";
 import { nameCase } from "@/lib/names";
 import { fmtDateTime } from "@/lib/dates";
+import { notify } from "@/lib/notify";
 // LenderCell lives in @/components/LenderCell (shared with the EPC profile
 // action bar so both render the identical dropdown). Lender keys are DYNAMIC
 // (the `lenders` registry — lib/lenders), so Lender is a plain string.
@@ -35,15 +35,15 @@ import {
 
 // Distinct colours for the derived EPC single-stage badge (admin display only).
 const EPC_STAGE_META: Record<string, { label: string; cls: string }> = {
-  unseen:          { label: "Application Unseen",  cls: "bg-[#eef1f0] text-[#5a8a76]" },
-  under_review:    { label: "Under Review",        cls: "bg-[#fef0d6] text-[#854f0b]" },
-  updated:         { label: "Updated",             cls: "bg-[#fff2cc] text-[#8a6500]" },
-  approved:        { label: "Approved by Manish",  cls: "bg-[#e6f6ee] text-[#178a5c]" },
+  unseen:          { label: "Application Unseen",  cls: "bg-cc-chip text-cc-muted" },
+  under_review:    { label: "Under Review",        cls: "bg-warn-tint text-warn-ink" },
+  updated:         { label: "Updated",             cls: "bg-[#fff2cc] text-warn-ochre" },
+  approved:        { label: "Approved by Manish",  cls: "bg-cc-tint text-cc-green" },
   hold:            { label: "Hold",                cls: "bg-[#e5edf5] text-[#3b5a76]" },
   rejected:        { label: "Rejected by CC",      cls: "bg-red-50 text-red-700" },
-  docs_sent:       { label: "Docs Sent to Lender", cls: "bg-[#dceffb] text-[#185fa5]" },
-  lender_approved: { label: "Approved by Lender",  cls: "bg-[#d6efe3] text-[#0f7a52]" },
-  rejected_by_lender: { label: "Rejected by Lender", cls: "bg-[#ffe4e6] text-[#9f1239]" },
+  docs_sent:       { label: "Docs Sent to Lender", cls: "bg-cc-blue-tint text-cc-blue" },
+  lender_approved: { label: "Approved by Lender",  cls: "bg-cc-tint-strong text-cc-green-text" },
+  rejected_by_lender: { label: "Rejected by Lender", cls: "bg-[#ffe4e6] text-rose-800" },
 };
 // The Status column sorts by the shown stage, in this order (= the summary cards).
 const EPC_STAGE_ORDER = Object.keys(EPC_STAGE_META);
@@ -144,7 +144,7 @@ export default function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps &
       q, sourceFilter, lenderFilter, lenderStateFilter,
       dateFrom, dateTo, categoryFilter, sortKey, sortDir,
     }));
-    router.push(`/admin/epc/${row.id}/view` as any);
+    router.push(`/admin/epc/${row.id}/view`);
   }
 
   async function load(force = false) {
@@ -183,8 +183,8 @@ export default function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps &
   async function addLender(name: string) {
     if (!name.trim()) return;
     const r = await addRegistryLender(name);
-    if (r.error) toast.error(r.error);
-    else if (r.existed) toast.error("That lender already exists.");
+    if (r.error) notify.error(r.error);
+    else if (r.existed) notify.error("That lender already exists.");
   }
 
   // Single mutually-exclusive stage per EPC — highest rule wins (top→bottom).
@@ -310,7 +310,7 @@ export default function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps &
       invalidate("dash.epcs"); // local state already updated; refresh cache on next mount
     } catch (e) {
       setLenderState(prevState);
-      alert("Couldn't save lender state: " + (e as Error).message);
+      notify.error("Couldn't save lender state: " + (e as Error).message);
     }
   }
 
@@ -466,7 +466,7 @@ export default function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps &
                 data-highlighted={isHighlighted ? "yes" : undefined}
                 style={highlightRowStyle(isHighlighted)}
                 onClick={() => navigateToView(r)}
-                className="border-b border-[#eaf3ee] cursor-pointer hover:bg-[#f7fcfa] align-top"
+                className="border-b border-cc-row-line cursor-pointer hover:bg-cc-row-hover align-top"
               >
                 <td className="px-3 py-3">
                   <div className="flex items-start gap-3">
@@ -474,19 +474,19 @@ export default function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps &
                       {IconBuilding}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-semibold text-[#0f3d2e] truncate">
+                      <p className="text-[13px] font-semibold text-cc-ink truncate">
                         {r.trade_name || r.legal_name ? (
                           <RowLink href={`/admin/epc/${r.id}/view`} onOpen={() => navigateToView(r)}>{nameCase(r.trade_name || r.legal_name)}</RowLink>
-                        ) : <span className="text-[#5a8a76] font-normal">—</span>}
+                        ) : <span className="text-cc-muted font-normal">—</span>}
                       </p>
                       {r.epc_display_id && (
-                        <p className="text-[11px] font-mono text-[#185fa5]">{r.epc_display_id}</p>
+                        <p className="text-[11px] font-mono text-cc-blue">{r.epc_display_id}</p>
                       )}
-                      <p className="text-[12px] text-[#5a8a76]">
+                      <p className="text-[12px] text-cc-muted">
                         +91 {maskMobile(r.contact_mobile)}
                       </p>
                       {r.contact_email && (
-                        <p className="text-[11px] text-[#5a8a76] truncate">{r.contact_email}</p>
+                        <p className="text-[11px] text-cc-muted truncate">{r.contact_email}</p>
                       )}
                     </div>
                   </div>
@@ -508,11 +508,11 @@ export default function EpcsTab({ period, pFrom, pTo, onKpis }: TabPeriodProps &
                   )}
                 </td>
                 <CreatedOnCell at={r.created_at} />
-                <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">{createdBy(r)}</td>
+                <td className="px-3 py-3 text-center text-[13px] text-cc-muted">{createdBy(r)}</td>
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <div className="flex flex-col items-center gap-1">
                     <button type="button" disabled={epcLocked(r)} onClick={(e) => { e.stopPropagation(); setEmailRow(r); }}
-                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 bg-[#178a5c] text-white hover:bg-[#12734c] transition-colors disabled:opacity-40 disabled:pointer-events-none">
+                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 bg-cc-green text-white hover:bg-cc-green-hover transition-colors disabled:opacity-40 disabled:pointer-events-none">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
                       Email
                     </button>

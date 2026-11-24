@@ -26,9 +26,9 @@ export default function ApprovalSummary({ loan, lenderLabel, docs }: {
     const d = letter(category);
     return (
       <div className="flex items-center justify-between gap-3 py-[5px] text-[14px]">
-        <span className="text-[#5a8a76]">{label}</span>
+        <span className="text-cc-muted">{label}</span>
         {d ? <HAction variant="outline" icon={I.eye} onClick={() => void open(d.id)}>View</HAction>
-           : <span className="font-medium text-[#0f3d2e]">{missing}</span>}
+           : <span className="font-medium text-cc-ink">{missing}</span>}
       </div>
     );
   };
@@ -36,7 +36,7 @@ export default function ApprovalSummary({ loan, lenderLabel, docs }: {
   return (
     <Section title="Approval details" summary={lenderLabel ?? undefined}>
       <ApprovalDetailsTable value={details} readOnly />
-      <div className="mt-4 pt-3 border-t border-[#eef1f4] max-w-[520px]">
+      <div className="mt-4 pt-3 border-t border-grey-line max-w-[520px]">
         <KV k="Credit score" v={loan.credit_ntc ? `${credit} · NTC` : credit} />
         {docs && docRow("Sanction letter", "sanction_letter", loan.sanction_letter_unavailable ? "Not available at filling" : "—")}
         {docs && docRow("Disbursement advice letter", "disbursement_advice", "—")}

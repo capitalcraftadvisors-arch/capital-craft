@@ -97,6 +97,7 @@ export default function EditableField({
         <dt className="text-text-muted min-w-[140px] shrink-0">{label}</dt>
         <dd className="flex-1 flex items-center gap-2 flex-wrap">
           <select
+            aria-label={label}
             value={val}
             disabled={saving}
             onChange={(e) => void pick(e.target.value)}
@@ -148,6 +149,7 @@ export default function EditableField({
       <div className="flex flex-wrap gap-2 items-start">
         {options ? (
           <select
+            aria-label={label}
             value={val}
             onChange={(e) => setVal(e.target.value)}
             disabled={saving}
@@ -160,6 +162,7 @@ export default function EditableField({
           </select>
         ) : (
           <input
+            aria-label={label}
             type={type}
             value={val}
             onChange={(e) => setVal(e.target.value)}

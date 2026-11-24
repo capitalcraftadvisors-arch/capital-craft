@@ -403,7 +403,7 @@ function Panel({ title, note, className = "", children }: { title: string; note?
   return (
     <section className={`${CARD} p-5 ${className}`}>
       <header className="flex items-baseline justify-between gap-3 mb-4">
-        <h3 className="text-[14px] font-semibold text-[#0f3d2e] tracking-[-0.01em]">{title}</h3>
+        <h3 className="text-[14px] font-semibold text-cc-ink tracking-[-0.01em]">{title}</h3>
         {note && <span className="text-[12px] text-text-muted tabular-nums">{note}</span>}
       </header>
       {children}
@@ -428,7 +428,7 @@ function Kpi({ label, value, sub, ch, tone }: { label: string; value: string; su
     <div className={`${CARD} relative overflow-hidden p-4`}>
       <span className="absolute inset-x-0 top-0 h-[3px]" style={{ background: tone }} />
       <div className="text-[12.5px] font-medium text-text-mid">{label}</div>
-      <div className="mt-1.5 font-display text-[28px] leading-none font-bold text-[#0f2a20] tabular-nums tracking-[-0.02em]">{value}</div>
+      <div className="mt-1.5 font-display text-[28px] leading-none font-bold text-cc-ink-deep tabular-nums tracking-[-0.02em]">{value}</div>
       <div className="mt-2.5 flex items-center gap-2 flex-wrap min-h-[22px]">
         <Change ch={ch} />
         {sub && <span className="text-[12px] text-text-muted tabular-nums">{sub}</span>}
@@ -469,11 +469,11 @@ function StageBars({ rows }: { rows: { label: string; count: number; sub?: strin
       {rows.map((r) => (
         <div key={r.label} className="grid grid-cols-[minmax(0,10rem)_1fr_auto] items-center gap-3">
           <span className="text-[13px] text-text-mid truncate" title={r.label}>{r.label}</span>
-          <span className="h-2.5 rounded-full bg-[#eef3f0] overflow-hidden">
+          <span className="h-2.5 rounded-full bg-cc-track overflow-hidden">
             <span className="block h-full rounded-full transition-[width] duration-700" style={{ width: `${(r.count / max) * 100}%`, background: r.color }} />
           </span>
           <span className="text-right tabular-nums min-w-[3.5rem]">
-            <span className="text-[14px] font-semibold text-[#0f2a20]">{count(r.count)}</span>
+            <span className="text-[14px] font-semibold text-cc-ink-deep">{count(r.count)}</span>
             {r.sub && <span className="block text-[11.5px] text-text-muted">{r.sub}</span>}
           </span>
         </div>
@@ -498,7 +498,7 @@ function Donut({ data, total, centre }: { data: { name: string; value: number; c
         </ResponsiveContainer>
         <div className="absolute inset-0 grid place-items-center pointer-events-none text-center">
           <div>
-            <div className="font-display text-[24px] font-bold text-[#0f2a20] tabular-nums leading-none">{count(total)}</div>
+            <div className="font-display text-[24px] font-bold text-cc-ink-deep tabular-nums leading-none">{count(total)}</div>
             <div className="text-[11.5px] text-text-muted mt-1">{centre}</div>
           </div>
         </div>
@@ -508,7 +508,7 @@ function Donut({ data, total, centre }: { data: { name: string; value: number; c
           <li key={x.name} className="flex items-center gap-2 text-[13px]">
             <span className="h-2.5 w-2.5 rounded-[3px] shrink-0" style={{ background: x.color }} />
             <span className="text-text-mid truncate">{x.name}</span>
-            <span className="ml-auto tabular-nums font-semibold text-[#0f2a20]">{count(x.value)}</span>
+            <span className="ml-auto tabular-nums font-semibold text-cc-ink-deep">{count(x.value)}</span>
             <span className="tabular-nums text-text-muted w-10 text-right">{pct(x.value, sum)}%</span>
           </li>
         ))}
@@ -546,7 +546,7 @@ function Tip({ active, payload, label, fmt = count }: { active?: boolean; payloa
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-xl border border-black/[0.06] bg-white px-3 py-2 shadow-lg text-[12.5px]">
-      {label && <div className="font-semibold text-[#0f2a20] mb-1">{label}</div>}
+      {label && <div className="font-semibold text-cc-ink-deep mb-1">{label}</div>}
       {payload.map((p) => (
         <div key={p.name} className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-[2px]" style={{ background: p.payload?.color || p.color || p.fill }} />
@@ -579,10 +579,10 @@ function Speed({ rows }: { rows: { name: string; days: number | null }[] }) {
       {rows.map((r) => (
         <div key={r.name} className="grid grid-cols-[minmax(0,10rem)_1fr_auto] items-center gap-3">
           <span className="text-[13px] text-text-mid truncate" title={r.name}>{r.name}</span>
-          <span className="h-2.5 rounded-full bg-[#eef3f0] overflow-hidden">
+          <span className="h-2.5 rounded-full bg-cc-track overflow-hidden">
             {r.days != null && <span className="block h-full rounded-full" style={{ width: `${(r.days / max) * 100}%`, background: C.teal }} />}
           </span>
-          <span className="text-right tabular-nums min-w-[3.5rem] text-[14px] font-semibold text-[#0f2a20]">{r.days == null ? "—" : `${r.days} d`}</span>
+          <span className="text-right tabular-nums min-w-[3.5rem] text-[14px] font-semibold text-cc-ink-deep">{r.days == null ? "—" : `${r.days} d`}</span>
         </div>
       ))}
     </div>
@@ -605,13 +605,13 @@ function LenderTable({ rows }: { rows: { key: string; label: string; color: stri
       <tbody>
         {rows.map((r) => (
           <tr key={r.key} className="border-t border-black/[0.05]">
-            <td className="py-2.5"><span className="inline-flex items-center gap-2 font-medium text-[#0f2a20]"><span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: r.color }} />{r.label}</span></td>
+            <td className="py-2.5"><span className="inline-flex items-center gap-2 font-medium text-cc-ink-deep"><span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: r.color }} />{r.label}</span></td>
             <td className="py-2.5 text-right tabular-nums">{count(r.sent)}</td>
-            <td className="py-2.5 text-right tabular-nums text-[#0f7a52] font-semibold">{count(r.approved)}</td>
+            <td className="py-2.5 text-right tabular-nums text-cc-green-text font-semibold">{count(r.approved)}</td>
             <td className="py-2.5 text-right tabular-nums text-[#b91c1c]">{count(r.rejected)}</td>
             <td className="py-2.5">
               <div className="flex items-center gap-2 justify-end">
-                <span className="h-2 w-24 rounded-full bg-[#eef3f0] overflow-hidden"><span className="block h-full rounded-full" style={{ width: `${r.rate}%`, background: C.green }} /></span>
+                <span className="h-2 w-24 rounded-full bg-cc-track overflow-hidden"><span className="block h-full rounded-full" style={{ width: `${r.rate}%`, background: C.green }} /></span>
                 <span className="tabular-nums font-semibold w-10 text-right">{r.approved + r.rejected ? `${r.rate}%` : "—"}</span>
               </div>
             </td>
@@ -643,16 +643,16 @@ function PartnerTable({ rows }: { rows: { name: string; files: number; approved:
             <td className="py-2.5 pr-2">
               <span className="flex items-center gap-2 min-w-0">
                 <span className="h-5 w-5 shrink-0 rounded-full grid place-items-center text-[10.5px] font-bold text-white" style={{ background: i < 3 ? "#145c45" : "#94a3b8" }}>{i + 1}</span>
-                <span className="truncate font-medium text-[#0f2a20]" title={r.name}>{r.name}</span>
+                <span className="truncate font-medium text-cc-ink-deep" title={r.name}>{r.name}</span>
               </span>
             </td>
             <td className="py-2.5">
               <span className="flex items-center gap-2">
-                <span className="h-2 flex-1 max-w-[7rem] rounded-full bg-[#eef3f0] overflow-hidden"><span className="block h-full rounded-full" style={{ width: `${(r.files / max) * 100}%`, background: C.blue }} /></span>
+                <span className="h-2 flex-1 max-w-[7rem] rounded-full bg-cc-track overflow-hidden"><span className="block h-full rounded-full" style={{ width: `${(r.files / max) * 100}%`, background: C.blue }} /></span>
                 <span className="tabular-nums font-semibold">{count(r.files)}</span>
               </span>
             </td>
-            <td className="py-2.5 text-right tabular-nums text-[#0f7a52] font-semibold">{count(r.approved)}</td>
+            <td className="py-2.5 text-right tabular-nums text-cc-green-text font-semibold">{count(r.approved)}</td>
             <td className="py-2.5 text-right tabular-nums">{r.disbursed ? money(r.disbursed) : "—"}</td>
             {showRate && <td className="py-2.5 text-right tabular-nums">{r.rate == null ? "—" : `${r.rate}%`}</td>}
           </tr>

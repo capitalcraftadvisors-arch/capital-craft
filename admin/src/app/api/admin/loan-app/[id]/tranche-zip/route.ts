@@ -18,6 +18,7 @@ import { UUID_RE } from "@/lib/validators";
 import { loanDisplayId } from "@/lib/loan-labels";
 import { baseName, loadLoanAndDocs, zipResponse } from "@/lib/zip-response";
 import { rupees } from "@/lib/money";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -119,7 +120,7 @@ export async function GET(
       .slice(0, 80);
     return zipResponse(archive, safeName);
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[tranche-zip] error:", msg);
     return err(msg, 500);
   }

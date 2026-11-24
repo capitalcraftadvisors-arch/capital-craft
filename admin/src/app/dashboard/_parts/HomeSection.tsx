@@ -75,11 +75,11 @@ export default function HomeSection({ loans, loading, attnCount, canLoan, canIns
   }, [loans]);
 
   const kpis: { label: string; value: string; tone: string; delta?: number; money?: boolean }[] = [
-    { label: "Applications", value: String(cur.total), tone: "text-[#0f3d2e]", delta: cur.total - prev.total },
-    { label: "Approved", value: String(cur.approved), tone: "text-[#178a5c]", delta: cur.approved - prev.approved },
-    { label: "Sanctioned", value: compactRupees(cur.sanctioned), tone: "text-[#0f3d2e]", delta: cur.sanctioned - prev.sanctioned, money: true },
-    { label: "Disbursed", value: compactRupees(cur.disbursed), tone: "text-[#0f3d2e]", delta: cur.disbursed - prev.disbursed, money: true },
-    { label: "2nd tranche pending", value: String(cur.tranchePending), tone: "text-[#854f0b]" },
+    { label: "Applications", value: String(cur.total), tone: "text-cc-ink", delta: cur.total - prev.total },
+    { label: "Approved", value: String(cur.approved), tone: "text-cc-green", delta: cur.approved - prev.approved },
+    { label: "Sanctioned", value: compactRupees(cur.sanctioned), tone: "text-cc-ink", delta: cur.sanctioned - prev.sanctioned, money: true },
+    { label: "Disbursed", value: compactRupees(cur.disbursed), tone: "text-cc-ink", delta: cur.disbursed - prev.disbursed, money: true },
+    { label: "2nd tranche pending", value: String(cur.tranchePending), tone: "text-warn-ink" },
   ];
   const segs = [
     { label: "In review", value: breakdown.review, color: "#f0b429" },
@@ -103,7 +103,7 @@ export default function HomeSection({ loans, loading, attnCount, canLoan, canIns
           )}
           {canInsurance && (
             <button onClick={onApplyInsurance} disabled={applyingInsurance}
-              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-[#1e3a8a] text-[#1e3a8a] text-[13.5px] font-semibold hover:bg-[#1e3a8a]/[0.06] active:scale-[0.98] transition disabled:opacity-60">
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-navy text-navy text-[13.5px] font-semibold hover:bg-navy/[0.06] active:scale-[0.98] transition disabled:opacity-60">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" /></svg>
               {applyingInsurance ? "Starting…" : "Apply for insurance"}
             </button>
@@ -111,7 +111,7 @@ export default function HomeSection({ loans, loading, attnCount, canLoan, canIns
         </div>
         <div className="relative shrink-0">
           <select value={period} onChange={(e) => setPeriod(e.target.value as Period)}
-            className="appearance-none bg-white border border-line rounded-xl pl-3.5 pr-9 py-2 text-[13px] font-semibold text-[#0f3d2e] cursor-pointer hover:border-[#1e3a8a] focus:outline-none focus:border-[#1e3a8a]">
+            className="appearance-none bg-white border border-line rounded-xl pl-3.5 pr-9 py-2 text-[13px] font-semibold text-cc-ink cursor-pointer hover:border-navy focus:outline-none focus:border-navy">
             {PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
           </select>
           <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5a8a76" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
@@ -125,7 +125,7 @@ export default function HomeSection({ loans, loading, attnCount, canLoan, canIns
             <div className="text-[11.5px] text-text-muted">{k.label}</div>
             <div className={`text-[22px] font-bold mt-0.5 ${k.tone}`}>{loading ? "…" : k.value}</div>
             {comparable && k.delta !== undefined && (
-              <div title="vs previous period" className={["mt-1 inline-flex items-center gap-1 text-[11px] font-semibold", k.delta > 0 ? "text-[#178a5c]" : k.delta < 0 ? "text-[#dc2626]" : "text-text-muted"].join(" ")}>
+              <div title="vs previous period" className={["mt-1 inline-flex items-center gap-1 text-[11px] font-semibold", k.delta > 0 ? "text-cc-green" : k.delta < 0 ? "text-red-600" : "text-text-muted"].join(" ")}>
                 <span aria-hidden>{k.delta > 0 ? "▲" : k.delta < 0 ? "▼" : "–"}</span>
                 {k.money ? compactRupees(Math.abs(k.delta)) : Math.abs(k.delta)}
               </div>
@@ -139,10 +139,10 @@ export default function HomeSection({ loans, loading, attnCount, canLoan, canIns
         <div className="lg:col-span-2 flex flex-col gap-5">
           <div className="bg-white rounded-2xl border border-line p-5">
             <div className="flex items-center justify-between gap-3">
-              <div className="text-[13px] font-semibold text-[#0f3d2e]">Portfolio breakdown</div>
+              <div className="text-[13px] font-semibold text-cc-ink">Portfolio breakdown</div>
               {attnCount > 0 && (
-                <button onClick={onAttention} className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-2.5 py-1 rounded-full bg-[#fde8e8] text-[#dc2626] hover:bg-[#fbd5d5] transition-colors">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#dc2626]" />{attnCount} need attention
+                <button onClick={onAttention} className="inline-flex items-center gap-1.5 text-[11.5px] font-semibold px-2.5 py-1 rounded-full bg-[#fde8e8] text-red-600 hover:bg-[#fbd5d5] transition-colors">
+                  <span className="w-1.5 h-1.5 rounded-full bg-red-600" />{attnCount} need attention
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
                 </button>
               )}
@@ -154,7 +154,7 @@ export default function HomeSection({ loans, loading, attnCount, canLoan, canIns
                   <div key={s.label} className="flex items-center gap-3">
                     <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: s.color }} />
                     <span className="text-[13px] text-text-mid flex-1">{s.label}</span>
-                    <span className="text-[15px] font-bold text-[#0f3d2e] tabular-nums">{s.value}</span>
+                    <span className="text-[15px] font-bold text-cc-ink tabular-nums">{s.value}</span>
                     <span className="text-[11.5px] text-text-muted w-9 text-right tabular-nums">{Math.round((s.value / segTotal) * 100)}%</span>
                   </div>
                 ))}
@@ -163,14 +163,14 @@ export default function HomeSection({ loans, loading, attnCount, canLoan, canIns
           </div>
 
           <div className="bg-white rounded-2xl border border-line p-5">
-            <div className="text-[13px] font-semibold text-[#0f3d2e] mb-3">Today&rsquo;s activity</div>
+            <div className="text-[13px] font-semibold text-cc-ink mb-3">Today&rsquo;s activity</div>
             {loading ? <div className="text-[13px] text-text-muted">Loading…</div>
               : todays.length === 0 ? <div className="text-[13px] text-text-muted">No status changes in the last 24 hours.</div>
               : <div className="flex flex-col gap-2">
                   {todays.map((r) => {
                     const stg = stage4(r);
                     return (
-                      <button key={r.id} onClick={() => onOpenCase(r)} className="flex items-center justify-between gap-3 rounded-xl border border-line px-3.5 py-2.5 hover:bg-[#f7f9fe] text-left">
+                      <button key={r.id} onClick={() => onOpenCase(r)} className="flex items-center justify-between gap-3 rounded-xl border border-line px-3.5 py-2.5 hover:bg-navy-mist text-left">
                         <div className="min-w-0"><div className="text-[13.5px] font-semibold text-text truncate">{borrower(r)}</div><div className="text-[11px] text-text-muted">{fmtDateTimeOrBlank(statusChangedAt(r) ?? r.created_at)}</div></div>
                         <span className={`shrink-0 text-[11px] font-semibold px-2.5 py-1 rounded-full ${STAGE4_PILL[stg]}`}>{STAGE4_LABEL[stg]}</span>
                       </button>
@@ -182,18 +182,18 @@ export default function HomeSection({ loans, loading, attnCount, canLoan, canIns
 
         {/* Right: EMI tile · disbursement progress · relationship managers */}
         <div className="flex flex-col gap-5">
-          <button onClick={onEmi} className="bg-white rounded-2xl border border-line p-5 text-left hover:border-[#1e3a8a] transition-colors">
+          <button onClick={onEmi} className="bg-white rounded-2xl border border-line p-5 text-left hover:border-navy transition-colors">
             <div className="text-[12px] text-text-muted">Quote a customer&rsquo;s EMI</div>
-            <div className="text-[15px] font-semibold text-[#1e3a8a] mt-1 flex items-center gap-1.5">Open EMI calculator
+            <div className="text-[15px] font-semibold text-navy mt-1 flex items-center gap-1.5">Open EMI calculator
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
             </div>
             <div className="text-[11.5px] text-text-muted mt-1">EMI after the PM Surya Ghar subsidy, in seconds.</div>
           </button>
 
           {canQuote && (
-            <button onClick={onQuotation} className="bg-white rounded-2xl border border-line p-5 text-left hover:border-[#1e3a8a] transition-colors">
+            <button onClick={onQuotation} className="bg-white rounded-2xl border border-line p-5 text-left hover:border-navy transition-colors">
               <div className="text-[12px] text-text-muted">Make a customer quotation</div>
-              <div className="text-[15px] font-semibold text-[#1e3a8a] mt-1 flex items-center gap-1.5">Open quotation builder
+              <div className="text-[15px] font-semibold text-navy mt-1 flex items-center gap-1.5">Open quotation builder
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
               </div>
             </button>

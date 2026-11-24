@@ -24,6 +24,7 @@ import sharp from "sharp";
 import { err, requireLogin } from "@/lib/api";
 import { visionDocumentText } from "@/lib/vision-server";
 import { geminiExtractGeoStamp } from "@/lib/doc-extractors";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -124,7 +125,7 @@ export async function POST(req: NextRequest) {
     try {
       rawText = await visionDocumentText(buffer, "image/jpeg");
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errText(e);
       console.error("[extract-geo] vision error:", msg);
       return err(msg, 502);
     }
@@ -154,7 +155,7 @@ export async function POST(req: NextRequest) {
     if (g && printed(g.lat) && printed(g.lng)) return found(g, seen);
     return found(null, rawText || "");
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[extract-geo] error:", msg);
     return err(msg, 500);
   }

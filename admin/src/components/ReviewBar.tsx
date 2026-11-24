@@ -10,6 +10,7 @@
 import { useState } from "react";
 import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { fmtDate } from "@/lib/dates";
+import { askConfirm } from "@/lib/confirm";
 import { approveReview, sendBackReview, undoReview, reviewState, type ReviewItem } from "@/lib/review";
 import { HAction, I } from "@/components/view/ViewKit";
 
@@ -49,15 +50,15 @@ export default function ReviewBar({ loan, item, onDecided, onEdit, compact }: {
   }
   const approve = () => void run(() => approveReview(loan.id, item));
   const sendBack = () => { if (reason.trim()) void run(() => sendBackReview(loan.id, item, reason)); };
-  const undo = () => {
-    if (!window.confirm("Undo the admin's decision? It goes back to waiting for the check.")) return;
+  const undo = async () => {
+    if (!(await askConfirm("Undo the admin's decision? It goes back to waiting for the check."))) return;
     void run(() => undoReview(loan.id, item));
   };
 
   const tone =
-    state === "approved"  ? { box: "border-[#cdeadd] bg-[#f0faf5] text-[#178a5c]", icon: I.checkCircle, text: "Approved by Admin" } :
+    state === "approved"  ? { box: "border-cc-line bg-cc-wash text-cc-green", icon: I.checkCircle, text: "Approved by Admin" } :
     state === "sent_back" ? { box: "border-red-200 bg-red-50 text-red-700", icon: UNDO, text: "Sent back by Admin" } :
-                            { box: "border-[#f3d9a4] bg-[#fef8ee] text-[#854f0b]", icon: I.lock, text: admin ? "Waiting for your check" : "Waiting for admin check" };
+                            { box: "border-warn-line bg-warn-wash text-warn-ink", icon: I.lock, text: admin ? "Waiting for your check" : "Waiting for admin check" };
 
   const sm = !!compact; // Pendings rows: small buttons on one line
   const actions = admin && (
@@ -85,7 +86,7 @@ export default function ReviewBar({ loan, item, onDecided, onEdit, compact }: {
         onChange={(e) => setReason(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") sendBack(); }}
         placeholder="Reason"
-        className={["border border-red-200 rounded-[8px] outline-none focus:border-red-400 bg-white text-[#0f3d2e]",
+        className={["border border-red-200 rounded-[8px] outline-none focus:border-red-400 bg-white text-cc-ink",
           sm ? "w-[200px] px-2.5 py-1 text-[12px]" : "flex-1 min-w-[220px] px-3 py-2 text-[13px]"].join(" ")}
       />
       <HAction small={sm} variant="reject" disabled={busy || !reason.trim()} onClick={sendBack}>{busy ? "Saving…" : "Send back"}</HAction>
@@ -119,9 +120,9 @@ export default function ReviewBar({ loan, item, onDecided, onEdit, compact }: {
             {tone.text}
             {state !== "pending" && when && <span className="font-normal opacity-80">· {when}</span>}
           </div>
-          {state === "sent_back" && note && <p className="text-[13px] mt-1 text-[#0f3d2e]">{note}</p>}
+          {state === "sent_back" && note && <p className="text-[13px] mt-1 text-cc-ink">{note}</p>}
           {state === "pending" && admin && note && (
-            <p className="text-[12px] mt-1 text-[#5a8a76]">Sent back earlier: {note}</p>
+            <p className="text-[12px] mt-1 text-cc-muted">Sent back earlier: {note}</p>
           )}
         </div>
         {actions}

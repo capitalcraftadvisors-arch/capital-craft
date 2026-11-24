@@ -18,6 +18,7 @@ import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { getSignedReadUrl } from "@/lib/gcs";
 import { LOAN_PATH_COLUMNS as PATH_COLUMNS } from "@/lib/loan-doc-checklist";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,7 +67,7 @@ export async function POST(
     );
     return NextResponse.json({ ok: true, url });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[sign-doc] error:", msg);
     return err(msg, 500);
   }

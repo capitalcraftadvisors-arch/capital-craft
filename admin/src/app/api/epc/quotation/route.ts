@@ -34,6 +34,7 @@ import { buildPotaliyaQuotation, potaliyaInput } from "@/lib/quotation-potaliya"
 import { num } from "@/lib/pdf-template";
 import { BIJLEE, SARVATRA, SARVATRA_ENERGY, RVS, POTALIYA } from "@/lib/quotation-brands";
 import { fmtDateIST } from "@/lib/dates";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -149,7 +150,7 @@ export async function POST(req: NextRequest) {
       });
     }
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[epc/quotation] error:", msg);
     return err(msg, 500);
   }

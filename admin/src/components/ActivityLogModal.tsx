@@ -3,7 +3,7 @@
 // Modal wrapper around <ActivityLog />. Rendered from the View page's
 // Actions strip. Full-height scrollable list; close on backdrop or × click.
 
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import ActivityLog from "@/components/ActivityLog";
 import Modal from "@/components/ui/Modal";
 
@@ -33,11 +33,12 @@ export default function ActivityLogModal({ open, onClose, businessId, epcName, r
 export function LogModalFrame({ onClose, name, subtitle, children }: {
   onClose: () => void; name?: string | null; subtitle: string; children: ReactNode;
 }) {
+  const titleId = useId();
   return (
-    <Modal onClose={onClose} className="w-full max-w-2xl bg-white rounded-lg shadow-lg flex flex-col max-h-[90vh]">
+    <Modal onClose={onClose} className="w-full max-w-2xl bg-white rounded-lg shadow-lg flex flex-col max-h-[90vh]" aria-labelledby={titleId}>
       <div className="p-5 border-b border-line flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="font-display font-semibold text-[18px] text-text truncate">
+          <h3 id={titleId} className="font-display font-semibold text-[18px] text-text truncate">
             Activity log{name ? ` — ${name}` : ""}
           </h3>
           <p className="text-[12px] text-text-mid mt-0.5">{subtitle}</p>

@@ -9,7 +9,7 @@ import type { PaymentStage } from "@/lib/quotation-brands";
 import { numberInput } from "@/lib/money";
 
 export function AddBtn({ onClick, label = "+ Add row" }: { onClick: () => void; label?: string }) {
-  return <button type="button" onClick={onClick} className="text-[13px] font-semibold text-[#1e3a8a] hover:underline">{label}</button>;
+  return <button type="button" onClick={onClick} className="text-[13px] font-semibold text-navy hover:underline">{label}</button>;
 }
 
 export function RemoveBtn({ onClick }: { onClick: () => void }) {
@@ -40,7 +40,7 @@ export function PaymentRows({ rows, onChange }: { rows: PaymentStage[]; onChange
       ))}
       <div className="flex items-center justify-between gap-3">
         <AddBtn onClick={() => onChange([...rows, ["", 0]])} />
-        <span className={"text-[13px] font-semibold " + (Math.abs(total - 100) > 0.001 ? "text-red-600" : "text-[#178a5c]")}>{total}%</span>
+        <span className={"text-[13px] font-semibold " + (Math.abs(total - 100) > 0.001 ? "text-red-600" : "text-cc-green")}>{total}%</span>
       </div>
     </div>
   );

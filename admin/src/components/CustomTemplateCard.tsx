@@ -12,6 +12,7 @@ import FileUpload from "@/components/FileUpload";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { fmtDate } from "@/lib/dates";
+import { askConfirm } from "@/lib/confirm";
 import { customState, freeUntil } from "@/lib/custom-template";
 import { HAction } from "@/components/view/ViewKit";
 
@@ -37,8 +38,8 @@ export default function CustomTemplateCard({ businessId }: { businessId: string 
     if (e) { setError(e.message); return; }
     setTpl({ ...tpl, ...patch });
   }
-  const markReady = () => {
-    if (window.confirm("Mark the custom template ready?\n\nThe EPC sees \"Your custom template is ready\" and its 3 free months start today.")) {
+  const markReady = async () => {
+    if (await askConfirm("Mark the custom template ready?\n\nThe EPC sees \"Your custom template is ready\" and its 3 free months start today.")) {
       void save({ ready_at: new Date().toISOString() });
     }
   };
@@ -51,7 +52,7 @@ export default function CustomTemplateCard({ businessId }: { businessId: string 
     tpl.unlocked ? `${tpl.name || "Template"} · On` :
     state === "ready" ? `${tpl.name || "Template"} · free till ${fmtDate(freeUntil(tpl.ready_at!).toISOString())}` :
     `${tpl.name || "Template"} · locked since ${fmtDate(freeUntil(tpl.ready_at!).toISOString())}`;
-  const tone = state === "locked" ? "text-[#854f0b]" : state === "ready" ? "text-[#178a5c]" : "text-[#0f3d2e]";
+  const tone = state === "locked" ? "text-warn-ink" : state === "ready" ? "text-cc-green" : "text-cc-ink";
 
   return (
     <div className="pt-1 flex flex-col gap-3">
@@ -61,14 +62,14 @@ export default function CustomTemplateCard({ businessId }: { businessId: string 
           <HAction small variant="primary" disabled={busy} onClick={markReady}>{busy ? "Saving…" : "Mark ready"}</HAction>
         )}
         {admin && tpl?.ready_at && (
-          <label className="inline-flex items-center gap-2 text-[12.5px] font-semibold text-[#0f3d2e] cursor-pointer select-none">
-            <input type="checkbox" className="w-4 h-4 accent-[#178a5c]" checked={!!tpl.unlocked} disabled={busy}
+          <label className="inline-flex items-center gap-2 text-[12.5px] font-semibold text-cc-ink cursor-pointer select-none">
+            <input type="checkbox" className="w-4 h-4 accent-cc-green" checked={!!tpl.unlocked} disabled={busy}
               onChange={(e) => void save({ unlocked: e.target.checked })} />
             On
           </label>
         )}
       </div>
-      {tpl?.ready_at && <div className="text-[12px] text-[#5a8a76]">Ready {fmtDate(tpl.ready_at)}</div>}
+      {tpl?.ready_at && <div className="text-[12px] text-cc-muted">Ready {fmtDate(tpl.ready_at)}</div>}
       {error && <p className="text-[12px] text-red-600">{error}</p>}
       <FileUpload table="epc_documents" category="custom_quote_sample" businessId={businessId} uploadedBy="admin"
         maxFiles={3} label="Sample quotation" uploadHint="PDF or photo" />

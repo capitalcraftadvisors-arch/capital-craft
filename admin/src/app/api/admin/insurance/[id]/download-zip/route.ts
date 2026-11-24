@@ -17,6 +17,7 @@ import { UUID_RE } from "@/lib/validators";
 import { rupees } from "@/lib/money";
 import { fmtDob } from "@/lib/dates";
 import { baseName, zipResponse } from "@/lib/zip-response";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -118,7 +119,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     const safeName = `${displayId}_${applicant}`.replace(/[^\w-]+/g, "_").slice(0, 80);
     return zipResponse(archive, safeName);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[insurance-zip] error:", msg);
     return err(msg, 500);
   }

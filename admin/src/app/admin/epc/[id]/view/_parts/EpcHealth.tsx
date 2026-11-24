@@ -13,16 +13,16 @@ export function EpcHealthPanel({ health, hPeriod, setHPeriod, healthTab, setHeal
 }) {
   return (
     <div className="pt-6">
-      <div className="rounded-[14px] border border-[#cdeadd] bg-[#f4fbf7] p-5 sm:p-6">
+      <div className="rounded-[14px] border border-cc-line bg-cc-soft p-5 sm:p-6">
         {/* Header — title (left) · EPC score + period (right). */}
         <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
-          <div className="text-[20px] font-bold text-[#0f3d2e] leading-tight">EPC Health</div>
+          <div className="text-[20px] font-bold text-cc-ink leading-tight">EPC Health</div>
           <div className="flex items-center gap-2.5 flex-wrap justify-end">
             {health && <HeaderScore score={health.score} />}
             <select
               value={hPeriod}
               onChange={(e) => setHPeriod(e.target.value as Period | "all")}
-              className="rounded-input border border-[#cdeadd] bg-white px-3 py-2 text-[13px] font-medium text-[#0f3d2e] outline-none focus:border-[#178a5c] cursor-pointer shrink-0"
+              className="rounded-input border border-cc-line bg-white px-3 py-2 text-[13px] font-medium text-cc-ink outline-none focus:border-cc-green cursor-pointer shrink-0"
             >
               <option value="all">All time</option>
               <option value="today">Today</option>
@@ -35,7 +35,7 @@ export function EpcHealthPanel({ health, hPeriod, setHPeriod, healthTab, setHeal
         </div>
 
         {!health ? (
-          <div className="rounded-[12px] border border-[#e0f0e8] bg-white p-6 text-center text-[14px] text-[#5a8a76]">
+          <div className="rounded-[12px] border border-cc-line-soft bg-white p-6 text-center text-[14px] text-cc-muted">
             No applications in this period yet.
           </div>
         ) : (() => {
@@ -48,15 +48,15 @@ export function EpcHealthPanel({ health, hPeriod, setHPeriod, healthTab, setHeal
           return (
             <>
               {/* Segment tabs */}
-              <div className="inline-flex rounded-[10px] border border-[#cdeadd] overflow-hidden bg-white mb-3">
+              <div className="inline-flex rounded-[10px] border border-cc-line overflow-hidden bg-white mb-3">
                 {TABS.map((t) => (
                   <button
                     key={t.key}
                     type="button"
                     onClick={() => setHealthTab(t.key)}
                     className={
-                      "px-4 py-1.5 text-[13px] font-semibold border-r border-[#cdeadd] last:border-r-0 transition-colors " +
-                      (healthTab === t.key ? "bg-[#178a5c] text-white" : "text-[#0f3d2e] bg-white hover:bg-[#f0faf5]")
+                      "px-4 py-1.5 text-[13px] font-semibold border-r border-cc-line last:border-r-0 transition-colors " +
+                      (healthTab === t.key ? "bg-cc-green text-white" : "text-cc-ink bg-white hover:bg-cc-wash")
                     }
                   >
                     {t.label}
@@ -96,9 +96,9 @@ const lacsFmt = (v: number) => `₹${(v / 100000).toLocaleString("en-IN", { maxi
 // One paired metric row inside a segment tab (label left, value right).
 function HealthRow({ label, value, accent, green }: { label: string; value: string; accent?: boolean; green?: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-3 py-2 border-b border-[#eef1f4]">
-      <span className="text-[15px] text-[#334155]">{label}</span>
-      <span className={"text-[15px] font-semibold " + (green ? "text-[#178a5c]" : accent ? "text-[#185fa5]" : "text-[#0f3d2e]")}>
+    <div className="flex items-center justify-between gap-3 py-2 border-b border-grey-line">
+      <span className="text-[15px] text-slate-700">{label}</span>
+      <span className={"text-[15px] font-semibold " + (green ? "text-cc-green" : accent ? "text-cc-blue" : "text-cc-ink")}>
         {value}
       </span>
     </div>
@@ -108,7 +108,7 @@ function HealthRow({ label, value, accent, green }: { label: string; value: stri
 // The full paired-metrics card for a segment (Applications↔Approval ratio, etc.).
 function MetricsCard({ b }: { b: HealthBucket }) {
   return (
-    <div className="rounded-[12px] border border-[#e0f0e8] bg-white p-4 sm:p-5 h-full">
+    <div className="rounded-[12px] border border-cc-line-soft bg-white p-4 sm:p-5 h-full">
       <div className="grid sm:grid-cols-2 gap-x-8 gap-y-0">
         <HealthRow label="Applications Submitted" value={numFmt(b.submitted)} />
         <HealthRow label="Approval ratio" value={pctFmt(b.approvalRatio)} accent />
@@ -125,9 +125,9 @@ function MetricsCard({ b }: { b: HealthBucket }) {
 // A small headline stat card (transaction volume / repeat customers).
 function MiniStat({ label, value, className }: { label: string; value: string; className?: string }) {
   return (
-    <div className={"rounded-[12px] border border-[#e0f0e8] bg-white p-4 flex flex-col justify-center " + (className ?? "")}>
-      <div className="text-[12px] font-semibold uppercase tracking-wide text-[#5a8a76]">{label}</div>
-      <div className="text-[26px] font-bold text-[#0f3d2e] mt-1 leading-none">{value}</div>
+    <div className={"rounded-[12px] border border-cc-line-soft bg-white p-4 flex flex-col justify-center " + (className ?? "")}>
+      <div className="text-[12px] font-semibold uppercase tracking-wide text-cc-muted">{label}</div>
+      <div className="text-[26px] font-bold text-cc-ink mt-1 leading-none">{value}</div>
     </div>
   );
 }
@@ -161,9 +161,9 @@ function TatCard({ tat, className }: { tat: TatBands; className?: string }) {
     { label: "> 90 days", value: tat.gt90, color: "#dc2626", active: tat.alert === "red" },
   ];
   return (
-    <div className={"rounded-[12px] border border-[#e0f0e8] bg-white p-4 " + (className ?? "")}>
+    <div className={"rounded-[12px] border border-cc-line-soft bg-white p-4 " + (className ?? "")}>
       <div className="flex items-center justify-between gap-2 mb-3">
-        <div className="text-[12px] font-semibold uppercase tracking-wide text-[#5a8a76]">Installation TAT</div>
+        <div className="text-[12px] font-semibold uppercase tracking-wide text-cc-muted">Installation TAT</div>
         <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold" style={{ color: t.text }}>
           <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: t.dot }} />
           {t.label}
@@ -175,7 +175,7 @@ function TatCard({ tat, className }: { tat: TatBands; className?: string }) {
             className="rounded-[10px] border px-3 py-2.5 text-center"
             style={{ borderColor: band.active ? band.color : "#eef1f4", backgroundColor: band.active ? band.color + "14" : "#fbfdfc" }}>
             <div className="text-[22px] font-bold" style={{ color: band.color }}>{band.value}</div>
-            <div className="text-[11px] font-medium text-[#5a8a76] mt-0.5">{band.label}</div>
+            <div className="text-[11px] font-medium text-cc-muted mt-0.5">{band.label}</div>
           </div>
         ))}
       </div>

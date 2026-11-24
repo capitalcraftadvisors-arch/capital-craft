@@ -1,5 +1,4 @@
 "use client";
-import { fmtRupees } from "@/lib/money";
 
 // Insurance application — full-page View for admin. Structural sibling of the
 // loan View, on the SAME ViewKit (header card, SectionCard, KV, Pill, DocGrid)
@@ -12,6 +11,8 @@ import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { authHeaders } from "@/lib/auth";
 import { saveDownload } from "@/lib/storage";
+import { fmtRupees } from "@/lib/money";
+import { notify } from "@/lib/notify";
 import { I, SectionCard, KV, Pill, DocGrid, StatusBtn, type ViewDocSlot } from "@/components/view/ViewKit";
 import InsuranceUpload from "@/components/InsuranceUpload";
 import OwnershipCard from "@/components/OwnershipCard";
@@ -22,7 +23,6 @@ import { INSURANCE_STATUS_LABEL, policyValidity } from "@/lib/insurance-validity
 
 type App = Record<string, any>;
 
-// fmtRupees imported from @/lib/money
 // DISPLAY-ONLY label for the insurer. The stored insurance_partner value is
 // never changed and nothing keyed on it is affected; anything that isn't SBI
 // renders exactly as stored.
@@ -71,7 +71,7 @@ function Inner() {
     });
     const d = await res.json().catch(() => ({}));
     if (res.ok && d?.ok) { setPolicySaved(true); setApp({ ...app, policy_from_date: policyFrom || null, policy_to_date: policyTo || null }); }
-    else alert("Couldn't save policy dates: " + (d?.error || res.status));
+    else notify.error("Couldn't save policy dates: " + (d?.error || res.status));
   }
 
   // Admin moves the policy through Under Review → Issued / Hold / Rejected.
@@ -82,7 +82,7 @@ function Inner() {
       .from("insurance_applications")
       .update({ status: next })
       .eq("id", app.id);
-    if (error) alert("Status update failed: " + error.message);
+    if (error) notify.error("Status update failed: " + error.message);
     else setApp({ ...app, status: next });
     setStatusBusy(false);
   }
@@ -126,10 +126,10 @@ function Inner() {
         body: JSON.stringify({ table: "insurance_applications", id: params.id, column }),
       });
       const d = await res.json().catch(() => ({}));
-      if (!res.ok || !d?.ok) { alert("Couldn't remove: " + (d?.error || res.status)); return; }
+      if (!res.ok || !d?.ok) { notify.error("Couldn't remove: " + (d?.error || res.status)); return; }
       setApp((prev: App | null) => (prev ? { ...prev, [column]: null } : prev));
     } catch (e) {
-      alert("Couldn't remove: " + (e as Error).message);
+      notify.error("Couldn't remove: " + (e as Error).message);
     }
   }
 
@@ -140,13 +140,13 @@ function Inner() {
       const res = await fetch(`/api/admin/insurance/${app.id}/download-zip`, {
         headers: authHeaders(),
       });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert("ZIP failed: " + (d?.error || `HTTP ${res.status}`)); return; }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); notify.error("ZIP failed: " + (d?.error || `HTTP ${res.status}`)); return; }
       await saveDownload(res, `${app.insurance_display_id || app.id.slice(0, 8)}.zip`);
-    } catch (e) { alert("Download failed: " + (e as Error).message); }
+    } catch (e) { notify.error("Download failed: " + (e as Error).message); }
     finally { setDownloading(false); }
   }
 
-  if (loading) return <main className="min-h-screen grid place-items-center"><p className="text-[#5a8a76]">Loading…</p></main>;
+  if (loading) return <main className="min-h-screen grid place-items-center"><p className="text-cc-muted">Loading…</p></main>;
   if (!app) return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Insurance application not found.</p></main>;
 
   const docSlots: ViewDocSlot[] = [
@@ -179,22 +179,21 @@ function Inner() {
 
   return (
     <main className="min-h-screen bg-white">
-      <header className="border-b border-[#cdeadd] bg-white sticky top-0 z-30">
+      <header className="border-b border-cc-line bg-white sticky top-0 z-30">
         <div className="w-full px-5 sm:px-8 h-14 flex items-center justify-between">
-          <button onClick={() => router.push("/admin")} className="text-[14px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1">← Back to console</button>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <button onClick={() => router.push("/admin")} className="text-[14px] text-cc-muted hover:text-cc-ink inline-flex items-center gap-1">← Back to console</button>
           <img src="/brand/capital-craft.png" alt="Capital Craft" className="h-7 w-auto object-contain" />
         </div>
       </header>
 
       <div className="w-full px-5 sm:px-8 py-6" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
-        <div className="rounded-[12px] border border-[#cdeadd] bg-[#f0faf5] p-5 sm:p-6 mb-4">
+        <div className="rounded-[12px] border border-cc-line bg-cc-wash p-5 sm:p-6 mb-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-4 min-w-0">
-              <div className="w-14 h-14 rounded-[12px] bg-[#d6efe3] text-[#178a5c] grid place-items-center shrink-0" style={{ transform: "scale(1.3)", transformOrigin: "left center" }}>{I.user}</div>
+              <div className="w-14 h-14 rounded-[12px] bg-cc-tint-strong text-cc-green grid place-items-center shrink-0" style={{ transform: "scale(1.3)", transformOrigin: "left center" }}>{I.user}</div>
               <div className="min-w-0">
-                <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">{app.aadhaar_name || "(unnamed)"}</div>
-                <div className="text-[14px] text-[#5a8a76] truncate mt-0.5">via {epcName}</div>
+                <div className="text-[24px] font-semibold text-cc-ink truncate">{app.aadhaar_name || "(unnamed)"}</div>
+                <div className="text-[14px] text-cc-muted truncate mt-0.5">via {epcName}</div>
               </div>
             </div>
             <div className="flex gap-2 items-center flex-wrap">
@@ -210,7 +209,7 @@ function Inner() {
           left={
             <>
               <TabButton label="Profile" icon={I.user} active />
-              <TabButton label="Edit" icon={I.edit} onClick={() => router.push(`/dashboard/insurance/${app.id}/step-1` as any)} />
+              <TabButton label="Edit" icon={I.edit} onClick={() => router.push(`/dashboard/insurance/${app.id}/step-1`)} />
               <TabButton
                 label="Message to EPC"
                 icon={<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>}
@@ -255,7 +254,7 @@ function Inner() {
         {/* ── Insurance policy — under the status bar. Admin uploads the
             SBI-issued policy; we OCR the coverage period; dates editable. ── */}
         <SectionCard title="Insurance policy" accent="blue" icon={I.files} adminOnly>
-          <p className="text-[12px] text-[#5a8a76] mb-3">
+          <p className="text-[12px] text-cc-muted mb-3">
             Upload the policy issued by {insurerLabel(app.insurance_partner) || "the insurer"}. We&rsquo;ll read the coverage period; correct it if needed.
           </p>
           <div className="max-w-md">
@@ -274,22 +273,22 @@ function Inner() {
           </div>
           <div className="grid sm:grid-cols-2 gap-3 mt-4 max-w-md">
             <div>
-              <p className="text-[12px] text-[#5a8a76] mb-1">Coverage from</p>
+              <p className="text-[12px] text-cc-muted mb-1">Coverage from</p>
               <DateField value={policyFrom} onChange={(iso) => { setPolicyFrom(iso); setPolicySaved(false); }} ariaLabel="Coverage from"
-                className="border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] bg-white focus:border-[#185fa5] outline-none" />
+                className="border border-cc-line rounded-[8px] px-3 py-2.5 text-[14px] bg-white focus:border-cc-blue outline-none" />
             </div>
             <div>
-              <p className="text-[12px] text-[#5a8a76] mb-1">Coverage to (renewal deadline)</p>
+              <p className="text-[12px] text-cc-muted mb-1">Coverage to (renewal deadline)</p>
               <DateField value={policyTo} onChange={(iso) => { setPolicyTo(iso); setPolicySaved(false); }} ariaLabel="Coverage to"
-                className="border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] bg-white focus:border-[#185fa5] outline-none" />
+                className="border border-cc-line rounded-[8px] px-3 py-2.5 text-[14px] bg-white focus:border-cc-blue outline-none" />
             </div>
           </div>
           <div className="mt-3 flex items-center gap-3 flex-wrap">
             <button type="button" onClick={() => void savePolicy()}
-              className="px-4 py-2 bg-[#178a5c] text-white rounded text-[13px] font-semibold hover:bg-[#12734c]">Save policy dates</button>
-            {policySaved && <span className="text-[12px] text-[#178a5c] font-medium">✓ Saved</span>}
+              className="px-4 py-2 bg-cc-green text-white rounded text-[13px] font-semibold hover:bg-cc-green-hover">Save policy dates</button>
+            {policySaved && <span className="text-[12px] text-cc-green font-medium">✓ Saved</span>}
             {policyFrom && policyTo && (
-              <span className="text-[13px] font-semibold text-[#0f3d2e]">{policyValidity(policyFrom, policyTo)}</span>
+              <span className="text-[13px] font-semibold text-cc-ink">{policyValidity(policyFrom, policyTo)}</span>
             )}
           </div>
         </SectionCard>
@@ -322,7 +321,7 @@ function Inner() {
 
           <div className="flex flex-col gap-2.5">
             <SectionCard title="Plant & invoice" accent="green" icon={I.money}>
-              <KV k="Sum insured" v={fmtRupees(app.sum_insured ?? app.invoice_confirmed_amount)} valueClass="text-[#178a5c]" />
+              <KV k="Sum insured" v={fmtRupees(app.sum_insured ?? app.invoice_confirmed_amount)} valueClass="text-cc-green" />
               <KV k="Insurance partner" v={insurerLabel(app.insurance_partner)} />
               <KV k="Plant address" v={app.plant_address} />
               <KV k="Tax invoice / Quotation amount" v={fmtRupees(app.invoice_confirmed_amount)} />
@@ -350,7 +349,7 @@ function Inner() {
         onClose={() => setDeleteOpen(false)}
         onDeleted={(payload) => {
           setDeleteOpen(false);
-          alert(`Deleted ${payload.display_id ?? "insurance application"}${payload.applicant ? ` — ${payload.applicant}` : ""}.`);
+          notify.success(`Deleted ${payload.display_id ?? "insurance application"}${payload.applicant ? ` — ${payload.applicant}` : ""}.`);
           router.push("/admin");
         }}
         endpoint="/api/admin/delete-insurance"

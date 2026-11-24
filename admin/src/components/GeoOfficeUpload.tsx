@@ -26,11 +26,11 @@
 // resolved address.
 
 import { useEffect, useRef, useState } from "react";
-import { gps as exifrGps } from "exifr";
 import { supabase } from "@/lib/supabase";
 import { uploadDocument, getDocumentUrl, deleteDocument, downloadDocument } from "@/lib/storage";
 import { authHeaders } from "@/lib/auth";
 import { isAcceptedFileType } from "@/lib/validators";
+import { askConfirm } from "@/lib/confirm";
 import { I } from "@/components/view/ViewKit";
 import { UPLOAD_BOX_COMPACT } from "@/components/FileUpload";
 
@@ -75,9 +75,11 @@ type DocRow = {
 // (instead of the File) means exifr parses the entire image rather than a
 // chunked window, so the GPS IFD is always in range. Throws on a real parse
 // error (caller falls back to OCR); returns null when the image carries no
-// EXIF GPS.
+// EXIF GPS. The exifr library is its own file: fetched when the upload box
+// mounts (see the component), so here it is already loaded.
 async function readExifGps(file: File): Promise<Gps | null> {
   const buf = await file.arrayBuffer();
+  const { gps: exifrGps } = await import("exifr");
   const out = await exifrGps(buf);
   if (out && typeof out.latitude === "number" && typeof out.longitude === "number") {
     return { lat: out.latitude, lng: out.longitude, captured_at: new Date().toISOString() };
@@ -375,6 +377,10 @@ export default function GeoOfficeUpload({
   // Always stop the camera when the component unmounts.
   useEffect(() => () => stopStream(), []);
 
+  // Fetch exifr with the page, as when it was part of it, so readExifGps finds
+  // it loaded. If this fails, readExifGps tries again on the upload.
+  useEffect(() => { import("exifr").catch(() => {}); }, []);
+
   function stopStream() {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
@@ -530,7 +536,7 @@ export default function GeoOfficeUpload({
 
   async function remove() {
     if (!doc) return;
-    if (!window.confirm("Delete this photo? This can't be undone.")) return;
+    if (!(await askConfirm("Delete this photo? This can't be undone.", { danger: true }))) return;
     setError(null);
     // Custom-upload mode: just clear locally; the next upload overwrites the
     // stored path (there's no doc row to delete).
@@ -583,13 +589,13 @@ export default function GeoOfficeUpload({
           </div>
           {canView && (
             <button type="button" onClick={() => void view()} title="View uploaded document" aria-label="View uploaded document"
-              className="p-1.5 rounded hover:bg-bg-tint text-[#185fa5] transition-colors">
+              className="p-1.5 rounded hover:bg-bg-tint text-cc-blue transition-colors">
               {I.eye}
             </button>
           )}
           {doc.id && (
             <button type="button" onClick={() => void downloadDocument(doc.id)} title="Download" aria-label="Download"
-              className="p-1.5 rounded hover:bg-bg-tint text-[#185fa5] transition-colors">
+              className="p-1.5 rounded hover:bg-bg-tint text-cc-blue transition-colors">
               {I.download}
             </button>
           )}
@@ -616,7 +622,7 @@ export default function GeoOfficeUpload({
                 type="button"
                 onClick={() => void view()}
                 title="View uploaded document" aria-label="View uploaded document"
-                className="p-1.5 rounded hover:bg-bg-tint text-[#185fa5] transition-colors"
+                className="p-1.5 rounded hover:bg-bg-tint text-cc-blue transition-colors"
               >
                 {I.eye}
               </button>
@@ -650,8 +656,8 @@ export default function GeoOfficeUpload({
             onClick={openCamera}
             disabled={uploading}
             className={[
-              "flex flex-col items-center justify-center min-h-[120px] border-2 border-dashed border-[#185fa5] rounded-input bg-white text-[#185fa5]",
-              "px-3 text-center cursor-pointer hover:bg-[#f2f7fc] transition-colors disabled:opacity-60",
+              "flex flex-col items-center justify-center min-h-[120px] border-2 border-dashed border-cc-blue rounded-input bg-white text-cc-blue",
+              "px-3 text-center cursor-pointer hover:bg-cc-blue-wash transition-colors disabled:opacity-60",
             ].join(" ")}
           >
             <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="mb-1.5">
@@ -659,14 +665,14 @@ export default function GeoOfficeUpload({
               <circle cx="12" cy="13" r="4" />
             </svg>
             <p className="text-[14px] font-semibold">Take photo</p>
-            <p className="text-[12px] text-[#5a86b3] mt-0.5">Live camera + GPS</p>
+            <p className="text-[12px] text-cc-blue-muted mt-0.5">Live camera + GPS</p>
           </button>
           )}
           <label
             className={[
-              "flex flex-col items-center justify-center border-2 border-dashed border-[#185fa5] rounded-input bg-white text-[#185fa5]",
+              "flex flex-col items-center justify-center border-2 border-dashed border-cc-blue rounded-input bg-white text-cc-blue",
               compact ? UPLOAD_BOX_COMPACT : "min-h-[120px]",
-              "px-3 text-center cursor-pointer hover:bg-[#f2f7fc] transition-colors",
+              "px-3 text-center cursor-pointer hover:bg-cc-blue-wash transition-colors",
             ].join(" ")}
           >
             <input
@@ -683,7 +689,7 @@ export default function GeoOfficeUpload({
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
             <p className={(compact ? "text-[13px]" : "text-[14px]") + " font-semibold"}>Upload photo</p>
-            <p className={(compact ? "text-[11px]" : "text-[12px] mt-0.5") + " text-[#5a86b3]"}>Must be geo-tagged</p>
+            <p className={(compact ? "text-[11px]" : "text-[12px] mt-0.5") + " text-cc-blue-muted"}>Must be geo-tagged</p>
           </label>
         </div>
       )}
@@ -720,7 +726,7 @@ export default function GeoOfficeUpload({
               type="button"
               onClick={capture}
               disabled={camBusy}
-              className="px-5 py-2 rounded-input text-[14px] font-semibold bg-white text-[#0f3d2e] hover:bg-white/90 disabled:opacity-50"
+              className="px-5 py-2 rounded-input text-[14px] font-semibold bg-white text-cc-ink hover:bg-white/90 disabled:opacity-50"
             >
               {camBusy ? "Capturing…" : "Capture photo"}
             </button>

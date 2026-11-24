@@ -23,12 +23,12 @@ export function UploadedDoc({
   onReupload: () => void;
   uploading: boolean;
 }) {
-  const viewClass = "inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#185fa5] hover:underline";
+  const viewClass = "inline-flex items-center gap-1.5 text-[12px] font-semibold text-cc-blue hover:underline";
   return (
-    <div className="rounded-input border-2 border-[#178a5c] bg-[#f0faf5] p-4 space-y-2">
-      <p className="text-[13px] font-semibold text-[#0f3d2e]">{fileName}</p>
+    <div className="rounded-input border-2 border-cc-green bg-cc-wash p-4 space-y-2">
+      <p className="text-[13px] font-semibold text-cc-ink">{fileName}</p>
       {uploadedAt && (
-        <p className="text-[11px] text-[#5a8a76]">
+        <p className="text-[11px] text-cc-muted">
           Uploaded on {fmtDateTime(uploadedAt)}
         </p>
       )}
@@ -61,7 +61,7 @@ export function UploadedDoc({
           type="button"
           onClick={onReupload}
           disabled={uploading}
-          className="text-[12px] font-semibold text-[#178a5c] hover:underline disabled:opacity-60"
+          className="text-[12px] font-semibold text-cc-green hover:underline disabled:opacity-60"
         >
           {uploading ? "Uploading…" : "Re-upload"}
         </button>

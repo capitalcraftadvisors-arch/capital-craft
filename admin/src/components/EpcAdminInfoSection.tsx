@@ -390,11 +390,12 @@ export default function EpcAdminInfoSection({ businessId }: { businessId: string
   );
 }
 
+// A wrapping <label>, so the field's text names its (first) box.
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <p className="text-[12px] text-text-muted mb-1">{label}</p>
+    <label className="block">
+      <span className="block text-[12px] text-text-muted mb-1">{label}</span>
       {children}
-    </div>
+    </label>
   );
 }

@@ -14,12 +14,12 @@ export function MyMonthCard({ cases, srcFilter, me, thisMonthKey }: {
   const wip = wipCases.length;
   const oldest = wipCases.reduce((m, c) => Math.max(m, c.tatDays), 0);
   return (
-    <div className="inline-flex flex-col mb-4 rounded-lg border border-[#cdeadd] bg-[#f0faf5] px-4 py-2.5">
-      <span className="text-[12px] font-semibold text-[#5a8a76]">This month</span>
-      <span className="text-[12px] text-[#0f3d2e] mt-0.5">
+    <div className="inline-flex flex-col mb-4 rounded-lg border border-cc-line bg-cc-wash px-4 py-2.5">
+      <span className="text-[12px] font-semibold text-cc-muted">This month</span>
+      <span className="text-[12px] text-cc-ink mt-0.5">
         <strong>WIP {wip}</strong>
         {oldest > 0 && <> · oldest {oldest}d</>}
-        {done > 0 && <> · <strong className="text-[#178a5c]">{done} done</strong></>}
+        {done > 0 && <> · <strong className="text-cc-green">{done} done</strong></>}
       </span>
     </div>
   );
@@ -35,7 +35,7 @@ export function WorkloadStrip({ workload }: { workload: { id: string; name: stri
           <div className="text-[11px] text-text-muted mt-0.5">
             <span className="font-semibold text-text">WIP {w.wip}</span>
             {w.oldest > 0 && <> · oldest {w.oldest}d</>}
-            {w.done > 0 && <> · <span className="text-[#178a5c] font-semibold">{w.done} done</span></>}
+            {w.done > 0 && <> · <span className="text-cc-green font-semibold">{w.done} done</span></>}
           </div>
         </div>
       ))}

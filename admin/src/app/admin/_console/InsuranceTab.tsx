@@ -19,6 +19,7 @@ import { useEpcUpdates } from "@/lib/use-epc-updates";
 import RowLink from "@/components/RowLink";
 import { fmtRupees } from "@/lib/money";
 import { fmtDateTime } from "@/lib/dates";
+import { notify } from "@/lib/notify";
 import { inPeriod, usePeriodRows, type TabPeriodProps } from "./console-period";
 import {
   CreatedOnCell, DateRange, EmptyRow, FiltersPanel, ListToolbar, PILL, ReportButton, SummaryCards, UnseenBadge,
@@ -38,9 +39,9 @@ function insurerLabelShort(v: string | null | undefined): string {
 }
 
 const STATUS_PILL: Record<string, string> = {
-  draft: "bg-[#eef1f0] text-[#5a8a76]",
-  under_review: "bg-[#fef0d6] text-[#854f0b]",
-  issued: "bg-[#e6f6ee] text-[#178a5c]",
+  draft: "bg-cc-chip text-cc-muted",
+  under_review: "bg-warn-tint text-warn-ink",
+  issued: "bg-cc-tint text-cc-green",
   rejected: "bg-red-50 text-red-700",
   hold: "bg-[#e5edf5] text-[#3b5a76]",
 };
@@ -146,11 +147,11 @@ export default function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
       q, statusFilter, epcFilter, expiryFilter,
       dateFrom, dateTo, categoryFilter,
     }));
-    router.push(`/admin/insurance/${row.id}/view` as any);
+    router.push(`/admin/insurance/${row.id}/view`);
   }
   function editRow(row: Row) {
     sessionStorage.setItem("adminList.tab", "insurance");
-    router.push(`/dashboard/insurance/${row.id}/step-1` as any);
+    router.push(`/dashboard/insurance/${row.id}/step-1`);
   }
 
   function applicant(r: Row): string { return r.aadhaar_name || "—"; }
@@ -177,7 +178,7 @@ export default function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
       });
       const d = await res.json().catch(() => ({}));
       if (!res.ok || !d?.ok || !d.url) {
-        alert("Couldn't open the policy: " + (d?.error || `HTTP ${res.status}`));
+        notify.error("Couldn't open the policy: " + (d?.error || `HTTP ${res.status}`));
         return;
       }
       const a = document.createElement("a");
@@ -187,7 +188,7 @@ export default function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
       a.rel = "noopener";
       document.body.appendChild(a); a.click(); a.remove();
     } catch (e) {
-      alert("Couldn't open the policy: " + (e as Error).message);
+      notify.error("Couldn't open the policy: " + (e as Error).message);
     } finally { setPolicyBusy(null); }
   }
 
@@ -345,7 +346,7 @@ export default function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
                   data-highlighted={hl ? "yes" : undefined}
                   style={highlightRowStyle(hl)}
                   onClick={() => navigateToView(r)}
-                  className="border-b border-[#eaf3ee] cursor-pointer hover:bg-[#f7fcfa] align-top">
+                  className="border-b border-cc-row-line cursor-pointer hover:bg-cc-row-hover align-top">
                 {/* Insured name with the INS id beneath — same shape as the
                     EPC name/ID cell on the EPCs tab. */}
                 <td className="px-3 py-3">
@@ -354,18 +355,18 @@ export default function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
                       {IconPolicyDoc}
                     </span>
                     <div className="min-w-0">
-                      <p className="text-[15px] font-semibold text-[#0f3d2e] truncate"><RowLink href={`/admin/insurance/${r.id}/view`} onOpen={() => navigateToView(r)}>{applicant(r)}</RowLink></p>
-                      {r.insurance_display_id && <p className="text-[12px] font-mono text-[#185fa5] mt-0.5">{r.insurance_display_id}</p>}
+                      <p className="text-[15px] font-semibold text-cc-ink truncate"><RowLink href={`/admin/insurance/${r.id}/view`} onOpen={() => navigateToView(r)}>{applicant(r)}</RowLink></p>
+                      {r.insurance_display_id && <p className="text-[12px] font-mono text-cc-blue mt-0.5">{r.insurance_display_id}</p>}
                     </div>
                   </div>
                 </td>
                 {/* EPC partner — name + EPC ID text only. */}
                 <td className="px-3 py-3 text-center">
-                  <p className="text-[13px] text-[#0f3d2e] truncate">{epc(r)}</p>
-                  {r.epc_business?.epc_display_id && <p className="text-[11px] font-mono text-[#5a8a76] mt-0.5">{r.epc_business.epc_display_id}</p>}
+                  <p className="text-[13px] text-cc-ink truncate">{epc(r)}</p>
+                  {r.epc_business?.epc_display_id && <p className="text-[11px] font-mono text-cc-muted mt-0.5">{r.epc_business.epc_display_id}</p>}
                 </td>
-                <td className="px-3 py-3 text-center text-[13px] font-semibold text-[#0f3d2e]">{amount(r)}</td>
-                <td className="px-3 py-3 text-center text-[13px] text-[#0f3d2e]">{insurerLabelShort(r.insurance_partner)}</td>
+                <td className="px-3 py-3 text-center text-[13px] font-semibold text-cc-ink">{amount(r)}</td>
+                <td className="px-3 py-3 text-center text-[13px] text-cc-ink">{insurerLabelShort(r.insurance_partner)}</td>
                 <td className="px-3 py-3 text-center">
                   <span className={`${PILL} ${STATUS_PILL[r.status] ?? STATUS_PILL.draft}`}>
                     {INSURANCE_STATUS_LABEL[r.status] ?? r.status.replace(/_/g, " ")}
@@ -378,19 +379,19 @@ export default function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
                 </td>
                 <CreatedOnCell at={r.created_at} />
                 {/* Created by — the admin user who added it (from created_by_user_id). */}
-                <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">
+                <td className="px-3 py-3 text-center text-[13px] text-cc-muted">
                   {createdBy(r)}
                 </td>
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <div className="flex flex-col gap-1.5">
                     <div className="flex items-center justify-center gap-1.5">
                       <button type="button" onClick={() => editRow(r)}
-                        className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5] inline-flex items-center justify-center gap-1.5">
+                        className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-cc-green/30 bg-white text-cc-green hover:bg-cc-wash inline-flex items-center justify-center gap-1.5">
                         Edit
                       </button>
-                      <button type="button" onClick={() => router.push(`/admin/insurance/${r.id}/messages` as any)}
+                      <button type="button" onClick={() => router.push(`/admin/insurance/${r.id}/messages`)}
                         title="Message to EPC" aria-label="Message to EPC"
-                        className="relative grid place-items-center w-8 h-8 rounded-input border border-[#cdeadd] bg-white text-[#178a5c] hover:bg-[#f0faf5] transition-colors">
+                        className="relative grid place-items-center w-8 h-8 rounded-input border border-cc-line bg-white text-cc-green hover:bg-cc-wash transition-colors">
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                         <UnseenBadge n={insCounts.get(r.id) ?? 0} />
                       </button>

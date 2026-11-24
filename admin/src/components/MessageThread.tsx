@@ -11,6 +11,8 @@ import { fmtWhen } from "@/lib/dates";
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { authHeaders } from "@/lib/auth";
+import { notify } from "@/lib/notify";
+import { askConfirm } from "@/lib/confirm";
 import {
   MSG_TEMPLATES, DOC_TAGS, docTagLabel,
   type Message, type MsgKind, type MsgAttachment, type MsgTemplate,
@@ -126,7 +128,7 @@ export default function MessageThread({
       const res = await fetch("/api/messages/attach", { method: "POST", headers: authHeaders(), body: fd });
       const j = await res.json().catch(() => ({}));
       if (j?.ok) setPending((p) => [...p, { path: j.path, name: j.name, mime: j.mime }]);
-      else alert("Upload failed: " + (j?.error || ""));
+      else notify.error("Upload failed: " + (j?.error || ""));
     }
     setUploading(false);
   }
@@ -135,7 +137,7 @@ export default function MessageThread({
     const res = await fetch("/api/messages/sign", { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({ kind, id, path: a.path }) });
     const j = await res.json().catch(() => ({}));
     if (j?.ok && j.url) window.open(j.url as string, "_blank", "noopener");
-    else alert("Couldn't open the attachment.");
+    else notify.error("Couldn't open the attachment.");
   }
 
   async function send() {
@@ -147,7 +149,7 @@ export default function MessageThread({
     const tags = role === "admin" ? (sendKeys ?? docTags) : [];
     const j = await post({ action: "send", body: body.trim() || null, attachments: pending, doc_tags: tags });
     setBusy(false);
-    if (!j?.ok) { alert("Couldn't send: " + (j?.error || "")); return; }
+    if (!j?.ok) { notify.error("Couldn't send: " + (j?.error || "")); return; }
     setBody(""); setPending([]); setDocTags([]); setUsedTemplates(new Set());
     await load(); onChanged?.(); onSent?.();
   }
@@ -156,14 +158,14 @@ export default function MessageThread({
     setBusy(true);
     const j = await post({ action: "edit", message_id: m.id, body: editBody.trim() || null, attachments: m.attachments, doc_tags: m.doc_tags });
     setBusy(false);
-    if (!j?.ok) { alert("Couldn't save: " + (j?.error || "")); return; }
+    if (!j?.ok) { notify.error("Couldn't save: " + (j?.error || "")); return; }
     setEditId(null); setEditBody(""); await load();
   }
 
   async function remove(m: Message) {
-    if (!confirm("Delete this message?")) return;
+    if (!(await askConfirm("Delete this message?", { danger: true }))) return;
     const j = await post({ action: "delete", message_id: m.id });
-    if (!j?.ok) { alert("Couldn't delete: " + (j?.error || "")); return; }
+    if (!j?.ok) { notify.error("Couldn't delete: " + (j?.error || "")); return; }
     await load();
   }
 
@@ -171,7 +173,7 @@ export default function MessageThread({
     setBusy(true);
     const j = await post({ action });
     setBusy(false);
-    if (!j?.ok) { alert("Couldn't update: " + (j?.error || "")); return; }
+    if (!j?.ok) { notify.error("Couldn't update: " + (j?.error || "")); return; }
     await load(); onChanged?.();
   }
 
@@ -187,11 +189,11 @@ export default function MessageThread({
   return (
     <div className="flex flex-col rounded-2xl border border-line bg-white overflow-hidden" style={{ maxHeight: "78vh" }}>
       {/* Status bar */}
-      <div className="shrink-0 px-4 py-2.5 border-b border-line bg-[#f7f9fe] flex items-center gap-2 flex-wrap">
+      <div className="shrink-0 px-4 py-2.5 border-b border-line bg-navy-mist flex items-center gap-2 flex-wrap">
         {att.attention_status === "open" ? (
           <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Open</span>
         ) : att.attention_status === "resolved" ? (
-          <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-[#e6f6ee] text-[#178a5c]">Resolved{att.attention_resolved_by ? ` · by ${att.attention_resolved_by === "epc" ? "EPC" : "Capital Craft"}` : ""}</span>
+          <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full bg-cc-tint text-cc-green">Resolved{att.attention_resolved_by ? ` · by ${att.attention_resolved_by === "epc" ? "EPC" : "Capital Craft"}` : ""}</span>
         ) : (
           <span className="text-[11px] text-text-muted">No issue raised</span>
         )}
@@ -203,7 +205,7 @@ export default function MessageThread({
               it resolved — re-submitting their edited application auto-resolves it
               (that's the signal they've updated the file). */}
           {role === "admin" && (att.attention_status === "open" ? (
-            <button onClick={() => void setStatus("resolve")} disabled={busy} className="text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-[#178a5c] text-[#178a5c] hover:bg-[#f0faf5] disabled:opacity-50">Mark resolved</button>
+            <button onClick={() => void setStatus("resolve")} disabled={busy} className="text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-cc-green text-cc-green hover:bg-cc-wash disabled:opacity-50">Mark resolved</button>
           ) : att.attention_status === "resolved" ? (
             <button onClick={() => void setStatus("reopen")} disabled={busy} className="text-[12px] font-semibold px-3 py-1.5 rounded-lg border border-line text-text-mid hover:bg-bg-soft disabled:opacity-50">Reopen</button>
           ) : null)}
@@ -228,7 +230,7 @@ export default function MessageThread({
               </div>
               {editId === m.id ? (
                 <div className="flex flex-col gap-1.5">
-                  <textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={2} className="border border-line rounded-xl px-3 py-2 text-[13px] outline-none focus:border-[#1e3a8a]" />
+                  <textarea value={editBody} onChange={(e) => setEditBody(e.target.value)} rows={2} className="border border-line rounded-xl px-3 py-2 text-[13px] outline-none focus:border-navy" />
                   <div className="flex gap-2 justify-end">
                     <button onClick={() => setEditId(null)} className="text-[12px] text-text-muted">Cancel</button>
                     <button onClick={() => void saveEdit(m)} disabled={busy} className="text-[12px] font-semibold text-white px-3 py-1 rounded-lg disabled:opacity-50" style={{ background: A }}>Save</button>
@@ -240,7 +242,7 @@ export default function MessageThread({
                   {m.attachments.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {m.attachments.map((a, i) => (
-                        <button key={i} onClick={() => void view(a)} className={["flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11.5px] font-medium", mine ? "bg-white/15 text-white hover:bg-white/25" : "bg-white border border-line text-[#1e3a8a] hover:bg-[#f0f4fb]"].join(" ")}>
+                        <button key={i} onClick={() => void view(a)} className={["flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11.5px] font-medium", mine ? "bg-white/15 text-white hover:bg-white/25" : "bg-white border border-line text-navy hover:bg-[#f0f4fb]"].join(" ")}>
                           <span>{a.mime?.includes("pdf") ? "📄" : "🖼"}</span><span className="max-w-[130px] truncate">{a.name || "attachment"}</span>
                         </button>
                       ))}
@@ -250,12 +252,12 @@ export default function MessageThread({
               )}
               {mine && editId !== m.id && (
                 <div className="flex gap-2 mt-0.5 justify-end pr-1">
-                  <button onClick={() => { setEditId(m.id); setEditBody(m.body || ""); }} className="text-[11px] text-text-muted hover:text-[#1e3a8a]">Edit</button>
+                  <button onClick={() => { setEditId(m.id); setEditBody(m.body || ""); }} className="text-[11px] text-text-muted hover:text-navy">Edit</button>
                   <button onClick={() => void remove(m)} className="text-[11px] text-text-muted hover:text-red-600">Delete</button>
                 </div>
               )}
               {mine && m.id === lastMineId && otherSeenAt && new Date(otherSeenAt) >= new Date(m.created_at) && (
-                <div className="text-[10.5px] text-[#178a5c] text-right mt-0.5 pr-1">Seen</div>
+                <div className="text-[10.5px] text-cc-green text-right mt-0.5 pr-1">Seen</div>
               )}
             </div>
           );
@@ -268,7 +270,7 @@ export default function MessageThread({
           <div className="flex gap-1.5 flex-wrap">
             {MSG_TEMPLATES.map((t) => (
               <button key={t.label} onClick={() => toggleTemplate(t)}
-                className={["text-[11px] px-2.5 py-1 rounded-full border transition-colors", usedTemplates.has(t.label) ? "bg-[#e8effc] border-[#1e3a8a] text-[#1e3a8a] font-semibold" : "border-line text-text-mid hover:border-[#1e3a8a] hover:text-[#1e3a8a]"].join(" ")}>
+                className={["text-[11px] px-2.5 py-1 rounded-full border transition-colors", usedTemplates.has(t.label) ? "bg-navy-tint border-navy text-navy font-semibold" : "border-line text-text-mid hover:border-navy hover:text-navy"].join(" ")}>
                 {usedTemplates.has(t.label) ? "✓ " : ""}{t.label}
               </button>
             ))}
@@ -283,7 +285,7 @@ export default function MessageThread({
                 return (
                   <button key={d.value} type="button"
                     onClick={() => setDocTags((s) => on ? s.filter((x) => x !== d.value) : [...s, d.value])}
-                    className={["text-[12px] px-2.5 py-1 rounded-full border transition-colors", on ? "bg-[#e8effc] border-[#1e3a8a] text-[#1e3a8a] font-semibold" : "border-line text-text-mid hover:border-[#1e3a8a]"].join(" ")}>
+                    className={["text-[12px] px-2.5 py-1 rounded-full border transition-colors", on ? "bg-navy-tint border-navy text-navy font-semibold" : "border-line text-text-mid hover:border-navy"].join(" ")}>
                     {on ? "✓ " : ""}{d.label}
                   </button>
                 );
@@ -296,15 +298,15 @@ export default function MessageThread({
             {pending.map((a, i) => (
               <span key={i} className="flex items-center gap-1.5 bg-[#f1f4f9] border border-line rounded-lg px-2 py-1 text-[11.5px]">
                 <span>{a.mime?.includes("pdf") ? "📄" : "🖼"}</span><span className="max-w-[120px] truncate">{a.name}</span>
-                <button onClick={() => setPending((p) => p.filter((_, j) => j !== i))} className="text-text-muted hover:text-red-600">✕</button>
+                <button onClick={() => setPending((p) => p.filter((_, j) => j !== i))} aria-label="Remove" className="text-text-muted hover:text-red-600">✕</button>
               </span>
             ))}
           </div>
         )}
         <div className="flex items-end gap-2">
-          <textarea ref={taRef} value={body} onChange={(e) => setBody(e.target.value)} rows={2} placeholder={role === "admin" ? "Write a message to the EPC…" : "Reply to Capital Craft…"} className="flex-1 border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none focus:border-[#1e3a8a] resize-none overflow-hidden min-h-[56px]" />
-          <label className="shrink-0 w-10 h-10 grid place-items-center rounded-xl border border-line text-text-mid hover:border-[#1e3a8a] hover:text-[#1e3a8a] cursor-pointer" title="Attach photos / PDF">
-            {uploading ? <span className="w-4 h-4 rounded-full border-2 border-[#1e3a8a]/30 border-t-[#1e3a8a] animate-spin" /> : "📎"}
+          <textarea ref={taRef} value={body} onChange={(e) => setBody(e.target.value)} rows={2} placeholder={role === "admin" ? "Write a message to the EPC…" : "Reply to Capital Craft…"} className="flex-1 border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none focus:border-navy resize-none overflow-hidden min-h-[56px]" />
+          <label className="shrink-0 w-10 h-10 grid place-items-center rounded-xl border border-line text-text-mid hover:border-navy hover:text-navy cursor-pointer" title="Attach photos / PDF">
+            {uploading ? <span className="w-4 h-4 rounded-full border-2 border-navy/30 border-t-navy animate-spin" /> : "📎"}
             <input type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={(e) => { if (e.target.files?.length) void addFiles(e.target.files); e.currentTarget.value = ""; }} />
           </label>
           <button onClick={() => void send()} disabled={busy || uploading || (!body.trim() && pending.length === 0) || (requireKeys && (sendKeys?.length ?? 0) === 0)} className="shrink-0 h-10 px-4 rounded-xl text-white text-[13px] font-semibold disabled:opacity-50" style={{ background: A }}>

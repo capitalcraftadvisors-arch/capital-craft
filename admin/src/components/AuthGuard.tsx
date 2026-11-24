@@ -87,7 +87,7 @@ export default function AuthGuard({ children, allow, requireModule }: Props) {
           : biz;
         if (data) setBusiness(latest);
         if (!matches(latest, allow)) {
-          router.replace(routeForBusiness(latest) as any);
+          router.replace(routeForBusiness(latest));
           return;
         }
         // Module-level gate (e.g. Analytics is MAIN_ADMIN-only).

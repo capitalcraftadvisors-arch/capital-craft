@@ -55,7 +55,6 @@ export function useChatLog() {
   const uid = () => "m" + ++idRef.current;
   const pushBot = useCallback((text: string, turnId: string) => {
     setMsgs((m) => (m.some((x) => x.from === "bot" && x.turnId === turnId) ? m : [...m, { id: uid(), from: "bot", text, time: nowLabel(), turnId }]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   function pushUser(text: string, meta: Partial<ChatMsg> = {}) {
     setMsgs((m) => [...m, { id: uid(), from: "user", text, time: nowLabel(), ...meta }]);

@@ -115,7 +115,7 @@ export function SheetConfirmCard({ parsed, onEdit, onConfirm, onSkip }: {
         <EditableRows theme={THEME} rows={rows} onSave={onEdit} />
         <p className="text-[11px] text-text-muted leading-snug mt-0.5">The EPC partner stays as you chose it — the merchant name is kept only for reference.</p>
         <div className="flex flex-wrap gap-2 mt-1">
-          <button onClick={onConfirm} className="px-3.5 py-1.5 rounded-lg bg-[#178a5c] text-white text-[12.5px] font-semibold hover:bg-[#12734c]">Confirm & continue →</button>
+          <button onClick={onConfirm} className="px-3.5 py-1.5 rounded-lg bg-cc-green text-white text-[12.5px] font-semibold hover:bg-cc-green-hover">Confirm & continue →</button>
           <button onClick={onSkip} className="px-3 py-1.5 rounded-lg border border-line text-[12.5px] text-text-mid hover:bg-bg-soft">Skip</button>
         </div>
       </div>

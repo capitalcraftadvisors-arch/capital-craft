@@ -23,6 +23,7 @@ import { parsePanFields } from "@/lib/pan-parser";
 import { parseGstAddress } from "@/lib/gst-address";
 import { isValidPan, isValidGstin } from "@/lib/doc-validation";
 import { geminiExtractPan, geminiExtractGst, geminiExtractGstR3b, geminiNameDocument } from "@/lib/doc-extractors";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -109,7 +110,7 @@ export async function POST(req: NextRequest) {
       });
       edge = (await res.json().catch(() => null)) as Record<string, unknown> | null;
     } catch (e) {
-      return err(e instanceof Error ? e.message : "ocr upstream failed", 502);
+      return err(errText(e, "ocr upstream failed"), 502);
     }
     if (!edge || edge.ok === false) {
       return NextResponse.json(edge ?? { ok: false, error: "ocr_failed" }, { status: 502 });
@@ -141,7 +142,7 @@ export async function POST(req: NextRequest) {
     // gstr3b — the Edge Function already returns the full shape.
     return NextResponse.json({ ...edge, source: "vision" });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[api/ocr] error:", msg);
     return err(msg, 500);
   }

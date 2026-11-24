@@ -28,6 +28,7 @@ import { supabase } from "@/lib/supabase";
 import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { getCached, setCached, invalidate } from "@/lib/list-cache";
 import { fmtDate, fmtDateTime, fmtTime, localIsoDate } from "@/lib/dates";
+import { notify } from "@/lib/notify";
 import { waUrl } from "@/lib/wa-link";
 import { LEAD_STATUS_OPTIONS, LEAD_STATUS_PILL } from "@/lib/lead-status";
 
@@ -123,7 +124,7 @@ function Inner() {
     setBusy(r.id);
     const { error: e } = await supabase().from("gozerobils_leads").update(p).eq("id", r.id);
     setBusy(null);
-    if (e) { alert("Couldn't save: " + e.message); return false; }
+    if (e) { notify.error("Couldn't save: " + e.message); return false; }
     patch(r.id, p);
     return true;
   }
@@ -169,12 +170,12 @@ function Inner() {
           <div className="flex gap-1.5 mt-4">
             {tabs.map(([k, label, n]) => (
               <button key={k} type="button" onClick={() => setTab(k)}
-                className={["px-4 py-2 rounded-xl text-[13.5px] font-semibold border", tab === k ? "text-white border-transparent" : "bg-white border-line text-[#0f3d2e]"].join(" ")}
+                className={["px-4 py-2 rounded-xl text-[13.5px] font-semibold border", tab === k ? "text-white border-transparent" : "bg-white border-line text-cc-ink"].join(" ")}
                 style={tab === k ? { background: ACCENTS.gzb.color } : undefined}>
                 {label}
                 {n != null && n > 0 && (
                   <span className={["ml-1.5 inline-grid place-items-center min-w-[18px] h-[18px] px-1 rounded-full text-[10.5px] font-bold",
-                    k === "myday" ? "bg-[#dc2626] text-white" : tab === k ? "bg-white/25" : "bg-[#eef1f0] text-[#5a8a76]"].join(" ")}>{n}</span>
+                    k === "myday" ? "bg-red-600 text-white" : tab === k ? "bg-white/25" : "bg-cc-chip text-cc-muted"].join(" ")}>{n}</span>
                 )}
               </button>
             ))}
@@ -185,13 +186,13 @@ function Inner() {
           {error && <p className="mb-3 text-[13px] text-red-600">{error}</p>}
 
           {tab === "myday" && (
-            !rows ? <p className="text-[13px] text-[#5a8a76]">Loading…</p>
-            : dayCount === 0 ? <Card className="p-8 text-center text-[14px] text-[#5a8a76]">Nothing due today.</Card>
+            !rows ? <p className="text-[13px] text-cc-muted">Loading…</p>
+            : dayCount === 0 ? <Card className="p-8 text-center text-[14px] text-cc-muted">Nothing due today.</Card>
             : (
               <div className="flex flex-col gap-5">
-                <DaySection title="Overdue" tone="text-[#dc2626]" rows={day.overdue} today={today} onOpen={setOpen} onLog={setLogFor} />
-                <DaySection title="Today" tone="text-[#b45309]" rows={day.today} today={today} onOpen={setOpen} onLog={setLogFor} />
-                <DaySection title="New, not called yet" tone="text-[#185fa5]" rows={day.fresh} today={today} onOpen={setOpen} onLog={setLogFor} />
+                <DaySection title="Overdue" tone="text-red-600" rows={day.overdue} today={today} onOpen={setOpen} onLog={setLogFor} />
+                <DaySection title="Today" tone="text-amber-700" rows={day.today} today={today} onOpen={setOpen} onLog={setLogFor} />
+                <DaySection title="New, not called yet" tone="text-cc-blue" rows={day.fresh} today={today} onOpen={setOpen} onLog={setLogFor} />
               </div>
             )
           )}
@@ -222,23 +223,23 @@ function Inner() {
                   </thead>
                   <tbody>
                     {filtered.length === 0 ? (
-                      <tr><td colSpan={8} className="px-5 py-10 text-center text-[#5a8a76]">{!rows ? "Loading…" : rows.length ? "No leads match." : "No leads yet."}</td></tr>
+                      <tr><td colSpan={8} className="px-5 py-10 text-center text-cc-muted">{!rows ? "Loading…" : rows.length ? "No leads match." : "No leads yet."}</td></tr>
                     ) : filtered.map((r) => (
-                      <tr key={r.id} onClick={() => setOpen(r)} className="border-b border-[#eaf3ee] hover:bg-[#f7fcfa] align-top cursor-pointer">
+                      <tr key={r.id} onClick={() => setOpen(r)} className="border-b border-cc-row-line hover:bg-cc-row-hover align-top cursor-pointer">
                         <td className="px-3 py-3">
-                          <p className="text-[15px] font-semibold text-[#0f3d2e]">{r.name || "—"}</p>
-                          <p className="text-[12px] mt-0.5 text-[#185fa5]">+91 {r.mobile}</p>
-                          <p className="text-[12px] text-[#5a8a76]">{[r.city, r.pincode, r.state].filter(Boolean).join(" · ")}</p>
+                          <p className="text-[15px] font-semibold text-cc-ink">{r.name || "—"}</p>
+                          <p className="text-[12px] mt-0.5 text-cc-blue">+91 {r.mobile}</p>
+                          <p className="text-[12px] text-cc-muted">{[r.city, r.pincode, r.state].filter(Boolean).join(" · ")}</p>
                         </td>
-                        <td className="px-3 py-3 text-[13px] text-[#0f3d2e]">{r.monthly_bill || "—"}</td>
-                        <td className="px-3 py-3 text-[13px] text-[#0f3d2e] max-w-[220px] break-words">{words(r.looking_for) || "—"}</td>
-                        <td className="px-3 py-3 text-[13px] text-[#0f3d2e]">
+                        <td className="px-3 py-3 text-[13px] text-cc-ink">{r.monthly_bill || "—"}</td>
+                        <td className="px-3 py-3 text-[13px] text-cc-ink max-w-[220px] break-words">{words(r.looking_for) || "—"}</td>
+                        <td className="px-3 py-3 text-[13px] text-cc-ink">
                           <div>{r.utm_source || "—"}</div>
-                          {r.utm_campaign && <div className="text-[12px] text-[#5a8a76]">{r.utm_campaign}</div>}
+                          {r.utm_campaign && <div className="text-[12px] text-cc-muted">{r.utm_campaign}</div>}
                         </td>
-                        <td className="px-3 py-3 text-center text-[13px] text-[#0f3d2e] whitespace-nowrap">{fmtDateTime(r.created_at)}</td>
-                        <td className="px-3 py-3 text-[13px] text-[#0f3d2e] whitespace-nowrap">
-                          {r.last_call_at ? <><div>{OUTCOME_LABEL[r.last_outcome as Outcome] ?? r.last_outcome}</div><div className="text-[12px] text-[#5a8a76]">{fmtDateTime(r.last_call_at)}</div></> : "—"}
+                        <td className="px-3 py-3 text-center text-[13px] text-cc-ink whitespace-nowrap">{fmtDateTime(r.created_at)}</td>
+                        <td className="px-3 py-3 text-[13px] text-cc-ink whitespace-nowrap">
+                          {r.last_call_at ? <><div>{OUTCOME_LABEL[r.last_outcome as Outcome] ?? r.last_outcome}</div><div className="text-[12px] text-cc-muted">{fmtDateTime(r.last_call_at)}</div></> : "—"}
                         </td>
                         <td className={["px-3 py-3 text-center text-[13px] whitespace-nowrap", followTone(r, today)].join(" ")}>{r.follow_up_at ? fmtDate(r.follow_up_at) : "—"}</td>
                         <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
@@ -269,19 +270,19 @@ function Inner() {
                 </thead>
                 <tbody>
                   {!calls || calls.length === 0 ? (
-                    <tr><td colSpan={5} className="px-5 py-10 text-center text-[#5a8a76]">{!calls ? "Loading…" : "No calls yet."}</td></tr>
+                    <tr><td colSpan={5} className="px-5 py-10 text-center text-cc-muted">{!calls ? "Loading…" : "No calls yet."}</td></tr>
                   ) : calls.map((c) => {
                     const lead = rows?.find((r) => r.id === c.lead_id);
                     return (
-                      <tr key={c.id} onClick={() => lead && setOpen(lead)} className="border-b border-[#eaf3ee] hover:bg-[#f7fcfa] align-top cursor-pointer">
-                        <td className="px-3 py-3 text-[13px] text-[#0f3d2e] whitespace-nowrap">{fmtDateTime(c.called_at)}</td>
+                      <tr key={c.id} onClick={() => lead && setOpen(lead)} className="border-b border-cc-row-line hover:bg-cc-row-hover align-top cursor-pointer">
+                        <td className="px-3 py-3 text-[13px] text-cc-ink whitespace-nowrap">{fmtDateTime(c.called_at)}</td>
                         <td className="px-3 py-3">
-                          <p className="text-[14px] font-semibold text-[#0f3d2e]">{c.lead?.name || "—"}</p>
-                          {c.lead?.mobile && <p className="text-[12px] text-[#5a8a76]">+91 {c.lead.mobile}</p>}
+                          <p className="text-[14px] font-semibold text-cc-ink">{c.lead?.name || "—"}</p>
+                          {c.lead?.mobile && <p className="text-[12px] text-cc-muted">+91 {c.lead.mobile}</p>}
                         </td>
-                        <td className="px-3 py-3 text-[13px] text-[#0f3d2e] whitespace-nowrap">{OUTCOME_LABEL[c.outcome] ?? c.outcome}</td>
-                        <td className="px-3 py-3 text-[13px] text-[#0f3d2e]">{c.note || "—"}</td>
-                        <td className="px-3 py-3 text-center text-[13px] text-[#0f3d2e] whitespace-nowrap">{c.next_follow_up ? fmtDate(c.next_follow_up) : "—"}</td>
+                        <td className="px-3 py-3 text-[13px] text-cc-ink whitespace-nowrap">{OUTCOME_LABEL[c.outcome] ?? c.outcome}</td>
+                        <td className="px-3 py-3 text-[13px] text-cc-ink">{c.note || "—"}</td>
+                        <td className="px-3 py-3 text-center text-[13px] text-cc-ink whitespace-nowrap">{c.next_follow_up ? fmtDate(c.next_follow_up) : "—"}</td>
                       </tr>
                     );
                   })}
@@ -318,7 +319,7 @@ const DAY_COLS: [Exclude<keyof TrafficDay, "day">, string][] = [
 ];
 const NO_TRAFFIC = Object.fromEntries(DAY_COLS.map(([k]) => [k, 0])) as Omit<TrafficDay, "day">;
 const dayTone = (k: string, n: number) =>
-  !n ? "text-[#9bb5aa]" : k === "capi_failed" ? "text-[#dc2626] font-semibold" : k === "leads" ? "text-[#178a5c] font-semibold" : "text-[#0f3d2e]";
+  !n ? "text-[#9bb5aa]" : k === "capi_failed" ? "text-red-600 font-semibold" : k === "leads" ? "text-cc-green font-semibold" : "text-cc-ink";
 const host = (u: string | null) => { if (!u) return null; try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; } };
 const dur = (s: number | null) => (s == null ? "—" : s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`);
 
@@ -356,7 +357,7 @@ function Traffic() {
   const byDay = new Map((days ?? []).map((d) => [d.day, d]));
   const list = Array.from({ length: TRAFFIC_DAYS }, (_, i) => inDays(-i)).map((day) => byDay.get(day) ?? { day, ...NO_TRAFFIC });
   const shown = pick ? visits[pick] ?? null : null;
-  const td = "px-3 py-3 text-[13px] text-[#0f3d2e]";
+  const td = "px-3 py-3 text-[13px] text-cc-ink";
 
   return (
     <div className="flex flex-col gap-5">
@@ -371,10 +372,10 @@ function Traffic() {
           </thead>
           <tbody>
             {!days ? (
-              <tr><td colSpan={DAY_COLS.length + 1} className="px-5 py-10 text-center text-[#5a8a76]">Loading…</td></tr>
+              <tr><td colSpan={DAY_COLS.length + 1} className="px-5 py-10 text-center text-cc-muted">Loading…</td></tr>
             ) : list.map((d) => (
               <tr key={d.day} onClick={() => { if (d.visits > 0) openDay(d.day); }}
-                className={["border-b border-[#eaf3ee]", d.visits > 0 ? "cursor-pointer hover:bg-[#f7fcfa]" : "", pick === d.day ? "bg-[#f0f8f4]" : ""].join(" ")}>
+                className={["border-b border-cc-row-line", d.visits > 0 ? "cursor-pointer hover:bg-cc-row-hover" : "", pick === d.day ? "bg-[#f0f8f4]" : ""].join(" ")}>
                 <td className={td + " font-semibold whitespace-nowrap"}>{fmtDate(d.day)}</td>
                 {DAY_COLS.map(([k]) => <td key={k} className={["px-3 py-3 text-center text-[13px]", dayTone(k, d[k])].join(" ")}>{d[k]}</td>)}
               </tr>
@@ -385,8 +386,8 @@ function Traffic() {
 
       {pick && (
         <section>
-          <div className="text-[13px] font-semibold mb-2 text-[#0f3d2e]">
-            {fmtDate(pick)} {shown && <span className="text-[#5a8a76] font-normal">{shown.length}</span>}
+          <div className="text-[13px] font-semibold mb-2 text-cc-ink">
+            {fmtDate(pick)} {shown && <span className="text-cc-muted font-normal">{shown.length}</span>}
           </div>
           <Card className="overflow-x-auto cc-table-card">
             <table className="w-full text-[14px] cc-table">
@@ -406,13 +407,13 @@ function Traffic() {
               </thead>
               <tbody>
                 {!shown || !shown.length ? (
-                  <tr><td colSpan={10} className="px-5 py-10 text-center text-[#5a8a76]">{!shown ? "Loading…" : "No visits."}</td></tr>
+                  <tr><td colSpan={10} className="px-5 py-10 text-center text-cc-muted">{!shown ? "Loading…" : "No visits."}</td></tr>
                 ) : shown.map((v) => (
-                  <tr key={v.visit_id} className="border-b border-[#eaf3ee] align-top">
+                  <tr key={v.visit_id} className="border-b border-cc-row-line align-top">
                     <td className={td + " whitespace-nowrap"}>{fmtTime(v.started)}</td>
                     <td className={td + " max-w-[200px] break-words"}>
                       <div>{v.source || host(v.referrer) || "—"}</div>
-                      {v.campaign && <div className="text-[12px] text-[#5a8a76]">{v.campaign}</div>}
+                      {v.campaign && <div className="text-[12px] text-cc-muted">{v.campaign}</div>}
                     </td>
                     <td className={td}>{v.device || "—"}</td>
                     <td className={td + " text-center"}>{v.pages}</td>
@@ -421,11 +422,11 @@ function Traffic() {
                     <td className={td + " text-center"}>{v.clicks}</td>
                     <td className={td + " max-w-[200px] break-words"}>{v.pixel_events || "—"}</td>
                     <td className={td + " max-w-[200px] break-words"}>
-                      {v.capi_ok && <div className="text-[#178a5c]">{v.capi_ok}</div>}
-                      {v.capi_failed && <div className="text-[#dc2626] font-semibold">{v.capi_failed}</div>}
+                      {v.capi_ok && <div className="text-cc-green">{v.capi_ok}</div>}
+                      {v.capi_failed && <div className="text-red-600 font-semibold">{v.capi_failed}</div>}
                       {!v.capi_ok && !v.capi_failed && "—"}
                     </td>
-                    <td className={td + " text-center"}>{v.lead ? <span className="text-[#178a5c] font-semibold">Yes</span> : "—"}</td>
+                    <td className={td + " text-center"}>{v.lead ? <span className="text-cc-green font-semibold">Yes</span> : "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -438,14 +439,14 @@ function Traffic() {
 }
 
 const followTone = (r: Lead, today: string) =>
-  !r.follow_up_at || !OPEN(r.status) ? "text-[#0f3d2e]" : r.follow_up_at < today ? "text-[#dc2626] font-semibold" : r.follow_up_at === today ? "text-[#b45309] font-semibold" : "text-[#0f3d2e]";
+  !r.follow_up_at || !OPEN(r.status) ? "text-cc-ink" : r.follow_up_at < today ? "text-red-600 font-semibold" : r.follow_up_at === today ? "text-amber-700 font-semibold" : "text-cc-ink";
 
 function CallActions({ lead, onLog }: { lead: Lead; onLog: (l: Lead) => void }) {
   const btn = "px-3 py-1.5 rounded-lg text-[12.5px] font-semibold border";
   return (
     <div className="flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
-      <a href={tel(lead.mobile)} className={btn + " border-[#178a5c] text-[#178a5c] hover:bg-[#178a5c]/[0.06]"}>Call</a>
-      <a href={waUrl(lead.mobile, "")} target="_blank" rel="noreferrer" className={btn + " border-[#128C7E] text-[#128C7E] hover:bg-[#128C7E]/[0.06]"}>WhatsApp</a>
+      <a href={tel(lead.mobile)} className={btn + " border-cc-green text-cc-green hover:bg-cc-green/[0.06]"}>Call</a>
+      <a href={waUrl(lead.mobile, "")} target="_blank" rel="noreferrer" className={btn + " border-whatsapp text-whatsapp hover:bg-whatsapp/[0.06]"}>WhatsApp</a>
       <button type="button" onClick={() => onLog(lead)} className={btn + " border-transparent text-white"} style={{ background: ACCENTS.gzb.color }}>Log call</button>
     </div>
   );
@@ -457,18 +458,18 @@ function DaySection({ title, tone, rows, today, onOpen, onLog }: {
   if (!rows.length) return null;
   return (
     <section>
-      <div className={`text-[13px] font-semibold mb-2 ${tone}`}>{title} <span className="text-[#5a8a76] font-normal">{rows.length}</span></div>
+      <div className={`text-[13px] font-semibold mb-2 ${tone}`}>{title} <span className="text-cc-muted font-normal">{rows.length}</span></div>
       <div className="flex flex-col gap-2">
         {rows.map((r) => (
-          <Card key={r.id} className="p-3.5 cursor-pointer hover:bg-[#f7fcfa]">
+          <Card key={r.id} className="p-3.5 cursor-pointer hover:bg-cc-row-hover">
             <div onClick={() => onOpen(r)} className="flex items-start justify-between gap-3 flex-wrap">
               <div className="min-w-0">
-                <p className="text-[15px] font-semibold text-[#0f3d2e]">{r.name || "—"} <span className="text-[13px] font-normal text-[#185fa5]">+91 {r.mobile}</span></p>
-                <p className="text-[12.5px] text-[#5a8a76]">
+                <p className="text-[15px] font-semibold text-cc-ink">{r.name || "—"} <span className="text-[13px] font-normal text-cc-blue">+91 {r.mobile}</span></p>
+                <p className="text-[12.5px] text-cc-muted">
                   {[r.city, r.monthly_bill && `Bill ${r.monthly_bill}`, words(r.looking_for)].filter(Boolean).join(" · ") || "—"}
                 </p>
                 {(r.last_call_at || r.follow_up_at) && (
-                  <p className="text-[12.5px] text-[#0f3d2e] mt-0.5">
+                  <p className="text-[12.5px] text-cc-ink mt-0.5">
                     {r.last_call_at && <>Last: {OUTCOME_LABEL[r.last_outcome as Outcome] ?? r.last_outcome}, {fmtDate(r.last_call_at)}</>}
                     {r.last_call_at && r.follow_up_at && " · "}
                     {r.follow_up_at && <span className={followTone(r, today)}>Follow-up {fmtDate(r.follow_up_at)}</span>}
@@ -510,14 +511,14 @@ function LeadWindow({ lead, added, busy, onUpdate, onLog, onClose }: {
     if (added && added.lead_id === lead.id) setCalls((cs) => (cs && !cs.some((x) => x.id === added.id) ? [added, ...cs] : cs));
   }, [added, lead.id]);
   const row = (l: string, v: string | null | undefined) => (
-    <div className="min-w-0"><div className="text-[11.5px] text-[#5a8a76]">{l}</div><div className="text-[14px] text-[#0f3d2e] break-words">{v || "—"}</div></div>
+    <div className="min-w-0"><div className="text-[11.5px] text-cc-muted">{l}</div><div className="text-[14px] text-cc-ink break-words">{v || "—"}</div></div>
   );
   return (
-    <Modal onClose={close} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[680px] max-h-[92vh] overflow-y-auto p-6">
+    <Modal onClose={close} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[680px] max-h-[92vh] overflow-y-auto p-6" aria-label={lead.name || "Lead"}>
       <div className="flex items-start justify-between gap-3 mb-4 flex-wrap">
         <div>
-          <div className="text-[18px] font-display font-bold text-[#0f3d2e]">{lead.name || "—"}</div>
-          <div className="text-[13px] text-[#185fa5]">+91 {lead.mobile}</div>
+          <div className="text-[18px] font-display font-bold text-cc-ink">{lead.name || "—"}</div>
+          <div className="text-[13px] text-cc-blue">+91 {lead.mobile}</div>
         </div>
         <CallActions lead={lead} onLog={() => onLog()} />
       </div>
@@ -532,43 +533,43 @@ function LeadWindow({ lead, added, busy, onUpdate, onLog, onClose }: {
       </div>
       <div className="grid sm:grid-cols-2 gap-3 mb-4">
         <label className="flex flex-col gap-1">
-          <span className="text-[12px] font-medium text-[#5a8a76]">Status</span>
+          <span className="text-[12px] font-medium text-cc-muted">Status</span>
           <select disabled={busy} value={lead.status} onChange={(e) => void onUpdate({ status: e.target.value })}
             className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none">
             {LEAD_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[12px] font-medium text-[#5a8a76]">Next follow-up</span>
+          <span className="text-[12px] font-medium text-cc-muted">Next follow-up</span>
           <DateField value={lead.follow_up_at ?? ""} disabled={busy} onChange={(v) => void onUpdate({ follow_up_at: v || null })}
             className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none" />
         </label>
         <label className="flex flex-col gap-1 sm:col-span-2">
-          <span className="text-[12px] font-medium text-[#5a8a76]">Notes</span>
+          <span className="text-[12px] font-medium text-cc-muted">Notes</span>
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3}
             onBlur={saveNotes}
             className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none resize-none" />
         </label>
       </div>
-      <div className="text-[12px] font-medium text-[#5a8a76] mb-1.5">Calls</div>
-      {!calls ? <p className="text-[13px] text-[#5a8a76]">Loading…</p>
-        : calls.length === 0 ? <p className="text-[13px] text-[#5a8a76]">No calls yet.</p>
+      <div className="text-[12px] font-medium text-cc-muted mb-1.5">Calls</div>
+      {!calls ? <p className="text-[13px] text-cc-muted">Loading…</p>
+        : calls.length === 0 ? <p className="text-[13px] text-cc-muted">No calls yet.</p>
         : (
-          <div className="flex flex-col divide-y divide-[#eaf3ee] border border-[#eaf3ee] rounded-xl">
+          <div className="flex flex-col divide-y divide-cc-row-line border border-cc-row-line rounded-xl">
             {calls.map((c) => (
               <div key={c.id} className="px-3 py-2 text-[13px]">
                 <div className="flex justify-between gap-3">
-                  <span className="font-semibold text-[#0f3d2e]">{OUTCOME_LABEL[c.outcome] ?? c.outcome}</span>
-                  <span className="text-[#5a8a76] whitespace-nowrap">{fmtDateTime(c.called_at)}</span>
+                  <span className="font-semibold text-cc-ink">{OUTCOME_LABEL[c.outcome] ?? c.outcome}</span>
+                  <span className="text-cc-muted whitespace-nowrap">{fmtDateTime(c.called_at)}</span>
                 </div>
-                {c.note && <div className="text-[#0f3d2e] mt-0.5">{c.note}</div>}
-                {c.next_follow_up && <div className="text-[12px] text-[#5a8a76]">Follow-up {fmtDate(c.next_follow_up)}</div>}
+                {c.note && <div className="text-cc-ink mt-0.5">{c.note}</div>}
+                {c.next_follow_up && <div className="text-[12px] text-cc-muted">Follow-up {fmtDate(c.next_follow_up)}</div>}
               </div>
             ))}
           </div>
         )}
       <div className="flex justify-end mt-5">
-        <button type="button" onClick={close} className="px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-[#5a8a76] hover:bg-[#f7fcfa]">Close</button>
+        <button type="button" onClick={close} className="px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-cc-muted hover:bg-cc-row-hover">Close</button>
       </div>
     </Modal>
   );
@@ -608,37 +609,37 @@ function LogCall({ lead, onLogged, onClose }: { lead: Lead; onLogged: (c: Call, 
   }
 
   return (
-    <Modal onClose={onClose} busy={busy} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.softTop} className="bg-white rounded-2xl shadow-xl w-full max-w-[520px] max-h-[92vh] overflow-y-auto p-6">
-      <div className="text-[16px] font-display font-bold text-[#0f3d2e]">Log call</div>
-      <div className="text-[13px] text-[#5a8a76] mb-4">{lead.name || "—"} · +91 {lead.mobile}</div>
+    <Modal onClose={onClose} busy={busy} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.softTop} className="bg-white rounded-2xl shadow-xl w-full max-w-[520px] max-h-[92vh] overflow-y-auto p-6" aria-label="Log call">
+      <div className="text-[16px] font-display font-bold text-cc-ink">Log call</div>
+      <div className="text-[13px] text-cc-muted mb-4">{lead.name || "—"} · +91 {lead.mobile}</div>
       <div className="flex flex-wrap gap-1.5 mb-4">
         {OUTCOMES.map((o) => (
           <button key={o} type="button" onClick={() => pick(o)} disabled={busy}
-            className={["px-3 py-1.5 rounded-full text-[12.5px] font-semibold border", outcome === o ? "text-white border-transparent" : "bg-white border-line text-[#0f3d2e]"].join(" ")}
+            className={["px-3 py-1.5 rounded-full text-[12.5px] font-semibold border", outcome === o ? "text-white border-transparent" : "bg-white border-line text-cc-ink"].join(" ")}
             style={outcome === o ? { background: ACCENTS.gzb.color } : undefined}>
             {OUTCOME_LABEL[o]}
           </button>
         ))}
       </div>
       <label className="flex flex-col gap-1 mb-3">
-        <span className="text-[12px] font-medium text-[#5a8a76]">Note</span>
+        <span className="text-[12px] font-medium text-cc-muted">Note</span>
         <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} disabled={busy}
           className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none resize-none" />
       </label>
       <div className="grid sm:grid-cols-2 gap-3">
         <label className="flex flex-col gap-1">
-          <span className="text-[12px] font-medium text-[#5a8a76]">Next follow-up</span>
+          <span className="text-[12px] font-medium text-cc-muted">Next follow-up</span>
           <DateField value={next} onChange={setNext} disabled={busy} min={localIsoDate(new Date())}
             className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none" />
           <div className="flex gap-1.5 mt-1">
             {QUICK.map(([l, n]) => (
               <button key={l} type="button" onClick={() => setNext(inDays(n))} disabled={busy}
-                className="px-2 py-1 rounded-lg text-[11.5px] font-semibold border border-line text-[#0f3d2e] hover:bg-[#f7fcfa]">{l}</button>
+                className="px-2 py-1 rounded-lg text-[11.5px] font-semibold border border-line text-cc-ink hover:bg-cc-row-hover">{l}</button>
             ))}
           </div>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[12px] font-medium text-[#5a8a76]">Status</span>
+          <span className="text-[12px] font-medium text-cc-muted">Status</span>
           <select value={status} onChange={(e) => setStatus(e.target.value)} disabled={busy}
             className="border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none">
             {LEAD_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -647,7 +648,7 @@ function LogCall({ lead, onLogged, onClose }: { lead: Lead; onLogged: (c: Call, 
       </div>
       {error && <p className="text-[13px] text-red-600 mt-3">{error}</p>}
       <div className="flex justify-end gap-2 mt-5">
-        <button type="button" onClick={onClose} disabled={busy} className="px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-[#5a8a76] hover:bg-[#f7fcfa]">Cancel</button>
+        <button type="button" onClick={onClose} disabled={busy} className="px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-cc-muted hover:bg-cc-row-hover">Cancel</button>
         <button type="button" onClick={() => void save()} disabled={busy}
           className="px-5 py-2.5 rounded-xl text-white text-[13.5px] font-semibold disabled:opacity-60" style={{ background: ACCENTS.gzb.color }}>
           {busy ? "Saving…" : "Save"}

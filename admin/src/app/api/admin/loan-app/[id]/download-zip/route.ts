@@ -34,6 +34,7 @@ import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { loanDisplayId } from "@/lib/loan-labels";
 import { baseName, loadLoanAndDocs, zipResponse } from "@/lib/zip-response";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -144,7 +145,7 @@ export async function GET(
       .slice(0, 80);
     return zipResponse(archive, safeName);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[loan-zip] error:", msg);
     return err(msg, 500);
   }

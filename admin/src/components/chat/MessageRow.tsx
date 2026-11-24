@@ -49,7 +49,7 @@ export function MessageRow({ theme, m, rmName, onEdit, editingId, canEdit = m.ed
         {m.edited && <span>· edited</span>}
         {isUser && !m.files && <span className={theme.accentText}>✓✓</span>}
         {isUser && canEdit && (
-          <button onClick={onEdit} className={`${theme.accentText} font-semibold hover:underline`} aria-label="Edit">{m.files ? "↺ replace" : "✎ edit"}</button>
+          <button onClick={onEdit} className={`${theme.accentText} font-semibold hover:underline`} aria-label={m.files ? "Replace" : "Edit"}>{m.files ? "↺ replace" : "✎ edit"}</button>
         )}
       </div>
     </div>

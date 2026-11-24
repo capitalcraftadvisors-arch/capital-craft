@@ -7,6 +7,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { authHeaders } from "@/lib/auth";
 import { deleteDocument } from "@/lib/storage";
 import { nameDocument } from "@/lib/ocr";
+import { askConfirm } from "@/lib/confirm";
 import type { LoanDocRow } from "@/lib/loan-form";
 import type { Form } from "@/components/chat/types";
 import { uidGen } from "./script";
@@ -88,7 +89,7 @@ export default function ExtraDocs({ appId, form, docRows, bills, only, onPatch, 
     }
   }
   async function remove(list: ExtraKey, d: ExtraDoc) {
-    if (!window.confirm(`Delete "${d.name}"? This can't be undone.`)) return;
+    if (!(await askConfirm(`Delete "${d.name}"? This can't be undone.`, { danger: true }))) return;
     if (!(await deleteDocument(d.id))) { setError(`Couldn't delete ${d.name}.`); return; }
     setLists((l) => ({ ...l, [list]: l[list].filter((x) => x.id !== d.id) }));
   }
@@ -99,7 +100,7 @@ export default function ExtraDocs({ appId, form, docRows, bills, only, onPatch, 
       <div className={top ? "" : "border-t border-line/70"}>
         <div className="flex items-center justify-between gap-2 px-3 py-2">
           <span className="text-[12.5px] text-text leading-snug">{title}</span>
-          <label className="inline-flex items-center gap-1 rounded-lg border border-dashed border-line hover:border-[#1e3a8a] bg-white px-2.5 py-1.5 cursor-pointer text-[11.5px] font-semibold text-[#1e3a8a] whitespace-nowrap">
+          <label className="inline-flex items-center gap-1 rounded-lg border border-dashed border-line hover:border-navy bg-white px-2.5 py-1.5 cursor-pointer text-[11.5px] font-semibold text-navy whitespace-nowrap">
             <span className="text-[13px] leading-none">＋</span> Add
             <input type="file" multiple accept="image/*,application/pdf" className="hidden" onChange={(e) => { add(list, e.target.files); e.currentTarget.value = ""; }} />
           </label>
@@ -108,14 +109,14 @@ export default function ExtraDocs({ appId, form, docRows, bills, only, onPatch, 
           <ul className="px-3 pb-2.5 flex flex-col gap-1.5">
             {lists[list].map((d, i) => (
               <li key={d.id} className="flex items-center gap-2 text-[12px] text-text min-w-0">
-                <span className="w-6 h-6 rounded-md bg-[#f4f7fd] border border-[#c7d5f0] grid place-items-center text-[11px] shrink-0">📄</span>
+                <span className="w-6 h-6 rounded-md bg-navy-soft border border-navy-line grid place-items-center text-[11px] shrink-0">📄</span>
                 <span className="truncate flex-1">{label(d, i)}</span>
-                <button onClick={() => void remove(list, d)} aria-label={`Delete ${label(d, i)}`} className="text-[#9aa5a0] hover:text-red-600 text-[13px] leading-none px-1">✕</button>
+                <button onClick={() => void remove(list, d)} aria-label={`Delete ${label(d, i)}`} className="text-cc-empty hover:text-red-600 text-[13px] leading-none px-1">✕</button>
               </li>
             ))}
             {waiting.map((p) => (
               <li key={p.key} className="flex items-center gap-2 text-[11.5px] text-text-muted min-w-0">
-                <span className="w-3.5 h-3.5 rounded-full border-2 border-[#1e3a8a]/30 border-t-[#1e3a8a] animate-spin shrink-0" />
+                <span className="w-3.5 h-3.5 rounded-full border-2 border-navy/30 border-t-navy animate-spin shrink-0" />
                 <span className="truncate">{p.name} · {list === "_extra_bills" ? "Uploading…" : "Reading…"}</span>
               </li>
             ))}

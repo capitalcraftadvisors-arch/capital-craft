@@ -14,6 +14,7 @@ import { NAVY } from "@/components/partner/PartnerShell";
 import { input } from "@/components/quotation/form-kit";
 import { saveUrl } from "@/lib/storage";
 import { getBusiness } from "@/lib/auth";
+import { askConfirm } from "@/lib/confirm";
 import { isSiteStaff, portalV2 } from "@/lib/epc-roles";
 import { fetchEpcName } from "@/lib/epc-name";
 import { fetchWhatsAppOn } from "@/lib/subscription";
@@ -55,8 +56,8 @@ export default function ProjectDocuments({ project, canUpload }: { project: Proj
     try { await fn(); } catch (e) { setError((e as Error).message || "Something went wrong."); } finally { setBusy(""); }
   }
   const upload = (f: File) => run("upload", async () => setFiles(await addVaultDoc(project.id, files ?? [], category, f)));
-  const remove = (f: VaultFile) => {
-    if (!f.id || !window.confirm(`Delete ${f.name}? This can't be undone.`)) return;
+  const remove = async (f: VaultFile) => {
+    if (!f.id || !(await askConfirm(`Delete ${f.name}? This can't be undone.`, { danger: true }))) return;
     const id = f.id;
     void run(`del:${id}`, async () => setFiles(await removeVaultDoc(project.id, files ?? [], id)));
   };
@@ -75,7 +76,7 @@ export default function ProjectDocuments({ project, canUpload }: { project: Proj
         <div className="ml-auto flex items-center gap-4">
           {canUpload && <WhatsAppButton on={wa} busy={busy === "wa"} onClick={() => void share()} label="Photo update" />}
           <button type="button" onClick={() => void zip()} disabled={!files?.length || !!busy}
-            className="text-[13px] font-semibold text-[#1e3a8a] hover:underline disabled:opacity-50 disabled:no-underline">
+            className="text-[13px] font-semibold text-navy hover:underline disabled:opacity-50 disabled:no-underline">
             {busy === "zip" ? "Preparing…" : "Download all"}
           </button>
         </div>
@@ -97,10 +98,10 @@ export default function ProjectDocuments({ project, canUpload }: { project: Proj
                   {list.map((f, i) => (
                     <div key={f.id ?? `${g}.${i}`} className="flex items-center gap-3 text-[13px] min-w-0">
                       {f.url
-                        ? <a href={f.url} target="_blank" rel="noreferrer" className="text-text hover:text-[#1e3a8a] hover:underline truncate">{f.name}</a>
+                        ? <a href={f.url} target="_blank" rel="noreferrer" className="text-text hover:text-navy hover:underline truncate">{f.name}</a>
                         : <span className="text-text-muted truncate">{f.name}</span>}
                       {f.deletable && f.id && (
-                        <button type="button" onClick={() => remove(f)} disabled={!!busy}
+                        <button type="button" onClick={() => void remove(f)} disabled={!!busy}
                           className="ml-auto shrink-0 text-[12.5px] font-semibold text-red-600 hover:underline disabled:opacity-60">
                           {busy === `del:${f.id}` ? "Deleting…" : "Delete"}
                         </button>

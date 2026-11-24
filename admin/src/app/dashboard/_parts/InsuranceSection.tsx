@@ -39,7 +39,7 @@ export default function InsuranceSection({ insRows, loading, onApply, applying, 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div><h2 className="font-display text-[20px] font-bold text-[#0f3d2e]">Your insurance applications</h2></div>
+        <div><h2 className="font-display text-[20px] font-bold text-cc-ink">Your insurance applications</h2></div>
         {onApply && <button onClick={onApply} disabled={applying} className="px-4 py-2 rounded-xl text-white text-[13px] font-semibold disabled:opacity-60" style={{ background: NAVY_ACCENT }}>{applying ? "Starting…" : "Apply for insurance"}</button>}
       </div>
 
@@ -57,9 +57,9 @@ export default function InsuranceSection({ insRows, loading, onApply, applying, 
               : insRows.length === 0 ? <tr><td colSpan={6} className="px-5 py-12 text-center text-text-muted">No insurance applications yet.</td></tr>
               : filtered.length === 0 ? <tr><td colSpan={6} className="px-5 py-12 text-center text-text-muted">No applications match your search or filter.</td></tr>
               : filtered.map((r) => (
-                <tr key={r.id} onClick={() => onOpen(r.id)} className="border-b border-line cursor-pointer hover:bg-[#f0faf5]">
-                  <td className="px-5 py-4"><div className="text-[15px] font-semibold text-text">{r.aadhaar_name || "—"}</div>{r.insurance_display_id && <div className="text-[12px] font-mono text-[#185fa5] mt-0.5">{r.insurance_display_id}</div>}{r.attention_status === "open" && <div className="mt-1"><span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Action needed</span></div>}</td>
-                  <td className="px-5 py-4 font-semibold text-[#0f3d2e]">{fmtRupees(r.sum_insured ?? r.invoice_confirmed_amount)}</td>
+                <tr key={r.id} onClick={() => onOpen(r.id)} className="border-b border-line cursor-pointer hover:bg-cc-wash">
+                  <td className="px-5 py-4"><div className="text-[15px] font-semibold text-text">{r.aadhaar_name || "—"}</div>{r.insurance_display_id && <div className="text-[12px] font-mono text-cc-blue mt-0.5">{r.insurance_display_id}</div>}{r.attention_status === "open" && <div className="mt-1"><span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Action needed</span></div>}</td>
+                  <td className="px-5 py-4 font-semibold text-cc-ink">{fmtRupees(r.sum_insured ?? r.invoice_confirmed_amount)}</td>
                   <td className="px-5 py-4">{r.insurance_partner || "—"}</td>
                   <td className="px-5 py-4"><span className={`inline-block px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wide ${INS_STATUS_PILL[r.status] ?? INS_STATUS_PILL.draft}`}>{INSURANCE_STATUS_LABEL[r.status] ?? r.status}</span></td>
                   <td className="px-5 py-4">
@@ -67,7 +67,7 @@ export default function InsuranceSection({ insRows, loading, onApply, applying, 
                     {canRenew(r) && (
                       <div className="mt-1.5">
                         <button type="button" disabled={applying} onClick={(e) => { e.stopPropagation(); onRenew?.(); }}
-                          className="px-3 py-1 rounded-lg border border-[#1e3a8a] text-[#1e3a8a] text-[12px] font-semibold hover:bg-[#1e3a8a]/[0.06] disabled:opacity-60">
+                          className="px-3 py-1 rounded-lg border border-navy text-navy text-[12px] font-semibold hover:bg-navy/[0.06] disabled:opacity-60">
                           {applying ? "Starting…" : "Renew"}
                         </button>
                       </div>

@@ -1,5 +1,4 @@
 "use client";
-import { fmtDate } from "@/lib/dates";
 
 // Loan application step tracker card.
 //
@@ -22,6 +21,8 @@ import { fmtDate } from "@/lib/dates";
 // currentStep is 1-based. Steps below currentStep render as "done"
 // (green), the currentStep renders as "active" (green ring + fill),
 // steps above render as "pending" (grey).
+
+import { fmtDate } from "@/lib/dates";
 
 type Props = {
   applicationId: string;
@@ -77,7 +78,7 @@ export default function LoanAppStepTracker({
         )}
         <div className="text-right">
           <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold">Progress</p>
-          <p className="text-[14px] font-semibold text-[#178a5c]">
+          <p className="text-[14px] font-semibold text-cc-green">
             Step {clamped} of {total} · {pct}% Complete
           </p>
         </div>
@@ -103,8 +104,8 @@ export default function LoanAppStepTracker({
               <p
                 className={[
                   "mt-1.5 text-[11px] leading-tight",
-                  state === "active" ? "text-[#0f3d2e] font-semibold" :
-                  state === "done"   ? "text-[#178a5c]" :
+                  state === "active" ? "text-cc-ink font-semibold" :
+                  state === "done"   ? "text-cc-green" :
                                        "text-text-muted",
                 ].join(" ")}
               >
@@ -122,7 +123,7 @@ function StepCircle({ state, num }: { state: "done" | "active" | "pending"; num:
   const base = "w-7 h-7 rounded-full flex items-center justify-center text-[12px] font-bold border-2 shrink-0";
   if (state === "done") {
     return (
-      <span className={base + " bg-[#178a5c] border-[#178a5c] text-white"}>
+      <span className={base + " bg-cc-green border-cc-green text-white"}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
           <polyline points="20 6 9 17 4 12" />
         </svg>
@@ -131,7 +132,7 @@ function StepCircle({ state, num }: { state: "done" | "active" | "pending"; num:
   }
   if (state === "active") {
     return (
-      <span className={base + " bg-white border-[#178a5c] text-[#0f3d2e] ring-4 ring-[#f0faf5]"}>
+      <span className={base + " bg-white border-cc-green text-cc-ink ring-4 ring-cc-wash"}>
         {num}
       </span>
     );
@@ -148,7 +149,7 @@ function ConnectorLine({ done }: { done: boolean }) {
     <span
       className={[
         "flex-1 h-0.5 rounded-full",
-        done ? "bg-[#178a5c]" : "bg-line",
+        done ? "bg-cc-green" : "bg-line",
       ].join(" ")}
       aria-hidden
     />

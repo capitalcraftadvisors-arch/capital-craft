@@ -76,7 +76,7 @@ export default function ApplyPage() {
     <main className="min-h-screen bg-bg-soft">
       <header className="border-b border-line bg-white">
         <div className="max-w-2xl mx-auto px-5 h-16 flex items-center">
-          <span className="font-display font-bold text-[20px] text-[#178a5c]">Capital&nbsp;Craft</span>
+          <span className="font-display font-bold text-[20px] text-cc-green">Capital&nbsp;Craft</span>
         </div>
       </header>
 
@@ -106,13 +106,13 @@ export default function ApplyPage() {
               <div className="grid sm:grid-cols-2 gap-3">
                 <button type="button" onClick={() => choose("loan")}
                   className={["text-left p-5 rounded-card border-2 transition-colors",
-                    leadType === "loan" ? "border-[#178a5c] bg-[#f0faf5]" : "border-line hover:border-[#178a5c]/50"].join(" ")}>
+                    leadType === "loan" ? "border-cc-green bg-cc-wash" : "border-line hover:border-cc-green/50"].join(" ")}>
                   <div className="text-[17px] font-semibold text-text">Solar Loan</div>
                   <div className="text-[13px] text-text-mid mt-1">Finance your rooftop or commercial solar project.</div>
                 </button>
                 <button type="button" onClick={() => choose("insurance")}
                   className={["text-left p-5 rounded-card border-2 transition-colors",
-                    leadType === "insurance" ? "border-[#178a5c] bg-[#f0faf5]" : "border-line hover:border-[#178a5c]/50"].join(" ")}>
+                    leadType === "insurance" ? "border-cc-green bg-cc-wash" : "border-line hover:border-cc-green/50"].join(" ")}>
                   <div className="text-[17px] font-semibold text-text">Solar Insurance</div>
                   <div className="text-[13px] text-text-mid mt-1">Protect your installed solar plant.</div>
                 </button>
@@ -159,7 +159,7 @@ export default function ApplyPage() {
           {/* ── Step 4: done ── */}
           {step === "done" && (
             <div className="text-center py-6">
-              <div className="w-16 h-16 rounded-full bg-[#e6f6ee] text-[#178a5c] grid place-items-center mx-auto mb-4">
+              <div className="w-16 h-16 rounded-full bg-cc-tint text-cc-green grid place-items-center mx-auto mb-4">
                 <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5L20 7"/></svg>
               </div>
               <h1 className="font-display text-[24px] font-bold text-text mb-2">Thank you!</h1>

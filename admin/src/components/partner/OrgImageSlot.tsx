@@ -7,6 +7,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { authHeaders } from "@/lib/auth";
 import { orgImageUrl, type OrgImageKind } from "@/lib/org-profile";
 import { setOrgImage } from "@/lib/org-settings";
+import { askConfirm } from "@/lib/confirm";
 import { NAVY } from "@/components/partner/PartnerShell";
 
 export default function OrgImageSlot({ kind, path, empty, onChange }: {
@@ -40,7 +41,7 @@ export default function OrgImageSlot({ kind, path, empty, onChange }: {
   }
 
   async function remove() {
-    if (!window.confirm("Remove this image?")) return;
+    if (!(await askConfirm("Remove this image?", { danger: true }))) return;
     setBusy(true); setError(null);
     const r = await call("DELETE");
     setBusy(false);
@@ -52,7 +53,6 @@ export default function OrgImageSlot({ kind, path, empty, onChange }: {
     <div className="flex items-center gap-5 flex-wrap">
       <div className="w-28 h-28 rounded-2xl border border-line bg-white grid place-items-center overflow-hidden shrink-0">
         {path ? (
-          /* eslint-disable-next-line @next/next/no-img-element */
           <img src={orgImageUrl(path)} alt="" className="w-full h-full object-contain p-2" />
         ) : empty}
       </div>

@@ -12,6 +12,7 @@ import { compressUpload } from "./image-compress";
 import { compress } from "./insurance-server";
 import { ACCEPTED, safeName } from "./upload-rules";
 import type { GeminiImage } from "./gemini-extract";
+import { errText } from "./errors";
 
 // ── Loan application (epc_applications, applications/{id}/… in storage) ──────
 
@@ -67,7 +68,7 @@ export async function readDoc<F>(
     const r = await vision(doc.buffer, doc.mime);
     return { fields: r.fields, rawText: r.raw_text, visionError: null, source: "vision" };
   } catch (e) {
-    const visionError = e instanceof Error ? e.message : String(e);
+    const visionError = errText(e);
     console.error(logLabel, visionError);
     return { fields: empty, rawText: null, visionError, source: "vision" };
   }

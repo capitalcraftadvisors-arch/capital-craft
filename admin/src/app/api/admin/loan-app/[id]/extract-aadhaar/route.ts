@@ -31,6 +31,7 @@ import { uploadBuffer, getSignedReadUrl } from "@/lib/gcs";
 import { extractAadhaar, geminiExtractAadhaar, cropAndUploadFace, type AadhaarFields } from "@/lib/aadhaar";
 import { checkLoanAppForUpload, compressFile, saveOcrRaw } from "@/lib/extract-server";
 import { ACCEPTED, safeName } from "@/lib/upload-rules";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -107,7 +108,7 @@ export async function POST(
           extractAadhaar(backComp.output,  backComp.mime),
         ]);
       } catch (e) {
-        visionError = e instanceof Error ? e.message : String(e);
+        visionError = errText(e);
         console.error("[extract-aadhaar] vision error:", visionError);
       }
       const frontFields = frontOut?.fields ?? null;
@@ -172,7 +173,7 @@ export async function POST(
       debug_raw_text_back:  backOut?.raw_text  ?? null,
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[extract-aadhaar] error:", msg);
     return err(msg, 500);
   }

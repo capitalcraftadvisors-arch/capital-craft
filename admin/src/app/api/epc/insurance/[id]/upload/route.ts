@@ -18,6 +18,7 @@ import { uploadBuffer } from "@/lib/gcs";
 import { compress } from "@/lib/insurance-server";
 import { ACCEPTED, safeName } from "@/lib/upload-rules";
 import { UUID_RE } from "@/lib/validators";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,7 +66,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     return NextResponse.json({ ok: true, path });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[insurance/upload] error:", msg);
     return err(msg, 500);
   }

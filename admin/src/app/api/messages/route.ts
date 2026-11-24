@@ -14,6 +14,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { err, dbAs, requireLogin, strOrNull } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -155,7 +156,7 @@ export async function POST(req: NextRequest) {
 
     return err("unknown_action", 400);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[messages] error:", msg);
     return err(msg, 500);
   }

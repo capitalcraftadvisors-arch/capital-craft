@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import Card from "@/components/ui/Card";
 import { supabase } from "@/lib/supabase";
+import type { TeamAccount } from "@/lib/use-admin-names";
 
 // ── brand palette ────────────────────────────────────────────────────────────
 const C = {
@@ -33,6 +34,7 @@ const APPROVED = new Set(["approved", "rfd", "sent_to_nbfc", "disbursed"]);
 
 type LoanRow = Record<string, any>;
 type LeadRow = { status: string | null; dead_at: string | null; created_at: string | null };
+type EpcNameRow = { id: string; trade_name: string | null; legal_name: string | null; contact_name: string | null };
 
 const num = (v: unknown) => Number(v) || 0;
 const money = rupeesShort;
@@ -71,18 +73,18 @@ export default function OverviewSection({ win, segment }: { win: { start: number
       setLoans((l.data ?? []) as LoanRow[]);
       setLeads((ld.data ?? []) as LeadRow[]);
       const m = new Map<string, string>();
-      for (const b of (e.data ?? []) as any[]) m.set(b.id, b.trade_name || b.legal_name || b.contact_name || "—");
+      for (const b of (e.data ?? []) as EpcNameRow[]) m.set(b.id, b.trade_name || b.legal_name || b.contact_name || "—");
       setEpcNames(m);
       const rm = new Map<string, string>();
-      for (const b of (u.data ?? []) as any[]) rm.set(b.id, b.contact_name || "—");
+      for (const b of (u.data ?? []) as TeamAccount[]) rm.set(b.id, b.contact_name || "—");
       setRmNames(rm);
       setLoading(false);
     })();
     return () => { cancelled = true; };
   }, []);
 
-  const colorOf = (k: string) => lenderColor(lenders, k);
   const d = useMemo(() => {
+    const colorOf = (k: string) => lenderColor(lenders, k);
     // Scope to a loan segment (Residential / C&I) when this section is segmented.
     const uni = segment ? loans.filter((l) => l.plant_use_type === segment) : loans;
     const cohort = uni.filter((r) => inWin(r.created_at, win));
@@ -531,7 +533,7 @@ function ForecastTable({ rows, fmt }: { rows: { name: string; color: string; cou
       </thead>
       <tbody>
         {rows.map((r) => (
-          <tr key={r.name} className="border-b border-[#f0f4f2] last:border-0">
+          <tr key={r.name} className="border-b border-cc-row-line-soft last:border-0">
             <td className="py-2 font-semibold text-text">
               <span className="inline-flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: r.color }} />{r.name}</span>
             </td>
@@ -575,7 +577,7 @@ function ScoreCard({ rows, fmt }: { rows: { name: string; color: string; approve
       </thead>
       <tbody>
         {rows.map((r) => (
-          <tr key={r.name} className="border-b border-[#f0f4f2] last:border-0">
+          <tr key={r.name} className="border-b border-cc-row-line-soft last:border-0">
             <td className="py-2 font-semibold text-text">
               <span className="inline-flex items-center gap-2"><span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: r.color }} />{r.name}</span>
             </td>
@@ -710,7 +712,7 @@ function Funnel({ steps }: { steps: { label: string; value: number; pct: number;
               <b className="text-text">{s.value}</b>{s.conv != null && s.conv <= 100 && <span className="ml-2 text-[11px]">{s.conv}% ↓</span>}
             </span>
           </div>
-          <div className="h-6 rounded-md bg-[#eef1f4] overflow-hidden">
+          <div className="h-6 rounded-md bg-grey-line overflow-hidden">
             <div className="h-full rounded-md" style={{ width: `${Math.max(4, s.pct)}%`, backgroundColor: C.green }} />
           </div>
         </div>
@@ -732,7 +734,7 @@ function Leaderboard({ rows, fmt }: { rows: { name: string; value: number }[]; f
               <span className="truncate text-text font-medium">{r.name}</span>
               <span className="font-semibold text-text shrink-0 ml-2">{fmt(r.value)}</span>
             </div>
-            <div className="h-2 rounded-full bg-[#eef1f4] overflow-hidden">
+            <div className="h-2 rounded-full bg-grey-line overflow-hidden">
               <div className="h-full rounded-full" style={{ width: `${(r.value / max) * 100}%`, backgroundColor: C.green }} />
             </div>
           </div>

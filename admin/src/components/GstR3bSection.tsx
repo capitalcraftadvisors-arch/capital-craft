@@ -30,12 +30,13 @@
 // Admin-only enforcement (RLS, /api/upload, /api/document/[id]) is
 // untouched by this rewrite — same constraints apply.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Card from "@/components/ui/Card";
 import { supabase } from "@/lib/supabase";
 import { uploadDocument, getDocumentUrl, deleteDocument } from "@/lib/storage";
 import { extractGstR3b } from "@/lib/ocr";
 import { isAcceptedFileType } from "@/lib/validators";
+import { askConfirm } from "@/lib/confirm";
 
 type Mode = "monthly" | "quarterly";
 
@@ -98,7 +99,7 @@ export default function GstR3bSection({ businessId }: { businessId: string }) {
     mode === "monthly" ? MAX_MONTHLY : mode === "quarterly" ? MAX_QUARTERLY : 0;
 
   // ── Load ──────────────────────────────────────────────────────────────
-  async function load() {
+  const load = useCallback(async () => {
     const { data } = await supabase()
       .from("epc_documents")
       .select("id, storage_path, mime_type, file_name, metadata")
@@ -120,18 +121,19 @@ export default function GstR3bSection({ businessId }: { businessId: string }) {
     setLegacy(legacyRows);
     if (validDocs.length > 0) setMode(validDocs[0].metadata.period_type);
     setLoaded(true);
-  }
+  }, [businessId]);
 
-  useEffect(() => { void load(); }, [businessId]);
+  useEffect(() => { void load(); }, [load]);
 
   // ── Legacy cleanup ────────────────────────────────────────────────────
   async function clearLegacy() {
     if (
-      !confirm(
+      !(await askConfirm(
         `Permanently delete ${legacy.length} legacy GSTR-3B file${
           legacy.length > 1 ? "s" : ""
         } from the previous design? This cannot be undone.`,
-      )
+        { danger: true },
+      ))
     ) return;
     setBusy(true);
     for (const l of legacy) {
@@ -146,11 +148,12 @@ export default function GstR3bSection({ businessId }: { businessId: string }) {
     if (mode === newMode) return;
     if (docs.length > 0) {
       if (
-        !confirm(
+        !(await askConfirm(
           `Switching to ${newMode} mode will permanently delete the ${docs.length} file${
             docs.length > 1 ? "s" : ""
           } already uploaded under ${mode} mode. Continue?`,
-        )
+          { danger: true },
+        ))
       ) return;
       setBusy(true);
       for (const d of docs) {
@@ -282,7 +285,7 @@ export default function GstR3bSection({ businessId }: { businessId: string }) {
   }
 
   async function removeDoc(d: Doc) {
-    if (!confirm("Remove this GSTR-3B file?")) return;
+    if (!(await askConfirm("Remove this GSTR-3B file?", { danger: true }))) return;
     const ok = await deleteDocument(d.id);
     if (!ok) {
       setError("Could not delete this file.");
@@ -362,7 +365,7 @@ export default function GstR3bSection({ businessId }: { businessId: string }) {
 
       {legacy.length > 0 && (
         <div className="mb-4 p-3 rounded-input bg-gold-50 border border-[#f5b800]/30 flex items-center justify-between gap-4">
-          <p className="text-[13px] text-[#8a6500]">
+          <p className="text-[13px] text-warn-ochre">
             <strong>Legacy data found.</strong>{" "}
             {legacy.length} file{legacy.length > 1 ? "s" : ""} from the previous
             design (Present/Previous panels) — not displayed in the new table.
@@ -371,7 +374,7 @@ export default function GstR3bSection({ businessId }: { businessId: string }) {
             type="button"
             disabled={busy}
             onClick={clearLegacy}
-            className="shrink-0 text-[12px] font-semibold text-[#8a6500] border border-[#8a6500]/40 px-3 py-1.5 rounded hover:bg-[#f5b800]/15 disabled:opacity-50"
+            className="shrink-0 text-[12px] font-semibold text-warn-ochre border border-warn-ochre/40 px-3 py-1.5 rounded hover:bg-[#f5b800]/15 disabled:opacity-50"
           >
             Clear legacy files
           </button>
@@ -538,8 +541,8 @@ function Uploader({
   return (
     <label
       className={[
-        "flex flex-col items-center justify-center min-h-[120px] border-2 border-dashed border-[#185fa5] rounded-input bg-white text-[#185fa5]",
-        "px-4 py-5 text-center cursor-pointer hover:bg-[#f2f7fc] transition-colors mb-3",
+        "flex flex-col items-center justify-center min-h-[120px] border-2 border-dashed border-cc-blue rounded-input bg-white text-cc-blue",
+        "px-4 py-5 text-center cursor-pointer hover:bg-cc-blue-wash transition-colors mb-3",
         disabled ? "opacity-60 pointer-events-none" : "",
       ].join(" ")}
     >
@@ -565,7 +568,7 @@ function Uploader({
       <p className="text-[14px] font-semibold">
         {disabled ? "Working…" : `Click to upload (${used}/${max} used)`}
       </p>
-      <p className="text-[12px] text-[#5a86b3] mt-0.5">
+      <p className="text-[12px] text-cc-blue-muted mt-0.5">
         Photo, scan, or PDF · duplicates auto-skipped
       </p>
     </label>

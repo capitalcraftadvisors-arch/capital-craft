@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { authHeaders } from "@/lib/auth";
 import { openLoanDoc } from "@/lib/storage";
 import { PINCODE_RE } from "@/lib/validators";
+import { errText } from "@/lib/errors";
 import { PARTNER_THEME as THEME } from "@/components/chat/theme";
 import type { Form } from "@/components/chat/types";
 import { AddFileButton, ContinueRow, DocSlotTable, FieldRows, ReadingLine, SlotFileChip } from "@/components/chat/DocSlotTable";
@@ -155,7 +156,7 @@ export default function DocTable({ appId, form, rows, docRows = [], review = fal
       onPatch(patch);
       if (mounted.current) setReads((s) => ({ ...s, [unit]: { status: "done" } }));
     } catch (e) {
-      if (mounted.current) setReads((s) => ({ ...s, [unit]: { status: "error", error: e instanceof Error ? e.message : "Couldn't read that." } }));
+      if (mounted.current) setReads((s) => ({ ...s, [unit]: { status: "error", error: errText(e, "Couldn't read that.") } }));
     }
   }
 
@@ -194,17 +195,17 @@ export default function DocTable({ appId, form, rows, docRows = [], review = fal
     if (rd?.status === "reading") return <ReadingLine theme={THEME} />;
     if (rd?.status === "error") {
       const canRetry = rows.find((r) => r.unit === unit)!.parts.every((p) => filesRef.current[p]);
-      return <span className="flex flex-wrap items-center gap-2 text-[11.5px]"><span className="text-red-600">{rd.error || "Couldn't read that."}</span>{canRetry && <button onClick={() => void run(unit, filesRef.current)} className="text-[#1e3a8a] font-semibold hover:underline">Try again</button>}</span>;
+      return <span className="flex flex-wrap items-center gap-2 text-[11.5px]"><span className="text-red-600">{rd.error || "Couldn't read that."}</span>{canRetry && <button onClick={() => void run(unit, filesRef.current)} className="text-navy font-semibold hover:underline">Try again</button>}</span>;
     }
     if (unitDone(unit)) {
       const build = UNIT_FIELDS[unit];
       const tgt = unitTarget(unit);
       const viewLink = (tgt.url || tgt.path || tgt.rowId)
-        ? <button onClick={() => void openLoanDoc(appId, tgt)} className="text-[#1e3a8a] text-[11px] font-semibold hover:underline">View current file</button>
+        ? <button onClick={() => void openLoanDoc(appId, tgt)} className="text-navy text-[11px] font-semibold hover:underline">View current file</button>
         : null;
       return build
         ? <div className="flex flex-col gap-1.5">{viewLink}<FieldRows theme={THEME} fields={build(form).map((x) => { const value = form[x.field] || ""; return { ...x, value, ok: !!value }; })} onEdit={(field, value) => onPatch({ [field]: value })} /></div>
-        : <span className="flex items-center gap-2 text-[11.5px] text-[#1e3a8a] font-medium">Uploaded ✓{viewLink && <>· {viewLink}</>}</span>;
+        : <span className="flex items-center gap-2 text-[11.5px] text-navy font-medium">Uploaded ✓{viewLink && <>· {viewLink}</>}</span>;
     }
     return null;
   }

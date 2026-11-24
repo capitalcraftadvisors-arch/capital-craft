@@ -35,6 +35,7 @@ import DateField from "@/components/ui/DateField";
 import { I, KV, Section, StatusBtn } from "@/components/view/ViewKit";
 import { amountInput, fmtRupeesExact } from "@/lib/money";
 import { fmtDate, localIsoDate } from "@/lib/dates";
+import { askConfirm } from "@/lib/confirm";
 import {
   remainingAmount, DISBURSEMENT_WINDOW_DAYS,
   FIRST_CHARGES, firstCharges, type FirstChargeKey,
@@ -45,7 +46,7 @@ type Loan = Record<string, any>;
 // The team's lock until the admin approves the stage before.
 function LockNote({ what }: { what: string }) {
   return (
-    <div className="mt-5 flex items-center gap-2.5 rounded-[8px] border border-[#f3d9a4] bg-[#fef8ee] px-4 py-3 text-[13px] font-medium text-[#854f0b]">
+    <div className="mt-5 flex items-center gap-2.5 rounded-[8px] border border-warn-line bg-warn-wash px-4 py-3 text-[13px] font-medium text-warn-ink">
       <span className="shrink-0 inline-flex">{I.lock}</span>
       Locked — waiting for the admin to approve the {what}.
     </div>
@@ -115,7 +116,7 @@ export default function LoanDisbursementPanel({
     const total = amt + firstCharges(chargeVals);
     const sanctioned = Number(loan.sanctioned_amount ?? 0);
     if (sanctioned > 0 && total > sanctioned) {
-      const ok = window.confirm(
+      const ok = await askConfirm(
         `The first disbursement plus charges (${fmtRupeesExact(total)}) is MORE than the sanctioned amount (${fmtRupeesExact(sanctioned)}).\n\nAre you sure?`,
       );
       if (!ok) return;
@@ -226,13 +227,13 @@ export default function LoanDisbursementPanel({
   );
 
   const inputCls =
-    "w-full border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] " +
-    "focus:border-[#185fa5] outline-none bg-white";
+    "w-full border border-cc-line rounded-[8px] px-3 py-2.5 text-[14px] " +
+    "focus:border-cc-blue outline-none bg-white";
 
   return (
     <div>
       {!isApproved && (
-        <div className="mt-5 rounded-[8px] border border-[#f3d9a4] bg-[#fef8ee] px-4 py-3 text-[13px] text-[#854f0b]">
+        <div className="mt-5 rounded-[8px] border border-warn-line bg-warn-wash px-4 py-3 text-[13px] text-warn-ink">
           This application is not approved yet. Disbursement opens only after a lender approves it (which requires the documents to have been sent).
         </div>
       )}
@@ -241,7 +242,7 @@ export default function LoanDisbursementPanel({
         <>
           {(admin || !firstLocked) && (
             <Section title="1st tranche documents">
-              <p className="text-[13px] text-[#5a8a76] mb-3">
+              <p className="text-[13px] text-cc-muted mb-3">
                 {loan.approved_lender === "solfin"
                   ? "Upload the Feasibility Report. Once it's in, the 1st-disbursement entry below opens."
                   : "Upload the Feasibility Report and MMR / Advance Receipt. Once both are in, the 1st-disbursement entry below opens."}
@@ -268,7 +269,7 @@ export default function LoanDisbursementPanel({
                 <KV k="Deadline (45 days)" v={fmtDate(loan.disbursement_deadline)} />
               </div>
             ) : !tranche1Complete ? (
-              <p className="text-[13px] text-[#854f0b] bg-[#fef8ee] border border-[#f3d9a4] rounded-[8px] px-3 py-2">
+              <p className="text-[13px] text-warn-ink bg-warn-wash border border-warn-line rounded-[8px] px-3 py-2">
                 {!isApproved
                   ? "The application must be approved by a lender before the 1st disbursement can be entered."
                   : loan.approved_lender === "solfin"
@@ -278,46 +279,46 @@ export default function LoanDisbursementPanel({
             ) : (
               <>
                 {firstSaved ? (
-                  <div className="mb-3 text-[12px] text-[#5a8a76]">
-                    Deadline (45 days): <span className="font-semibold text-[#0f3d2e]">{fmtDate(loan.disbursement_deadline)}</span>
-                    {" · "}Remaining (pending): <span className="font-semibold text-[#0f3d2e]">{fmtRupeesExact(remaining)}</span>
+                  <div className="mb-3 text-[12px] text-cc-muted">
+                    Deadline (45 days): <span className="font-semibold text-cc-ink">{fmtDate(loan.disbursement_deadline)}</span>
+                    {" · "}Remaining (pending): <span className="font-semibold text-cc-ink">{fmtRupeesExact(remaining)}</span>
                   </div>
                 ) : (
-                  <p className="text-[13px] text-[#5a8a76] mb-3">
+                  <p className="text-[13px] text-cc-muted mb-3">
                     Entering the first disbursement starts the {DISBURSEMENT_WINDOW_DAYS}-day completion clock from the date below.
                   </p>
                 )}
                 <div className="grid sm:grid-cols-2 gap-3 max-w-[640px]">
-                  <div>
-                    <p className="text-[12px] text-[#5a8a76] mb-1">First disbursement amount</p>
+                  <label className="block">
+                    <span className="block text-[12px] text-cc-muted mb-1">First disbursement amount</span>
                     <input type="text" inputMode="decimal" className={inputCls} placeholder="0"
                       value={firstAmt} onChange={(e) => setFirstAmt(amountInput(e.target.value))} />
-                  </div>
+                  </label>
                   <div>
-                    <p className="text-[12px] text-[#5a8a76] mb-1">Date</p>
+                    <p className="text-[12px] text-cc-muted mb-1">Date</p>
                     <DateField className={inputCls} value={firstDate} onChange={(iso) => setFirstDate(iso)} ariaLabel="First disbursement date" />
                   </div>
                   {FIRST_CHARGES.map((c) => (
-                    <div key={c.key}>
-                      <p className="text-[12px] text-[#5a8a76] mb-1">{c.label}</p>
+                    <label key={c.key} className="block">
+                      <span className="block text-[12px] text-cc-muted mb-1">{c.label}</span>
                       <input type="text" inputMode="decimal" className={inputCls} placeholder="0"
                         value={charges[c.key]} onChange={(e) => { const v = amountInput(e.target.value); setCharges((p) => ({ ...p, [c.key]: v })); }} />
-                    </div>
+                    </label>
                   ))}
                 </div>
                 {sanctioned != null && firstAmt && Number(firstAmt) > 0 && (
-                  <p className="text-[12px] text-[#5a8a76] mt-2">
-                    Remaining after this: <span className="font-semibold text-[#0f3d2e]">{fmtRupeesExact(remainingAmount(sanctioned, Number(firstAmt), typedCharges))}</span>
+                  <p className="text-[12px] text-cc-muted mt-2">
+                    Remaining after this: <span className="font-semibold text-cc-ink">{fmtRupeesExact(remainingAmount(sanctioned, Number(firstAmt), typedCharges))}</span>
                   </p>
                 )}
                 <div className="mt-4 flex gap-2">
                   <button type="button" onClick={() => void saveFirst()} disabled={busy}
-                    className="px-4 py-2 bg-[#178a5c] text-white rounded-[8px] text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-60">
+                    className="px-4 py-2 bg-cc-green text-white rounded-[8px] text-[13px] font-semibold hover:bg-cc-green-hover disabled:opacity-60">
                     {busy ? "Saving…" : firstSaved ? "Update first disbursement" : "Save first disbursement"}
                   </button>
                   {editing === "disb1" && (
                     <button type="button" onClick={() => setEditing(null)} disabled={busy}
-                      className="px-4 py-2 bg-white border border-[#cdeadd] text-[#5a8a76] rounded-[8px] text-[13px] font-semibold hover:bg-[#f0faf5] disabled:opacity-60">
+                      className="px-4 py-2 bg-white border border-cc-line text-cc-muted rounded-[8px] text-[13px] font-semibold hover:bg-cc-wash disabled:opacity-60">
                       Cancel
                     </button>
                   )}
@@ -336,12 +337,12 @@ export default function LoanDisbursementPanel({
           {(admin || !secondLocked) && (
             <Section title="Completion documents" summary={`${docsUploaded}/${docsTotal}`}>
               {!firstSaved ? (
-                <p className="text-[13px] text-[#5a8a76]">
+                <p className="text-[13px] text-cc-muted">
                   Enter the first disbursement to begin collecting completion documents.
                 </p>
               ) : (
                 <>
-                  <p className="text-[13px] text-[#5a8a76] mb-4">
+                  <p className="text-[13px] text-cc-muted mb-4">
                     Collected from the customer. The EPC can upload these too — same slots.
                   </p>
                   <CompletionDocsSection
@@ -365,7 +366,7 @@ export default function LoanDisbursementPanel({
                 )}
               </div>
               {!allDocsIn && docsReview !== "approved" && (
-                <p className="text-[12px] text-[#854f0b] mt-2">
+                <p className="text-[12px] text-warn-ink mt-2">
                   All {docsTotal} completion documents must be uploaded before review.
                 </p>
               )}
@@ -378,7 +379,7 @@ export default function LoanDisbursementPanel({
                     disabled={busy || !allDocsIn}
                     onClick={() => setEmailOpen(true)}
                     title={allDocsIn ? "Email the completion documents to the lender" : "Upload all completion documents first"}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[8px] text-[13px] font-semibold bg-[#178a5c] text-white hover:bg-[#12734c] disabled:opacity-50"
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[8px] text-[13px] font-semibold bg-cc-green text-white hover:bg-cc-green-hover disabled:opacity-50"
                   >
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>
                     Email to {lenderName(loan.approved_lender) || "lender"}
@@ -405,33 +406,33 @@ export default function LoanDisbursementPanel({
                   <KV k="Date" v={fmtDate(loan.second_disbursement_date)} />
                 </div>
               ) : !secondUnlocked && !secondSaved ? (
-                <p className="text-[13px] text-[#5a8a76]">
+                <p className="text-[13px] text-cc-muted">
                   Available once the completion documents are reviewed and approved above.
                 </p>
               ) : (
                 <>
-                  <p className="text-[13px] text-[#5a8a76] mb-3">
-                    Pending after the first disbursement: <span className="font-semibold text-[#0f3d2e]">{fmtRupeesExact(remaining)}</span>
+                  <p className="text-[13px] text-cc-muted mb-3">
+                    Pending after the first disbursement: <span className="font-semibold text-cc-ink">{fmtRupeesExact(remaining)}</span>
                   </p>
                   <div className="grid sm:grid-cols-2 gap-3 max-w-[640px]">
-                    <div>
-                      <p className="text-[12px] text-[#5a8a76] mb-1">Second disbursement amount</p>
+                    <label className="block">
+                      <span className="block text-[12px] text-cc-muted mb-1">Second disbursement amount</span>
                       <input type="text" inputMode="decimal" className={inputCls} placeholder="0"
                         value={secondAmt} onChange={(e) => setSecondAmt(amountInput(e.target.value))} />
-                    </div>
+                    </label>
                     <div>
-                      <p className="text-[12px] text-[#5a8a76] mb-1">Date</p>
+                      <p className="text-[12px] text-cc-muted mb-1">Date</p>
                       <DateField className={inputCls} value={secondDate} onChange={(iso) => setSecondDate(iso)} ariaLabel="Second disbursement date" />
                     </div>
                   </div>
                   <div className="mt-4 flex gap-2">
                     <button type="button" onClick={() => void saveSecond()} disabled={busy}
-                      className="px-4 py-2 bg-[#178a5c] text-white rounded-[8px] text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-60">
+                      className="px-4 py-2 bg-cc-green text-white rounded-[8px] text-[13px] font-semibold hover:bg-cc-green-hover disabled:opacity-60">
                       {busy ? "Saving…" : secondSaved ? "Update second disbursement" : "Save second disbursement"}
                     </button>
                     {editing === "disb2" && (
                       <button type="button" onClick={() => setEditing(null)} disabled={busy}
-                        className="px-4 py-2 bg-white border border-[#cdeadd] text-[#5a8a76] rounded-[8px] text-[13px] font-semibold hover:bg-[#f0faf5] disabled:opacity-60">
+                        className="px-4 py-2 bg-white border border-cc-line text-cc-muted rounded-[8px] text-[13px] font-semibold hover:bg-cc-wash disabled:opacity-60">
                         Cancel
                       </button>
                     )}
@@ -443,7 +444,7 @@ export default function LoanDisbursementPanel({
         </>
       )}
 
-      {msg && <p className="text-[13px] text-[#178a5c] mt-3">{msg}</p>}
+      {msg && <p className="text-[13px] text-cc-green mt-3">{msg}</p>}
       {error && <p className="text-[13px] text-red-600 mt-3">{error}</p>}
 
       <EmailComposerModal

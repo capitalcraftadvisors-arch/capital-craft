@@ -8,7 +8,7 @@
 // (lib/quotes saveQuote) and opens it in the editor. Shown on Quotations to a
 // login that may work (canWork) on the demo EPC (portalV2).
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { NAVY } from "@/components/partner/PartnerShell";
 import Modal, { OVERLAY } from "@/components/ui/Modal";
@@ -48,6 +48,7 @@ export default function BillToQuote({ quotes, onClose }: { quotes: QuoteRow[]; o
   const [error, setError] = useState<string | null>(null);
   const camRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const titleId = useId();
 
   // The EPC's preferences and state — cached reads the editor opened next shares.
   useEffect(() => {
@@ -88,7 +89,7 @@ export default function BillToQuote({ quotes, onClose }: { quotes: QuoteRow[]; o
     setBusy(true); setError(null);
     try {
       const saved = await saveQuote(null, doc, "draft", epcState);
-      router.push(`/dashboard/quotes/${saved.id}` as any);
+      router.push(`/dashboard/quotes/${saved.id}`);
     } catch (e) {
       const m = (e as { message?: string })?.message || "";
       setError(/row-level|42501|permission denied/i.test(m) ? "You don't have access to make quotations." : m || "Couldn't save the quotation.");
@@ -96,15 +97,15 @@ export default function BillToQuote({ quotes, onClose }: { quotes: QuoteRow[]; o
     }
   }
 
-  const tile = "flex flex-col items-center justify-center gap-2.5 rounded-2xl border border-line bg-white py-9 text-[14px] font-semibold text-[#0f3d2e] hover:border-[#1e3a8a] hover:bg-[#f7f9fd]";
+  const tile = "flex flex-col items-center justify-center gap-2.5 rounded-2xl border border-line bg-white py-9 text-[14px] font-semibold text-cc-ink hover:border-navy hover:bg-[#f7f9fd]";
   const icon = { width: 26, height: 26, viewBox: "0 0 24 24", fill: "none", stroke: NAVY, strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 
   return (
     // Escape, ✕, Cancel and the overlay press all wait while the quotation saves.
     <Modal onClose={onClose} busy={busy} closeOnBackdrop="mousedown" closeOnEscape overlayClassName={OVERLAY.soft}
-      className="bg-white rounded-2xl shadow-xl w-full max-w-[640px] max-h-[92vh] overflow-y-auto p-6">
+      className="bg-white rounded-2xl shadow-xl w-full max-w-[640px] max-h-[92vh] overflow-y-auto p-6" aria-labelledby={titleId}>
       <div className="flex items-center justify-between mb-4">
-        <div className="text-[17px] font-display font-bold text-[#0f3d2e]">Quotation from bill</div>
+        <div id={titleId} className="text-[17px] font-display font-bold text-cc-ink">Quotation from bill</div>
         <button type="button" onClick={onClose} disabled={busy} aria-label="Close" className="w-8 h-8 grid place-items-center rounded-lg text-text-muted hover:bg-bg-soft">✕</button>
       </div>
 
@@ -126,10 +127,9 @@ export default function BillToQuote({ quotes, onClose }: { quotes: QuoteRow[]; o
 
       {step === "reading" && (
         <div className="flex flex-col items-center gap-4 py-6">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           {preview && <img src={preview} alt="" className="max-h-[240px] max-w-full rounded-xl border border-line object-contain" />}
           <span className="flex items-center gap-2 text-[13.5px] text-text-mid">
-            <span className="w-4 h-4 rounded-full border-2 border-[#1e3a8a]/30 border-t-[#1e3a8a] animate-spin" /> Reading…
+            <span className="w-4 h-4 rounded-full border-2 border-navy/30 border-t-navy animate-spin" /> Reading…
           </span>
         </div>
       )}
@@ -178,7 +178,7 @@ export default function BillToQuote({ quotes, onClose }: { quotes: QuoteRow[]; o
                     <tr key={e.years} className="border-t border-line">
                       <td className="py-1.5 text-text-mid">{e.years} {e.years === 1 ? "year" : "years"}</td>
                       <td className="py-1.5 text-right font-semibold text-text">{fmtRupees(e.emi)}</td>
-                      <td className={"py-1.5 text-right font-semibold " + (e.saving == null ? "text-text-muted" : e.saving >= 0 ? "text-[#178a5c]" : "text-red-600")}>
+                      <td className={"py-1.5 text-right font-semibold " + (e.saving == null ? "text-text-muted" : e.saving >= 0 ? "text-cc-green" : "text-red-600")}>
                         {e.saving == null ? "—" : e.saving < 0 ? `- ${fmtRupees(-e.saving)}` : fmtRupees(e.saving)}
                       </td>
                     </tr>
@@ -195,7 +195,7 @@ export default function BillToQuote({ quotes, onClose }: { quotes: QuoteRow[]; o
       {step === "review" && (
         <div className="flex items-center gap-2 mt-5">
           <button type="button" onClick={() => { setError(null); setStep("pick"); }} disabled={busy}
-            className="px-3 py-2 rounded-xl text-[13.5px] font-semibold text-[#1e3a8a] hover:bg-bg-soft disabled:opacity-60">Retake</button>
+            className="px-3 py-2 rounded-xl text-[13.5px] font-semibold text-navy hover:bg-bg-soft disabled:opacity-60">Retake</button>
           <button type="button" onClick={onClose} disabled={busy} className="ml-auto px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-text-mid hover:bg-bg-soft">Cancel</button>
           <button type="button" onClick={() => void create()} disabled={busy || !org}
             className="px-5 py-2.5 rounded-xl text-white text-[13.5px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
@@ -209,7 +209,7 @@ export default function BillToQuote({ quotes, onClose }: { quotes: QuoteRow[]; o
 
 function Sum({ l, v, strong }: { l: string; v: number; strong?: boolean }) {
   return (
-    <div className={"flex items-center justify-between gap-3 py-1 " + (strong ? "text-[15px] font-bold text-[#0f3d2e]" : "text-[13.5px] text-text")}>
+    <div className={"flex items-center justify-between gap-3 py-1 " + (strong ? "text-[15px] font-bold text-cc-ink" : "text-[13.5px] text-text")}>
       <span className={strong ? "" : "text-text-mid"}>{l}</span>
       <span className="whitespace-nowrap">{v < 0 ? `- ${fmtRupees(-v)}` : fmtRupees(v)}</span>
     </div>

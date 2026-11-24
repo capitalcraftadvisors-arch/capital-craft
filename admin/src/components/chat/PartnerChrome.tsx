@@ -26,9 +26,8 @@ export function PartnerChatHeader({ title, subtitle, progress, onBack, hideBroke
 }) {
   return (
     <>
-      <header className="shrink-0 px-4 sm:px-5 py-2.5 bg-[#14235c] text-white flex items-center gap-3 shadow-sm">
+      <header className="shrink-0 px-4 sm:px-5 py-2.5 bg-navy-ink text-white flex items-center gap-3 shadow-sm">
         <button onClick={onBack} className="p-1 -ml-1 text-white/80 hover:text-white text-[20px] leading-none" aria-label="Back">←</button>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/brand/capital-craft-mark.png" alt="" className="w-9 h-9 rounded-full bg-white object-contain p-1 shadow-sm"
           onError={hideBrokenLogo ? (e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; } : undefined} />
         <div className="min-w-0 flex-1">
@@ -48,9 +47,9 @@ export function PartnerTypingBubble() {
   return (
     <div className="self-start">
       <div className={`rounded-2xl rounded-tl-md bg-white border ${THEME.cardBorder} px-4 py-3 shadow-sm flex gap-1`}>
-        <span className="w-2 h-2 rounded-full bg-[#1e3a8a]/40 animate-bounce" style={{ animationDelay: "0ms" }} />
-        <span className="w-2 h-2 rounded-full bg-[#1e3a8a]/40 animate-bounce" style={{ animationDelay: "150ms" }} />
-        <span className="w-2 h-2 rounded-full bg-[#1e3a8a]/40 animate-bounce" style={{ animationDelay: "300ms" }} />
+        <span className="w-2 h-2 rounded-full bg-navy/40 animate-bounce" style={{ animationDelay: "0ms" }} />
+        <span className="w-2 h-2 rounded-full bg-navy/40 animate-bounce" style={{ animationDelay: "150ms" }} />
+        <span className="w-2 h-2 rounded-full bg-navy/40 animate-bounce" style={{ animationDelay: "300ms" }} />
       </div>
     </div>
   );
@@ -63,7 +62,7 @@ export function PartnerComposer({ inputRef, value, onChange, onSend, inputMode, 
 }) {
   return (
     <div className="flex items-center gap-2">
-      <div className="flex-1 flex items-center border border-line rounded-full bg-white overflow-hidden focus-within:border-[#1e3a8a] focus-within:ring-2 focus-within:ring-[#1e3a8a]/15">
+      <div className="flex-1 flex items-center border border-line rounded-full bg-white overflow-hidden focus-within:border-navy focus-within:ring-2 focus-within:ring-navy/15">
         <input
           ref={inputRef} autoFocus value={value}
           inputMode={inputMode}

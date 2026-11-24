@@ -17,8 +17,8 @@ export const LEAD_STATUS_LABEL: Record<LeadStatus, string> = {
   new: "New", contacted: "Contacted", quoted: "Quotation sent", won: "Won", lost: "Lost",
 };
 export const LEAD_STATUS_PILL: Record<LeadStatus, string> = {
-  new: "bg-[#e8effc] text-[#1e3a8a]", contacted: "bg-[#fdf3e2] text-[#854f0b]", quoted: "bg-[#efedff] text-[#5b3fc4]",
-  won: "bg-[#e6f6ee] text-[#178a5c]", lost: "bg-[#eef1f5] text-[#475569]",
+  new: "bg-navy-tint text-navy", contacted: "bg-[#fdf3e2] text-warn-ink", quoted: "bg-[#efedff] text-[#5b3fc4]",
+  won: "bg-cc-tint text-cc-green", lost: "bg-grey-chip text-[#475569]",
 };
 
 export type LeadRow = {

@@ -91,10 +91,10 @@ function Inner() {
   const actions = editing ? (
     <>
       <button type="button" onClick={() => setEditing(false)} className="px-4 py-2 rounded-[8px] border border-line text-[13px] text-text-mid hover:bg-bg-soft">Cancel</button>
-      <button type="button" onClick={() => void save()} disabled={busy} className="px-4 py-2 rounded-[8px] bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-60">{busy ? "Saving…" : "Save"}</button>
+      <button type="button" onClick={() => void save()} disabled={busy} className="px-4 py-2 rounded-[8px] bg-cc-green text-white text-[13px] font-semibold hover:bg-cc-green-hover disabled:opacity-60">{busy ? "Saving…" : "Save"}</button>
     </>
   ) : (
-    <button type="button" onClick={startEdit} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[8px] border border-[#cdeadd] bg-[#f4fbf7] text-[13px] font-semibold text-[#178a5c] hover:bg-[#e9f6ef]">{I.edit} Edit</button>
+    <button type="button" onClick={startEdit} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[8px] border border-cc-line bg-cc-soft text-[13px] font-semibold text-cc-green hover:bg-[#e9f6ef]">{I.edit} Edit</button>
   );
 
   return (

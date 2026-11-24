@@ -45,10 +45,10 @@ function Inner() {
     () => loan?.aadhaar_name || loan?.borrower_name || "(unnamed applicant)",
     [loan],
   );
-  const back = () => router.push((search.get("from") === "pendings" ? "/admin/pendings" : `/admin/app/${params.id}/view`) as any);
+  const back = () => router.push(search.get("from") === "pendings" ? "/admin/pendings" : `/admin/app/${params.id}/view`);
 
   if (loading) {
-    return <main className="min-h-screen grid place-items-center"><p className="text-[#5a8a76]">Loading…</p></main>;
+    return <main className="min-h-screen grid place-items-center"><p className="text-cc-muted">Loading…</p></main>;
   }
   if (!loan) {
     return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Loan application not found.</p></main>;
@@ -57,11 +57,11 @@ function Inner() {
 
   return (
     <main className="min-h-screen bg-white">
-      <header className="border-b border-[#cdeadd] bg-white sticky top-0 z-30">
+      <header className="border-b border-cc-line bg-white sticky top-0 z-30">
         <div className="w-full px-5 sm:px-8 h-14 flex items-center justify-between">
           <button
-            onClick={() => router.push(`/admin/app/${loan.id}/view` as any)}
-            className="text-[14px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1"
+            onClick={() => router.push(`/admin/app/${loan.id}/view`)}
+            className="text-[14px] text-cc-muted hover:text-cc-ink inline-flex items-center gap-1"
           >
             ← Back to profile
           </button>
@@ -72,13 +72,13 @@ function Inner() {
 
       <div className="w-full max-w-5xl mx-auto px-5 sm:px-8 py-8" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
         <div className="mb-2">
-          <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">
+          <div className="text-[24px] font-semibold text-cc-ink truncate">
             {editMode === "approval" ? "Edit approval details" : "Approval details"}
           </div>
-          <div className="text-[14px] text-[#5a8a76] mt-0.5 truncate">
+          <div className="text-[14px] text-cc-muted mt-0.5 truncate">
             {applicantName}
             {lenderKey && (
-              <> · approved by <span className="font-semibold text-[#178a5c]">{search.get("label") || lenderLabelIn(lenders, lenderKey)}</span></>
+              <> · approved by <span className="font-semibold text-cc-green">{search.get("label") || lenderLabelIn(lenders, lenderKey)}</span></>
             )}
           </div>
         </div>

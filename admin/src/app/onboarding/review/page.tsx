@@ -8,6 +8,7 @@ import WizardProgress from "@/components/WizardProgress";
 import { getBusiness, setBusiness, isImpersonating, authHeaders } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { PAN_RE } from "@/lib/validators";
+import { notify } from "@/lib/notify";
 
 type BizFull = {
   contact_name: string | null;
@@ -61,7 +62,7 @@ export default function ReviewPage() {
     // must complete the required fields first.
     const missing = missingRequired(biz);
     if (missing.length && !isImpersonating()) {
-      alert(`Please complete: ${missing.join(", ")}.`);
+      notify.error(`Please complete: ${missing.join(", ")}.`);
       return;
     }
     const b = getBusiness();
@@ -88,11 +89,11 @@ export default function ReviewPage() {
       const data = await res.json();
       setSubmitting(false);
       if (!data.ok) {
-        return alert("Couldn't save your changes: " + (data.error ?? "unknown"));
+        return notify.error("Couldn't save your changes: " + (data.error ?? "unknown"));
       }
       localStorage.removeItem("cc_self_edit_snapshot");
       // Update cached business so AuthGuard reflects the lock.
-      setBusiness({ ...b, status: "under_review", epc_self_edited: true } as any);
+      setBusiness({ ...b, status: "under_review", epc_self_edited: true });
       router.push("/status");
       return;
     }
@@ -103,7 +104,7 @@ export default function ReviewPage() {
       .update({ status: "under_review", submitted_at: new Date().toISOString() })
       .eq("id", b.id);
     setSubmitting(false);
-    if (error) return alert(error.message);
+    if (error) return notify.error(error.message);
     setBusiness({ ...b, status: "under_review" });
     router.push("/status");
   }
@@ -118,7 +119,7 @@ export default function ReviewPage() {
     <>
       <button
         type="button"
-        onClick={() => router.push("/onboarding/step-6" as any)}
+        onClick={() => router.push("/onboarding/step-6")}
         className="inline-flex items-center gap-1 text-[13px] text-text-mid hover:text-text mb-4"
       >
         <span aria-hidden>←</span> Back

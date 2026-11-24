@@ -18,6 +18,7 @@ const num = (v: unknown) => Number(v) || 0;
 const money = rupeesShort; // lib/money — paise when present
 
 type Epc = { id: string; name: string; created_at: string | null; last_login_at: string | null };
+type EpcRow = { id: string; trade_name: string | null; legal_name: string | null; contact_name: string | null; created_at: string | null; last_login_at: string | null };
 type App = Record<string, any>;
 
 export default function EpcHealthPanel() {
@@ -38,7 +39,7 @@ export default function EpcHealthPanel() {
         db.from("epc_login_events").select("epc_business_id").gte("created_at", since),
       ]);
       if (cancelled) return;
-      setEpcs(((e.data ?? []) as any[]).map((r) => ({ id: r.id, name: r.trade_name || r.legal_name || r.contact_name || "—", created_at: r.created_at, last_login_at: r.last_login_at })));
+      setEpcs(((e.data ?? []) as EpcRow[]).map((r) => ({ id: r.id, name: r.trade_name || r.legal_name || r.contact_name || "—", created_at: r.created_at, last_login_at: r.last_login_at })));
       setApps((a.data ?? []) as App[]);
       setLogins((l.data ?? []) as { epc_business_id: string | null }[]);
       setLoading(false);
@@ -142,7 +143,7 @@ export default function EpcHealthPanel() {
                       <span className="truncate text-text font-medium">{r.name}</span>
                       <span className="font-semibold text-text shrink-0 ml-2">{fmt(r.disbursed, d.top10Unit)}</span>
                     </div>
-                    <div className="h-2 rounded-full bg-[#eef1f4] overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(r.disbursed / max) * 100}%`, backgroundColor: C.green }} /></div>
+                    <div className="h-2 rounded-full bg-grey-line overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(r.disbursed / max) * 100}%`, backgroundColor: C.green }} /></div>
                   </div>
                 </div>
               )); })()}

@@ -524,7 +524,7 @@ function Inner() {
         {donId && (
           <DonePanel theme={THEME}
             message={donDraft ? "Draft saved — the EPC is on your Task Manager board." : "✓ EPC submitted — it's in “Review by CC”."}
-            actionLabel="Open the EPC →" onAction={() => router.push(`/admin/epc/${donId}/view` as any)}
+            actionLabel="Open the EPC →" onAction={() => router.push(`/admin/epc/${donId}/view`)}
             secondaryLabel="Go to console" onSecondary={() => router.push("/admin")} />
         )}
       </ChatMessages>
@@ -538,8 +538,8 @@ function Inner() {
             <div className="flex items-center gap-2">
               <input ref={inputRef} autoFocus value={input} onChange={(e) => setInput(e.target.value.replace(/\D/g, "").slice(0, 10))}
                 onKeyDown={(e) => { if (e.key === "Enter") void submitMobile(); }}
-                inputMode="numeric" placeholder="10-digit mobile" className="flex-1 border border-line rounded-full px-4 py-2.5 text-[14px] bg-white focus:outline-none focus:border-[#185fa5] focus:ring-2 focus:ring-[#185fa5]/15" />
-              <button onClick={() => void submitMobile()} className="px-4 h-11 shrink-0 rounded-full bg-[#185fa5] text-white text-[13px] font-semibold grid place-items-center hover:bg-[#124a82] shadow-sm">Create EPC</button>
+                inputMode="numeric" placeholder="10-digit mobile" className="flex-1 border border-line rounded-full px-4 py-2.5 text-[14px] bg-white focus:outline-none focus:border-cc-blue focus:ring-2 focus:ring-cc-blue/15" />
+              <button onClick={() => void submitMobile()} className="px-4 h-11 shrink-0 rounded-full bg-cc-blue text-white text-[13px] font-semibold grid place-items-center hover:bg-cc-blue-dark shadow-sm">Create EPC</button>
             </div>
           )}
 
@@ -569,7 +569,7 @@ function Inner() {
                 <span className="text-[12px] text-text-muted">{bankStmtCount} uploaded</span>
                 <div className="flex items-center gap-2">
                   <button onClick={skipBankStatements} className="px-3 py-2 text-[13px] text-text-muted hover:text-text">Skip</button>
-                  <button onClick={submitBankStatements} disabled={bankStmtCount < 1} className="px-4 py-2 rounded-xl bg-[#185fa5] text-white text-[14px] font-semibold hover:bg-[#124a82] disabled:opacity-50">Continue →</button>
+                  <button onClick={submitBankStatements} disabled={bankStmtCount < 1} className="px-4 py-2 rounded-xl bg-cc-blue text-white text-[14px] font-semibold hover:bg-cc-blue-dark disabled:opacity-50">Continue →</button>
                 </div>
               </div>
             </div>
@@ -586,7 +586,7 @@ function Inner() {
           {active.kind === "submit" && (
             <div className="flex flex-col gap-2">
               {missing.length > 0 && <div className="text-[12px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">Skipped so far: {missing.join(", ")}. Anything still required will keep it a draft.</div>}
-              <button onClick={() => void doSubmit()} className="px-4 py-2.5 rounded-xl bg-[#185fa5] text-white text-[14px] font-semibold hover:bg-[#124a82]">Submit for verification →</button>
+              <button onClick={() => void doSubmit()} className="px-4 py-2.5 rounded-xl bg-cc-blue text-white text-[14px] font-semibold hover:bg-cc-blue-dark">Submit for verification →</button>
             </div>
           )}
         </ChatDock>

@@ -14,6 +14,7 @@ import { visionDocumentText } from "@/lib/vision-server";
 import { geminiExtractPolicy } from "@/lib/doc-extractors";
 import { compress, parsePolicyPeriod } from "@/lib/insurance-server";
 import { ACCEPTED, safeName } from "@/lib/upload-rules";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -69,7 +70,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     return NextResponse.json({ ok: true, from, to });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[insurance/extract-policy] error:", msg);
     return err(msg, 500);
   }

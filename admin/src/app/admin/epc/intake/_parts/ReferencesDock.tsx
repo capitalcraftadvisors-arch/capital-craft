@@ -42,13 +42,13 @@ export default function ReferencesDock({ initCustomers, initSuppliers, initRefer
       <RefBlock title="Supplier references" which="supplier" refs={suppliers} onUpd={upd} onAdd={add} onRemove={remove} />
       <div>
         <div className="text-[12px] text-text-muted mb-1">How did they hear about us?</div>
-        <select value={referral} onChange={(e) => setReferral(e.target.value)} className="w-full border border-line rounded-lg px-2.5 py-2 text-[13px] bg-white outline-none focus:border-[#185fa5]">
+        <select value={referral} onChange={(e) => setReferral(e.target.value)} className="w-full border border-line rounded-lg px-2.5 py-2 text-[13px] bg-white outline-none focus:border-cc-blue">
           <option value="">Select…</option>
           {REFERRAL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
         </select>
-        {referral === "others" && <input value={referralOther} onChange={(e) => setReferralOther(e.target.value)} placeholder="Please specify" className="mt-2 w-full border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#185fa5]" />}
+        {referral === "others" && <input value={referralOther} onChange={(e) => setReferralOther(e.target.value)} placeholder="Please specify" className="mt-2 w-full border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-cc-blue" />}
       </div>
-      <button onClick={cont} className="self-end px-4 py-2 rounded-lg bg-[#185fa5] text-white text-[13px] font-semibold hover:bg-[#124a82]">Save references & continue →</button>
+      <button onClick={cont} className="self-end px-4 py-2 rounded-lg bg-cc-blue text-white text-[13px] font-semibold hover:bg-cc-blue-dark">Save references & continue →</button>
     </div>
   );
 }
@@ -62,15 +62,15 @@ function RefBlock({ title, which, refs, onUpd, onAdd, onRemove }: {
       <div className="flex flex-col gap-2">
         {refs.map((r, i) => (
           <div key={i} className="grid grid-cols-2 gap-2">
-            <input value={r.name} onChange={(e) => onUpd(which, i, "name", e.target.value)} placeholder="Name" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#185fa5]" />
+            <input value={r.name} onChange={(e) => onUpd(which, i, "name", e.target.value)} placeholder="Name" className="border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-cc-blue" />
             <div className="flex items-center gap-1">
-              <input value={r.mobile} onChange={(e) => onUpd(which, i, "mobile", e.target.value.replace(/\D/g, "").slice(0, 10))} inputMode="numeric" placeholder="Mobile" className="flex-1 border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-[#185fa5]" />
-              {refs.length > 2 && <button onClick={() => onRemove(which, i)} className="text-text-muted hover:text-red-500 text-[15px] px-1">×</button>}
+              <input value={r.mobile} onChange={(e) => onUpd(which, i, "mobile", e.target.value.replace(/\D/g, "").slice(0, 10))} inputMode="numeric" placeholder="Mobile" className="flex-1 border border-line rounded-lg px-2.5 py-2 text-[13px] outline-none focus:border-cc-blue" />
+              {refs.length > 2 && <button onClick={() => onRemove(which, i)} aria-label={`Remove ${which} reference`} className="text-text-muted hover:text-red-500 text-[15px] px-1">×</button>}
             </div>
           </div>
         ))}
       </div>
-      <button onClick={() => onAdd(which)} className="mt-2 text-[12px] font-semibold text-[#185fa5] hover:underline">+ Add {which} reference</button>
+      <button onClick={() => onAdd(which)} className="mt-2 text-[12px] font-semibold text-cc-blue hover:underline">+ Add {which} reference</button>
     </div>
   );
 }

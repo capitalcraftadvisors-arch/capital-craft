@@ -11,6 +11,7 @@ import { parsePanFields } from "@/lib/pan-parser";
 import { geminiExtractPan } from "@/lib/doc-extractors";
 import { storeInsuranceFile } from "@/lib/extract-server";
 import { UUID_RE } from "@/lib/validators";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     return NextResponse.json({ ok: true, fields });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[insurance/extract-pan] error:", msg);
     return err(msg, 500);
   }

@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { authHeaders } from "@/lib/auth";
 import { amountInput } from "@/lib/money";
+import { errText } from "@/lib/errors";
 import { PARTNER_THEME as THEME } from "@/components/chat/theme";
 import type { Form } from "@/components/chat/types";
 import { ContinueRow, FieldRows } from "@/components/chat/DocSlotTable";
@@ -39,7 +40,7 @@ export default function QuotationDock({ appId, form, onPatch, onDone }: { appId:
       onPatch(await readQuotation(appId, file));
       setStatus("done");
     } catch (e) {
-      setStatus("error"); setErr(e instanceof Error ? e.message : "Couldn't read the quotation.");
+      setStatus("error"); setErr(errText(e, "Couldn't read the quotation."));
     }
   }
 
@@ -48,8 +49,8 @@ export default function QuotationDock({ appId, form, onPatch, onDone }: { appId:
   return (
     <div className="flex flex-col gap-2.5">
       <label onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) void read(f); }}
-        className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-[#1e3a8a] bg-[#f4f7fd] px-4 py-3 cursor-pointer text-[13px] font-semibold text-[#1e3a8a] hover:bg-[#eef3fc]">
-        {status === "reading" ? <><span className="w-3.5 h-3.5 rounded-full border-2 border-[#1e3a8a]/30 border-t-[#1e3a8a] animate-spin" /> Reading…</> : <>＋ {status === "done" ? "Re-upload quotation" : "Upload quotation / proforma"}</>}
+        className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-navy bg-navy-soft px-4 py-3 cursor-pointer text-[13px] font-semibold text-navy hover:bg-navy-wash">
+        {status === "reading" ? <><span className="w-3.5 h-3.5 rounded-full border-2 border-navy/30 border-t-navy animate-spin" /> Reading…</> : <>＋ {status === "done" ? "Re-upload quotation" : "Upload quotation / proforma"}</>}
         <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void read(f); e.currentTarget.value = ""; }} />
       </label>
       {err && <div className="text-[11.5px] text-red-600">{err}</div>}

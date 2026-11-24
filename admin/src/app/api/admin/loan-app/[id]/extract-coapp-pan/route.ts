@@ -17,6 +17,7 @@ import { parsePanFields, type PanFields } from "@/lib/pan-parser";
 import { geminiExtractPan } from "@/lib/doc-extractors";
 import { checkLoanAppForUpload, readDoc, saveOcrRaw, signedUrlOrNull, storeLoanFile } from "@/lib/extract-server";
 import { ACCEPTED } from "@/lib/upload-rules";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -96,7 +97,7 @@ export async function POST(
       debug_raw_text:     rawText,
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[extract-coapp-pan] error:", msg);
     return err(msg, 500);
   }

@@ -5,7 +5,7 @@
 // section is hidden) and the "Co-applicant details" section.
 
 import type { Dispatch, SetStateAction } from "react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
 import DatePicker from "@/components/ui/DatePicker";
@@ -144,6 +144,7 @@ export default function CoappSection({ coapp, setCoapp, uploads, mobileConflict,
   mobileConflict: boolean;
   emailConflict: boolean;
 }) {
+  const aadhaarInputId = useId(); // ties the "Aadhaar number" label to its box
   return (
     <FormSection title="Co-applicant details">
       <div>
@@ -253,16 +254,17 @@ export default function CoappSection({ coapp, setCoapp, uploads, mobileConflict,
               onChange={(e) => setCoapp({ ...coapp, aadhaar_gender: e.target.value })}
             />
             <div>
-              <label className={FIELD_LABEL}>
+              <label htmlFor={aadhaarInputId} className={FIELD_LABEL}>
                 Aadhaar number
               </label>
               <input
+                id={aadhaarInputId}
                 value={coapp.aadhaar_number.replace(/(\d{4})(?=\d)/g, "$1 ")}
                 onChange={(e) => setCoapp({ ...coapp, aadhaar_number: e.target.value.replace(/\D/g, "").slice(0, 12) })}
                 maxLength={14}
                 inputMode="numeric"
                 placeholder="0000 0000 0000"
-                className="w-full px-4 py-3 rounded-input border-2 border-line font-mono text-[15px] tracking-wider outline-none focus:border-[#178a5c] bg-white"
+                className="w-full px-4 py-3 rounded-input border-2 border-line font-mono text-[15px] tracking-wider outline-none focus:border-cc-green bg-white"
               />
               <p className="mt-1 text-[11px] text-text-muted">12 digits, as printed on the card.</p>
             </div>

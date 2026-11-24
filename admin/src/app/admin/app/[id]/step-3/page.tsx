@@ -2,7 +2,7 @@
 
 // Loan Application — Step 3 (Loan Requirements)
 //
-// Seven sections stacked vertically inside the standard tracker card:
+// The sections, top to bottom:
 //   a. Header (tracker at step 3 of 6)
 //   b. Document upload — Proforma + E-bill (mandatory)
 //         · Each upload triggers OCR via /api/admin/loan-app/[id]/extract-loan-docs
@@ -20,7 +20,7 @@
 // The page frame, section cards, upload box and the save / OCR / pincode calls
 // come from the shared loan-form kit (components/loan-form).
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Input from "@/components/ui/Input";
@@ -30,7 +30,7 @@ import { supabase } from "@/lib/supabase";
 import { signLoanPath } from "@/lib/storage";
 import { MOBILE_RE, EMAIL_RE, PAN_RE, PINCODE_RE, AADHAAR_RE } from "@/lib/validators";
 import { INDIA_STATES } from "@/lib/india-states";
-import { amountInput, numberInput, fmtRupees } from "@/lib/money";
+import { amountInput, numberInput, fmtRupees, fmtRupeesExact } from "@/lib/money";
 import LoanShareChips from "@/components/LoanShareChips";
 import {
   StepHeader, StepLoading, StepNotFound, StepTracker, StepTitle, StepNav,
@@ -82,6 +82,7 @@ function Inner() {
   // Project + loan
   const [projectSize,    setProjectSize]    = useState<string>("");
   const [projectUnit,    setProjectUnit]    = useState<"kw" | "mw">("kw");
+  const sizeInputId = useId(); // ties the "Project size" label to its box
   const [totalCost,      setTotalCost]      = useState<string>("");
   const [loanAmount,     setLoanAmount]     = useState<string>("");
 
@@ -103,8 +104,8 @@ function Inner() {
   const [pincodeError,   setPincodeError]   = useState<string | null>(null);
   const [ebillName,      setEbillName]      = useState<string>("");
 
-  // Rooftop photo — geo-tagged. Reuses the GeoOfficeUpload pipeline that
-  // the EPC office photos use (exifr + camera GPS).
+  // Rooftop photo — geo-tagged: FileUpload with captureGps, plus the device
+  // location read once the upload lands (saved to rooftop_photo_gps).
   // uploaded_at: the stored time on reload, the pick time on a fresh upload.
   const [rooftopDoc,       setRooftopDoc]       = useState<{ id: string; storage_path: string; file_name: string | null; uploaded_at: string | null } | null>(null);
   const [rooftopGps,       setRooftopGps]       = useState<{ lat: number; lng: number; captured_at: string } | null>(null);
@@ -425,7 +426,7 @@ function Inner() {
         setSaving(false);
         return;
       }
-      router.push(nextStepPath(loan.id, "step-4") as any);
+      router.push(nextStepPath(loan.id, "step-4"));
     } catch (e) {
       setSaveError((e as Error)?.message || "Network error.");
       setSaving(false);
@@ -473,9 +474,10 @@ function Inner() {
         <FormSection title="Project & loan details">
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
-              <p className={FIELD_LABEL}>Project size</p>
+              <label htmlFor={sizeInputId} className={FIELD_LABEL}>Project size</label>
               <div className="flex gap-2">
                 <input
+                  id={sizeInputId}
                   type="text"
                   inputMode="decimal"
                   value={projectSize}
@@ -484,6 +486,7 @@ function Inner() {
                   className="flex-1 min-w-0 border border-line rounded-input px-3.5 py-2.5 text-[14px] outline-none focus:border-blue bg-white"
                 />
                 <select
+                  aria-label="Project size unit"
                   value={projectUnit}
                   onChange={(e) => setProjectUnit(e.target.value as "kw" | "mw")}
                   className={
@@ -522,18 +525,18 @@ function Inner() {
         {(validCost || validLoan || sizeKw) && (
           <FormSection
             title="Project summary"
-            className="p-6 bg-[#f0faf5] border-[#cdeadd] space-y-3"
+            className="p-6 bg-[#f0faf5] border-cc-line space-y-3"
             titleClassName={H16_GREEN}
           >
             <div className="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-[13px]">
               <SummaryRow label="Project size"
                 value={sizeKw ? `${projectSize} ${projectUnit.toUpperCase()} (${sizeKw.toLocaleString("en-IN")} KW)` : "—"} />
               <SummaryRow label="Project cost"
-                value={validCost ? `₹${costN.toLocaleString("en-IN")}` : "—"} />
+                value={validCost ? fmtRupeesExact(costN) : "—"} />
               <SummaryRow label="Loan amount"
-                value={validLoan ? `₹${loanN.toLocaleString("en-IN")}` : "—"} />
+                value={validLoan ? fmtRupeesExact(loanN) : "—"} />
               <SummaryRow label="Down payment"
-                value={downPayment !== null ? `₹${downPayment.toLocaleString("en-IN")}` : "—"} />
+                value={fmtRupeesExact(downPayment)} />
               <SummaryRow label="Loan-to-value ratio"
                 value={ltvPct !== null ? `${ltvPct.toFixed(1)}%` : "—"} />
               <SummaryRow label="Cost per KW"
@@ -611,7 +614,7 @@ function Inner() {
             />
           </div>
 
-          {/* Rooftop photo — geo-tagged, reuses EPC office-photo pipeline */}
+          {/* Rooftop photo — geo-tagged (FileUpload captureGps) */}
           <div className="pt-2 border-t border-line">
             <p className="text-[13px] font-medium text-text-mid mb-1.5">
               Rooftop photo (geo-tagged)
@@ -659,7 +662,7 @@ function Inner() {
         {/* g. Bill Ownership Confirmation */}
         <FormSection
           title="Please confirm the electricity bill is in the name of the applicant."
-          className="p-6 bg-[#f0faf5] border-[#cdeadd] space-y-4"
+          className="p-6 bg-[#f0faf5] border-cc-line space-y-4"
           titleClassName={H16_GREEN}
         >
           {/* Name on e-bill — always an editable field so it is captured even

@@ -9,7 +9,7 @@ import { saveUrl } from "@/lib/storage";
 import { inrPlain, numberInput } from "@/lib/money";
 
 export const NAVY = "#1e3a8a";
-export const input = "w-full border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none focus:border-[#1e3a8a]";
+export const input = "w-full border border-line rounded-xl px-3 py-2 text-[13.5px] outline-none focus:border-navy";
 export const inr = (n: number) => (Number.isFinite(n) ? inrPlain(n) : "0"); // paise when present
 // A number box: any real number (minus, decimals). `digits` is for codes only — mobiles, PIN codes.
 export const decimal = (v: string) => numberInput(v);
@@ -149,7 +149,7 @@ export function Chips({ options, value, onChange }: { options: readonly string[]
 export function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="bg-white rounded-2xl border border-line p-5 mt-5">
-      <div className="text-[13px] font-semibold text-[#0f3d2e] mb-3">{title}</div>
+      <div className="text-[13px] font-semibold text-cc-ink mb-3">{title}</div>
       <div className="grid sm:grid-cols-2 gap-3">{children}</div>
     </div>
   );

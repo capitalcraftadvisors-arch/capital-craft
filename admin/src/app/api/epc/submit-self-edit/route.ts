@@ -27,6 +27,7 @@ import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { JwtClaims } from "@/lib/jwt";
 import { err, dbAs, requireLogin } from "@/lib/api";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -133,7 +134,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[submit-self-edit] error:", msg);
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }

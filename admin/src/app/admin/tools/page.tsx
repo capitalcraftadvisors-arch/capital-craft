@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { authHeaders } from "@/lib/auth";
+import { notify } from "@/lib/notify";
 
 export default function ToolsPage() {
   return (
@@ -36,7 +37,7 @@ function Inner() {
           body: JSON.stringify({ limit: 15, after }),
         });
         const j = await res.json().catch(() => ({}));
-        if (!res.ok || !j?.ok) { alert(j?.error || "Backfill failed."); break; }
+        if (!res.ok || !j?.ok) { notify.error(j?.error || "Backfill failed."); break; }
         setStats((s) => ({
           processed: s.processed + j.processed,
           fixed: s.fixed + j.fixed,
@@ -61,7 +62,7 @@ function Inner() {
         <button
           onClick={runBackfill}
           disabled={running}
-          className="mt-4 px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold hover:bg-[#12734c] disabled:opacity-60"
+          className="mt-4 px-4 py-2 rounded-lg bg-cc-green text-white text-[13px] font-semibold hover:bg-cc-green-hover disabled:opacity-60"
         >
           {running ? "Fixing…" : "Run"}
         </button>
@@ -69,7 +70,7 @@ function Inner() {
           <div className="mt-3 text-[13px] text-text-mid">
             Processed {stats.processed} · Fixed {stats.fixed} · No face {stats.noFace}
             {stats.failed ? ` · Failed ${stats.failed}` : ""}
-            {done && <span className="text-[#178a5c] font-semibold"> · Done</span>}
+            {done && <span className="text-cc-green font-semibold"> · Done</span>}
           </div>
         )}
       </div>

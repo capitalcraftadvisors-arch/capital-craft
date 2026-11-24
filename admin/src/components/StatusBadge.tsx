@@ -6,7 +6,7 @@ const STYLES: Record<AllStatus, string> = {
   draft:        "bg-line-soft text-text-mid",
   submitted:    "bg-blue-50 text-blue",
   under_review: "bg-blue-50 text-blue",
-  on_hold:      "bg-gold-50 text-[#8a6500]",
+  on_hold:      "bg-gold-50 text-warn-ochre",
   approved:     "bg-green-50 text-green-dark",
   rejected:     "bg-red-50 text-red-700",
   sent_to_nbfc: "bg-blue-50 text-blue-dark",
@@ -42,7 +42,7 @@ export default function StatusBadge({
       <span className={[PILL_BASE, STYLES[s]].join(" ")}>{LABELS[s]}</span>
       {updated && (
         <span
-          className={[PILL_BASE, "bg-gold-50 text-[#8a6500]"].join(" ")}
+          className={[PILL_BASE, "bg-gold-50 text-warn-ochre"].join(" ")}
           title="EPC used their one-time self-edit"
         >
           Updated

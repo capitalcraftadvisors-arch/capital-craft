@@ -21,6 +21,8 @@
 //
 // Do NOT import this from client code — no bundling, Node-only runtime.
 
+import { errText } from "./errors";
+
 const VISION_API_KEY = process.env.GOOGLE_VISION_API_KEY;
 const VISION_BASE = "https://vision.googleapis.com/v1";
 
@@ -76,7 +78,7 @@ export async function visionDocumentText(
   try {
     data = await res.json();
   } catch (e) {
-    throw new Error(`vision_bad_response HTTP=${res.status}: ${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(`vision_bad_response HTTP=${res.status}: ${errText(e)}`);
   }
 
   // Layer 1 — top-level error (auth / quota / API-not-enabled).

@@ -37,11 +37,11 @@ function Inner() {
   return (
     <main className="min-h-screen bg-bg-soft">
       <div className="max-w-[820px] mx-auto px-5 sm:px-7 py-8">
-        <button onClick={() => router.push(`/admin/insurance/${id}/view` as any)} className="text-[13px] text-text-muted hover:text-[#0f3d2e] mb-3">← Back to profile</button>
+        <button onClick={() => router.push(`/admin/insurance/${id}/view`)} className="text-[13px] text-text-muted hover:text-cc-ink mb-3">← Back to profile</button>
         <div className="mb-4">
-          <h1 className="font-display text-[24px] font-bold text-[#0f3d2e]">Message to EPC</h1>
+          <h1 className="font-display text-[24px] font-bold text-cc-ink">Message to EPC</h1>
           <p className="text-[13.5px] text-text-mid mt-0.5">
-            {ctx ? <>{ctx.name} · <span className="font-mono text-[#185fa5]">{ctx.ref}</span></> : "…"}
+            {ctx ? <>{ctx.name} · <span className="font-mono text-cc-blue">{ctx.ref}</span></> : "…"}
           </p>
         </div>
         <MessageThread kind="insurance" id={id} role="admin" />

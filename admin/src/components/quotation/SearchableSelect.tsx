@@ -67,7 +67,7 @@ export default function SearchableSelect({
       <div className="relative">
         <button type="button" ref={btnRef} data-qnav onClick={() => setOpen((o) => !o)}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") { e.preventDefault(); setOpen(true); } }}
-          className={(triggerClass ?? "border border-line rounded-xl px-3 py-2 text-[13.5px] bg-white hover:border-[#1e3a8a] focus:outline-none focus:border-[#1e3a8a]") + " w-full text-left flex items-center justify-between gap-2"}>
+          className={(triggerClass ?? "border border-line rounded-xl px-3 py-2 text-[13.5px] bg-white hover:border-navy focus:outline-none focus:border-navy") + " w-full text-left flex items-center justify-between gap-2"}>
           <span className={value ? "text-text" : "text-text-muted"}>{value || placeholder}</span>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#5a8a76" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
         </button>
@@ -83,18 +83,18 @@ export default function SearchableSelect({
                   if (e.key === "Enter") { e.preventDefault(); if (filtered.length) pick(filtered[0]); else if (q.trim()) void addCustom(); }
                   else if (e.key === "Escape") { e.preventDefault(); setOpen(false); setQ(""); setTimeout(() => btnRef.current?.focus(), 0); }
                 }}
-                className="w-full border border-line rounded-lg px-2.5 py-1.5 text-[13px] outline-none focus:border-[#1e3a8a]" />
+                className="w-full border border-line rounded-lg px-2.5 py-1.5 text-[13px] outline-none focus:border-navy" />
             </div>
             <div className="overflow-y-auto">
               {filtered.map((o) => (
                 <button key={o} type="button" onClick={() => pick(o)}
-                  className={["w-full text-left px-3 py-2 text-[13px] hover:bg-[#f0faf5]", o === value ? "font-semibold text-[#1e3a8a]" : "text-text"].join(" ")}>
+                  className={["w-full text-left px-3 py-2 text-[13px] hover:bg-cc-wash", o === value ? "font-semibold text-navy" : "text-text"].join(" ")}>
                   {o}
                 </button>
               ))}
               {q.trim() && !exact && (
                 <button type="button" disabled={busy} onClick={() => void addCustom()}
-                  className="w-full text-left px-3 py-2 text-[13px] text-[#178a5c] font-semibold hover:bg-[#f0faf5] border-t border-line disabled:opacity-50">
+                  className="w-full text-left px-3 py-2 text-[13px] text-cc-green font-semibold hover:bg-cc-wash border-t border-line disabled:opacity-50">
                   + Add “{q.trim()}”{field ? " (saved for next time)" : ""}
                 </button>
               )}

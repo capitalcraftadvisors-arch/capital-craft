@@ -2,7 +2,7 @@
 
 // Task Manager — "My Day": the ranked Act-today list, with the WhatsApp composer, follow-up, comment and activity pop-ups.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import DateField from "@/components/ui/DateField";
 import Modal, { OVERLAY, BACKDROP } from "@/components/ui/Modal";
 import LoanActivityLogModal from "@/components/LoanActivityLogModal";
@@ -71,6 +71,10 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
   const [noteCase, setNoteCase] = useState<OpsCase | null>(null);
   const [noteText, setNoteText] = useState("");
   const [logCase, setLogCase] = useState<OpsCase | null>(null); // activity-log modal
+  // The pop-ups’ names for screen readers.
+  const waTitleId = useId();
+  const remindTitleId = useId();
+  const noteTitleId = useId();
 
   // Check the case's documents (loan only) → split into on-file vs missing; the
   // missing ones are pre-ticked to request. On-demand only: runs once when the
@@ -143,7 +147,7 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
           <div className="ml-auto flex items-center gap-2">
             {ownerControl}
             <select value={colour} onChange={(e) => setColour(e.target.value as "all" | "red" | "yellow" | "green")}
-              className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-[12px] font-medium text-text outline-none focus:border-[#0f766e] cursor-pointer">
+              className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-[12px] font-medium text-text outline-none focus:border-teal-700 cursor-pointer">
               <option value="all">All colours</option>
               <option value="red">🔴 Red</option>
               <option value="yellow">🟡 Yellow</option>
@@ -152,7 +156,7 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
             <div className="relative">
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
               <input value={q} onChange={(e) => onSearch(e.target.value)} placeholder="Search my cases…"
-                className="w-40 sm:w-52 border-2 border-line rounded-lg pl-9 pr-3 py-1.5 text-[13px] outline-none focus:border-[#0f766e]" />
+                className="w-40 sm:w-52 border-2 border-line rounded-lg pl-9 pr-3 py-1.5 text-[13px] outline-none focus:border-teal-700" />
             </div>
           </div>
         </div>
@@ -161,9 +165,9 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
       <div className="inline-flex border border-line rounded-lg overflow-hidden mb-3">
         {MYDAY_SRC_TABS.map((t) => (
           <button key={t.key} type="button" onClick={() => { setSrc(t.key); setStage("all"); }}
-            className={["px-3.5 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0 inline-flex items-center gap-1.5", src === t.key ? "bg-[#0f766e] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
+            className={["px-3.5 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0 inline-flex items-center gap-1.5", src === t.key ? "bg-teal-700 text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
             {t.label}
-            <span className={["text-[10.5px] font-bold px-1.5 rounded-full", src === t.key ? "bg-white/20 text-white" : "bg-[#eef2f7] text-[#334155]"].join(" ")}>{counts[t.key]}</span>
+            <span className={["text-[10.5px] font-bold px-1.5 rounded-full", src === t.key ? "bg-white/20 text-white" : "bg-grey-pill text-slate-700"].join(" ")}>{counts[t.key]}</span>
           </button>
         ))}
       </div>
@@ -174,15 +178,15 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
       {presentStages.length >= 2 && (
         <div className="flex items-center gap-1.5 flex-wrap mb-3">
           <button type="button" onClick={() => setStage("all")}
-            className={["px-2.5 py-1 rounded-full text-[11.5px] font-semibold border inline-flex items-center gap-1.5", activeStage === "all" ? "bg-[#0f766e] text-white border-[#0f766e]" : "bg-white text-text-mid border-line hover:bg-bg-tint"].join(" ")}>
-            All <span className={["text-[10px] font-bold px-1.5 rounded-full", activeStage === "all" ? "bg-white/20" : "bg-[#eef2f7] text-[#334155]"].join(" ")}>{inSrc.length}</span>
+            className={["px-2.5 py-1 rounded-full text-[11.5px] font-semibold border inline-flex items-center gap-1.5", activeStage === "all" ? "bg-teal-700 text-white border-teal-700" : "bg-white text-text-mid border-line hover:bg-bg-tint"].join(" ")}>
+            All <span className={["text-[10px] font-bold px-1.5 rounded-full", activeStage === "all" ? "bg-white/20" : "bg-grey-pill text-slate-700"].join(" ")}>{inSrc.length}</span>
           </button>
           {presentStages.map((s) => {
             const on = activeStage === s.key;
             return (
               <button key={s.key} type="button" onClick={() => setStage(s.key)}
-                className={["px-2.5 py-1 rounded-full text-[11.5px] font-semibold border inline-flex items-center gap-1.5", on ? "bg-[#0f766e] text-white border-[#0f766e]" : "bg-white text-text-mid border-line hover:bg-bg-tint"].join(" ")}>
-                {s.label} <span className={["text-[10px] font-bold px-1.5 rounded-full", on ? "bg-white/20" : "bg-[#eef2f7] text-[#334155]"].join(" ")}>{stageCounts.get(s.key)}</span>
+                className={["px-2.5 py-1 rounded-full text-[11.5px] font-semibold border inline-flex items-center gap-1.5", on ? "bg-teal-700 text-white border-teal-700" : "bg-white text-text-mid border-line hover:bg-bg-tint"].join(" ")}>
+                {s.label} <span className={["text-[10px] font-bold px-1.5 rounded-full", on ? "bg-white/20" : "bg-grey-pill text-slate-700"].join(" ")}>{stageCounts.get(s.key)}</span>
               </button>
             );
           })}
@@ -220,7 +224,7 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
                     const fuDue = !!c.followUpAt && c.followUpAt <= todayStr;
                     return (
                       <tr key={c.source + c.id} id={`myday-${c.source}:${c.id}`}
-                        className={["border-b border-[#f0f4f2] last:border-0 hover:bg-[#f7fcfa] cursor-pointer", blink === `${c.source}:${c.id}` ? "animate-pulse !bg-[#cdeee4]" : ""].join(" ")}
+                        className={["border-b border-cc-row-line-soft last:border-0 hover:bg-cc-row-hover cursor-pointer", blink === `${c.source}:${c.id}` ? "animate-pulse !bg-[#cdeee4]" : ""].join(" ")}
                         onClick={() => { saveTm({ last: `${c.source}:${c.id}` }); onOpen(c.href); }}>
                         <td className="px-2.5 py-2.5 align-top text-text-muted font-semibold">{i + 1}</td>
                         <td className="px-2.5 py-2.5 align-top">
@@ -241,13 +245,13 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
                         <td className="px-2.5 py-2.5 align-top text-text-mid">
                           <span className="block truncate max-w-[230px]" title={act.text} style={act.tone ? { color: act.tone, fontWeight: 600 } : undefined}>{act.text}</span>
                         </td>
-                        {showOwner && <td className="px-2.5 py-2.5 align-top whitespace-nowrap">{c.ownerName ? <span className="text-text-mid">{c.ownerName}</span> : <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-[#fef0d6] text-[#854f0b]">Unassigned</span>}</td>}
+                        {showOwner && <td className="px-2.5 py-2.5 align-top whitespace-nowrap">{c.ownerName ? <span className="text-text-mid">{c.ownerName}</span> : <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-warn-tint text-warn-ink">Unassigned</span>}</td>}
                         <td className="px-2.5 py-2.5 align-top whitespace-nowrap text-right" onClick={(e) => e.stopPropagation()}>
                           <span className="inline-flex items-center gap-2 text-[13px]">
                             {tel && <button type="button" title="WhatsApp" aria-label="WhatsApp" onClick={() => openWa(c)} className="text-[#25D366] hover:opacity-70 inline-flex align-middle"><WhatsAppIcon size={18} /></button>}
-                            <button type="button" title="Remind" onClick={() => { setRemindCase(c); setRemindDate(c.followUpAt || ""); }} className="hover:opacity-70">⏰</button>
-                            {hasNote && <button type="button" title="Comment" onClick={() => { setNoteCase(c); setNoteText(""); }} className="hover:opacity-70">✎</button>}
-                            {(c.source === "loan" || c.source === "epc") && <button type="button" title="Activity" onClick={() => setLogCase(c)} className="hover:opacity-70">🕘</button>}
+                            <button type="button" title="Remind" aria-label="Remind" onClick={() => { setRemindCase(c); setRemindDate(c.followUpAt || ""); }} className="hover:opacity-70">⏰</button>
+                            {hasNote && <button type="button" title="Comment" aria-label="Comment" onClick={() => { setNoteCase(c); setNoteText(""); }} className="hover:opacity-70">✎</button>}
+                            {(c.source === "loan" || c.source === "epc") && <button type="button" title="Activity" aria-label="Activity" onClick={() => setLogCase(c)} className="hover:opacity-70">🕘</button>}
                           </span>
                         </td>
                       </tr>
@@ -261,18 +265,18 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
 
         {/* Today's math + Who is delaying */}
         <aside className="lg:w-72 shrink-0 mt-4 lg:mt-0 space-y-4">
-          <div className="rounded-lg border border-[#f2c4c4] bg-[#fdf0f0] p-4">
-            <p className="text-[12px] font-bold uppercase tracking-wide text-[#b42318] mb-2">Today&rsquo;s math</p>
-            <div className="flex justify-between items-baseline text-[13px] py-1 border-b border-[#f2c4c4]/60"><span className="text-[#8a3a3a]">₹ blocked (stuck &gt; 2d)</span><span className="font-bold text-[#b42318]">{fmtRupees(blocked)}</span></div>
-            <div className="flex justify-between items-baseline text-[13px] py-1 border-b border-[#f2c4c4]/60"><span className="text-[#8a3a3a]">Recoverable by {custCases.length} call{custCases.length === 1 ? "" : "s"}</span><span className="font-bold text-[#b42318]">{fmtRupees(recoverable)}</span></div>
-            <div className="flex justify-between items-baseline text-[13px] py-1"><span className="text-[#8a3a3a]">Cases to action</span><span className="font-bold text-[#b42318]">{work.length}</span></div>
+          <div className="rounded-lg border border-danger-line bg-[#fdf0f0] p-4">
+            <p className="text-[12px] font-bold uppercase tracking-wide text-danger-ink mb-2">Today&rsquo;s math</p>
+            <div className="flex justify-between items-baseline text-[13px] py-1 border-b border-danger-line/60"><span className="text-[#8a3a3a]">₹ blocked (stuck &gt; 2d)</span><span className="font-bold text-danger-ink">{fmtRupees(blocked)}</span></div>
+            <div className="flex justify-between items-baseline text-[13px] py-1 border-b border-danger-line/60"><span className="text-[#8a3a3a]">Recoverable by {custCases.length} call{custCases.length === 1 ? "" : "s"}</span><span className="font-bold text-danger-ink">{fmtRupees(recoverable)}</span></div>
+            <div className="flex justify-between items-baseline text-[13px] py-1"><span className="text-[#8a3a3a]">Cases to action</span><span className="font-bold text-danger-ink">{work.length}</span></div>
           </div>
           <div className="rounded-lg border border-line bg-white p-4">
             <p className="text-[12px] font-bold uppercase tracking-wide text-text-mid mb-3">Who is delaying</p>
             {delayCounts.map((d) => (
               <div key={d.k} className="mb-2.5 last:mb-0">
                 <div className="flex justify-between text-[12px] mb-1"><span className="text-text">{d.k}</span><span className="font-semibold text-text">{d.n} case{d.n === 1 ? "" : "s"}</span></div>
-                <div className="h-2 rounded-full bg-[#eef1f4] overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(d.n / delayMax) * 100}%`, backgroundColor: WAIT_COLOR[d.k] }} /></div>
+                <div className="h-2 rounded-full bg-grey-line overflow-hidden"><div className="h-full rounded-full" style={{ width: `${(d.n / delayMax) * 100}%`, backgroundColor: WAIT_COLOR[d.k] }} /></div>
               </div>
             ))}
           </div>
@@ -281,13 +285,13 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
 
       {/* WhatsApp composer — pick pending items → Hindi message → open WhatsApp. */}
       {waCase && (
-        <Modal onClose={() => setWaCase(null)} overlayClassName={OVERLAY.layered} backdropClassName={BACKDROP} className="relative w-full max-w-md bg-white rounded-card-lg shadow-lg p-5 max-h-[90vh] overflow-y-auto">
+        <Modal onClose={() => setWaCase(null)} overlayClassName={OVERLAY.layered} backdropClassName={BACKDROP} className="relative w-full max-w-md bg-white rounded-card-lg shadow-lg p-5 max-h-[90vh] overflow-y-auto" aria-labelledby={waTitleId}>
           <div className="flex items-start justify-between gap-2 mb-3">
             <div>
-              <div className="text-[15px] font-bold text-text">Send WhatsApp</div>
+              <div id={waTitleId} className="text-[15px] font-bold text-text">Send WhatsApp</div>
               <div className="text-[12px] text-text-muted">{waCase.name}</div>
             </div>
-            <button type="button" onClick={() => setWaCase(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
+            <button type="button" onClick={() => setWaCase(null)} aria-label="Close" className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
           </div>
 
           {/* Message intent */}
@@ -295,7 +299,7 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
           <div className="flex flex-wrap gap-1.5 mb-2.5">
             {waIntents.map((t) => (
               <button key={t.key} type="button" onClick={() => setWaIntent(t.key)}
-                className={["text-[12px] rounded-lg border px-2.5 py-1.5 transition-colors", waIntent === t.key ? "border-[#0f766e] bg-[#0f766e] text-white font-semibold" : "border-line bg-white text-text-mid hover:bg-bg-tint"].join(" ")}>
+                className={["text-[12px] rounded-lg border px-2.5 py-1.5 transition-colors", waIntent === t.key ? "border-teal-700 bg-teal-700 text-white font-semibold" : "border-line bg-white text-text-mid hover:bg-bg-tint"].join(" ")}>
                 {t.label}
               </button>
             ))}
@@ -307,7 +311,7 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
             <div className="inline-flex border border-line rounded-lg overflow-hidden">
               {WA_LANGS.map((l) => (
                 <button key={l.key} type="button" onClick={() => setWaLang(l.key)}
-                  className={["px-2.5 py-1 text-[12px] font-semibold border-r border-line last:border-r-0", waLang === l.key ? "bg-[#0f766e] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
+                  className={["px-2.5 py-1 text-[12px] font-semibold border-r border-line last:border-r-0", waLang === l.key ? "bg-teal-700 text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
                   {l.label}
                 </button>
               ))}
@@ -331,7 +335,7 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
                 <span className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Request{waCase.source === "loan" ? " · missing pre-ticked" : ""}</span>
                 {waCase.source === "loan" && (
                   <button type="button" onClick={() => void runDetect(waCase)} disabled={detecting}
-                    className="text-[11px] font-semibold text-[#185fa5] hover:underline disabled:opacity-50">
+                    className="text-[11px] font-semibold text-cc-blue hover:underline disabled:opacity-50">
                     {detecting ? "Checking…" : "Re-check"}
                   </button>
                 )}
@@ -341,7 +345,7 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
                   const on = waSel.has(it.key);
                   return (
                     <button key={it.key} type="button" onClick={() => toggleItem(it.key)}
-                      className={["text-left text-[12px] rounded-lg border px-2.5 py-1.5 transition-colors", on ? "border-[#0f766e] bg-[#dcf3ef] text-[#0f3d2e] font-semibold" : "border-line bg-white text-text-mid hover:bg-bg-tint"].join(" ")}>
+                      className={["text-left text-[12px] rounded-lg border px-2.5 py-1.5 transition-colors", on ? "border-teal-700 bg-[#dcf3ef] text-cc-ink font-semibold" : "border-line bg-white text-text-mid hover:bg-bg-tint"].join(" ")}>
                       {on ? "✓ " : ""}{it.label}
                     </button>
                   );
@@ -353,20 +357,20 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
           <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Send to</div>
           <div className="flex items-center gap-2 mt-1 mb-3">
             <span className="text-[13px] text-text-muted">+91</span>
-            <input value={waTo} onChange={(e) => setWaTo(e.target.value)} inputMode="numeric" placeholder="10-digit number"
-              className="flex-1 border border-line rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#0f766e]" />
+            <input aria-label="Send to" value={waTo} onChange={(e) => setWaTo(e.target.value)} inputMode="numeric" placeholder="10-digit number"
+              className="flex-1 border border-line rounded-lg px-3 py-2 text-[13px] outline-none focus:border-teal-700" />
           </div>
 
           <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Message preview</div>
-          <textarea value={waMsg} onChange={(e) => setWaMsg(e.target.value)} rows={9}
-            className="w-full mt-1 border border-line rounded-lg px-3 py-2 text-[13px] leading-relaxed outline-none focus:border-[#0f766e] resize-none" />
+          <textarea aria-label="Message preview" value={waMsg} onChange={(e) => setWaMsg(e.target.value)} rows={9}
+            className="w-full mt-1 border border-line rounded-lg px-3 py-2 text-[13px] leading-relaxed outline-none focus:border-teal-700 resize-none" />
 
           <div className="flex items-center justify-between gap-2 mt-3">
             <span className="text-[11px] text-text-muted">Sent from your WhatsApp</span>
             <div className="flex gap-2">
               <button type="button" onClick={() => setWaCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">Cancel</button>
               <button type="button" onClick={sendWa} disabled={!waTel(waTo)}
-                className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#128C7E] text-white hover:bg-[#0f766e] disabled:opacity-50 inline-flex items-center gap-1.5">
+                className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-whatsapp text-white hover:bg-teal-700 disabled:opacity-50 inline-flex items-center gap-1.5">
                 Send on WhatsApp →
               </button>
             </div>
@@ -376,24 +380,24 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
 
       {/* Follow-up ("Remind me") — set / change / clear a call-back date. */}
       {remindCase && (
-        <Modal onClose={() => setRemindCase(null)} overlayClassName={OVERLAY.layered} backdropClassName={BACKDROP} className="relative w-full max-w-sm bg-white rounded-card-lg shadow-lg p-5">
+        <Modal onClose={() => setRemindCase(null)} overlayClassName={OVERLAY.layered} backdropClassName={BACKDROP} className="relative w-full max-w-sm bg-white rounded-card-lg shadow-lg p-5" aria-labelledby={remindTitleId}>
           <div className="flex items-start justify-between gap-2 mb-3">
             <div>
-              <div className="text-[15px] font-bold text-text">Follow-up date</div>
+              <div id={remindTitleId} className="text-[15px] font-bold text-text">Follow-up date</div>
               <div className="text-[12px] text-text-muted">{remindCase.name}</div>
             </div>
-            <button type="button" onClick={() => setRemindCase(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
+            <button type="button" onClick={() => setRemindCase(null)} aria-label="Close" className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
           </div>
           <DateField value={remindDate} onChange={setRemindDate} min={todayStr}
-            className="border border-line rounded-lg px-3 py-2 text-[14px] outline-none focus:border-[#0f766e]" />
+            className="border border-line rounded-lg px-3 py-2 text-[14px] outline-none focus:border-teal-700" />
           <div className="flex items-center justify-between gap-2 mt-4">
             {remindCase.followUpAt
-              ? <button type="button" onClick={() => { onSetFollowUp(remindCase, null); setRemindCase(null); }} className="text-[12px] font-semibold text-[#b42318] hover:underline">Remove</button>
+              ? <button type="button" onClick={() => { onSetFollowUp(remindCase, null); setRemindCase(null); }} className="text-[12px] font-semibold text-danger-ink hover:underline">Remove</button>
               : <span />}
             <div className="flex gap-2">
               <button type="button" onClick={() => setRemindCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">Cancel</button>
               <button type="button" onClick={() => { onSetFollowUp(remindCase, remindDate || null); setRemindCase(null); }} disabled={!remindDate}
-                className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#0f766e] text-white hover:bg-[#0c5f58] disabled:opacity-50">Set</button>
+                className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-teal-700 text-white hover:bg-[#0c5f58] disabled:opacity-50">Set</button>
             </div>
           </div>
         </Modal>
@@ -401,20 +405,20 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
 
       {/* Inline note — a comment on the case (visible to everyone). */}
       {noteCase && (
-        <Modal onClose={() => setNoteCase(null)} overlayClassName={OVERLAY.layered} backdropClassName={BACKDROP} className="relative w-full max-w-sm bg-white rounded-card-lg shadow-lg p-5">
+        <Modal onClose={() => setNoteCase(null)} overlayClassName={OVERLAY.layered} backdropClassName={BACKDROP} className="relative w-full max-w-sm bg-white rounded-card-lg shadow-lg p-5" aria-labelledby={noteTitleId}>
           <div className="flex items-start justify-between gap-2 mb-2">
             <div>
-              <div className="text-[15px] font-bold text-text">Add comment</div>
+              <div id={noteTitleId} className="text-[15px] font-bold text-text">Add comment</div>
               <div className="text-[12px] text-text-muted">{noteCase.name} · visible to everyone</div>
             </div>
-            <button type="button" onClick={() => setNoteCase(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
+            <button type="button" onClick={() => setNoteCase(null)} aria-label="Close" className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
           </div>
           <textarea value={noteText} onChange={(e) => setNoteText(e.target.value)} rows={4} autoFocus placeholder="Write a comment…"
-            className="w-full border border-line rounded-lg px-3 py-2 text-[13px] leading-relaxed outline-none focus:border-[#0f766e] resize-none" />
+            className="w-full border border-line rounded-lg px-3 py-2 text-[13px] leading-relaxed outline-none focus:border-teal-700 resize-none" />
           <div className="flex justify-end gap-2 mt-3">
             <button type="button" onClick={() => setNoteCase(null)} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint">Cancel</button>
             <button type="button" onClick={() => { onAddNote(noteCase, noteText); setNoteCase(null); }} disabled={!noteText.trim()}
-              className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#0f766e] text-white hover:bg-[#0c5f58] disabled:opacity-50">Add</button>
+              className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-teal-700 text-white hover:bg-[#0c5f58] disabled:opacity-50">Add</button>
           </div>
         </Modal>
       )}

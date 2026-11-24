@@ -11,6 +11,7 @@ import { DocGrid, FillCount, I, Section, type ViewDocSlot } from "@/components/v
 import { deleteDocument, openDocument, uploadDocument } from "@/lib/storage";
 import { listStakeholderDocs, OTHER_DOC, type StakeholderDoc } from "@/lib/stakeholders";
 import { inputCls } from "@/components/StakeholderDetails";
+import { notify } from "@/lib/notify";
 
 type Owner = { team_id: string } | { partner_id: string };
 
@@ -37,7 +38,7 @@ export default function StakeholderDocs({ owner, slots }: { owner: Owner; slots:
   }
   async function remove(id: string) {
     if (await deleteDocument(id)) setDocs((d) => d?.filter((x) => x.id !== id) ?? d);
-    else alert("Couldn't delete the document.");
+    else notify.error("Couldn't delete the document.");
   }
 
   const slotOf = (d: StakeholderDoc | undefined, key: string, label: string): ViewDocSlot => ({
@@ -57,7 +58,7 @@ export default function StakeholderDocs({ owner, slots }: { owner: Owner; slots:
   return (
     <Section card white icon={I.files} title="Documents" summary={docs ? <FillCount have={have} total={slots.length} /> : undefined}>
       {!docs ? (
-        <p className="text-[13px] text-[#7a958a]">Loading…</p>
+        <p className="text-[13px] text-cc-faint">Loading…</p>
       ) : (
         <div className="space-y-4">
           <DocGrid slots={viewSlots} eyeIcon={I.eye} />
@@ -65,7 +66,7 @@ export default function StakeholderDocs({ owner, slots }: { owner: Owner; slots:
             <select className={`${inputCls} !w-auto flex-1 min-w-0`} value={kind} onChange={(e) => setKind(e.target.value)} aria-label="Document type">
               {[...slots, OTHER_DOC].map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
-            <label className={["shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-[8px] text-[13px] font-semibold text-white bg-[#178a5c] hover:bg-[#12734c] cursor-pointer", busy ? "opacity-60 pointer-events-none" : ""].join(" ")}>
+            <label className={["shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-[8px] text-[13px] font-semibold text-white bg-cc-green hover:bg-cc-green-hover cursor-pointer", busy ? "opacity-60 pointer-events-none" : ""].join(" ")}>
               {busy ? "Uploading…" : "＋ Upload"}
               <input type="file" multiple={kind === OTHER_DOC} accept="image/*,application/pdf" className="hidden"
                 onChange={(e) => { void upload(e.target.files); e.currentTarget.value = ""; }} />

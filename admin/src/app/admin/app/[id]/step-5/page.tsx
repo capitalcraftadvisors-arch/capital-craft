@@ -7,18 +7,19 @@
 //   b. Your Loan Profile — read-only recap of loan amount / monthly
 //      bill / annual income captured earlier
 //   c. Info box (Capital Craft language — no "Solfin", no "pre-approved")
-//   d. RM inputs: ROI (enforced 7.5–10.8), auto central subsidy, state subsidy
+//   d. RM inputs: subsidy case, central subsidy (auto-suggested, editable),
+//      state subsidy. The ROI is a fixed backend rate and is never shown.
 //   e. Five tenure cards (1..5 years) with live-computed Monthly EMI + Subsidy EMI
 //   f. Prev / Save & Continue
 //
-// EMI math is REDUCING BALANCE, computed client-side and reactive to
-// ROI / state-subsidy changes. The subsidy EMI applies to (loan - central - state),
+// EMI math is REDUCING BALANCE, computed client-side and reactive to the
+// subsidy inputs. The subsidy EMI applies to (loan - central - state),
 // floored at zero.
 //
 // The page frame, section cards, Previous/Save bar and the save call come
 // from the shared loan-form kit (components/loan-form).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Input from "@/components/ui/Input";
@@ -29,6 +30,11 @@ import {
   FormSection, H18, FIELD_LABEL, RadioDot, EPC_JOIN, saveStep, type EpcNames,
 } from "@/components/loan-form";
 import { amountInput, fmtRupees } from "@/lib/money";
+// EMI + subsidy math shared with the EPC apply flow — see lib/emi.ts.
+import {
+  TENURES, DEFAULT_INDICATIVE_ROI,
+  computeCentralSubsidy, computeEmi,
+} from "@/lib/emi";
 
 type Loan = {
   id: string;
@@ -47,12 +53,6 @@ type Loan = {
   selected_tenure_years:  number | null;
   epc_business: EpcNames | null;
 };
-
-// EMI + subsidy math shared with the EPC apply flow — see lib/emi.ts.
-import {
-  TENURES, DEFAULT_INDICATIVE_ROI,
-  computeCentralSubsidy, computeEmi,
-} from "@/lib/emi";
 
 export default function LoanAppStep5Page() {
   return (
@@ -74,6 +74,7 @@ function Inner() {
   const [subsidyCase, setSubsidyCase] = useState<"subsidy" | "non_subsidy">("subsidy");
   const [centralSub, setCentralSub]   = useState<string>(""); // editable central subsidy
   const [selectedTenure, setTenure]   = useState<number | null>(null);
+  const subsidyCaseId = useId(); // ties the "Subsidy case?" label to its dropdown
 
   // Save
   const [saving, setSaving] = useState(false);
@@ -165,7 +166,7 @@ function Inner() {
         selected_subsidy_emi:  chosen?.subsidy ?? null,
       });
       if (error) { setSaveError(error); setSaving(false); return; }
-      router.push(`/admin/app/${loan.id}/step-6` as any);
+      router.push(`/admin/app/${loan.id}/step-6`);
     } catch (e) {
       setSaveError((e as Error)?.message || "Network error.");
       setSaving(false);
@@ -197,13 +198,13 @@ function Inner() {
         </FormSection>
 
         {/* c. Info box — Capital Craft wording */}
-        <div className="rounded-input border border-[#d3e9f7] bg-[#dceffb] p-5 flex gap-3">
+        <div className="rounded-input border border-cc-blue-line bg-cc-blue-tint p-5 flex gap-3">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#185fa5" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 mt-0.5">
             <circle cx="12" cy="12" r="10" />
             <line x1="12" y1="16" x2="12" y2="12" />
             <line x1="12" y1="8" x2="12.01" y2="8" />
           </svg>
-          <p className="text-[13px] text-[#0f3d2e] leading-relaxed">
+          <p className="text-[13px] text-cc-ink leading-relaxed">
             Based on the details declared, here are indicative loan options for your
             solar project from <span className="font-semibold">Capital Craft Financial Advisors</span>.
             Final terms are subject to document verification and lender approval.
@@ -217,7 +218,7 @@ function Inner() {
             <line x1="12" y1="9" x2="12" y2="13" />
             <line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
-          <p className="text-[12px] text-[#854f0b] leading-relaxed">
+          <p className="text-[12px] text-warn-ink leading-relaxed">
             <span className="font-semibold">Disclaimer:</span> The interest rate (ROI) and EMI figures
             displayed above are <span className="font-semibold">indicative</span> and are provided solely
             for reference. All rates and repayment amounts are subject to the sole discretion of the
@@ -234,8 +235,9 @@ function Inner() {
           <div className="grid sm:grid-cols-2 gap-4">
             {/* Subsidy vs non-subsidy — admin's explicit choice. */}
             <div>
-              <label className={FIELD_LABEL}>Subsidy case?</label>
+              <label htmlFor={subsidyCaseId} className={FIELD_LABEL}>Subsidy case?</label>
               <Select
+                id={subsidyCaseId}
                 value={subsidyCase}
                 onChange={(e) => {
                   const v = e.target.value as "subsidy" | "non_subsidy";
@@ -293,17 +295,17 @@ function Inner() {
                   disabled={!roiValid}
                   className={[
                     "text-left rounded-input border-2 p-4 transition-colors relative",
-                    "focus:outline-none focus-visible:ring-2 focus-visible:ring-[#185fa5]",
+                    "focus:outline-none focus-visible:ring-2 focus-visible:ring-cc-blue",
                     !roiValid
                       ? "border-line bg-white opacity-60 cursor-not-allowed"
                       : active
-                      ? "border-[#178a5c] bg-[#f0faf5]"
-                      : "border-line bg-white hover:border-[#185fa5]",
+                      ? "border-cc-green bg-cc-wash"
+                      : "border-line bg-white hover:border-cc-blue",
                   ].join(" ")}
                 >
                   <RadioDot active={active} />
 
-                  <p className="font-display font-bold text-[18px] text-[#0f3d2e]">
+                  <p className="font-display font-bold text-[18px] text-cc-ink">
                     {row.years} {row.years === 1 ? "Year" : "Years"}
                   </p>
 
@@ -312,7 +314,7 @@ function Inner() {
                       <p className="text-[10px] uppercase tracking-wide text-text-muted font-semibold">
                         Monthly EMI
                       </p>
-                      <p className="font-display font-bold text-[16px] text-[#185fa5]">
+                      <p className="font-display font-bold text-[16px] text-cc-blue">
                         {row.monthly !== null ? fmtRupees(row.monthly) : "—"}
                       </p>
                     </div>
@@ -320,7 +322,7 @@ function Inner() {
                       <p className="text-[10px] uppercase tracking-wide text-text-muted font-semibold">
                         Subsidy EMI
                       </p>
-                      <p className="text-[13px] font-semibold text-[#0f3d2e]">
+                      <p className="text-[13px] font-semibold text-cc-ink">
                         {row.subsidy !== null ? fmtRupees(row.subsidy) : "—"}
                       </p>
                     </div>
@@ -360,9 +362,9 @@ function ProfileTile({
   value: string;
   accent: "green" | "sky";
 }) {
-  const border = accent === "green" ? "border-[#cdeadd]" : "border-[#d3e9f7]";
-  const bg     = accent === "green" ? "bg-[#f0faf5]"    : "bg-[#dceffb]";
-  const text   = accent === "green" ? "text-[#0f3d2e]"  : "text-[#0f2447]";
+  const border = accent === "green" ? "border-cc-line" : "border-cc-blue-line";
+  const bg     = accent === "green" ? "bg-cc-wash"    : "bg-cc-blue-tint";
+  const text   = accent === "green" ? "text-cc-ink"  : "text-[#0f2447]";
   return (
     <div className={"rounded-input border-2 p-4 " + border + " " + bg}>
       <p className="text-[11px] uppercase tracking-wide text-text-muted font-semibold">{label}</p>

@@ -1,13 +1,13 @@
 "use client";
-import { fmtDate } from "@/lib/dates";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import StatusBadge from "@/components/StatusBadge";
 import { supabase } from "@/lib/supabase";
 import { getDocumentUrl, openDocument } from "@/lib/storage";
+import { fmtDate } from "@/lib/dates";
 
 type App = Record<string, any>;
 type Doc = { id: string; category: string; storage_path: string; mime_type: string | null; file_name: string | null };
@@ -119,7 +119,7 @@ function Inner() {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <Card className="p-6">
       <h3 className="font-display font-semibold text-[16px] mb-3">{title}</h3>
@@ -127,7 +127,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </Card>
   );
 }
-function Row({ k, v }: { k: string; v: any }) {
+function Row({ k, v }: { k: string; v: ReactNode }) {
   return (
     <div className="flex gap-4 text-[13px]">
       <dt className="text-text-muted min-w-[160px]">{k}</dt>

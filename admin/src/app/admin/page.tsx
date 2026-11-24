@@ -134,7 +134,7 @@ function Inner() {
               {showPeriod && (
                 <PeriodPicker period={period} onPeriod={changePeriod} from={pFrom} onFrom={changeFrom} to={pTo} onTo={changeTo} />
               )}
-              <span className="text-[13px] text-text-muted">Hi <span className="font-semibold text-[#178a5c]">{greetingName(getBusiness())}</span></span>
+              <span className="text-[13px] text-text-muted">Hi <span className="font-semibold text-cc-green">{greetingName(getBusiness())}</span></span>
               <NotificationBell />
             </div>
           </div>

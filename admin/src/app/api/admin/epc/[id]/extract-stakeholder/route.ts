@@ -15,6 +15,7 @@ import sharp from "sharp";
 import { err, requireLogin } from "@/lib/api";
 import { geminiExtractPan } from "@/lib/doc-extractors";
 import { geminiExtractAadhaar } from "@/lib/aadhaar";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,7 +67,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, fields: clean });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[extract-stakeholder] error:", msg);
     return err(msg, 500);
   }

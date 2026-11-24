@@ -23,6 +23,7 @@ import { UUID_RE } from "@/lib/validators";
 import { downloadBuffer, uploadBuffer, deleteObject } from "@/lib/gcs";
 import { geminiExtractInvoice } from "@/lib/doc-extractors";
 import { safeName } from "@/lib/upload-rules";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -144,7 +145,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ ok: true, id: insId, created: false, filled: Object.keys(patch) });
   } catch (e) {
     for (const p of copied) await deleteObject(p).catch(() => {});
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[loan-app/insurance] error:", msg);
     return err(msg, 500);
   }

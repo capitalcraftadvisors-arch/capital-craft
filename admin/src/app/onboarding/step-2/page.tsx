@@ -14,6 +14,7 @@ import { getBusiness, setBusiness, isImpersonating, logout } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { extractPan, extractGstLegalName } from "@/lib/ocr";
 import { GSTIN_RE, PAN_RE } from "@/lib/validators";
+import { notify } from "@/lib/notify";
 
 type SuryaGhar = "yes" | "no" | "other" | "";
 
@@ -194,7 +195,7 @@ export default function Step2Page() {
     const biz = getBusiness();
     if (!biz) return;
     // Admin (impersonating) may proceed with anything filled — even no type.
-    if (!isImpersonating() && !values.business_type) return alert("Please pick a business type.");
+    if (!isImpersonating() && !values.business_type) return notify.error("Please pick a business type.");
 
     // Admins run onboarding under impersonation — treat as non-draft so
     // every required check is relaxed (admin can skip anything). Real EPCs
@@ -211,7 +212,7 @@ export default function Step2Page() {
         .eq("category", "gstin")
         .limit(1);
       if (!gstDocs || gstDocs.length === 0) {
-        return alert("Please upload the GST registration document to continue.");
+        return notify.error("Please upload the GST registration document to continue.");
       }
       // PAN card doc present
       const { data: panDocs } = await supabase()
@@ -221,19 +222,19 @@ export default function Step2Page() {
         .eq("category", "pan_business")
         .limit(1);
       if (!panDocs || panDocs.length === 0) {
-        return alert("Please upload the PAN card to continue.");
+        return notify.error("Please upload the PAN card to continue.");
       }
       // Legal + trade + GSTIN fields
-      if (!values.legal_name.trim()) return alert("Please enter the Legal name.");
-      if (!values.trade_name.trim()) return alert("Please enter the Trade name.");
-      if (!values.gstin_number.trim()) return alert("Please enter the GSTIN.");
+      if (!values.legal_name.trim()) return notify.error("Please enter the Legal name.");
+      if (!values.trade_name.trim()) return notify.error("Please enter the Trade name.");
+      if (!values.gstin_number.trim()) return notify.error("Please enter the GSTIN.");
       if (!GSTIN_RE.test(values.gstin_number.trim().toUpperCase())) {
-        return alert("The GSTIN doesn't look valid (expected 15 characters, e.g. 08ATMPS8478D1ZY).");
+        return notify.error("The GSTIN doesn't look valid (expected 15 characters, e.g. 08ATMPS8478D1ZY).");
       }
       // PM Surya Ghar
-      if (!values.pm_surya_ghar) return alert("Please answer the PM Surya Ghar question.");
+      if (!values.pm_surya_ghar) return notify.error("Please answer the PM Surya Ghar question.");
       if (values.pm_surya_ghar === "other" && !values.pm_surya_ghar_other.trim()) {
-        return alert("Please specify which entity you're registered with.");
+        return notify.error("Please specify which entity you're registered with.");
       }
     }
 
@@ -263,7 +264,7 @@ export default function Step2Page() {
       })
       .eq("id", biz.id);
     setSaving(false);
-    if (error) return alert(error.message);
+    if (error) return notify.error(error.message);
     setBusiness({ ...biz, current_step: 3 });
     router.push("/onboarding/step-3");
   }
@@ -275,18 +276,18 @@ export default function Step2Page() {
   if (taken) {
     const what = taken.pan && taken.gstin ? "PAN card and GST registration are" : taken.pan ? "PAN card is" : "GST registration is";
     return (
-      <div className="max-w-lg mx-auto mt-10 rounded-2xl border border-[#f3d9a4] bg-[#fef8ee] p-7 text-center">
-        <div className="mx-auto mb-4 grid place-items-center w-12 h-12 rounded-full bg-[#854f0b] text-white text-[22px] font-bold">!</div>
-        <h1 className="font-display text-[22px] font-bold text-[#0f3d2e]">Already registered</h1>
-        <p className="mt-3 text-[15px] text-[#0f3d2e]">This {what} already registered with Capital Craft.</p>
+      <div className="max-w-lg mx-auto mt-10 rounded-2xl border border-warn-line bg-warn-wash p-7 text-center">
+        <div className="mx-auto mb-4 grid place-items-center w-12 h-12 rounded-full bg-warn-ink text-white text-[22px] font-bold">!</div>
+        <h1 className="font-display text-[22px] font-bold text-cc-ink">Already registered</h1>
+        <p className="mt-3 text-[15px] text-cc-ink">This {what} already registered with Capital Craft.</p>
         <p className="mt-2 text-[14px] text-text-mid">To add a user, log in to your company&apos;s partner portal and add them in <b>Settings → Users</b>.</p>
         <div className="mt-6 flex justify-center gap-2 flex-wrap">
           <button type="button" onClick={() => setTaken(null)}
-            className="px-4 py-2.5 rounded-xl border border-line bg-white text-[14px] font-semibold text-[#0f3d2e] hover:bg-bg-soft">
+            className="px-4 py-2.5 rounded-xl border border-line bg-white text-[14px] font-semibold text-cc-ink hover:bg-bg-soft">
             Check the documents again
           </button>
-          <button type="button" onClick={() => { logout(); router.replace("/login" as any); }}
-            className="px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c]">
+          <button type="button" onClick={() => { logout(); router.replace("/login"); }}
+            className="px-4 py-2.5 rounded-xl bg-cc-green text-white text-[14px] font-semibold hover:bg-cc-green-hover">
             Log out
           </button>
         </div>
@@ -298,7 +299,7 @@ export default function Step2Page() {
     <>
       <button
         type="button"
-        onClick={() => router.push("/onboarding/step-1" as any)}
+        onClick={() => router.push("/onboarding/step-1")}
         className="inline-flex items-center gap-1 text-[13px] text-text-mid hover:text-text mb-4"
       >
         <span aria-hidden>←</span> Back

@@ -11,6 +11,7 @@ import FileUpload from "@/components/FileUpload";
 import { getBusiness, setBusiness, authHeaders, isImpersonating } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { ACCOUNT_RE, IFSC_RE } from "@/lib/validators";
+import { notify } from "@/lib/notify";
 
 // Bank details.
 //
@@ -208,33 +209,33 @@ export default function Step4Page() {
       })
       .eq("id", biz.id);
     setSaving(false);
-    if (error) return alert(error.message);
+    if (error) return notify.error(error.message);
     setBusiness({ ...biz, current_step: nextStep });
-    router.push(`/onboarding/step-${nextStep}` as any);
+    router.push(`/onboarding/step-${nextStep}`);
   }
 
   const onNext = handleSubmit(async (v) => {
     if (isDraft) {
       if (!(await chequeUploaded())) {
-        return alert("Please upload the cancelled cheque to continue.");
+        return notify.error("Please upload the cancelled cheque to continue.");
       }
       if (!v.bank_account_number || !ACCOUNT_RE.test(v.bank_account_number)) {
-        return alert("Please enter a valid account number (9-18 digits).");
+        return notify.error("Please enter a valid account number (9-18 digits).");
       }
       if (v.bank_account_number !== v.confirm_account_number) {
-        return alert("OCR may have read the wrong value — please edit the account number so both boxes match.");
+        return notify.error("OCR may have read the wrong value — please edit the account number so both boxes match.");
       }
       if (!v.bank_ifsc || !IFSC_RE.test(v.bank_ifsc.toUpperCase())) {
-        return alert("Please enter a valid IFSC code.");
+        return notify.error("Please enter a valid IFSC code.");
       }
       if (!v.bank_name.trim()) {
-        return alert("Please enter the bank name.");
+        return notify.error("Please enter the bank name.");
       }
       if (bankStmtCount < BANK_STMT_MIN) {
-        return alert("Please upload your last 12 months' bank statements.");
+        return notify.error("Please upload your last 12 months' bank statements.");
       }
       if (!v.gst_username.trim()) {
-        return alert("Please enter the GST username.");
+        return notify.error("Please enter the GST username.");
       }
     } else {
       // Non-draft path: if the account number is present it must match confirm.
@@ -258,7 +259,7 @@ export default function Step4Page() {
     <>
       <button
         type="button"
-        onClick={() => router.push("/onboarding/step-3" as any)}
+        onClick={() => router.push("/onboarding/step-3")}
         className="inline-flex items-center gap-1 text-[13px] text-text-mid hover:text-text mb-4"
       >
         <span aria-hidden>←</span> Back
@@ -380,7 +381,7 @@ export default function Step4Page() {
             <h2 className="font-display font-semibold text-[16px]">Last 12 months&rsquo; bank statements</h2>
             <p className="text-[13px] text-text-mid mt-1 mb-3">
               One file or as many as you need. Duplicate files are skipped automatically.
-              {bankStmtCount > 0 && <span className="font-semibold text-[#0f3d2e]"> {bankStmtCount} uploaded.</span>}
+              {bankStmtCount > 0 && <span className="font-semibold text-cc-ink"> {bankStmtCount} uploaded.</span>}
             </p>
             <FileUpload
               businessId={businessId}

@@ -12,6 +12,7 @@ import { SUBSCRIPTION_MSG } from "@/lib/custom-template";
 import { uploadBuffer } from "@/lib/gcs";
 import { fileLinkUrl } from "@/lib/file-links";
 import { publicOrigin } from "@/lib/login-password-server";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       customer: pdf.doc.customer?.name || "", mobile: pdf.doc.customer?.mobile || "", kw: pdf.doc.kw || null, org: pdf.orgName,
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[epc/quotes/share] error:", msg);
     return err(msg, 500);
   }

@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { FUNCTIONS_URL } from "@/lib/supabase-config";
 import { dbAs } from "@/lib/api";
 import { MCP_TOOLS } from "@/lib/mcp-tools";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -66,7 +67,7 @@ async function handle(msg: RpcMsg, jwt: string): Promise<object | null> {
         const out = await tool.run(dbAs(jwt), (msg.params?.arguments ?? {}) as Record<string, unknown>);
         return rpcResult(id, { content: [{ type: "text", text: JSON.stringify(out) }] });
       } catch (e) {
-        return rpcResult(id, { content: [{ type: "text", text: e instanceof Error ? e.message : String(e) }], isError: true });
+        return rpcResult(id, { content: [{ type: "text", text: errText(e) }], isError: true });
       }
     }
     default:

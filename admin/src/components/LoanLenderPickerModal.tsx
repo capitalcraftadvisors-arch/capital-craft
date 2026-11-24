@@ -5,13 +5,14 @@
 //   - Approve   → pick which lender approved (from those already sent docs).
 //   - Reject    → pick which lender rejected + capture the date + a reason.
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import Select from "@/components/ui/Select";
 import DateField from "@/components/ui/DateField";
 import { addLender } from "@/lib/lenders";
 import { localIsoDate } from "@/lib/dates";
+import { notify } from "@/lib/notify";
 
 export type PickerLender = { key: string; label: string };
 const CUSTOM = "__custom__";
@@ -36,6 +37,7 @@ export default function LoanLenderPickerModal({
   const [reason, setReason] = useState("");
   const [date, setDate] = useState<string>(() => localIsoDate(new Date()));
   const [busy, setBusy] = useState(false);
+  const uid = useId(); // ids that tie the heading and labels to the pop-up and its fields
 
   if (!open) return null;
 
@@ -65,24 +67,24 @@ export default function LoanLenderPickerModal({
       let lender: PickerLender = options.find((o) => o.key === sel) || { key: sel, label: sel };
       if (isCustom) {
         const r = await addLender(custom);
-        if (!r.lender) { alert(r.error || "Couldn't add the lender."); return; }
+        if (!r.lender) { notify.error(r.error || "Couldn't add the lender."); return; }
         lender = r.lender;
       }
       await onConfirm(lender, needReason ? reason.trim() : undefined, needDate ? date : undefined);
       setSel(""); setCustom(""); setReason(""); setDate(localIsoDate(new Date()));
       onClose();
     } catch (e) {
-      alert("Couldn't save: " + (e as Error).message);
+      notify.error("Couldn't save: " + (e as Error).message);
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <Modal onClose={close} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
+    <Modal onClose={close} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6" aria-labelledby={`${uid}-title`}>
       <div className="flex items-start justify-between mb-4">
         <div className="min-w-0">
-          <h3 className="font-display font-semibold text-[18px] text-text">{title}</h3>
+          <h3 id={`${uid}-title`} className="font-display font-semibold text-[18px] text-text">{title}</h3>
           {subtitle && <p className="text-[12px] text-text-mid mt-0.5">{subtitle}</p>}
         </div>
         <button type="button" onClick={close} disabled={busy} aria-label="Close"
@@ -103,13 +105,14 @@ export default function LoanLenderPickerModal({
 
       {isCustom && (
         <div className="mt-3">
-          <label className="block text-[13px] font-medium text-text mb-1">New lender name</label>
+          <label htmlFor={`${uid}-custom`} className="block text-[13px] font-medium text-text mb-1">New lender name</label>
           <input
+            id={`${uid}-custom`}
             type="text"
             value={custom}
             onChange={(e) => setCustom(e.target.value)}
             placeholder="e.g. HDFC"
-            className="w-full rounded-input border border-line bg-white px-3 py-2 text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-[#185fa5]/30"
+            className="w-full rounded-input border border-line bg-white px-3 py-2 text-[14px] text-text focus:outline-none focus:ring-2 focus:ring-cc-blue/30"
           />
         </div>
       )}
@@ -131,10 +134,11 @@ export default function LoanLenderPickerModal({
 
       {needReason && (
         <div className="mt-4">
-          <label className="block text-[13px] font-medium text-text mb-1">
+          <label htmlFor={`${uid}-reason`} className="block text-[13px] font-medium text-text mb-1">
             Reason for rejection <span className="text-red-600">*</span>
           </label>
           <textarea
+            id={`${uid}-reason`}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             rows={3}

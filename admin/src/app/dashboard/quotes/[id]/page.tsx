@@ -31,6 +31,7 @@ import { fetchWhatsAppOn } from "@/lib/subscription";
 import { createProposal, whatsAppProposal } from "@/lib/proposals";
 import WhatsAppButton from "@/components/partner/WhatsAppButton";
 import { useCloseOnOutsideClick } from "@/lib/use-close-on-outside-click";
+import { askConfirm } from "@/lib/confirm";
 
 export default function QuoteEditor({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -191,9 +192,9 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
   }
 
   async function remove() {
-    if (!row || !window.confirm(`Delete quotation ${row.quote_no}? This can't be undone.`)) return;
+    if (!row || !(await askConfirm(`Delete quotation ${row.quote_no}? This can't be undone.`, { danger: true }))) return;
     setBusy("delete");
-    try { await deleteQuote(row.id); router.push("/dashboard/quotes" as any); }
+    try { await deleteQuote(row.id); router.push("/dashboard/quotes"); }
     catch (e) { setError((e as Error).message); setBusy(null); }
   }
 
@@ -236,8 +237,8 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
     <div className="max-w-[1250px]">
       {/* Action bar */}
       <div className="sticky top-0 z-30 -mx-5 sm:-mx-8 px-5 sm:px-8 py-3 mb-4 bg-bg-soft/95 backdrop-blur border-b border-line flex items-center gap-3 flex-wrap">
-        <button type="button" onClick={() => router.push("/dashboard/quotes" as any)} className="text-[13px] text-text-muted hover:text-text">← Quotations</button>
-        <span className="text-[16px] font-bold text-[#0f3d2e]">{row ? row.quote_no : "New quotation"}</span>
+        <button type="button" onClick={() => router.push("/dashboard/quotes")} className="text-[13px] text-text-muted hover:text-text">← Quotations</button>
+        <span className="text-[16px] font-bold text-cc-ink">{row ? row.quote_no : "New quotation"}</span>
         <span className="text-[12px] font-semibold px-2.5 py-1 rounded-full bg-[#fff5de] text-[#8a5a00]">{resi ? "Residential" : "Commercial"}</span>
         {row && (
           <select value={row.status} onChange={(e) => void status(e.target.value as QuoteStatus)} disabled={busy !== null || !work}
@@ -253,7 +254,7 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
               Undo
             </button>
           )}
-          {row && work && <button type="button" onClick={() => router.push(`/dashboard/quotes/new?from=${row.id}` as any)} className={ghost}>Copy</button>}
+          {row && work && <button type="button" onClick={() => router.push(`/dashboard/quotes/new?from=${row.id}`)} className={ghost}>Copy</button>}
           {row && work && <button type="button" onClick={() => void remove()} disabled={busy !== null} className={ghost + " text-red-600"}>Delete</button>}
           {row && v2 && (
             <>
@@ -286,7 +287,7 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
               <F l="Billing address" wide><textarea className={input + " min-h-[60px]"} value={doc.customer.billing} onChange={(e) => upCust({ billing: e.target.value })} /></F>
               <F l="Site address" wide>
                 <label className="flex items-center gap-2 text-[13px] text-text-mid mb-1.5">
-                  <input type="checkbox" checked={!doc.customer.shipping} onChange={(e) => upCust({ shipping: e.target.checked ? "" : doc.customer.billing || " " })} className="h-4 w-4 accent-[#1e3a8a]" />
+                  <input type="checkbox" checked={!doc.customer.shipping} onChange={(e) => upCust({ shipping: e.target.checked ? "" : doc.customer.billing || " " })} className="h-4 w-4 accent-navy" />
                   Same as billing
                 </label>
                 {!!doc.customer.shipping && <textarea className={input + " min-h-[60px]"} value={doc.customer.shipping.trimStart()} onChange={(e) => upCust({ shipping: e.target.value || " " })} />}
@@ -454,7 +455,7 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
 
         {/* Live totals */}
         <aside className="xl:sticky xl:top-20 bg-white rounded-2xl border border-line p-5">
-          <div className="text-[13px] font-semibold text-[#0f3d2e] mb-3">Summary</div>
+          <div className="text-[13px] font-semibold text-cc-ink mb-3">Summary</div>
           <Sum l={lines ? "Sub total" : "System price"} v={totals.base} />
           {!!totals.discount && <Sum l="Discount" v={-totals.discount} />}
           {totals.taxes.map(({ rate, amount }) => totals.intra ? (
@@ -485,13 +486,13 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
   );
 }
 
-const ghost = "px-4 py-2.5 rounded-xl border border-line bg-white text-[13.5px] font-semibold text-[#0f3d2e] hover:bg-bg-soft disabled:opacity-60";
+const ghost = "px-4 py-2.5 rounded-xl border border-line bg-white text-[13.5px] font-semibold text-cc-ink hover:bg-bg-soft disabled:opacity-60";
 
 function Block({ title, right, children }: { title: string; right?: ReactNode; children: ReactNode }) {
   return (
     <section className="bg-white rounded-2xl border border-line p-5 mb-5">
       <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
-        <h2 className="text-[14px] font-semibold text-[#0f3d2e]">{title}</h2>
+        <h2 className="text-[14px] font-semibold text-cc-ink">{title}</h2>
         {right}
       </div>
       {children}
@@ -510,14 +511,14 @@ function AddItemMenu({ options, onPick }: { options: { label: string; item: Quot
   const opt = "block w-full text-left px-4 py-2 text-[13px] hover:bg-[#f0f5fc]";
   return (
     <div className="relative self-start" ref={ref}>
-      <button type="button" onClick={() => setOpen((o) => !o)} className="text-[13px] font-semibold text-[#1e3a8a] hover:underline inline-flex items-center gap-1">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="text-[13px] font-semibold text-navy hover:underline inline-flex items-center gap-1">
         + Add item
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
       </button>
       {open && (
         <div className="absolute left-0 z-30 mt-1 w-64 max-h-72 overflow-y-auto bg-white border border-line rounded-xl shadow-lg py-1">
           {options.map((o) => <button key={o.label} type="button" onClick={() => pick(o.item)} className={opt + " text-text"}>{o.label}</button>)}
-          <button type="button" onClick={() => pick(null)} className={opt + " font-semibold text-[#1e3a8a]" + (options.length ? " border-t border-line" : "")}>Write your own</button>
+          <button type="button" onClick={() => pick(null)} className={opt + " font-semibold text-navy" + (options.length ? " border-t border-line" : "")}>Write your own</button>
         </div>
       )}
     </div>
@@ -532,11 +533,11 @@ function F({ l, req, opt, wide, children }: { l: string; req?: boolean; opt?: bo
     </div>
   );
 }
-function Sum({ l, v, text, strong }: { l: string; v?: number; text?: string; strong?: boolean }) {
+function Sum({ l, v, strong }: { l: string; v: number; strong?: boolean }) {
   return (
-    <div className={"flex items-center justify-between gap-3 py-1 " + (strong ? "text-[15px] font-bold text-[#0f3d2e]" : "text-[13.5px] text-text")}>
+    <div className={"flex items-center justify-between gap-3 py-1 " + (strong ? "text-[15px] font-bold text-cc-ink" : "text-[13.5px] text-text")}>
       <span className={strong ? "" : "text-text-mid"}>{l}</span>
-      <span className="whitespace-nowrap">{text ?? (v! < 0 ? `- ${fmtRupees(-v!)}` : fmtRupees(v))}</span>
+      <span className="whitespace-nowrap">{v < 0 ? `- ${fmtRupees(-v)}` : fmtRupees(v)}</span>
     </div>
   );
 }

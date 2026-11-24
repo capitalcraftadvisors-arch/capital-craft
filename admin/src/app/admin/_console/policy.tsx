@@ -57,18 +57,18 @@ export function byPolicyDaysLeft(a: PolicyDates, b: PolicyDates): number {
 // Shared by the Solar Insurance and Other Insurance tables.
 export function PolicyValidityCell({ from, to }: { from: string | null; to: string | null }) {
   const v = policyValidityParts(from, to);
-  if (!v) return <span className="text-[13px] text-[#5a8a76]">—</span>;
+  if (!v) return <span className="text-[13px] text-cc-muted">—</span>;
   const badge =
     v.tone === "red"   ? "bg-red-50 text-red-700 border-red-200" :
-    v.tone === "amber" ? "bg-[#fef0d6] text-[#854f0b] border-[#f3d9a4]" :
-                         "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd]";
+    v.tone === "amber" ? "bg-warn-tint text-warn-ink border-warn-line" :
+                         "bg-cc-tint text-cc-green border-cc-line";
   const daysText =
     v.daysLeft == null ? null :
     v.daysLeft < 0 ? `Expired ${Math.abs(v.daysLeft)}d ago` :
     `${v.daysLeft} ${v.daysLeft === 1 ? "day" : "days"} left`;
   return (
     <div className="flex flex-col items-center gap-1">
-      <span className="text-[13px] font-semibold text-[#0f3d2e]">{v.toLabel ?? "—"}</span>
+      <span className="text-[13px] font-semibold text-cc-ink">{v.toLabel ?? "—"}</span>
       {daysText && (
         <span className={`inline-flex px-2 py-0.5 rounded-full border text-[11px] font-semibold ${badge}`}>{daysText}</span>
       )}
@@ -81,7 +81,7 @@ export function DownloadPolicyButton({ busy, onClick }: { busy: boolean; onClick
   return (
     <button type="button" disabled={busy} onClick={onClick}
       className={["text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center justify-center gap-1.5 transition-colors",
-        busy ? "bg-bg-soft text-text-muted cursor-not-allowed" : "bg-[#178a5c] text-white hover:bg-[#12734c]"].join(" ")}>
+        busy ? "bg-bg-soft text-text-muted cursor-not-allowed" : "bg-cc-green text-white hover:bg-cc-green-hover"].join(" ")}>
       {IconDownload} {busy ? "Opening…" : "Download Policy"}
     </button>
   );

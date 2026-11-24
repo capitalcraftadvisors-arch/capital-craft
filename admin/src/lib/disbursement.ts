@@ -94,8 +94,8 @@ export function deadlineState(firstDisbursementDate?: string | null, secondDisbu
 // Tailwind classes for the countdown pill, keyed by tone. Brand green /
 // existing amber / red — same palette the rest of the admin uses.
 export const DEADLINE_PILL: Record<DeadlineTone, string> = {
-  green: "bg-[#e6f6ee] text-[#178a5c] border border-[#cdeadd]",
-  amber: "bg-[#fef0d6] text-[#854f0b] border border-[#f3d9a4]",
+  green: "bg-cc-tint text-cc-green border border-cc-line",
+  amber: "bg-warn-tint text-warn-ink border border-warn-line",
   red:   "bg-red-50 text-red-700 border border-red-200",
 };
 

@@ -81,9 +81,9 @@ export default function PartnerShell({ active, onSection, badge = 0, quoteTpl, t
   ];
   const items = nav.filter((n) => n.show);
   const go = (n: { key: PartnerSection; href?: string }) => {
-    if (n.href) router.push(n.href as any);
+    if (n.href) router.push(n.href);
     else if (onSection) onSection(n.key);
-    else router.push((n.key === "home" ? "/dashboard" : `/dashboard?s=${n.key}`) as any);
+    else router.push(n.key === "home" ? "/dashboard" : `/dashboard?s=${n.key}`);
   };
   const countPill = (n: number) => (n > 9 ? "9+" : String(n));
 
@@ -95,7 +95,7 @@ export default function PartnerShell({ active, onSection, badge = 0, quoteTpl, t
       <aside className="hidden md:flex group/side fixed top-0 left-0 z-40 h-screen w-[68px] hover:w-[224px] transition-[width] duration-200 ease-out flex-col text-white overflow-hidden shadow-xl" style={{ background: NAVY }}>
         <div className="flex flex-col h-full p-3">
           {/* Logo — mark when collapsed, full logo (on white) when expanded. */}
-          <a href="/" className="flex items-center justify-center group-hover/side:justify-start h-11 mb-4 shrink-0">
+          <a href="/" aria-label="Capital Craft" className="flex items-center justify-center group-hover/side:justify-start h-11 mb-4 shrink-0">
             <span className="group-hover/side:hidden w-9 h-9 rounded-lg bg-white grid place-items-center shrink-0">
               <img src="/brand/capital-craft-mark.png" alt="" className="w-7 h-7 object-contain" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
             </span>
@@ -108,17 +108,17 @@ export default function PartnerShell({ active, onSection, badge = 0, quoteTpl, t
               const on = active === n.key;
               const b = badgeOf(n.key);
               return (
-                <button key={n.key} onClick={() => go(n)} title={n.label}
+                <button key={n.key} onClick={() => go(n)} title={n.label} aria-label={n.label}
                   className={["relative w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13.5px] font-medium transition-colors justify-center group-hover/side:justify-start", on ? "bg-white/15 text-white" : "text-white/70 hover:bg-white/10 hover:text-white"].join(" ")}>
                   <span className="relative shrink-0">
                     <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{ICON[n.key]}</svg>
                     {b > 0 && (
-                      <span className="group-hover/side:hidden absolute -top-2 -right-2 min-w-[16px] h-[16px] px-1 grid place-items-center rounded-full bg-[#dc2626] text-white text-[9px] font-bold leading-none">{countPill(b)}</span>
+                      <span className="group-hover/side:hidden absolute -top-2 -right-2 min-w-[16px] h-[16px] px-1 grid place-items-center rounded-full bg-red-600 text-white text-[9px] font-bold leading-none">{countPill(b)}</span>
                     )}
                   </span>
                   <span className="hidden group-hover/side:inline whitespace-nowrap">{n.label}</span>
                   {b > 0 && (
-                    <span className="hidden group-hover/side:grid ml-auto min-w-[18px] h-[18px] px-1 place-items-center rounded-full bg-[#dc2626] text-white text-[10px] font-bold leading-none">{countPill(b)}</span>
+                    <span className="hidden group-hover/side:grid ml-auto min-w-[18px] h-[18px] px-1 place-items-center rounded-full bg-red-600 text-white text-[10px] font-bold leading-none">{countPill(b)}</span>
                   )}
                 </button>
               );
@@ -139,7 +139,7 @@ export default function PartnerShell({ active, onSection, badge = 0, quoteTpl, t
             <button key={n.key} onClick={() => go(n)} className={["relative text-[13px] whitespace-nowrap px-2 py-1 rounded-lg", active === n.key ? "bg-white/20" : "text-white/70"].join(" ")}>
               {n.label}
               {badgeOf(n.key) > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-1 grid place-items-center rounded-full bg-[#dc2626] text-white text-[9px] font-bold leading-none">{countPill(badgeOf(n.key))}</span>
+                <span className="absolute -top-1 -right-1 min-w-[15px] h-[15px] px-1 grid place-items-center rounded-full bg-red-600 text-white text-[9px] font-bold leading-none">{countPill(badgeOf(n.key))}</span>
               )}
             </button>
           ))}
@@ -148,7 +148,7 @@ export default function PartnerShell({ active, onSection, badge = 0, quoteTpl, t
         <header className="px-5 sm:px-8 pt-6 pb-2 flex items-start justify-between gap-3">
           <div className="min-w-0">{title}</div>
           <OrgMenu name={name} logo={logo} person={me?.member ? `${personName(me)} · ${roleLabel(epcRole(me), me)}` : null}
-            onSettings={manage ? () => router.push(SETTINGS_HREF as any) : null} onLogout={() => { logout(); router.replace("/login"); }} />
+            onSettings={manage ? () => router.push(SETTINGS_HREF) : null} onLogout={() => { logout(); router.replace("/login"); }} />
         </header>
 
         {children}
@@ -165,16 +165,15 @@ function OrgMenu({ name, logo, person, onSettings, onLogout }: {
   const ref = useRef<HTMLDivElement>(null);
   useCloseOnOutsideClick(ref, open, setOpen);
   const avatar = (size: string) => logo ? (
-    /* eslint-disable-next-line @next/next/no-img-element */
     <img src={orgImageUrl(logo)} alt="" className={`${size} rounded-full bg-white border border-line object-contain p-1`} />
   ) : (
     <div className={`${size} rounded-full text-white grid place-items-center font-display font-bold text-[15px]`} style={{ background: NAVY_ACCENT }} aria-hidden>{(name || "C").slice(0, 1).toUpperCase()}</div>
   );
   return (
     <div ref={ref} className="relative shrink-0">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="flex items-center gap-3 rounded-full hover:opacity-90">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-label={name} className="flex items-center gap-3 rounded-full hover:opacity-90">
         <div className="text-right hidden sm:block min-w-0">
-          <div className="text-[13px] font-semibold text-[#0f3d2e] truncate max-w-[220px]">{name}</div>
+          <div className="text-[13px] font-semibold text-cc-ink truncate max-w-[220px]">{name}</div>
           <div className="text-[11px] text-text-muted truncate max-w-[220px]">{person ?? "Portal"}</div>
         </div>
         {avatar("w-10 h-10")}

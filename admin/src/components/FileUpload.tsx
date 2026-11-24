@@ -4,10 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { uploadDocument, getDocumentUrl, deleteDocument, downloadDocument } from "@/lib/storage";
 import { isAcceptedFileType } from "@/lib/validators";
+import { askConfirm } from "@/lib/confirm";
 
 type EpcCategory =
   | "pan_business" | "gstin" | "extra_doc" | "admin_extra"
-  | "stakeholder_pan" | "stakeholder_aadhaar"
+  | "stakeholder_pan" | "stakeholder_aadhaar" | "stakeholder_aadhaar_front" | "stakeholder_aadhaar_back"
   | "cancelled_cheque"
   | "office_exterior" | "office_interior" | "office_selfie"
   | "custom_quote_sample"; // the EPC's own quotation, for its custom template (0122)
@@ -224,7 +225,7 @@ export default function FileUpload(props: Props) {
   }
 
   async function removeDoc(d: DocRow) {
-    if (!window.confirm(`Delete "${d.file_name || label}"? This can't be undone.`)) return;
+    if (!(await askConfirm(`Delete "${d.file_name || label}"? This can't be undone.`, { danger: true }))) return;
     const ok = await deleteDocument(d.id);
     if (!ok) {
       setError("Could not delete this file.");
@@ -286,7 +287,7 @@ export default function FileUpload(props: Props) {
                 }}
                 title="View uploaded document"
                 aria-label="View uploaded document"
-                className="p-1.5 rounded hover:bg-bg-tint text-[#185fa5] transition-colors"
+                className="p-1.5 rounded hover:bg-bg-tint text-cc-blue transition-colors"
               >
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -299,7 +300,7 @@ export default function FileUpload(props: Props) {
                   onClick={() => void downloadDocument(d.id)}
                   title="Download"
                   aria-label="Download"
-                  className="p-1.5 rounded hover:bg-bg-tint text-[#185fa5] transition-colors"
+                  className="p-1.5 rounded hover:bg-bg-tint text-cc-blue transition-colors"
                 >
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16" /></svg>
                 </button>
@@ -315,7 +316,7 @@ export default function FileUpload(props: Props) {
               </button>
               {filledSlot && canUploadMore && n === listed.length - 1 && (
                 <label title="Add another" aria-label="Add another"
-                  className={"p-1.5 rounded hover:bg-bg-tint text-[#185fa5] transition-colors cursor-pointer" + (uploading ? " opacity-50 pointer-events-none" : "")}>
+                  className={"p-1.5 rounded hover:bg-bg-tint text-cc-blue transition-colors cursor-pointer" + (uploading ? " opacity-50 pointer-events-none" : "")}>
                   {fileInput}
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
                 </label>
@@ -328,9 +329,9 @@ export default function FileUpload(props: Props) {
       {canUploadMore && !filledSlot && (
         <label
           className={[
-            "flex flex-col items-center justify-center border-2 border-dashed border-[#185fa5] rounded-input bg-white",
+            "flex flex-col items-center justify-center border-2 border-dashed border-cc-blue rounded-input bg-white",
             compact ? `${UPLOAD_BOX_COMPACT} px-3` : "min-h-[96px] px-4 py-4",
-            "text-center cursor-pointer hover:bg-[#f2f7fc] transition-colors",
+            "text-center cursor-pointer hover:bg-cc-blue-wash transition-colors",
           ].join(" ")}
         >
           {fileInput}
@@ -339,10 +340,10 @@ export default function FileUpload(props: Props) {
             <polyline points="17 8 12 3 7 8" />
             <line x1="12" y1="3" x2="12" y2="15" />
           </svg>
-          <p className={(compact ? "text-[13px]" : "text-[14px]") + " font-semibold text-[#185fa5]"}>
+          <p className={(compact ? "text-[13px]" : "text-[14px]") + " font-semibold text-cc-blue"}>
             {uploading ? "Uploading…" : "Click to upload"}
           </p>
-          <p className={(compact ? "text-[11px]" : "text-[12px] mt-0.5") + " text-[#5a86b3]"}>{uploadHint ?? "Photo, scan, or PDF"}</p>
+          <p className={(compact ? "text-[11px]" : "text-[12px] mt-0.5") + " text-cc-blue-muted"}>{uploadHint ?? "Photo, scan, or PDF"}</p>
         </label>
       )}
 

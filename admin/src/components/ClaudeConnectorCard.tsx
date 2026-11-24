@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { supabase, FUNCTIONS_URL } from "@/lib/supabase";
 import { authHeaders } from "@/lib/auth";
 import { fmtDate } from "@/lib/dates";
+import { askConfirm } from "@/lib/confirm";
 
 type Link = { id: string; created_at: string; expires_at: string; revoked_at: string | null };
 
@@ -41,7 +42,7 @@ export default function ClaudeConnectorCard() {
   }
 
   async function revoke(id: string) {
-    if (!window.confirm("Revoke this connector link? Claude will lose access through it.")) return;
+    if (!(await askConfirm("Revoke this connector link? Claude will lose access through it.", { danger: true }))) return;
     const { error: e } = await supabase().from("mcp_tokens").update({ revoked_at: new Date().toISOString() }).eq("id", id);
     if (e) { setError("Couldn't revoke — " + e.message); return; }
     await load();
@@ -59,15 +60,15 @@ export default function ClaudeConnectorCard() {
       <div className="px-4 py-3 border-b border-line flex items-center justify-between gap-3">
         <h2 className="text-[15px] font-bold text-text">Claude connector</h2>
         <button type="button" onClick={() => void create()} disabled={busy}
-          className="text-[12px] font-semibold px-3 py-1.5 rounded bg-[#178a5c] text-white hover:bg-[#12734c] disabled:opacity-60">
+          className="text-[12px] font-semibold px-3 py-1.5 rounded bg-cc-green text-white hover:bg-cc-green-hover disabled:opacity-60">
           {busy ? "Creating…" : "Create connector link"}
         </button>
       </div>
       {newUrl && (
         <div className="px-4 py-3 border-b border-line flex items-center gap-2">
-          <code className="flex-1 min-w-0 truncate select-all rounded-[8px] border border-[#cdeadd] bg-[#f0faf5] px-3 py-2 text-[12px] font-mono text-[#0f3d2e]" title={newUrl}>{newUrl}</code>
+          <code className="flex-1 min-w-0 truncate select-all rounded-[8px] border border-cc-line bg-cc-wash px-3 py-2 text-[12px] font-mono text-cc-ink" title={newUrl}>{newUrl}</code>
           <button type="button" onClick={() => void copy()}
-            className="text-[12px] font-semibold px-3 py-2 rounded-[8px] border border-[#cdeadd] bg-white text-[#178a5c] hover:bg-[#f0faf5]">
+            className="text-[12px] font-semibold px-3 py-2 rounded-[8px] border border-cc-line bg-white text-cc-green hover:bg-cc-wash">
             {copied ? "Copied" : "Copy"}
           </button>
         </div>
@@ -81,7 +82,7 @@ export default function ClaudeConnectorCard() {
               <tr key={l.id} className="border-t border-line">
                 <td className="px-4 py-2.5 text-text">{fmtDate(l.created_at)}</td>
                 <td className="px-4 py-2.5 text-text">{fmtDate(l.expires_at)}</td>
-                <td className={"px-4 py-2.5 font-semibold " + (state(l) === "Active" ? "text-[#178a5c]" : "text-text-muted")}>{state(l)}</td>
+                <td className={"px-4 py-2.5 font-semibold " + (state(l) === "Active" ? "text-cc-green" : "text-text-muted")}>{state(l)}</td>
                 <td className="px-4 py-2.5 text-right">
                   {state(l) === "Active" && (
                     <button type="button" onClick={() => void revoke(l.id)}

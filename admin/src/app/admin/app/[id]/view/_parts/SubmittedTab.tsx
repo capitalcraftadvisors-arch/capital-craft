@@ -41,10 +41,10 @@ export default function SubmittedTab({
         ].filter(Boolean).join(" · ");
         return (
           <li key={d.id} className="text-[12px]">
-            <a href={`/admin/app/${d.id}/view`} target="_blank" rel="noopener" className="font-semibold text-[#185fa5] hover:underline">
+            <a href={`/admin/app/${d.id}/view`} target="_blank" rel="noopener" className="font-semibold text-cc-blue hover:underline">
               {d.loan_display_id ?? "—"}
             </a>
-            <span className="text-[#7a958a]"> · {d.aadhaar_name || d.borrower_name || "—"} · {why} · {d.aborted_at ? "Aborted" : (LOAN_STATUS_LABEL[d.status ?? ""] ?? d.status)}</span>
+            <span className="text-cc-faint"> · {d.aadhaar_name || d.borrower_name || "—"} · {why} · {d.aborted_at ? "Aborted" : (LOAN_STATUS_LABEL[d.status ?? ""] ?? d.status)}</span>
           </li>
         );
       })}
@@ -61,7 +61,7 @@ export default function SubmittedTab({
     { k: "Date of birth", v: loan.aadhaar_dob },
     { k: "PAN", v: loan.borrower_pan, copy: loan.borrower_pan },
     { k: "Aadhaar", v: loan.aadhaar_number_masked },
-    { k: "Email", v: loan.borrower_email, valueClass: "text-[#185fa5]", copy: loan.borrower_email },
+    { k: "Email", v: loan.borrower_email, valueClass: "text-cc-blue", copy: loan.borrower_email },
     { k: "Phone no", v: loan.borrower_mobile ? `+91 ${loan.borrower_mobile}` : null, copy: loan.borrower_mobile },
     { k: "Earning", v: yesNo(loan.applicant_earning) },
     { k: "Monthly income", v: loan.monthly_income != null ? fmtRupees(loan.monthly_income) : null, optional: loan.applicant_earning !== true },
@@ -136,7 +136,7 @@ export default function SubmittedTab({
           <div className="grid gap-x-12 gap-y-6 md:grid-cols-2 xl:grid-cols-1">
             <FieldCol title="Applicant" rows={applicantRows} />
             <FieldCol title="Co-applicant" rows={coappRows}>
-              {!hasCoapp && <p className="text-[14px] text-[#9aa5a0] py-[5px]">No co-applicant</p>}
+              {!hasCoapp && <p className="text-[14px] text-cc-empty py-[5px]">No co-applicant</p>}
             </FieldCol>
           </div>
         </Section>
@@ -179,7 +179,7 @@ export default function SubmittedTab({
                       type="button"
                       disabled={trancheBusy !== null}
                       onClick={() => void downloadTranche(tranche)}
-                      className="mt-3 text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center gap-1.5 border border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5] disabled:opacity-50"
+                      className="mt-3 text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center gap-1.5 border border-cc-green/30 bg-white text-cc-green hover:bg-cc-wash disabled:opacity-50"
                     >
                       {I.download} {trancheBusy === tranche ? "Preparing…" : `Download Tranche ${tranche}`}
                     </button>

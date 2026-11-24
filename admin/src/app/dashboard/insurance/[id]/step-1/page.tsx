@@ -17,8 +17,10 @@ import InsuranceUpload from "@/components/InsuranceUpload";
 import InsuranceStepHeader from "@/components/InsuranceStepHeader";
 import { supabase } from "@/lib/supabase";
 import { authHeaders } from "@/lib/auth";
+import { notify } from "@/lib/notify";
 
-type App = Record<string, any>;
+// The one insurance_applications column this page reads back after load.
+type App = { gst_path: string | null };
 
 export default function InsuranceStep1() {
   return (
@@ -38,6 +40,19 @@ type Kyc = {
   care_of: string | null;
   address: string | null;
 };
+
+// One extracted field. Blank values read "—" rather than vanishing, so a
+// gap in the OCR is visible instead of silent.
+function Row({ k, v, mono }: { k: string; v: string | null; mono?: boolean }) {
+  return (
+    <div className="flex justify-between gap-3 text-[13px] py-[3px]">
+      <span className="text-cc-muted shrink-0">{k}</span>
+      <span className={["text-right min-w-0 font-medium text-cc-ink", mono ? "font-mono" : ""].join(" ")}>
+        {v || "—"}
+      </span>
+    </div>
+  );
+}
 
 function Inner() {
   const params = useParams<{ id: string }>();
@@ -128,14 +143,14 @@ function Inner() {
     });
     const d = await res.json().catch(() => ({}));
     if (res.ok && d?.ok) setGstSaved(true);
-    else alert("Couldn't save GST details: " + (d?.error || res.status));
+    else notify.error("Couldn't save GST details: " + (d?.error || res.status));
   }
 
   async function saveContinue() {
     if (saving) return;
     // Required-doc checks surface as errors here (no "required" labels).
-    if (!pan) { alert("Please upload the PAN card."); return; }
-    if (!aadhaarDone) { alert("Please upload the Aadhaar (front + back) and read it."); return; }
+    if (!pan) { notify.error("Please upload the PAN card."); return; }
+    if (!aadhaarDone) { notify.error("Please upload the Aadhaar (front + back) and read it."); return; }
     setSaving(true);
     try {
       const res = await fetch(`/api/epc/insurance/${params.id}/save`, {
@@ -144,33 +159,20 @@ function Inner() {
         body: JSON.stringify({ step: 1 }),
       });
       const d = await res.json().catch(() => ({}));
-      if (!res.ok || !d?.ok) { alert("Couldn't save: " + (d?.error || res.status)); return; }
-      router.push(`/dashboard/insurance/${params.id}/step-2` as any);
+      if (!res.ok || !d?.ok) { notify.error("Couldn't save: " + (d?.error || res.status)); return; }
+      router.push(`/dashboard/insurance/${params.id}/step-2`);
     } finally {
       setSaving(false);
     }
   }
 
-  const fileCls = "block w-full text-[13px] text-text-mid file:mr-3 file:py-2 file:px-3 file:rounded-input file:border-0 file:bg-[#f0faf5] file:text-[#178a5c] file:font-semibold";
-
-  // One extracted field. Blank values read "—" rather than vanishing, so a
-  // gap in the OCR is visible instead of silent.
-  function Row({ k, v, mono }: { k: string; v: string | null; mono?: boolean }) {
-    return (
-      <div className="flex justify-between gap-3 text-[13px] py-[3px]">
-        <span className="text-[#5a8a76] shrink-0">{k}</span>
-        <span className={["text-right min-w-0 font-medium text-[#0f3d2e]", mono ? "font-mono" : ""].join(" ")}>
-          {v || "—"}
-        </span>
-      </div>
-    );
-  }
+  const fileCls = "block w-full text-[13px] text-text-mid file:mr-3 file:py-2 file:px-3 file:rounded-input file:border-0 file:bg-cc-wash file:text-cc-green file:font-semibold";
 
   return (
     <main className="min-h-screen bg-bg-soft">
       <InsuranceStepHeader step={1} />
       <section className="max-w-2xl mx-auto px-5 sm:px-7 py-8">
-        <h1 className="font-display text-[24px] sm:text-[28px] font-bold text-[#0f3d2e] mb-1">Insurance — your details</h1>
+        <h1 className="font-display text-[24px] sm:text-[28px] font-bold text-cc-ink mb-1">Insurance — your details</h1>
         <p className="text-text-mid mb-6">Upload PAN and Aadhaar.</p>
 
         <div className="space-y-5">
@@ -188,8 +190,8 @@ function Inner() {
             />
             {/* What the OCR read back — shown for the EPC to eyeball. */}
             {pan && (
-              <div className="mt-3 rounded-input border border-[#cdeadd] bg-[#f7fcfa] p-3">
-                <p className="text-[11px] font-semibold text-[#5a8a76] uppercase tracking-wider mb-1.5">Read from PAN</p>
+              <div className="mt-3 rounded-input border border-cc-line bg-cc-row-hover p-3">
+                <p className="text-[11px] font-semibold text-cc-muted uppercase tracking-wider mb-1.5">Read from PAN</p>
                 <Row k="PAN number" v={pan} mono />
                 {panName && <Row k="Name" v={panName} />}
               </div>
@@ -200,26 +202,26 @@ function Inner() {
             <p className="text-[13px] font-medium text-text-mid mb-2">Aadhaar card</p>
             <div className="grid sm:grid-cols-2 gap-3">
               <div>
-                <p className="text-[12px] text-text-muted mb-1">Front</p>
-                <input ref={frontRef} type="file" accept="image/*,application/pdf" className={fileCls} />
+                <label htmlFor="ins-aadhaar-front" className="block text-[12px] text-text-muted mb-1">Front</label>
+                <input id="ins-aadhaar-front" ref={frontRef} type="file" accept="image/*,application/pdf" className={fileCls} />
               </div>
               <div>
-                <p className="text-[12px] text-text-muted mb-1">Back</p>
-                <input ref={backRef} type="file" accept="image/*,application/pdf" className={fileCls} />
+                <label htmlFor="ins-aadhaar-back" className="block text-[12px] text-text-muted mb-1">Back</label>
+                <input id="ins-aadhaar-back" ref={backRef} type="file" accept="image/*,application/pdf" className={fileCls} />
               </div>
             </div>
             <div className="mt-3 flex items-center gap-3">
               <Button variant="outline" onClick={() => void readAadhaar()} loading={aadhaarBusy}>
                 {aadhaarDone ? "Re-read Aadhaar" : "Read Aadhaar"}
               </Button>
-              {aadhaarDone && <span className="text-[12px] text-[#178a5c] font-medium">✓ Details read</span>}
+              {aadhaarDone && <span className="text-[12px] text-cc-green font-medium">✓ Details read</span>}
             </div>
             {aadhaarErr && <p className="text-[12px] text-red-500 mt-2">{aadhaarErr}</p>}
 
             {/* Extracted Aadhaar details, shown back for review. */}
             {kyc && (
-              <div className="mt-3 rounded-input border border-[#cdeadd] bg-[#f7fcfa] p-3">
-                <p className="text-[11px] font-semibold text-[#5a8a76] uppercase tracking-wider mb-1.5">Read from Aadhaar</p>
+              <div className="mt-3 rounded-input border border-cc-line bg-cc-row-hover p-3">
+                <p className="text-[11px] font-semibold text-cc-muted uppercase tracking-wider mb-1.5">Read from Aadhaar</p>
                 <Row k="Name" v={kyc.name} />
                 <Row k="Date of birth" v={kyc.dob} />
                 <Row k="Gender" v={kyc.gender} />
@@ -248,13 +250,13 @@ function Inner() {
             {/* Fetched GST details — editable, with a Save. */}
             {gstDone && (
               <div className="mt-4 space-y-3">
-                <p className="text-[11px] font-semibold text-[#5a8a76] uppercase tracking-wider">Read from GST certificate</p>
+                <p className="text-[11px] font-semibold text-cc-muted uppercase tracking-wider">Read from GST certificate</p>
                 <Input label="Legal Name" value={gstLegal} onChange={(e) => { setGstLegal(e.target.value); setGstSaved(false); }} />
                 <Input label="Trade Name" value={gstTrade} onChange={(e) => { setGstTrade(e.target.value); setGstSaved(false); }} />
                 <Input label="Registration No (GSTIN)" value={gstin} onChange={(e) => { setGstin(e.target.value.toUpperCase()); setGstSaved(false); }} />
                 <div className="flex items-center gap-3">
                   <Button variant="outline" onClick={() => void saveGst()}>Save GST details</Button>
-                  {gstSaved && <span className="text-[12px] text-[#178a5c] font-medium">✓ Saved</span>}
+                  {gstSaved && <span className="text-[12px] text-cc-green font-medium">✓ Saved</span>}
                 </div>
               </div>
             )}

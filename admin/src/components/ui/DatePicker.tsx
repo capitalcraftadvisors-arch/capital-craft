@@ -105,7 +105,7 @@ export default function DatePicker({
           onClick={open}
           disabled={disabled}
           aria-label="Open calendar"
-          className="absolute inset-y-0 right-0 flex items-center pr-3 text-text-muted hover:text-[#185fa5] disabled:opacity-60"
+          className="absolute inset-y-0 right-0 flex items-center pr-3 text-text-muted hover:text-cc-blue disabled:opacity-60"
         >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />

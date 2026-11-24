@@ -9,7 +9,7 @@ export default function PartnerBackHeader() {
   return (
     <header className="border-b border-line bg-white">
       <div className="max-w-[900px] mx-auto px-5 sm:px-7 h-14 flex items-center">
-        <button onClick={() => router.push("/dashboard" as any)} className="text-[13px] text-text-muted hover:text-text inline-flex items-center gap-1">← Back to dashboard</button>
+        <button onClick={() => router.push("/dashboard")} className="text-[13px] text-text-muted hover:text-text inline-flex items-center gap-1">← Back to dashboard</button>
       </div>
     </header>
   );

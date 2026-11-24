@@ -49,11 +49,11 @@ function Inner() {
   return (
     <main className="min-h-screen bg-bg-soft">
       <div className="max-w-[1180px] mx-auto px-5 sm:px-7 py-8">
-        <button onClick={() => router.push(`/admin/app/${id}/view` as any)} className="text-[13px] text-text-muted hover:text-[#0f3d2e] mb-3">← Back to profile</button>
+        <button onClick={() => router.push(`/admin/app/${id}/view`)} className="text-[13px] text-text-muted hover:text-cc-ink mb-3">← Back to profile</button>
         <div className="mb-5">
-          <h1 className="font-display text-[24px] font-bold text-[#0f3d2e]">Message to EPC</h1>
+          <h1 className="font-display text-[24px] font-bold text-cc-ink">Message to EPC</h1>
           <p className="text-[13.5px] text-text-mid mt-0.5">
-            {ctx ? <>{ctx.name} · <span className="font-mono text-[#185fa5]">{ctx.ref}</span></> : "…"} — write the message and tick the rows to open for editing.
+            {ctx ? <>{ctx.name} · <span className="font-mono text-cc-blue">{ctx.ref}</span></> : "…"} — write the message and tick the rows to open for editing.
           </p>
         </div>
 
@@ -66,17 +66,17 @@ function Inner() {
 
           {/* The edit table — what the EPC is allowed to change */}
           <aside className="rounded-2xl border border-line bg-white overflow-hidden flex flex-col" style={{ maxHeight: "78vh" }}>
-            <div className="shrink-0 px-4 py-3 border-b border-line bg-[#f7f9fe]">
+            <div className="shrink-0 px-4 py-3 border-b border-line bg-navy-mist">
               <div className="flex items-center justify-between gap-2">
                 <div>
-                  <h2 className="text-[14px] font-bold text-[#14235c]">Open for editing</h2>
+                  <h2 className="text-[14px] font-bold text-navy-ink">Open for editing</h2>
                   <p className="text-[11.5px] text-text-muted mt-0.5">The EPC’s edit will show only the ticked rows.</p>
                 </div>
-                <span className="text-[12px] font-semibold px-2.5 py-1 rounded-full bg-[#e8effc] text-[#1e3a8a] shrink-0">{sel.length}</span>
+                <span className="text-[12px] font-semibold px-2.5 py-1 rounded-full bg-navy-tint text-navy shrink-0">{sel.length}</span>
               </div>
               <div className="flex items-center gap-3 mt-2">
-                <button onClick={() => setSel(allKeys)} className="text-[11.5px] font-semibold text-[#1e3a8a] hover:underline">Select all</button>
-                <button onClick={() => setSel([])} className="text-[11.5px] font-semibold text-text-muted hover:text-[#1e3a8a]">Clear</button>
+                <button onClick={() => setSel(allKeys)} className="text-[11.5px] font-semibold text-navy hover:underline">Select all</button>
+                <button onClick={() => setSel([])} className="text-[11.5px] font-semibold text-text-muted hover:text-navy">Clear</button>
               </div>
             </div>
             <div className="flex-1 overflow-y-auto p-3">

@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { err, publicDb } from "@/lib/api";
 import { MOBILE_RE } from "@/lib/validators";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[leads] error:", msg);
     return err(msg, 500);
   }

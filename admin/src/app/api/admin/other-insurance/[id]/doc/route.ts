@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { err } from "@/lib/api";
 import { getSignedReadUrl, deleteObject } from "@/lib/gcs";
 import { otherInsuranceRow } from "@/lib/insurance-server";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,7 +36,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
     return err("Invalid action.", 400);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[other-insurance/doc] error:", msg);
     return err(msg, 500);
   }

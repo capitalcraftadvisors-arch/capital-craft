@@ -5,7 +5,7 @@
 // leads they own; Owner / Admin see everyone's and pick each lead's owner.
 // Partner Portal v2 — the demo EPC only for now (portalV2).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { NAVY } from "@/components/partner/PartnerShell";
 import { input, decimal, digits, Field } from "@/components/quotation/form-kit";
@@ -22,6 +22,7 @@ import { fetchMembers, type MemberRow } from "@/lib/members";
 import { fmtDate, localIsoDate } from "@/lib/dates";
 import { fmtRupees } from "@/lib/money";
 import { MOBILE_RE } from "@/lib/validators";
+import { askConfirm } from "@/lib/confirm";
 import {
   fetchLeads, saveLead, deleteLead, leadsChanged, filedElsewhere, isDue,
   LEAD_STATUSES, LEAD_STATUS_LABEL, LEAD_STATUS_PILL, type LeadRow, type LeadStatus,
@@ -42,7 +43,7 @@ export default function LeadsPage() {
   const [members, setMembers] = useState<MemberRow[]>([]);
 
   const v2 = portalV2(me);
-  useEffect(() => { if (!v2) router.replace("/dashboard" as any); }, [v2, router]);
+  useEffect(() => { if (!v2) router.replace("/dashboard"); }, [v2, router]);
   // WhatsApp (paid) + the company's name for the message — both cached reads.
   const [wa, setWa] = useState(false);
   const [org, setOrg] = useState("");
@@ -85,7 +86,7 @@ export default function LeadsPage() {
               className={["px-3.5 py-1.5 rounded-full text-[13px] font-semibold border", filter === k ? "text-white border-transparent" : "bg-white border-line text-text-mid"].join(" ")}
               style={filter === k ? { background: NAVY } : undefined}>
               {k === "all" ? "All" : k === "due" ? "Follow-up due" : LEAD_STATUS_LABEL[k]}{" "}
-              <span className={k === "due" && count(k) > 0 && filter !== k ? "text-[#dc2626]" : "opacity-70"}>{count(k)}</span>
+              <span className={k === "due" && count(k) > 0 && filter !== k ? "text-red-600" : "opacity-70"}>{count(k)}</span>
             </button>
           ))}
         </div>
@@ -95,7 +96,7 @@ export default function LeadsPage() {
             {owner === "company" ? ownerName : rows?.find((r) => r.owner_member_id === owner)?.owner?.name ?? "—"} ×
           </button>
         )}
-        <input className={input + " max-w-[240px] ml-auto"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, mobile, city" />
+        <input className={input + " max-w-[240px] ml-auto"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, mobile, city" aria-label="Search name, mobile, city" />
         {work && (
           <button type="button" onClick={() => setOpen("new")} className="px-4 py-2.5 rounded-xl text-white text-[13.5px] font-semibold" style={{ background: NAVY }}>
             + Add lead
@@ -124,7 +125,7 @@ export default function LeadsPage() {
             <tbody>
               {shown.map((r) => {
                 const tone = !r.follow_up_at || r.status === "won" || r.status === "lost" ? "text-text-mid"
-                  : r.follow_up_at < today ? "text-[#dc2626] font-semibold" : r.follow_up_at === today ? "text-[#b45309] font-semibold" : "text-text";
+                  : r.follow_up_at < today ? "text-red-600 font-semibold" : r.follow_up_at === today ? "text-amber-700 font-semibold" : "text-text";
                 return (
                   <tr key={r.id} onClick={() => setOpen(r)} className="border-b border-line last:border-0 hover:bg-bg-soft cursor-pointer">
                     <td className="px-4 py-3">
@@ -151,7 +152,7 @@ export default function LeadsPage() {
       {open && rows && (
         <LeadEditor lead={open === "new" ? null : open} rows={rows} members={members} ownerName={ownerName}
           assign={assign} readOnly={!work} wa={wa} org={org} canLoan={canLoan && work}
-          onGo={(href) => router.push(href as any)}
+          onGo={(href) => router.push(href)}
           onSaved={(r) => { apply(open === "new" ? [r, ...rows] : rows.map((x) => (x.id === r.id ? r : x))); setOpen(null); }}
           onDeleted={(id) => { apply(rows.filter((x) => x.id !== id)); setOpen(null); }}
           onClose={() => setOpen(null)} />
@@ -176,6 +177,7 @@ function LeadEditor({ lead, rows, members, ownerName, assign, readOnly, wa, org,
   }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const titleId = useId();
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((p) => ({ ...p, [k]: v }));
   // A lead owned by someone who isn't in the list (switched off) keeps its owner.
   const owners = lead?.owner_member_id && !members.some((m) => m.id === lead.owner_member_id) && lead.owner
@@ -188,9 +190,9 @@ function LeadEditor({ lead, rows, members, ownerName, assign, readOnly, wa, org,
     try {
       if (d.mobile && d.mobile !== (lead?.mobile ?? "")) {
         const mine = rows.find((r) => r.mobile === d.mobile && r.id !== lead?.id);
-        if (mine && !window.confirm(`${mine.name} already has this mobile in your leads. Save anyway?`)) return;
+        if (mine && !(await askConfirm(`${mine.name} already has this mobile in your leads. Save anyway?`))) return;
         if (await filedElsewhere(d.mobile).catch(() => false)
-            && !window.confirm("This customer has already applied for a loan through another partner. Save the lead anyway?")) return;
+            && !(await askConfirm("This customer has already applied for a loan through another partner. Save the lead anyway?"))) return;
       }
       onSaved(await saveLead(lead?.id ?? null, {
         name: d.name, mobile: d.mobile || null, city: d.city || null,
@@ -213,15 +215,15 @@ function LeadEditor({ lead, rows, members, ownerName, assign, readOnly, wa, org,
   }
 
   async function remove() {
-    if (!lead || !window.confirm(`Delete the lead ${lead.name}? This can't be undone.`)) return;
+    if (!lead || !(await askConfirm(`Delete the lead ${lead.name}? This can't be undone.`, { danger: true }))) return;
     setBusy(true); setError(null);
     try { await deleteLead(lead.id); onDeleted(lead.id); }
     catch (e) { setError((e as Error).message || "Couldn't delete the lead."); setBusy(false); }
   }
 
   return (
-    <Modal onClose={onClose} closeOnBackdrop="mousedown" busy={busy} overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[640px] max-h-[92vh] overflow-y-auto p-6">
-      <div className="text-[17px] font-display font-bold text-[#0f3d2e] mb-4">{lead ? lead.name : "New lead"}</div>
+    <Modal onClose={onClose} closeOnBackdrop="mousedown" busy={busy} overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[640px] max-h-[92vh] overflow-y-auto p-6" aria-labelledby={titleId}>
+      <div id={titleId} className="text-[17px] font-display font-bold text-cc-ink mb-4">{lead ? lead.name : "New lead"}</div>
       <fieldset disabled={readOnly || busy} className="grid sm:grid-cols-2 gap-3">
         <Field l="Customer name" req><input className={input} value={d.name} onChange={(e) => set("name", e.target.value)} /></Field>
         <Field l="Mobile"><input className={input} inputMode="numeric" value={d.mobile} onChange={(e) => set("mobile", digits(e.target.value).slice(0, 10))} placeholder="10-digit mobile" /></Field>
@@ -250,10 +252,10 @@ function LeadEditor({ lead, rows, members, ownerName, assign, readOnly, wa, org,
         <div className="flex items-center gap-4 flex-wrap mt-4 pt-4 border-t border-line text-[13px] font-semibold">
           {lead.mobile && <WhatsAppButton on={wa} onClick={() => whatsAppLead(lead.name, lead.mobile, org)} />}
           {lead.application_id
-            ? <button type="button" onClick={() => onGo(`/dashboard/${lead.application_id}`)} className="text-[#1e3a8a] hover:underline">Open loan</button>
-            : canLoan && <button type="button" onClick={() => onGo(`/dashboard/apply/chat?lead=${lead.id}`)} className="text-[#1e3a8a] hover:underline">Apply for loan</button>}
+            ? <button type="button" onClick={() => onGo(`/dashboard/${lead.application_id}`)} className="text-navy hover:underline">Open loan</button>
+            : canLoan && <button type="button" onClick={() => onGo(`/dashboard/apply/chat?lead=${lead.id}`)} className="text-navy hover:underline">Apply for loan</button>}
           {!readOnly && lead.status === "won" && (
-            <button type="button" onClick={() => void toProject()} disabled={busy} className="text-[#1e3a8a] hover:underline disabled:opacity-60">Create project</button>
+            <button type="button" onClick={() => void toProject()} disabled={busy} className="text-navy hover:underline disabled:opacity-60">Create project</button>
           )}
         </div>
       )}

@@ -253,7 +253,7 @@ function Inner() {
     if (!res.ok || !d?.ok) return { ok: false, error: d?.error || `Upload failed (HTTP ${res.status}).` };
     merge({ plant_photo_path: "x", plant_photo_gps: gps });
     answer("plant", [user("plant", { text: `Plant photo · 📍 ${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}`, files: [{ name: file.name, thumb: thumbOf(file) }], redo: true })]);
-    finished("plant");
+    void finished("plant");
     return { ok: true };
   }
 
@@ -267,7 +267,7 @@ function Inner() {
     if (!d) return;
     merge({ plant_address: v });
     answer("address", [user("address", { text: v, redo: true })]);
-    finished("address");
+    void finished("address");
   }
 
   async function confirmAmount(amt: number) {
@@ -347,7 +347,7 @@ function Inner() {
             <div key={m.id} className={m.from === "bot" ? "self-start max-w-[88%]" : "self-end max-w-[88%]"}>
               <div className={[
                 "rounded-2xl px-3.5 py-2 text-[14px] shadow-sm whitespace-pre-wrap break-words",
-                m.from === "bot" ? "bg-white rounded-tl-md border border-[#c7d5f0] text-text" : "bg-[#1e3a8a] rounded-tr-md text-white",
+                m.from === "bot" ? "bg-white rounded-tl-md border border-navy-line text-text" : "bg-navy rounded-tr-md text-white",
                 editing && m.from === "user" && m.stage === editing ? "ring-2 ring-[#93b4ff]" : "",
               ].join(" ")}>
                 {m.text}
@@ -362,7 +362,7 @@ function Inner() {
               </div>
               {m.from === "user" && m.redo && m.stage && stage !== "done" && (
                 <div className="text-right mt-0.5 pr-1">
-                  <button onClick={() => redo(m.stage!)} disabled={busy} className="text-[11px] text-text-muted hover:text-[#1e3a8a] disabled:opacity-40">
+                  <button onClick={() => redo(m.stage!)} disabled={busy} className="text-[11px] text-text-muted hover:text-navy disabled:opacity-40">
                     {m.files ? "↺ Replace" : "✎ Edit"}
                   </button>
                 </div>
@@ -389,7 +389,7 @@ function Inner() {
             <div className="flex flex-col gap-2">
               <FileSlot label={{ pan: "PAN card", gst: "GST certificate", ebill: "Electricity bill", invoice: "Tax invoice / Quotation" }[active]} file={files.file} onPick={(f) => pick("file", f)} />
               <div className="flex items-center gap-2">
-                <button onClick={() => void sendDoc(active)} disabled={!files.file} className="px-4 py-2 rounded-xl bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-40">Upload &amp; read →</button>
+                <button onClick={() => void sendDoc(active)} disabled={!files.file} className="px-4 py-2 rounded-xl bg-navy text-white text-[13px] font-semibold hover:bg-navy-hover disabled:opacity-40">Upload &amp; read →</button>
                 {active === "gst" && !editing && <button onClick={skipGst} className="px-3 py-2 rounded-xl text-[13px] text-text-muted hover:text-text hover:bg-bg-soft">Don&apos;t have it</button>}
               </div>
             </div>
@@ -402,7 +402,7 @@ function Inner() {
                 <FileSlot label="Aadhaar — back" file={files.back} onPick={(f) => pick("back", f)} />
               </div>
               <div>
-                <button onClick={() => void sendDoc("aadhaar")} disabled={!files.front || !files.back} className="px-4 py-2 rounded-xl bg-[#1e3a8a] text-white text-[13px] font-semibold hover:bg-[#17307a] disabled:opacity-40">Upload &amp; read →</button>
+                <button onClick={() => void sendDoc("aadhaar")} disabled={!files.front || !files.back} className="px-4 py-2 rounded-xl bg-navy text-white text-[13px] font-semibold hover:bg-navy-hover disabled:opacity-40">Upload &amp; read →</button>
               </div>
             </div>
           )}
@@ -429,20 +429,20 @@ function Inner() {
 
           {active === "mismatch" && pendingAmount != null && (
             <div className="flex gap-2 flex-wrap">
-              <button onClick={() => void confirmAmount(pendingAmount)} className="flex-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a]">Use {fmtRupeesExact(pendingAmount)}</button>
+              <button onClick={() => void confirmAmount(pendingAmount)} className="flex-1 px-4 py-2.5 rounded-xl bg-navy text-white text-[14px] font-semibold hover:bg-navy-hover">Use {fmtRupeesExact(pendingAmount)}</button>
               <button onClick={reenterAmount} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">Re-enter</button>
             </div>
           )}
 
           {active === "review" && (
             <div className="flex gap-2 flex-wrap">
-              <button onClick={() => void submit()} className="flex-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a]">Submit application</button>
+              <button onClick={() => void submit()} className="flex-1 px-4 py-2.5 rounded-xl bg-navy text-white text-[14px] font-semibold hover:bg-navy-hover">Submit application</button>
               <button onClick={() => router.push("/dashboard")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">Later</button>
             </div>
           )}
 
           {active === "done" && (
-            <button onClick={() => router.push("/dashboard")} className="w-full px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a]">Back to dashboard</button>
+            <button onClick={() => router.push("/dashboard")} className="w-full px-4 py-2.5 rounded-xl bg-navy text-white text-[14px] font-semibold hover:bg-navy-hover">Back to dashboard</button>
           )}
         </ChatDock>
       )}
@@ -454,12 +454,12 @@ function Inner() {
 function FileSlot({ label, file, onPick }: { label: string; file?: File; onPick: (f: File | undefined) => void }) {
   return (
     <label className={["flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 cursor-pointer transition",
-      file ? "border-[#bfe3cf] bg-[#f3fbf6]" : "border-dashed border-[#9db4e6] bg-white hover:bg-[#f4f7fd]"].join(" ")}>
+      file ? "border-[#bfe3cf] bg-[#f3fbf6]" : "border-dashed border-[#9db4e6] bg-white hover:bg-navy-soft"].join(" ")}>
       <span className="min-w-0">
         <span className="block text-[13px] font-semibold text-text">{label}</span>
         <span className="block text-[11.5px] text-text-muted truncate">{file ? file.name : "Photo, scan or PDF"}</span>
       </span>
-      <span className={["shrink-0 text-[12px] font-semibold", file ? "text-[#178a5c]" : "text-[#1e3a8a]"].join(" ")}>{file ? "✓ Change" : "+ Add"}</span>
+      <span className={["shrink-0 text-[12px] font-semibold", file ? "text-cc-green" : "text-navy"].join(" ")}>{file ? "✓ Change" : "+ Add"}</span>
       <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { onPick(e.target.files?.[0]); e.target.value = ""; }} />
     </label>
   );
@@ -475,8 +475,8 @@ function ReadCard({ rows, onSave }: { rows: CardRow[]; onSave: (field: string, v
     if (await onSave(edit.field, draft.trim())) { setVals((v) => ({ ...v, [edit.label]: draft.trim() || null })); setEdit(null); }
   }
   return (
-    <div className="self-start w-full max-w-[88%] rounded-2xl rounded-tl-md border border-[#c7d5f0] bg-white shadow-sm overflow-hidden">
-      <div className="px-3.5 py-2 bg-[#edf2fb] border-b border-[#dbe4f5] text-[12.5px] font-semibold text-[#14235c]">📄 Read from the document</div>
+    <div className="self-start w-full max-w-[88%] rounded-2xl rounded-tl-md border border-navy-line bg-white shadow-sm overflow-hidden">
+      <div className="px-3.5 py-2 bg-[#edf2fb] border-b border-[#dbe4f5] text-[12.5px] font-semibold text-navy-ink">📄 Read from the document</div>
       <div className="p-3.5 flex flex-col gap-1.5">
         {rows.map((r) => (
           <div key={r.label} className="flex items-center justify-between gap-3 text-[13px] min-h-[24px]">
@@ -485,13 +485,13 @@ function ReadCard({ rows, onSave }: { rows: CardRow[]; onSave: (field: string, v
               <span className="flex items-center gap-1.5">
                 <input autoFocus value={draft} onChange={(e) => setDraft(r.field === "gstin" ? e.target.value.toUpperCase() : e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") void save(); if (e.key === "Escape") setEdit(null); }}
-                  className="border border-[#1e3a8a] rounded-lg px-2.5 py-1 text-[13px] w-44 text-right outline-none" />
-                <button onClick={() => void save()} className="text-[#1e3a8a] text-[12px] font-semibold">Save</button>
+                  className="border border-navy rounded-lg px-2.5 py-1 text-[13px] w-44 text-right outline-none" />
+                <button onClick={() => void save()} className="text-navy text-[12px] font-semibold">Save</button>
               </span>
             ) : (
               <span className="flex items-center gap-2 min-w-0">
                 {vals[r.label] ? <span className="text-text font-medium text-right break-words">{vals[r.label]}</span> : <span className="text-amber-600 text-[12px] italic">not found</span>}
-                {r.field && <button onClick={() => { setEdit(r); setDraft(vals[r.label] ?? ""); }} className="opacity-60 hover:opacity-100 text-[#1e3a8a] text-[11px] shrink-0" aria-label="Edit">✎</button>}
+                {r.field && <button onClick={() => { setEdit(r); setDraft(vals[r.label] ?? ""); }} className="opacity-60 hover:opacity-100 text-navy text-[11px] shrink-0" aria-label="Edit">✎</button>}
               </span>
             )}
           </div>
@@ -501,17 +501,21 @@ function ReadCard({ rows, onSave }: { rows: CardRow[]; onSave: (field: string, v
   );
 }
 
-// Review card before submitting — what goes to Capital Craft.
-function Summary({ app }: { app: App }) {
-  const Row = ({ k, v }: { k: string; v: unknown }) => (
+// One Summary line; a blank value reads "—".
+function Row({ k, v }: { k: string; v: unknown }) {
+  return (
     <div className="flex justify-between gap-3 text-[13px] py-1">
       <span className="text-text-muted shrink-0">{k}</span>
       <span className="text-right font-medium text-text min-w-0 break-words">{v ? String(v) : "—"}</span>
     </div>
   );
+}
+
+// Review card before submitting — what goes to Capital Craft.
+function Summary({ app }: { app: App }) {
   return (
-    <div className="self-start w-full max-w-[88%] rounded-2xl rounded-tl-md border border-[#c7d5f0] bg-white shadow-sm overflow-hidden">
-      <div className="px-3.5 py-2 bg-[#edf2fb] border-b border-[#dbe4f5] text-[12.5px] font-semibold text-[#14235c]">Summary</div>
+    <div className="self-start w-full max-w-[88%] rounded-2xl rounded-tl-md border border-navy-line bg-white shadow-sm overflow-hidden">
+      <div className="px-3.5 py-2 bg-[#edf2fb] border-b border-[#dbe4f5] text-[12.5px] font-semibold text-navy-ink">Summary</div>
       <div className="p-3.5">
         <Row k="PAN" v={app.pan_number} />
         <Row k="Aadhaar name" v={app.aadhaar_name} />

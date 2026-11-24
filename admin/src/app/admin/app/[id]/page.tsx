@@ -1,7 +1,7 @@
 "use client";
 import { fmtDate, fmtDateTime } from "@/lib/dates";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
@@ -39,13 +39,14 @@ function Inner() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { void load(); }, [params.id]);
-
-  async function load() {
+  // One read per application id (and again after a save).
+  const load = useCallback(async () => {
     const { data: a } = await supabase().from("epc_applications").select("*").eq("id", params.id).maybeSingle();
     setApp(a); setForm(a || {});
     setNotes(a?.review_notes || "");
-  }
+  }, [params.id]);
+
+  useEffect(() => { void load(); }, [load]);
 
   async function saveEdits() {
     setBusy(true); setError(null);
@@ -179,7 +180,7 @@ function Inner() {
                 <FileUpload
                   applicationId={params.id}
                   table="user_application_docs"
-                  category={c as any}
+                  category={c}
                   maxFiles={c === "borrower_pan" || c === "borrower_photo" ? 1 : 5}
                   uploadedBy="admin"
                   label={c.replace(/_/g, " ")}
@@ -241,7 +242,7 @@ function Inner() {
   );
 }
 
-function Row({ k, v }: { k: string; v: any }) {
+function Row({ k, v }: { k: string; v: ReactNode }) {
   return (
     <div className="flex gap-4 text-[13px]">
       <dt className="text-text-muted min-w-[160px]">{k}</dt>

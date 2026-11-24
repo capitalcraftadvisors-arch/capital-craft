@@ -11,7 +11,7 @@
 // Secondary: Abort (drops the lead off the dashboard, kept for the record).
 // Delete was removed deliberately — aborting is the reversible-by-record path.
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { fmtRupees } from "@/lib/money";
@@ -23,6 +23,8 @@ import OwnershipCard from "@/components/OwnershipCard";
 import { I, SectionCard, KV } from "@/components/view/ViewKit";
 import { supabase } from "@/lib/supabase";
 import { authHeaders } from "@/lib/auth";
+import { notify } from "@/lib/notify";
+import { askConfirm } from "@/lib/confirm";
 
 type Lead = {
   id: string;
@@ -70,6 +72,7 @@ function Inner() {
   const [abortReason, setAbortReason] = useState("");
   const [aborting, setAborting] = useState(false);
   const [deadBusy, setDeadBusy] = useState(false);
+  const abortTitleId = useId(); // names the Abort pop-up for screen readers
 
   useEffect(() => {
     void (async () => {
@@ -96,7 +99,7 @@ function Inner() {
       .update({ epc_business_id: id || null, epc_name_custom: id ? null : lead.epc_name_custom })
       .eq("id", lead.id);
     setSavingEpc(false);
-    if (error) { alert("Couldn't update EPC: " + error.message); return; }
+    if (error) { notify.error("Couldn't update EPC: " + error.message); return; }
     setLead({ ...lead, epc_business_id: id || null });
   }
 
@@ -104,20 +107,20 @@ function Inner() {
   // converted until revived.
   async function setDead(dead: boolean) {
     if (!lead) return;
-    if (dead && !window.confirm("Mark this lead as dead? It stays on the dashboard (shown as Dead) but can't be moved to a loan application until revived.")) return;
+    if (dead && !(await askConfirm("Mark this lead as dead? It stays on the dashboard (shown as Dead) but can't be moved to a loan application until revived."))) return;
     setDeadBusy(true);
     const dead_at = dead ? new Date().toISOString() : null;
     const { error } = await supabase().from("loan_leads").update({ dead_at }).eq("id", lead.id);
     setDeadBusy(false);
-    if (error) { alert("Couldn't update: " + error.message); return; }
+    if (error) { notify.error("Couldn't update: " + error.message); return; }
     setLead({ ...lead, dead_at });
   }
 
   async function convert() {
     if (!lead) return;
-    if (lead.dead_at) { alert("This lead is marked dead. Revive it before converting."); return; }
-    if (!lead.epc_business_id) { alert("Assign a real EPC (dropdown below) before converting."); return; }
-    if (!window.confirm("Move this lead to Loan Applications as a new draft? It will disappear from the Lead dashboard.")) return;
+    if (lead.dead_at) { notify.error("This lead is marked dead. Revive it before converting."); return; }
+    if (!lead.epc_business_id) { notify.error("Assign a real EPC (dropdown below) before converting."); return; }
+    if (!(await askConfirm("Move this lead to Loan Applications as a new draft? It will disappear from the Lead dashboard."))) return;
     setConverting(true);
     try {
       const res = await fetch(`/api/admin/lead/${lead.id}/convert-to-loan-app`, {
@@ -125,10 +128,10 @@ function Inner() {
         headers: authHeaders(),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) { alert(data?.error || `Conversion failed (HTTP ${res.status}).`); setConverting(false); return; }
+      if (!res.ok || !data?.ok) { notify.error(data?.error || `Conversion failed (HTTP ${res.status}).`); setConverting(false); return; }
       router.push(`/admin/app/${data.application_id}/view`);
     } catch (e) {
-      alert("Conversion failed: " + (e as Error).message);
+      notify.error("Conversion failed: " + (e as Error).message);
       setConverting(false);
     }
   }
@@ -140,12 +143,12 @@ function Inner() {
       .update({ aborted_at: new Date().toISOString(), abort_reason: abortReason.trim() || null })
       .eq("id", lead.id);
     setAborting(false);
-    if (error) { alert("Couldn't abort: " + error.message); return; }
+    if (error) { notify.error("Couldn't abort: " + error.message); return; }
     setAbortOpen(false);
     router.push("/admin");
   }
 
-  if (loading) return <main className="min-h-screen grid place-items-center bg-white"><p className="text-[#5a8a76]">Loading…</p></main>;
+  if (loading) return <main className="min-h-screen grid place-items-center bg-white"><p className="text-cc-muted">Loading…</p></main>;
   if (!lead) return <main className="min-h-screen grid place-items-center bg-white"><p className="text-red-700">Lead not found.</p></main>;
 
   const sizeStr = lead.project_size != null ? `${lead.project_size} ${(lead.project_size_unit || "kw").toUpperCase()}` : "—";
@@ -154,12 +157,12 @@ function Inner() {
   return (
     <main className="min-h-screen bg-white">
       {/* Sticky back-nav header */}
-      <header className="border-b border-[#cdeadd] bg-white sticky top-0 z-30">
+      <header className="border-b border-cc-line bg-white sticky top-0 z-30">
         <div className="w-full px-5 sm:px-8 h-14 flex items-center">
           <button
             type="button"
             onClick={() => { sessionStorage.setItem("adminList.tab", "loanleads"); router.push("/admin"); }}
-            className="text-[14px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1"
+            className="text-[14px] text-cc-muted hover:text-cc-ink inline-flex items-center gap-1"
           >
             ← Back to Leads
           </button>
@@ -170,17 +173,17 @@ function Inner() {
         style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
 
         {/* ── HEADER CARD ── */}
-        <div className="rounded-[12px] border border-[#cdeadd] bg-[#f0faf5] p-5 sm:p-6 mb-4">
+        <div className="rounded-[12px] border border-cc-line bg-cc-wash p-5 sm:p-6 mb-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-4 min-w-0">
-              <div className="w-14 h-14 rounded-[12px] bg-[#d6efe3] text-[#178a5c] grid place-items-center shrink-0"
+              <div className="w-14 h-14 rounded-[12px] bg-cc-tint-strong text-cc-green grid place-items-center shrink-0"
                 style={{ transform: "scale(1.3)", transformOrigin: "left center" }}>
                 {I.user}
               </div>
               <div className="min-w-0">
-                <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">{lead.name || "(unnamed lead)"}</div>
-                <div className="text-[13px] text-[#5a8a76] mt-0.5">
-                  <span className="font-mono text-[#0f7a52]">{lead.lead_display_id || "—"}</span>
+                <div className="text-[24px] font-semibold text-cc-ink truncate">{lead.name || "(unnamed lead)"}</div>
+                <div className="text-[13px] text-cc-muted mt-0.5">
+                  <span className="font-mono text-cc-green-text">{lead.lead_display_id || "—"}</span>
                   {lead.mobile && <span> · +91 {lead.mobile}</span>}
                 </div>
               </div>
@@ -189,7 +192,7 @@ function Inner() {
               {aborted ? (
                 <span className="inline-flex items-center px-3 py-1.5 rounded-full text-[13px] font-semibold bg-red-50 text-red-700 border border-red-200">Aborted</span>
               ) : (
-                <span className="inline-flex items-center px-3 py-1.5 rounded-full text-[13px] font-semibold bg-[#fef0d6] text-[#854f0b]">Under review</span>
+                <span className="inline-flex items-center px-3 py-1.5 rounded-full text-[13px] font-semibold bg-warn-tint text-warn-ink">Under review</span>
               )}
             </div>
           </div>
@@ -205,9 +208,9 @@ function Inner() {
 
         {/* ── ACTION BAR (hidden once aborted) ── */}
         {!aborted && (
-          <div className="rounded-[12px] border border-[#cdeadd] bg-white p-4 mb-4 flex items-center justify-between gap-3 flex-wrap">
-            <div className="text-[13px] text-[#5a8a76]">
-              When ready, move this lead into <span className="font-semibold text-[#0f3d2e]">Loan Applications</span> as a draft.
+          <div className="rounded-[12px] border border-cc-line bg-white p-4 mb-4 flex items-center justify-between gap-3 flex-wrap">
+            <div className="text-[13px] text-cc-muted">
+              When ready, move this lead into <span className="font-semibold text-cc-ink">Loan Applications</span> as a draft.
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <Button variant="outline" onClick={() => router.push(`/admin/lead/${lead.id}/step-1`)} className="!px-4 !py-2 !text-[13px]">Edit</Button>
@@ -220,9 +223,9 @@ function Inner() {
               </button>
               {lead.dead_at ? (
                 <>
-                  <span className="inline-flex items-center rounded-full px-3 py-1.5 text-[12px] font-semibold bg-[#fbe0e0] text-[#b42318] border border-[#f2c4c4]">Dead lead</span>
+                  <span className="inline-flex items-center rounded-full px-3 py-1.5 text-[12px] font-semibold bg-[#fbe0e0] text-danger-ink border border-danger-line">Dead lead</span>
                   <button type="button" onClick={() => void setDead(false)} disabled={deadBusy}
-                    className="px-4 py-2 rounded-btn text-[13px] font-semibold text-[#0f3d2e] border-[1.5px] border-[#cdeadd] hover:bg-[#f0faf5] disabled:opacity-60">
+                    className="px-4 py-2 rounded-btn text-[13px] font-semibold text-cc-ink border-[1.5px] border-cc-line hover:bg-cc-wash disabled:opacity-60">
                     {deadBusy ? "…" : "Revive lead"}
                   </button>
                 </>
@@ -248,7 +251,7 @@ function Inner() {
             <SectionCard title="Borrower" accent="blue" icon={I.user}>
               <KV k="Borrower Name" v={lead.name} />
               <KV k="Phone no" v={lead.mobile ? `+91 ${lead.mobile}` : "—"} />
-              <KV k="Email" v={lead.email} valueClass="text-[#185fa5]" />
+              <KV k="Email" v={lead.email} valueClass="text-cc-blue" />
             </SectionCard>
           </div>
 
@@ -263,7 +266,7 @@ function Inner() {
 
             {!aborted && (
               <SectionCard title="EPC assignment" accent="green" icon={I.building}>
-                <p className="text-[12px] text-[#5a8a76] mb-3">
+                <p className="text-[12px] text-cc-muted mb-3">
                   A loan application needs a real EPC. Pick the EPC this lead belongs to — required to convert.
                 </p>
                 <div className="flex items-center gap-2">
@@ -276,7 +279,7 @@ function Inner() {
                       disabled={savingEpc}
                     />
                   </div>
-                  {savingEpc && <span className="text-[12px] text-[#5a8a76]">Saving…</span>}
+                  {savingEpc && <span className="text-[12px] text-cc-muted">Saving…</span>}
                 </div>
                 {!lead.epc_business_id && lead.epc_name_custom && (
                   <p className="mt-2 text-[12px] text-amber-700">Typed name on file: “{lead.epc_name_custom}”. Select a real EPC to enable conversion.</p>
@@ -302,9 +305,9 @@ function Inner() {
 
       {/* ── ABORT MODAL ── */}
       {abortOpen && (
-        <Modal onClose={() => setAbortOpen(false)} busy={aborting} overlayClassName={OVERLAY.grid} className="w-full max-w-md rounded-[12px] bg-white p-5 shadow-xl">
-          <div className="text-[16px] font-semibold text-[#0f3d2e]">Abort this lead?</div>
-          <p className="text-[13px] text-[#5a8a76] mt-1">
+        <Modal onClose={() => setAbortOpen(false)} busy={aborting} overlayClassName={OVERLAY.grid} className="w-full max-w-md rounded-[12px] bg-white p-5 shadow-xl" aria-labelledby={abortTitleId}>
+          <div id={abortTitleId} className="text-[16px] font-semibold text-cc-ink">Abort this lead?</div>
+          <p className="text-[13px] text-cc-muted mt-1">
             It will drop off the Lead dashboard but stay on record. Add a reason (optional).
           </p>
           <textarea
@@ -312,14 +315,14 @@ function Inner() {
             onChange={(e) => setAbortReason(e.target.value)}
             rows={3}
             placeholder="Reason for aborting…"
-            className="mt-3 w-full border border-[#cdeadd] rounded-input px-3 py-2 text-[13px] bg-white focus:border-[#185fa5] outline-none resize-none"
+            className="mt-3 w-full border border-cc-line rounded-input px-3 py-2 text-[13px] bg-white focus:border-cc-blue outline-none resize-none"
           />
           <div className="mt-4 flex items-center justify-end gap-2">
             <button
               type="button"
               onClick={() => setAbortOpen(false)}
               disabled={aborting}
-              className="px-4 py-2 rounded-btn text-[13px] font-semibold text-[#5a8a76] border-[1.5px] border-[#cdeadd] hover:bg-[#f0faf5] disabled:opacity-60"
+              className="px-4 py-2 rounded-btn text-[13px] font-semibold text-cc-muted border-[1.5px] border-cc-line hover:bg-cc-wash disabled:opacity-60"
             >
               Cancel
             </button>

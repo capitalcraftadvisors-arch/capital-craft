@@ -89,18 +89,18 @@ export default function EditTable({ appId, form, docRows, value, onChange, accen
     <div className="rounded-xl border border-line bg-white overflow-hidden">
       {groups.map((g) => (
         <div key={g.title}>
-          <div className="px-3 py-2 bg-[#eef3fc] border-y border-[#dbe4f6] text-[11px] font-semibold text-[#14235c]">{g.title}</div>
+          <div className="px-3 py-2 bg-navy-wash border-y border-[#dbe4f6] text-[11px] font-semibold text-navy-ink">{g.title}</div>
           {g.items.map((it) => {
             const checked = sel.has(it.key);
             return (
-              <div key={it.key} onClick={() => toggle(it.key)} className="flex items-center gap-2.5 px-3 py-2 border-b border-line/70 last:border-b-0 cursor-pointer hover:bg-[#f7f9fe]">
+              <div key={it.key} onClick={() => toggle(it.key)} className="flex items-center gap-2.5 px-3 py-2 border-b border-line/70 last:border-b-0 cursor-pointer hover:bg-navy-mist">
                 <input type="checkbox" checked={checked} onChange={() => toggle(it.key)} onClick={(e) => e.stopPropagation()} className="w-4 h-4 cursor-pointer shrink-0" style={{ accentColor: accent }} aria-label={it.label} />
                 <span className="flex-1 text-[12.5px] text-text leading-snug">{it.label}</span>
                 {it.doc ? (
                   it.on ? (
                     <span className="flex items-center gap-2 shrink-0">
-                      <span className="text-[11px] font-semibold text-[#178a5c]">On file</span>
-                      <button onClick={(e) => { e.stopPropagation(); void openLoanDoc(appId, { path: it.path, rowId: it.rowId }); }} className="text-[11px] font-semibold hover:underline" style={{ color: accent }}>View</button>
+                      <span className="text-[11px] font-semibold text-cc-green">On file</span>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); void openLoanDoc(appId, { path: it.path, rowId: it.rowId }); }} className="text-[11px] font-semibold hover:underline" style={{ color: accent }}>View</button>
                     </span>
                   ) : <span className="text-[11px] font-semibold text-amber-600 shrink-0">Missing</span>
                 ) : (

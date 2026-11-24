@@ -18,6 +18,8 @@ import { fmtRupees } from "@/lib/money";
 import { fmtDate } from "@/lib/dates";
 import { policyValidity } from "@/lib/insurance-validity";
 import { deleteOtherIns, OTHER_INS_LIST_CACHE } from "@/lib/other-insurance";
+import { notify } from "@/lib/notify";
+import { askConfirm } from "@/lib/confirm";
 
 export default function OtherInsuranceViewPage() {
   return (
@@ -55,17 +57,18 @@ function Inner() {
   }
 
   async function remove() {
-    if (!row || deleting || !window.confirm("Delete this insurance file and all its documents?")) return;
+    if (!row || deleting) return;
+    if (!(await askConfirm("Delete this insurance file and all its documents?", { danger: true }))) return;
     setDeleting(true);
     const r = await deleteOtherIns(row.id);
     setDeleting(false);
-    if (!r.ok) { alert("Couldn't delete — " + r.error); return; }
+    if (!r.ok) { notify.error("Couldn't delete — " + r.error); return; }
     invalidate(OTHER_INS_LIST_CACHE);
     back();
   }
 
   if (!allowed) return null;
-  if (loading) return <main className="min-h-screen grid place-items-center"><p className="text-[#5a8a76]">Loading…</p></main>;
+  if (loading) return <main className="min-h-screen grid place-items-center"><p className="text-cc-muted">Loading…</p></main>;
   if (!row) return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Insurance file not found.</p></main>;
 
   const docs = otherInsDocLists(row);
@@ -75,22 +78,21 @@ function Inner() {
 
   return (
     <main className="min-h-screen bg-white">
-      <header className="border-b border-[#cdeadd] bg-white sticky top-0 z-30">
+      <header className="border-b border-cc-line bg-white sticky top-0 z-30">
         <div className="w-full px-5 sm:px-8 h-14 flex items-center justify-between">
-          <button onClick={back} className="text-[14px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1">← Back to Other Insurance</button>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <button onClick={back} className="text-[14px] text-cc-muted hover:text-cc-ink inline-flex items-center gap-1">← Back to Other Insurance</button>
           <img src="/brand/capital-craft.png" alt="Capital Craft" className="h-7 w-auto object-contain" />
         </div>
       </header>
 
       <div className="w-full px-5 sm:px-8 py-6" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
-        <div className="rounded-[12px] border border-[#cdeadd] bg-[#f0faf5] p-5 sm:p-6 mb-4">
+        <div className="rounded-[12px] border border-cc-line bg-cc-wash p-5 sm:p-6 mb-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-4 min-w-0">
-              <div className="w-14 h-14 rounded-[12px] bg-[#d6efe3] text-[#178a5c] grid place-items-center shrink-0" style={{ transform: "scale(1.3)", transformOrigin: "left center" }}>{I.user}</div>
+              <div className="w-14 h-14 rounded-[12px] bg-cc-tint-strong text-cc-green grid place-items-center shrink-0" style={{ transform: "scale(1.3)", transformOrigin: "left center" }}>{I.user}</div>
               <div className="min-w-0">
-                <div className="text-[24px] font-semibold text-[#0f3d2e] truncate">{row.customer_name || "(unnamed)"}</div>
-                {row.insurance_company && <div className="text-[14px] text-[#5a8a76] truncate mt-0.5">{row.insurance_company}</div>}
+                <div className="text-[24px] font-semibold text-cc-ink truncate">{row.customer_name || "(unnamed)"}</div>
+                {row.insurance_company && <div className="text-[14px] text-cc-muted truncate mt-0.5">{row.insurance_company}</div>}
               </div>
             </div>
             <div className="flex gap-2 items-center flex-wrap">
@@ -104,7 +106,7 @@ function Inner() {
           left={
             <>
               <TabButton label="Profile" icon={I.user} active />
-              <TabButton label="Edit" icon={I.edit} onClick={() => router.push(`/admin/other-insurance/${row.id}` as any)} />
+              <TabButton label="Edit" icon={I.edit} onClick={() => router.push(`/admin/other-insurance/${row.id}`)} />
             </>
           }
           right={
@@ -120,7 +122,7 @@ function Inner() {
           <div className="flex flex-col gap-2.5">
             <SectionCard title="Customer" accent="blue" icon={I.user}>
               <KV k="Name" v={row.customer_name} />
-              <KV k="Sum insured" v={row.sum_insured != null ? fmtRupees(row.sum_insured) : null} valueClass="text-[#178a5c]" />
+              <KV k="Sum insured" v={row.sum_insured != null ? fmtRupees(row.sum_insured) : null} valueClass="text-cc-green" />
               <KV k="Insurance company" v={row.insurance_company} />
             </SectionCard>
             <SectionCard title="Validity period" accent="blue" icon={I.invoice}>

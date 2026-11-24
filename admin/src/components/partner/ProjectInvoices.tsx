@@ -9,7 +9,7 @@
 // subscription the buttons stay visible with a lock. Also exports the invoice
 // form, the cancel dialog and the paid button for /dashboard/invoices.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { NAVY } from "@/components/partner/PartnerShell";
 import { input, Field } from "@/components/quotation/form-kit";
 import DateField from "@/components/ui/DateField";
@@ -34,7 +34,7 @@ export function PaidButton({ on, busy, label, onClick, className = "" }: { on: b
     <button type="button" onClick={(e) => { e.stopPropagation(); if (on) onClick(); }} disabled={!on || busy}
       title={on ? undefined : SUBSCRIPTION_MSG}
       className={["inline-flex items-center gap-1.5 text-[13px] font-semibold whitespace-nowrap disabled:opacity-60",
-        on ? "text-[#1e3a8a] hover:underline" : "text-text-muted cursor-not-allowed", className].join(" ")}>
+        on ? "text-navy hover:underline" : "text-text-muted cursor-not-allowed", className].join(" ")}>
       {!on && <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>}
       {label}
     </button>
@@ -94,7 +94,7 @@ export function InvoiceForm({ projectId, kw, start, applicationId, replaces, onI
   const th = "px-2.5 py-2 font-semibold", td = "px-2.5 py-2 whitespace-nowrap";
   return (
     <div className={className}>
-      {replaces && <div className="text-[16px] font-display font-bold text-[#0f3d2e] mb-4">Re-issue {replaces.invoice_no}</div>}
+      {replaces && <div className="text-[16px] font-display font-bold text-cc-ink mb-4">Re-issue {replaces.invoice_no}</div>}
       <fieldset disabled={busy} className="grid sm:grid-cols-2 gap-3">
         <Field l="Customer name" req><input className={input} value={d.customer_name} onChange={(e) => set("customer_name", e.target.value)} /></Field>
         <Field l="GSTIN">
@@ -166,6 +166,7 @@ export function CancelInvoice({ invoice, onDone, onClose }: { invoice: InvoiceRo
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const titleId = useId();
   async function go() {
     if (!reason.trim()) { setError("Enter the reason."); return; }
     setBusy(true); setError(null);
@@ -173,8 +174,8 @@ export function CancelInvoice({ invoice, onDone, onClose }: { invoice: InvoiceRo
     catch (e) { setError((e as Error).message || "Couldn't cancel the invoice."); setBusy(false); }
   }
   return (
-    <Modal onClose={onClose} busy={busy} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.softTop} className="bg-white rounded-2xl shadow-xl w-full max-w-[440px] p-6">
-      <div className="text-[16px] font-display font-bold text-[#0f3d2e] mb-4">Cancel {invoice.invoice_no}</div>
+    <Modal onClose={onClose} busy={busy} closeOnBackdrop="mousedown" overlayClassName={OVERLAY.softTop} className="bg-white rounded-2xl shadow-xl w-full max-w-[440px] p-6" aria-labelledby={titleId}>
+      <div id={titleId} className="text-[16px] font-display font-bold text-cc-ink mb-4">Cancel {invoice.invoice_no}</div>
       <Field l="Reason" req><textarea className={input + " min-h-[80px]"} value={reason} disabled={busy} onChange={(e) => setReason(e.target.value)} autoFocus /></Field>
       {error && <p className="text-[13px] text-red-600 mt-3">{error}</p>}
       <div className="flex items-center gap-2 mt-5">
@@ -224,12 +225,12 @@ export default function ProjectInvoices({ project, canIssue }: { project: Projec
         <div className="rounded-xl border border-line divide-y divide-line">
           {rows.map((r) => (
             <div key={r.id} className="flex items-center gap-3 flex-wrap px-3.5 py-2.5 text-[13px]">
-              <span className="font-semibold text-[#1e3a8a] whitespace-nowrap">{r.invoice_no}</span>
+              <span className="font-semibold text-navy whitespace-nowrap">{r.invoice_no}</span>
               <span className="text-text-muted whitespace-nowrap">{fmtDate(r.invoice_date)}</span>
               <span className="ml-auto font-semibold whitespace-nowrap">{fmtRupees(r.total)}</span>
               <span title={r.cancel_reason ?? undefined} className={`px-2.5 py-0.5 rounded-full text-[12px] font-semibold ${INVOICE_STATUS_PILL[r.status]}`}>{INVOICE_STATUS_LABEL[r.status]}</span>
               <button type="button" onClick={() => void act(`pdf:${r.id}`, () => downloadInvoicePdf(r.id))} disabled={busy === `pdf:${r.id}`}
-                className="text-[13px] font-semibold text-[#1e3a8a] hover:underline disabled:opacity-60">{busy === `pdf:${r.id}` ? "Preparing…" : "PDF"}</button>
+                className="text-[13px] font-semibold text-navy hover:underline disabled:opacity-60">{busy === `pdf:${r.id}` ? "Preparing…" : "PDF"}</button>
               {manage && r.status === "issued" && (
                 <button type="button" onClick={() => setCancelling(r)} className="text-[13px] font-semibold text-red-600 hover:underline">Cancel</button>
               )}

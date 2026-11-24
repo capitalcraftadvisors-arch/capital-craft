@@ -20,6 +20,7 @@ import { getBusiness } from "@/lib/auth";
 import { canWork, portalV2 } from "@/lib/epc-roles";
 import { fetchWhatsAppOn } from "@/lib/subscription";
 import { whatsAppQuote } from "@/lib/wa-share";
+import { notify } from "@/lib/notify";
 import WhatsAppButton from "@/components/partner/WhatsAppButton";
 
 type Segment = "residential" | "commercial";
@@ -48,7 +49,7 @@ export default function QuotesList() {
   useEffect(() => { if (v2) fetchWhatsAppOn().then(setWa, () => {}); }, [v2]);
   async function share(id: string) {
     setBusy(`wa:${id}`);
-    try { await whatsAppQuote(id); } catch (e) { alert((e as Error).message); } finally { setBusy(null); }
+    try { await whatsAppQuote(id); } catch (e) { notify.error((e as Error).message); } finally { setBusy(null); }
   }
 
   const inSegment = useMemo(() => (rows ?? []).filter((r) => r.segment === segment), [rows, segment]);
@@ -61,7 +62,7 @@ export default function QuotesList() {
 
   async function download(id: string) {
     setBusy(id);
-    try { await downloadQuotePdf(id); } catch (e) { alert((e as Error).message); } finally { setBusy(null); }
+    try { await downloadQuotePdf(id); } catch (e) { notify.error((e as Error).message); } finally { setBusy(null); }
   }
 
   return (
@@ -83,7 +84,7 @@ export default function QuotesList() {
           <div className="ml-auto flex items-center gap-2 flex-wrap">
             {v2 && (
               <button type="button" onClick={() => setFromBill(true)}
-                className="px-4 py-2.5 rounded-xl border border-line bg-white text-[13.5px] font-semibold text-[#0f3d2e] hover:bg-bg-soft">
+                className="px-4 py-2.5 rounded-xl border border-line bg-white text-[13.5px] font-semibold text-cc-ink hover:bg-bg-soft">
                 From bill photo
               </button>
             )}
@@ -105,7 +106,7 @@ export default function QuotesList() {
             </button>
           ))}
         </div>
-        <input className={input + " max-w-[260px] ml-auto"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search number, customer, mobile" />
+        <input className={input + " max-w-[260px] ml-auto"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search number, customer, mobile" aria-label="Search number, customer, mobile" />
       </div>
 
       {choose && <NewQuoteChooser segment={segment} tpl={tpl ?? null} onClose={() => setChoose(false)} />}
@@ -132,9 +133,9 @@ export default function QuotesList() {
             </thead>
             <tbody>
               {shown.map((r) => (
-                <tr key={r.id} onClick={() => router.push(`/dashboard/quotes/${r.id}` as any)} className="border-b border-line last:border-0 hover:bg-bg-soft cursor-pointer">
+                <tr key={r.id} onClick={() => router.push(`/dashboard/quotes/${r.id}`)} className="border-b border-line last:border-0 hover:bg-bg-soft cursor-pointer">
                   <td className="px-4 py-3 whitespace-nowrap">{fmtDate(r.quote_date)}</td>
-                  <td className="px-4 py-3 font-semibold text-[#1e3a8a] whitespace-nowrap">{r.quote_no}</td>
+                  <td className="px-4 py-3 font-semibold text-navy whitespace-nowrap">{r.quote_no}</td>
                   <td className="px-4 py-3">
                     <div className="font-medium text-text">{r.customer_name || "—"}</div>
                     {r.customer_mobile && <div className="text-[12px] text-text-muted">+91 {r.customer_mobile}</div>}
@@ -146,7 +147,7 @@ export default function QuotesList() {
                   <td className="px-4 py-3 text-right whitespace-nowrap">
                     {v2 && <WhatsAppButton on={wa} busy={busy === `wa:${r.id}`} onClick={() => void share(r.id)} className="mr-4" />}
                     <button type="button" onClick={(e) => { e.stopPropagation(); void download(r.id); }} disabled={busy === r.id}
-                      className="text-[13px] font-semibold text-[#1e3a8a] hover:underline disabled:opacity-60 whitespace-nowrap">
+                      className="text-[13px] font-semibold text-navy hover:underline disabled:opacity-60 whitespace-nowrap">
                       {busy === r.id ? "Preparing…" : "PDF"}
                     </button>
                   </td>

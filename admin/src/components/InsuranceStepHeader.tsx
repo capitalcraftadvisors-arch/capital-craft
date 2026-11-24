@@ -5,7 +5,7 @@
 
 export default function InsuranceStepHeader({ step }: { step: number }) {
   return (
-    <header className="bg-[#14235c] text-white shadow-sm">
+    <header className="bg-navy-ink text-white shadow-sm">
       <div className="max-w-2xl mx-auto px-5 sm:px-7 h-16 flex items-center gap-3">
         <a href="/dashboard" className="p-1 -ml-1 text-white/80 hover:text-white text-[20px] leading-none" aria-label="Back to dashboard">←</a>
         {/* eslint-disable-next-line @next/next/no-img-element */}

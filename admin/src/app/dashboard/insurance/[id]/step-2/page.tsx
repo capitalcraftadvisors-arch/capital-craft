@@ -1,5 +1,4 @@
 "use client";
-import { fmtRupees, amountInput } from "@/lib/money";
 
 // Insurance — Step 2: one geo-tagged plant photo + plant address + invoice.
 //
@@ -20,14 +19,15 @@ import Button from "@/components/ui/Button";
 import Input from "@/components/ui/Input";
 import GeoOfficeUpload from "@/components/GeoOfficeUpload";
 import InsuranceUpload from "@/components/InsuranceUpload";
+import InsuranceStepHeader from "@/components/InsuranceStepHeader";
 import { supabase } from "@/lib/supabase";
 import { authHeaders } from "@/lib/auth";
-import InsuranceStepHeader from "@/components/InsuranceStepHeader";
+import { fmtRupees, amountInput } from "@/lib/money";
+import { notify } from "@/lib/notify";
 
-type App = Record<string, any>;
 type Gps = { lat: number; lng: number; captured_at: string };
-
-// fmtRupees imported from @/lib/money
+// The one insurance_applications column this page reads back after load.
+type App = { plant_photo_gps: Gps | null };
 
 export default function InsuranceStep2() {
   return (
@@ -91,7 +91,7 @@ function Inner() {
     });
     const d = await res.json().catch(() => ({}));
     if (res.ok && d?.ok) setAddrSaved(true);
-    else alert("Couldn't save the address: " + (d?.error || res.status));
+    else notify.error("Couldn't save the address: " + (d?.error || res.status));
   }
 
   const confirmNum = confirmAmount.trim() === "" ? null : Number(amountInput(confirmAmount));
@@ -99,10 +99,10 @@ function Inner() {
 
   async function saveContinue() {
     if (saving) return;
-    if (!plantDone) { alert("Please add the geo-tagged plant photo."); return; }
-    if (!address.trim()) { alert("Please enter the plant address."); return; }
-    if (!invoiceDone) { alert("Please upload the invoice."); return; }
-    if (confirmNum == null || confirmNum <= 0) { alert("Please confirm the invoice amount."); return; }
+    if (!plantDone) { notify.error("Please add the geo-tagged plant photo."); return; }
+    if (!address.trim()) { notify.error("Please enter the plant address."); return; }
+    if (!invoiceDone) { notify.error("Please upload the invoice."); return; }
+    if (confirmNum == null || confirmNum <= 0) { notify.error("Please confirm the invoice amount."); return; }
     setSaving(true);
     try {
       const res = await fetch(`/api/epc/insurance/${params.id}/save`, {
@@ -111,8 +111,8 @@ function Inner() {
         body: JSON.stringify({ step: 2, plant_address: address.trim(), invoice_confirmed_amount: confirmNum }),
       });
       const d = await res.json().catch(() => ({}));
-      if (!res.ok || !d?.ok) { alert("Couldn't save: " + (d?.error || res.status)); return; }
-      router.push(`/dashboard/insurance/${params.id}/step-3` as any);
+      if (!res.ok || !d?.ok) { notify.error("Couldn't save: " + (d?.error || res.status)); return; }
+      router.push(`/dashboard/insurance/${params.id}/step-3`);
     } finally {
       setSaving(false);
     }
@@ -122,7 +122,7 @@ function Inner() {
     <main className="min-h-screen bg-bg-soft">
       <InsuranceStepHeader step={2} />
       <section className="max-w-2xl mx-auto px-5 sm:px-7 py-8">
-        <h1 className="font-display text-[24px] sm:text-[28px] font-bold text-[#0f3d2e] mb-1">Plant &amp; invoice</h1>
+        <h1 className="font-display text-[24px] sm:text-[28px] font-bold text-cc-ink mb-1">Plant &amp; invoice</h1>
         <p className="text-text-mid mb-6">A geo-tagged photo of the installed plant, its address, and the final invoice.</p>
 
         <div className="space-y-5">
@@ -132,13 +132,13 @@ function Inner() {
               label="Plant photo (geo-tagged)"
               uploadOnly
               uploadFn={uploadPlant}
-              initialGps={(app?.plant_photo_gps as Gps | null) ?? null}
+              initialGps={app?.plant_photo_gps ?? null}
               hint="Upload a photo with a location — taken with location on, or a GPS-camera stamp."
             />
           </Card>
 
           <Card className="p-6">
-            <p className="text-[13px] font-semibold text-[#0f3d2e] mb-1">Plant address</p>
+            <p className="text-[13px] font-semibold text-cc-ink mb-1">Plant address</p>
             <p className="text-[12px] text-text-muted mb-3">
               Upload the electricity bill of the site — we&rsquo;ll read the address; check it matches the bill and save.
             </p>
@@ -163,7 +163,7 @@ function Inner() {
               />
               <div className="mt-3 flex items-center gap-3">
                 <Button variant="outline" onClick={() => void saveAddress()}>Save address</Button>
-                {addrSaved && <span className="text-[12px] text-[#178a5c] font-medium">✓ Saved</span>}
+                {addrSaved && <span className="text-[12px] text-cc-green font-medium">✓ Saved</span>}
               </div>
             </div>
           </Card>
@@ -180,7 +180,7 @@ function Inner() {
               <div className="mt-4 grid sm:grid-cols-2 gap-3">
                 <div>
                   <p className="text-[12px] text-text-muted mb-1">Detected amount</p>
-                  <div className="border border-line rounded-input px-3.5 py-2.5 text-[15px] bg-[#f7fcfa] text-[#0f3d2e] font-semibold">
+                  <div className="border border-line rounded-input px-3.5 py-2.5 text-[15px] bg-cc-row-hover text-cc-ink font-semibold">
                     {fmtRupees(ocrAmount)}
                   </div>
                 </div>
@@ -199,7 +199,7 @@ function Inner() {
         </div>
 
         <div className="mt-6 flex justify-between">
-          <Button variant="outline" onClick={() => router.push(`/dashboard/insurance/${params.id}/step-1` as any)}>Back</Button>
+          <Button variant="outline" onClick={() => router.push(`/dashboard/insurance/${params.id}/step-1`)}>Back</Button>
           <Button variant="primary" onClick={() => void saveContinue()} loading={saving}>Save &amp; continue</Button>
         </div>
       </section>

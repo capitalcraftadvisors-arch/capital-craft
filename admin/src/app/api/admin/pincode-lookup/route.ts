@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { err, requireLogin } from "@/lib/api";
 import { geminiExtract } from "@/lib/gemini-extract";
 import { PINCODE_RE } from "@/lib/validators";
+import { errText } from "@/lib/errors";
 
 // Fallback: India Post is often blocked from cloud egress, so when it fails we
 // ask Gemini (reachable from Cloud Run, same GOOGLE_VISION_API_KEY as the OCR)
@@ -116,7 +117,7 @@ export async function GET(req: NextRequest) {
       },
     );
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[pincode-lookup] error:", msg);
     return err(msg, 500);
   }

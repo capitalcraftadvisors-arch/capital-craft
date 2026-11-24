@@ -593,7 +593,7 @@ function ChatInner() {
       <PartnerChatHeader hideBrokenLogo title={editMode ? "Edit loan application" : "New loan application"}
         subtitle={editMode ? "updating the application" : "building the application"}
         progress={progress} onBack={() => router.push("/dashboard")}>
-        <button onClick={undo} disabled={!undoStack.length || busy || !!done}
+        <button onClick={undo} disabled={!undoStack.length || busy}
           className="w-8 h-8 rounded-full hover:bg-white/10 grid place-items-center text-white/80 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent text-[17px] leading-none"
           aria-label="Undo last step" title="Undo last step">↶</button>
       </PartnerChatHeader>
@@ -604,7 +604,7 @@ function ChatInner() {
           <div key={m.id} className={m.from === "bot" ? "self-start max-w-[88%]" : "self-end max-w-[88%]"}>
             <div className={[
               "rounded-2xl px-3.5 py-2 text-[14px] shadow-sm whitespace-pre-wrap break-words",
-              m.from === "bot" ? "bg-white rounded-tl-md border border-[#c7d5f0] text-text" : "bg-[#1e3a8a] rounded-tr-md text-white",
+              m.from === "bot" ? "bg-white rounded-tl-md border border-navy-line text-text" : "bg-navy rounded-tr-md text-white",
             ].join(" ")}>
               {m.text}
               {m.files && m.files.length > 0 && (
@@ -615,9 +615,9 @@ function ChatInner() {
                 </div>
               )}
             </div>
-            {m.from === "user" && m.turnId && !done && (
+            {m.from === "user" && m.turnId && (
               <div className="text-right mt-0.5 pr-1">
-                <button onClick={() => editAnswer(m.turnId!, m.pass, m.value)} disabled={busy} className="text-[11px] text-text-muted hover:text-[#1e3a8a] disabled:opacity-40" title="Edit this answer">✎ Edit</button>
+                <button onClick={() => editAnswer(m.turnId!, m.pass, m.value)} disabled={busy} className="text-[11px] text-text-muted hover:text-navy disabled:opacity-40" title="Edit this answer">✎ Edit</button>
               </div>
             )}
           </div>
@@ -642,11 +642,11 @@ function ChatInner() {
                 <PartnerComposer inputRef={inputRef} value={input} onChange={setInput} onSend={send}
                   inputMode={turn.kind === "text" ? "text" : "numeric"} placeholder={turn.placeholder || "Type your answer…"} />
                 {amt > 0 && amountInWords(amt) && (
-                  <div className="text-[11.5px] text-[#14235c] px-4">₹{amt.toLocaleString("en-IN")} — <span className="font-medium">{amountInWords(amt)} rupees</span></div>
+                  <div className="text-[11.5px] text-navy-ink px-4">₹{amt.toLocaleString("en-IN")} — <span className="font-medium">{amountInWords(amt)} rupees</span></div>
                 )}
                 {/* The loan as a share of the project cost read from the quotation. */}
                 {amt > 0 && pctOf(amt, form.total_project_cost) && (
-                  <div className="text-[11.5px] text-[#14235c] px-4">
+                  <div className="text-[11.5px] text-navy-ink px-4">
                     <span className="font-semibold">{pctOf(amt, form.total_project_cost)}</span> of the project cost ({fmtRupees(Number(form.total_project_cost))})
                   </div>
                 )}
@@ -660,8 +660,8 @@ function ChatInner() {
                 // In edit mode, highlight + tag the value already on the application.
                 const current = !!turn.field && form[turn.field!] === c.value;
                 return (
-                  <button key={c.value || c.label} onClick={() => void choose(c)} className={["text-left px-4 py-3 rounded-xl border bg-white hover:border-[#1e3a8a] hover:bg-[#f4f7fd] transition", current ? "border-[#1e3a8a] bg-[#f4f7fd]" : "border-line"].join(" ")}>
-                    <div className="text-[14px] font-semibold text-text flex items-center gap-2">{c.label}{current && <span className="text-[10px] font-semibold text-[#1e3a8a] bg-[#e8effc] rounded-full px-2 py-0.5">Current</span>}</div>{c.sub && <div className="text-[12px] text-text-muted">{c.sub}</div>}
+                  <button key={c.value || c.label} onClick={() => void choose(c)} className={["text-left px-4 py-3 rounded-xl border bg-white hover:border-navy hover:bg-navy-soft transition", current ? "border-navy bg-navy-soft" : "border-line"].join(" ")}>
+                    <div className="text-[14px] font-semibold text-text flex items-center gap-2">{c.label}{current && <span className="text-[10px] font-semibold text-navy bg-navy-tint rounded-full px-2 py-0.5">Current</span>}</div>{c.sub && <div className="text-[12px] text-text-muted">{c.sub}</div>}
                   </button>
                 );
               })}
@@ -670,14 +670,14 @@ function ChatInner() {
 
           {turn.kind === "consent" && (
             <div className="flex gap-2 flex-wrap">
-              <button onClick={() => void giveConsent()} disabled={busy} className="flex-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a] disabled:opacity-60">Yes, the customer consents</button>
+              <button onClick={() => void giveConsent()} disabled={busy} className="flex-1 px-4 py-2.5 rounded-xl bg-navy text-white text-[14px] font-semibold hover:bg-navy-hover disabled:opacity-60">Yes, the customer consents</button>
               <button onClick={() => router.push("/dashboard")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">Cancel</button>
             </div>
           )}
 
           {turn.kind === "confirm_edit" && (
             <div className="flex gap-2 flex-wrap">
-              <button onClick={() => { pushUser("Yes, edit this application"); advance(); }} className="flex-1 px-4 py-2.5 rounded-xl bg-[#1e3a8a] text-white text-[14px] font-semibold hover:bg-[#17307a]">Yes, edit</button>
+              <button onClick={() => { pushUser("Yes, edit this application"); advance(); }} className="flex-1 px-4 py-2.5 rounded-xl bg-navy text-white text-[14px] font-semibold hover:bg-navy-hover">Yes, edit</button>
               <button onClick={() => router.push("/dashboard")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">No, go back</button>
             </div>
           )}

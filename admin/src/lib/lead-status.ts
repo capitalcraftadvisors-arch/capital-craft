@@ -9,8 +9,8 @@ export const LEAD_STATUS_OPTIONS = [
 ];
 
 export const LEAD_STATUS_PILL: Record<string, string> = {
-  new:       "bg-[#dceffb] text-[#185fa5]",
-  contacted: "bg-[#fef0d6] text-[#854f0b]",
-  converted: "bg-[#e6f6ee] text-[#178a5c]",
-  closed:    "bg-[#eef1f0] text-[#5a8a76]",
+  new:       "bg-cc-blue-tint text-cc-blue",
+  contacted: "bg-warn-tint text-warn-ink",
+  converted: "bg-cc-tint text-cc-green",
+  closed:    "bg-cc-chip text-cc-muted",
 };

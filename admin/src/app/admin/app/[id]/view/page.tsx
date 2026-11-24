@@ -44,6 +44,8 @@ import { fmtDate, fmtDateTime } from "@/lib/dates";
 import { fmtRupees } from "@/lib/money";
 import { initialsOf } from "@/lib/names";
 import { invalidateLoanBoards } from "@/lib/ops-board";
+import { notify } from "@/lib/notify";
+import { askConfirm } from "@/lib/confirm";
 import {
   I, DocViewer, FillCount, fillText, fillTone, HAction, ProgressTabs, CopyButton, Section, StatCards,
   type ViewDocSlot, type ViewerItem, type StageState,
@@ -91,7 +93,7 @@ function Inner() {
   const stacked = useStacked();
   function goBack() {
     const to = typeof window !== "undefined" ? sessionStorage.getItem("ccReturnTo") : null;
-    if (to) { sessionStorage.removeItem("ccReturnTo"); router.push(to as unknown as string); }
+    if (to) { sessionStorage.removeItem("ccReturnTo"); router.push(to); }
     else router.push("/admin");
   }
   const [loan, setLoan] = useState<Loan | null>(null);
@@ -205,7 +207,7 @@ function Inner() {
     if (doParam === "docsent") setDocSentPickerOpen(true);
     else if (doParam === "reject") setRejectOpen(true);
     else if (doParam === "abort") setAbortOpen(true);
-    router.replace(`/admin/app/${params.id}/view` as any); // strip the flag so refresh/back won't reopen
+    router.replace(`/admin/app/${params.id}/view`); // strip the flag so refresh/back won't reopen
   }, [loading, loan, searchParams, router, params.id]);
 
   const applicantName = useMemo(
@@ -248,7 +250,7 @@ function Inner() {
   // already confirmed, and shows the button to the owner only.
   async function removeDocRow(docId: string) {
     const ok = await deleteDocument(docId);
-    if (!ok) { alert("Couldn't remove the document."); return; }
+    if (!ok) { notify.error("Couldn't remove the document."); return; }
     setDocs((arr) => arr.filter((d) => d.id !== docId));
   }
 
@@ -262,10 +264,10 @@ function Inner() {
         body: JSON.stringify({ table: "epc_applications", id: params.id, column }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) { alert("Couldn't remove: " + (data?.error || res.status)); return; }
+      if (!res.ok || !data?.ok) { notify.error("Couldn't remove: " + (data?.error || res.status)); return; }
       setLoan((prev: Loan | null) => (prev ? { ...prev, [column]: null } : prev));
     } catch (e) {
-      alert("Couldn't remove: " + (e as Error).message);
+      notify.error("Couldn't remove: " + (e as Error).message);
     }
   }
 
@@ -319,13 +321,13 @@ function Inner() {
   // time; afterwards fills only what that profile is still missing, then opens it.
   async function openInsurance() {
     if (!loan || insBusy) return;
-    if (!loan.insurance_application_id && !window.confirm("Make the insurance profile from this application?")) return;
+    if (!loan.insurance_application_id && !(await askConfirm("Make the insurance profile from this application?"))) return;
     setInsBusy(true);
     try {
       const res = await fetch(`/api/admin/loan-app/${loan.id}/insurance`, { method: "POST", headers: authHeaders() });
       const d = await res.json().catch(() => ({}));
-      if (!res.ok || !d?.ok) { alert("Couldn't open the insurance profile — " + (d?.error || `HTTP ${res.status}`)); return; }
-      router.push(`/admin/insurance/${d.id}/view` as any);
+      if (!res.ok || !d?.ok) { notify.error("Couldn't open the insurance profile — " + (d?.error || `HTTP ${res.status}`)); return; }
+      router.push(`/admin/insurance/${d.id}/view`);
     } finally {
       setInsBusy(false);
     }
@@ -340,12 +342,12 @@ function Inner() {
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        alert("ZIP failed: " + (d?.error || `HTTP ${res.status}`));
+        notify.error("ZIP failed: " + (d?.error || `HTTP ${res.status}`));
         return;
       }
       await saveDownload(res, `${displayId(loan)}_${String(applicantName).replace(/[^\w-]+/g, "_")}.zip`);
     } catch (e) {
-      alert("Download failed: " + (e as Error).message);
+      notify.error("Download failed: " + (e as Error).message);
     } finally {
       setDownloading(false);
     }
@@ -361,19 +363,19 @@ function Inner() {
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        alert("Download failed: " + (d?.error || `HTTP ${res.status}`));
+        notify.error("Download failed: " + (d?.error || `HTTP ${res.status}`));
         return;
       }
       await saveDownload(res, `${displayId(loan)}_Tranche${tranche}.zip`);
     } catch (e) {
-      alert("Download failed: " + (e as Error).message);
+      notify.error("Download failed: " + (e as Error).message);
     } finally {
       setTrancheBusy(null);
     }
   }
 
   if (loading) {
-    return <main className="min-h-screen grid place-items-center"><p className="text-[#5a8a76]">Loading…</p></main>;
+    return <main className="min-h-screen grid place-items-center"><p className="text-cc-muted">Loading…</p></main>;
   }
   if (!loan) {
     return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Loan application not found.</p></main>;
@@ -451,9 +453,10 @@ function Inner() {
   // Fixes cases mistakenly marked Approved/Rejected by lender.
   const changeReview = async () => {
     if (!loan || statusBusy) return;
-    if (!window.confirm(
+    if (!(await askConfirm(
       "Change the review?\n\nThis undoes the current lender decision (and any abort) and moves the application back to Docs Sent, where you can Approve or Reject again.",
-    )) return;
+      { danger: true },
+    ))) return;
     // The lenders' own rows carry the decision too: clear them first, or the
     // Lenders box keeps the old decision and the next lender action puts the
     // status straight back. Docs-sent times and approval details stay.
@@ -694,9 +697,10 @@ function Inner() {
   // two PAN files and re-files the photo / bank statement as "other", so the
   // whole file (and its docs) is re-read afterwards.
   async function swapRoles() {
-    if (!loan || swapBusy || !window.confirm(
+    if (!loan || swapBusy) return;
+    if (!(await askConfirm(
       "Swap applicant ↔ co-applicant?\n\nThe photo and bank statement will move to Other documents and should be re-collected for the new applicant.",
-    )) return;
+    ))) return;
     setSwapBusy(true);
     try {
       const res = await fetch(`/api/admin/loan-app/${loan.id}/swap-roles`, {
@@ -704,11 +708,11 @@ function Inner() {
         headers: authHeaders(),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) { alert("Couldn't swap: " + (data?.error || res.status)); return; }
+      if (!res.ok || !data?.ok) { notify.error("Couldn't swap: " + (data?.error || res.status)); return; }
       setReloadKey((k) => k + 1);
       invalidateLoanBoards(); // applicant name changes on the board / Loans list
     } catch (e) {
-      alert("Couldn't swap: " + (e as Error).message);
+      notify.error("Couldn't swap: " + (e as Error).message);
     } finally {
       setSwapBusy(false);
     }
@@ -810,9 +814,9 @@ function Inner() {
   // Edit the application itself; each stage's details are edited in its stage.
   const editItems = aborted ? [] : [
     // Chatbot — asks only for what's still missing.
-    { label: "Continue in chat", onClick: () => router.push(`/admin/app/intake?app=${loan.id}&edit=1` as any) },
+    { label: "Continue in chat", onClick: () => router.push(`/admin/app/intake?app=${loan.id}&edit=1`) },
     // The classic step-by-step wizard.
-    { label: "Edit in form", onClick: () => router.push(`/admin/app/${loan.id}/step-1` as any) },
+    { label: "Edit in form", onClick: () => router.push(`/admin/app/${loan.id}/step-1`) },
   ];
   // This admin's unread EPC replies — from the console's cache, never a fetch.
   const msgCount = cachedLoanUpdateCount(loan.id);
@@ -824,7 +828,7 @@ function Inner() {
 
   const approvedAmt = tApproved ? (loan.sanctioned_amount ?? approvalDetails?.approved_loan_amount ?? null) : null;
   // Credit Fair's 1st disbursement counts with its three charges (lib/disbursement).
-  const disbursedAmt = (firstDisbursedShown(loan as Record<string, any>) ?? 0) + Number(loan.second_disbursement_amount ?? 0);
+  const disbursedAmt = (firstDisbursedShown(loan) ?? 0) + Number(loan.second_disbursement_amount ?? 0);
   const tranchesPaid = (firstDone ? 1 : 0) + (secondDone ? 1 : 0);
   const initials = initialsOf(applicantName);
   const kw = loan.project_size ? `${loan.project_size} ${String(loan.project_size_unit ?? "kw").toUpperCase()}` : null;
@@ -844,18 +848,18 @@ function Inner() {
   return (
     <main className="min-h-screen bg-white">
       {/* ── HEADER — who it is, one quiet info line · plain buttons ── */}
-      <header className="border-b border-[#eef3f1] bg-white/95 backdrop-blur sticky top-0 z-30">
+      <header className="border-b border-cc-rule bg-white/95 backdrop-blur sticky top-0 z-30">
         <div className="w-full px-5 sm:px-8 py-4 flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3.5 min-w-0">
             <button
               onClick={goBack}
               title={returnTo === "/admin/board" ? "Back to Task Manager" : "Back to console"}
               aria-label={returnTo === "/admin/board" ? "Back to Task Manager" : "Back to console"}
-              className="w-9 h-9 -ml-2 rounded-full grid place-items-center text-[#5a8a76] hover:bg-[#eef6f1] hover:text-[#0f3d2e] shrink-0"
+              className="w-9 h-9 -ml-2 rounded-full grid place-items-center text-cc-muted hover:bg-cc-icon-hover hover:text-cc-ink shrink-0"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>
             </button>
-            <div className="w-12 h-12 rounded-full bg-[#e6f6ee] text-[#178a5c] grid place-items-center shrink-0 overflow-hidden text-[16px] font-semibold">
+            <div className="w-12 h-12 rounded-full bg-cc-tint text-cc-green grid place-items-center shrink-0 overflow-hidden text-[16px] font-semibold">
               {photoUrl ? (
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img src={photoUrl} alt="" className="w-full h-full object-cover" style={{ imageOrientation: "from-image" }} />
@@ -865,11 +869,11 @@ function Inner() {
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2.5 min-w-0">
-                <h1 className="text-[22px] font-semibold text-[#0f3d2e] truncate leading-tight">{applicantName}</h1>
+                <h1 className="text-[22px] font-semibold text-cc-ink truncate leading-tight">{applicantName}</h1>
                 <StatusBadge status={aborted ? "aborted" : loan.status} lender={decidedByLabel} />
               </div>
-              <div className="flex items-center gap-2 mt-1 text-[13px] text-[#7a958a] min-w-0">
-                <span className="group inline-flex items-center gap-1 font-medium text-[#185fa5] shrink-0">
+              <div className="flex items-center gap-2 mt-1 text-[13px] text-cc-faint min-w-0">
+                <span className="group inline-flex items-center gap-1 font-medium text-cc-blue shrink-0">
                   {displayId(loan)}
                   <span className="opacity-0 group-hover:opacity-100 transition-opacity inline-flex"><CopyButton value={displayId(loan)} label="Copy loan ID" /></span>
                 </span>
@@ -886,7 +890,7 @@ function Inner() {
             <a
               href={`/admin/app/${loan.id}/messages`}
               title={loan.attention_status === "open" ? "Open issue with the EPC" : undefined}
-              className="relative h-9 px-3 rounded-[8px] inline-flex items-center gap-1.5 text-[13px] font-semibold text-[#178a5c] border border-[#cdeadd] bg-[#f4fbf7] hover:bg-[#e9f6ef] hover:border-[#9fd6bd]"
+              className="relative h-9 px-3 rounded-[8px] inline-flex items-center gap-1.5 text-[13px] font-semibold text-cc-green border border-cc-line bg-cc-soft hover:bg-[#e9f6ef] hover:border-[#9fd6bd]"
             >
               {MSG_EPC}
               Message EPC
@@ -917,15 +921,15 @@ function Inner() {
           <StatCards
             items={[
               { label: "Loan applied", value: fmtRupees(loan.loan_amount_required) },
-              { label: "Approved", value: approvedAmt != null ? fmtRupees(approvedAmt) : "—", sub: approvedAmt != null ? decidedByLabel ?? undefined : undefined, tone: approvedAmt != null ? "text-[#178a5c]" : "text-[#c3cbc7]" },
-              { label: "Disbursed", value: disbursedAmt > 0 ? fmtRupees(disbursedAmt) : "—", sub: tApproved ? `${tranchesPaid} of 2 tranches` : undefined, tone: disbursedAmt > 0 ? "text-[#185fa5]" : "text-[#c3cbc7]" },
+              { label: "Approved", value: approvedAmt != null ? fmtRupees(approvedAmt) : "—", sub: approvedAmt != null ? decidedByLabel ?? undefined : undefined, tone: approvedAmt != null ? "text-cc-green" : "text-cc-blank" },
+              { label: "Disbursed", value: disbursedAmt > 0 ? fmtRupees(disbursedAmt) : "—", sub: tApproved ? `${tranchesPaid} of 2 tranches` : undefined, tone: disbursedAmt > 0 ? "text-cc-blue" : "text-cc-blank" },
               { label: "Documents", value: fillText(docsHave, checklist.length), tone: fillTone(docsHave, checklist.length) },
             ]}
           />
         </div>
 
         {/* ── PROGRESS BAR = TABS ── */}
-        <div className="pt-7 pb-2 border-b border-[#eef3f1]">
+        <div className="pt-7 pb-2 border-b border-cc-rule">
           <ProgressTabs items={stages} value={activeTab} onChange={(k) => setTab(k as Stage)} />
         </div>
 
@@ -961,10 +965,10 @@ function Inner() {
                         const finalized = loan.approved_lender === r.lender_key;
                         return (
                           <li key={r.id} className="py-2 flex items-center gap-3 text-[13px]">
-                            <span className="flex-1 min-w-0 font-semibold text-[#0f3d2e] truncate">{r.lender_label}</span>
-                            <span className="text-[#5a8a76]">{fmtApproval(d?.approved_loan_amount == null ? null : Number(d.approved_loan_amount), true)}</span>
+                            <span className="flex-1 min-w-0 font-semibold text-cc-ink truncate">{r.lender_label}</span>
+                            <span className="text-cc-muted">{fmtApproval(d?.approved_loan_amount == null ? null : Number(d.approved_loan_amount), true)}</span>
                             {finalized ? (
-                              <span className="text-[12px] font-semibold px-2 py-0.5 rounded-[6px] bg-[#e6f6ee] text-[#178a5c]">Finalized</span>
+                              <span className="text-[12px] font-semibold px-2 py-0.5 rounded-[6px] bg-cc-tint text-cc-green">Finalized</span>
                             ) : canAct ? (
                               <HAction variant="outline" disabled={statusBusy} onClick={() => void finalizeLender(r.lender_key)}>Finalize</HAction>
                             ) : null}
@@ -1129,7 +1133,7 @@ function Inner() {
       <ConfirmDeleteModal
         open={delOpen}
         onClose={() => setDelOpen(false)}
-        onDeleted={() => { invalidate("dash.apps"); router.replace("/admin" as any); }}
+        onDeleted={() => { invalidate("dash.apps"); router.replace("/admin"); }}
         endpoint="/api/admin/delete-loan-app"
         body={{ applicationId: loan.id }}
         title="Delete loan application permanently"

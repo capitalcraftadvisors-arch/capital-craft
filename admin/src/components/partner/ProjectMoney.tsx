@@ -12,6 +12,7 @@ import WhatsAppButton from "@/components/partner/WhatsAppButton";
 import DateField from "@/components/ui/DateField";
 import { input, Field, Toggle } from "@/components/quotation/form-kit";
 import { getBusiness } from "@/lib/auth";
+import { askConfirm } from "@/lib/confirm";
 import { isSiteStaff, portalV2 } from "@/lib/epc-roles";
 import { fetchWhatsAppOn } from "@/lib/subscription";
 import { fmtDate, localIsoDate } from "@/lib/dates";
@@ -71,8 +72,8 @@ export default function ProjectMoney({ project, canEdit, onChanged }: { project:
     setDraft(null);
   });
 
-  const remove = (p: Payment) => {
-    if (!window.confirm(`Delete the payment of ${fmtRupees(p.amount)} on ${fmtDate(p.paid_on)}? This can't be undone.`)) return;
+  const remove = async (p: Payment) => {
+    if (!(await askConfirm(`Delete the payment of ${fmtRupees(p.amount)} on ${fmtDate(p.paid_on)}? This can't be undone.`, { danger: true }))) return;
     void run(`del:${p.id}`, async () => {
       await deletePayment(p.id);
       setPays((all) => (all ?? []).filter((x) => x.id !== p.id));
@@ -96,7 +97,7 @@ export default function ProjectMoney({ project, canEdit, onChanged }: { project:
       <div className="flex items-center justify-between gap-3 mb-2">
         <div className="text-[12.5px] font-medium text-text-mid">Payments</div>
         {canEdit && pays && !draft && (
-          <button type="button" onClick={() => setDraft(blank(project))} className="text-[13px] font-semibold text-[#1e3a8a] hover:underline">+ Add payment</button>
+          <button type="button" onClick={() => setDraft(blank(project))} className="text-[13px] font-semibold text-navy hover:underline">+ Add payment</button>
         )}
       </div>
 
@@ -162,7 +163,7 @@ export default function ProjectMoney({ project, canEdit, onChanged }: { project:
               </div>
               <span className="text-text-mid whitespace-nowrap">{fmtDate(p.paid_on)}</span>
               {canEdit && (
-                <button type="button" onClick={() => remove(p)} disabled={!!busy} aria-label="Delete payment"
+                <button type="button" onClick={() => void remove(p)} disabled={!!busy} aria-label="Delete payment"
                   className="w-6 h-6 -mr-1 rounded-full text-red-600 text-[14px] font-bold grid place-items-center hover:bg-red-50 disabled:opacity-60">×</button>
               )}
             </div>

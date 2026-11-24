@@ -14,8 +14,8 @@ export type QuoteStatus = "draft" | "sent" | "accepted" | "declined";
 export const QUOTE_STATUSES: QuoteStatus[] = ["draft", "sent", "accepted", "declined"];
 export const QUOTE_STATUS_LABEL: Record<QuoteStatus, string> = { draft: "Draft", sent: "Sent", accepted: "Accepted", declined: "Declined" };
 export const QUOTE_STATUS_PILL: Record<QuoteStatus, string> = {
-  draft: "bg-[#eef1f5] text-[#475569]", sent: "bg-[#e8effc] text-[#1e3a8a]",
-  accepted: "bg-[#e6f6ee] text-[#178a5c]", declined: "bg-red-50 text-red-700",
+  draft: "bg-grey-chip text-[#475569]", sent: "bg-navy-tint text-navy",
+  accepted: "bg-cc-tint text-cc-green", declined: "bg-red-50 text-red-700",
 };
 
 export type QuoteRow = {

@@ -42,7 +42,7 @@ export function DocSlot({
           disabled={uploading}
           className={[
             "w-full h-[140px] rounded-input border-2 border-dashed transition-colors flex items-center justify-center text-center px-4",
-            "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
+            "border-cc-blue bg-white text-cc-blue hover:bg-cc-blue-wash",
             uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
           ].join(" ")}
         >
@@ -75,11 +75,11 @@ export function OwnershipTile({
       className={[
         "text-left rounded-input border-2 p-4 transition-colors",
         active
-          ? "border-[#178a5c] bg-white"
-          : "border-line bg-white hover:border-[#185fa5]",
+          ? "border-cc-green bg-white"
+          : "border-line bg-white hover:border-cc-blue",
       ].join(" ")}
     >
-      <p className="font-semibold text-[14px] text-[#0f3d2e]">
+      <p className="font-semibold text-[14px] text-cc-ink">
         {title}
       </p>
       <p className="text-[12px] text-text-muted mt-1">
@@ -93,7 +93,7 @@ export function SummaryRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex gap-3">
       <dt className="min-w-[130px] text-text-muted">{label}</dt>
-      <dd className="font-semibold text-[#0f3d2e]">{value}</dd>
+      <dd className="font-semibold text-cc-ink">{value}</dd>
     </div>
   );
 }
@@ -149,7 +149,7 @@ export function CoappAadhaarPicker({
         type="button"
         onClick={() => { if (front && back && !uploading) onFiles(front, back); }}
         disabled={!front || !back || uploading}
-        className="w-full inline-flex items-center justify-center gap-2 rounded-input bg-[#185fa5] text-white text-[13px] font-semibold px-4 py-2.5 hover:bg-[#134a80] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="w-full inline-flex items-center justify-center gap-2 rounded-input bg-cc-blue text-white text-[13px] font-semibold px-4 py-2.5 hover:bg-[#134a80] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
         {uploading ? "Extracting details…" : "Extract details"}
       </button>
@@ -180,8 +180,8 @@ function AadhaarSideTile({
         className={[
           "w-full h-[84px] rounded-input border-2 border-dashed text-center flex items-center justify-center px-3 transition-colors",
           has || picked
-            ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
-            : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
+            ? "border-cc-green bg-cc-wash text-cc-ink"
+            : "border-cc-blue bg-white text-cc-blue hover:bg-cc-blue-wash",
           uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
         ].join(" ")}
       >
@@ -191,7 +191,7 @@ function AadhaarSideTile({
         </div>
       </button>
       {url && (
-        <a href={url} target="_blank" rel="noopener" className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[#185fa5] hover:underline">
+        <a href={url} target="_blank" rel="noopener" className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-cc-blue hover:underline">
           <EyeIcon size="13" />
           View
         </a>

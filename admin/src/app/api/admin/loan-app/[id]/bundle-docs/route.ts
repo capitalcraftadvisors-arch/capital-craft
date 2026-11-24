@@ -39,6 +39,7 @@ import { geminiExtract } from "@/lib/gemini-extract";
 import { geminiExtractPan, geminiExtractBankStatement, geminiExtractEbill } from "@/lib/doc-extractors";
 import { geminiExtractAadhaar, cropAndUploadFace } from "@/lib/aadhaar";
 import { isValidPan, isValidIfsc, isValidAadhaar } from "@/lib/doc-validation";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -560,7 +561,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     return NextResponse.json({ ok: true, documents, skipped, form: formPatch });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[bundle-docs] error:", msg);
     return err(msg, 500);
   }
@@ -661,7 +662,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     return NextResponse.json({ ok: true, type: toType, summary, form: formPatch });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[bundle-docs] reclassify error:", msg);
     return err(msg, 500);
   }

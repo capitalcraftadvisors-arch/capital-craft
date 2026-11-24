@@ -13,6 +13,7 @@ import { UUID_RE } from "@/lib/validators";
 import { downloadBuffer } from "@/lib/gcs";
 import { fmtDateIST } from "@/lib/dates";
 import { vaultEntries, vaultViewer, type VaultEntry, type VaultGroup } from "@/lib/project-docs";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -81,7 +82,7 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[project-zip] error:", msg);
     return err("Couldn't make the ZIP.", 500);
   }

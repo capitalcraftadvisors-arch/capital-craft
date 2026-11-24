@@ -12,11 +12,12 @@
 // "generic" (no-lender) option — every ZIP is targeted at a specific
 // lender's template.
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
 import Select from "@/components/ui/Select";
 import { useLenders } from "@/lib/lenders";
+import { notify } from "@/lib/notify";
 
 // A registered lender's key (lenders registry).
 export type LenderKey = string;
@@ -32,6 +33,7 @@ export default function LenderPickerModal({ open, onClose, onConfirm, epcName }:
   const [lender, setLender] = useState<LenderKey | "">("");
   const [busy, setBusy] = useState(false);
   const lenders = useLenders();
+  const titleId = useId();
 
   if (!open) return null;
 
@@ -49,17 +51,17 @@ export default function LenderPickerModal({ open, onClose, onConfirm, epcName }:
       setLender("");
       onClose();
     } catch (e) {
-      alert("Download failed: " + (e as Error)?.message);
+      notify.error("Download failed: " + (e as Error)?.message);
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <Modal onClose={close} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
+    <Modal onClose={close} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6" aria-labelledby={titleId}>
       <div className="flex items-start justify-between mb-4">
         <div className="min-w-0">
-          <h3 className="font-display font-semibold text-[18px] text-text">Download ZIP</h3>
+          <h3 id={titleId} className="font-display font-semibold text-[18px] text-text">Download ZIP</h3>
           <p className="text-[12px] text-text-mid mt-0.5">
             {epcName ? `For ${epcName}. ` : ""}Pick the lender you&rsquo;re preparing the ZIP for — the Excel inside is built to that lender&rsquo;s template.
           </p>

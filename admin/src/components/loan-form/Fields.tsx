@@ -4,15 +4,15 @@
 // one is plain markup with its exact classes, so a page reads the same as
 // before — just shorter.
 
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import type { Pincode } from "./requests";
 
 /** Section heading styles: plain 16px, green 16px, and the larger green 18px. */
 const H16 = "font-display font-semibold text-[16px]";
-export const H16_GREEN = "font-display font-semibold text-[16px] text-[#0f3d2e]";
-export const H18 = "font-display font-semibold text-[18px] text-[#0f3d2e]";
+export const H16_GREEN = "font-display font-semibold text-[16px] text-cc-ink";
+export const H18 = "font-display font-semibold text-[18px] text-cc-ink";
 
 /** Same look as the label <Input> draws — for labels above custom controls. */
 export const FIELD_LABEL = "block mb-1.5 text-[13px] font-medium text-text-mid";
@@ -62,7 +62,7 @@ export function ErrorBox({
 /** Small green capsule ("Uploaded", "Extracted" …). */
 export function GreenPill({ children }: { children: ReactNode }) {
   return (
-    <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#f0faf5] text-[#0f3d2e] font-semibold uppercase tracking-wide border border-[#cdeadd]">
+    <span className="text-[10px] px-2 py-0.5 rounded-full bg-cc-wash text-cc-ink font-semibold uppercase tracking-wide border border-cc-line">
       {children}
     </span>
   );
@@ -72,7 +72,7 @@ export function GreenPill({ children }: { children: ReactNode }) {
 export function TickCircle({ small }: { small?: boolean }) {
   const icon = small ? "12" : "14";
   return (
-    <span className={`${small ? "w-5 h-5" : "w-6 h-6"} rounded-full bg-[#178a5c] flex items-center justify-center`}>
+    <span className={`${small ? "w-5 h-5" : "w-6 h-6"} rounded-full bg-cc-green flex items-center justify-center`}>
       <svg width={icon} height={icon} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
         <polyline points="20 6 9 17 4 12" />
       </svg>
@@ -105,7 +105,7 @@ export function CheckRow({
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="mt-1 h-4 w-4 shrink-0 accent-[#178a5c]"
+        className="mt-1 h-4 w-4 shrink-0 accent-cc-green"
       />
       <span className="text-text">{children}</span>
     </label>
@@ -115,7 +115,7 @@ export function CheckRow({
 /** One of the policy links in the consent sentence. */
 export function PolicyLink({ children }: { children: ReactNode }) {
   return (
-    <a href="#" target="_blank" rel="noopener" className="text-[#185fa5] hover:underline font-medium">
+    <a href="#" target="_blank" rel="noopener" className="text-cc-blue hover:underline font-medium">
       {children}
     </a>
   );
@@ -164,12 +164,14 @@ export function TextAreaField({
   onChange: (v: string) => void;
   placeholder?: string;
 }) {
+  const id = useId();
   return (
     <div className="sm:col-span-2">
-      <label className={FIELD_LABEL}>
+      <label htmlFor={id} className={FIELD_LABEL}>
         {label}
       </label>
       <textarea
+        id={id}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}

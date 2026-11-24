@@ -142,9 +142,9 @@ function Inner() {
   const acts = "flex items-center gap-1.5 justify-end";
   const tabOf = REVIEW_TAB;
   const viewLink = (id: string, k: ReviewItem) => (
-    <Link href={`/admin/app/${id}/view?tab=${tabOf[k]}` as any} className={btn}>View</Link>
+    <Link href={`/admin/app/${id}/view?tab=${tabOf[k]}`} className={btn}>View</Link>
   );
-  const editLink = (href: string) => <Link href={href as any} className={btn}>Edit</Link>;
+  const editLink = (href: string) => <Link href={href} className={btn}>Edit</Link>;
   const letterBtn = (id: string, category: string, label: string) => {
     const d = letters.find((x) => x.application_id === id && x.category === category);
     return d ? (
@@ -176,15 +176,15 @@ function Inner() {
             <Table head={["EPC", "EPC ID", "Contact", "Mobile", ""]}>
               {(epcRows ?? []).map((r) => (
                 <tr key={r.id} className="border-t border-line">
-                  <Td wrap><Link href={`/admin/epc/${r.id}/view` as any} className="font-semibold text-text hover:underline">{epcShort(r)}</Link></Td>
+                  <Td wrap><Link href={`/admin/epc/${r.id}/view`} className="font-semibold text-text hover:underline">{epcShort(r)}</Link></Td>
                   <Td>{r.epc_display_id || "—"}</Td>
                   <Td wrap>{r.contact_name || "—"}</Td>
                   <Td>{r.contact_mobile ? `+91 ${r.contact_mobile}` : "—"}</Td>
                   <Td>
                     <div className={acts}>
-                      <Link href={`/admin/epc/${r.id}/view` as any} className={btn}>View</Link>
+                      <Link href={`/admin/epc/${r.id}/view`} className={btn}>View</Link>
                       <button type="button" onClick={() => void approveEpc(r.id)} disabled={busy != null}
-                        className="px-2.5 py-1 bg-[#178a5c] text-white rounded-[8px] text-[12px] font-semibold hover:bg-[#12734c] disabled:opacity-60 whitespace-nowrap">
+                        className="px-2.5 py-1 bg-cc-green text-white rounded-[8px] text-[12px] font-semibold hover:bg-cc-green-hover disabled:opacity-60 whitespace-nowrap">
                         {busy === r.id + "epc" ? "Approving…" : "Approve"}
                       </button>
                     </div>
@@ -199,7 +199,7 @@ function Inner() {
             <Table head={["EPC", "Uploaded", "Sample quotation", ""]}>
               {(requests ?? []).map((r) => (
                 <tr key={r.id} className="border-t border-line">
-                  <Td wrap><Link href={`/admin/epc/${r.id}/view` as any} className="font-semibold text-text hover:underline"><span title={r.name}>{shortEpcName(r.name) || "—"}</span></Link></Td>
+                  <Td wrap><Link href={`/admin/epc/${r.id}/view`} className="font-semibold text-text hover:underline"><span title={r.name}>{shortEpcName(r.name) || "—"}</span></Link></Td>
                   <Td>{fmtDate(r.at)}</Td>
                   <Td>
                     <div className="flex items-center gap-1.5">
@@ -211,7 +211,7 @@ function Inner() {
                       ))}
                     </div>
                   </Td>
-                  <Td><div className={acts}><Link href={`/admin/epc/${r.id}/view` as any} className={btn}>Open EPC</Link></div></Td>
+                  <Td><div className={acts}><Link href={`/admin/epc/${r.id}/view`} className={btn}>Open EPC</Link></div></Td>
                 </tr>
               ))}
             </Table>
@@ -221,7 +221,7 @@ function Inner() {
             <Table head={["Applicant", "Loan ID", "EPC", "Lender", "Approved amount", "Tenure", "EMI", "Filled by", ""]}>
               {approvals.map((r) => (
                 <tr key={r.id} className="border-t border-line">
-                  <Td wrap><Link href={`/admin/app/${r.id}/view?tab=approved` as any} className="font-semibold text-text hover:underline">{name(r)}</Link></Td>
+                  <Td wrap><Link href={`/admin/app/${r.id}/view?tab=approved`} className="font-semibold text-text hover:underline">{name(r)}</Link></Td>
                   <Td>{r.loan_display_id || "—"}</Td>
                   <Td wrap>{epc(r)}</Td>
                   <Td>{r.approved_lender ? lenderLabelIn(lenders, String(r.approved_lender)) : "—"}</Td>
@@ -249,7 +249,7 @@ function Inner() {
                 const first = k === "disb1";
                 return (
                   <tr key={r.id + k} className="border-t border-line">
-                    <Td wrap><Link href={`/admin/app/${r.id}/view?tab=${tabOf[k]}` as any} className="font-semibold text-text hover:underline">{name(r)}</Link></Td>
+                    <Td wrap><Link href={`/admin/app/${r.id}/view?tab=${tabOf[k]}`} className="font-semibold text-text hover:underline">{name(r)}</Link></Td>
                     <Td>{r.loan_display_id || "—"}</Td>
                     <Td wrap>{epc(r)}</Td>
                     <Td>{REVIEW_LABEL[k]}</Td>

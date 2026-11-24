@@ -13,6 +13,7 @@ import { parseEbill } from "@/lib/loan-docs";
 import { geminiExtractEbill } from "@/lib/doc-extractors";
 import { storeInsuranceFile } from "@/lib/extract-server";
 import { UUID_RE } from "@/lib/validators";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -63,7 +64,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     return NextResponse.json({ ok: true, address });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[insurance/extract-ebill] error:", msg);
     return err(msg, 500);
   }

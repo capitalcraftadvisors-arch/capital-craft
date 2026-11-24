@@ -68,7 +68,7 @@ export default function OtherInsDocs({
         </div>
       )}
       <button type="button" disabled={busy} onClick={() => ref.current?.click()}
-        className="w-full border-2 border-dashed border-[#cdeadd] rounded-[10px] px-4 py-4 text-[13px] font-semibold text-[#178a5c] hover:bg-[#f0faf5] disabled:opacity-60">
+        className="w-full border-2 border-dashed border-cc-line rounded-[10px] px-4 py-4 text-[13px] font-semibold text-cc-green hover:bg-cc-wash disabled:opacity-60">
         {label}
       </button>
       <input ref={ref} type="file" multiple={kind === "kyc"} accept={ACCEPTED_FILE_TYPES.join(",")} className="hidden"

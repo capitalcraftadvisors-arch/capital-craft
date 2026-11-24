@@ -16,6 +16,7 @@ import { fileLinkUrl } from "@/lib/file-links";
 import { publicOrigin } from "@/lib/login-password-server";
 import { SUBSCRIPTION_MSG } from "@/lib/subscription";
 import { vaultEntries, vaultViewer } from "@/lib/project-docs";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
     })));
     return NextResponse.json({ ok: true, files });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[epc/project-docs] error:", msg);
     return err("Couldn't load the documents.", 500);
   }
@@ -64,7 +65,7 @@ export async function POST(req: NextRequest) {
     const origin = publicOrigin(req);
     return NextResponse.json({ ok: true, links: photos.map((x) => fileLinkUrl(origin, x.path)) });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[epc/project-docs share] error:", msg);
     return err("Couldn't share the photos.", 500);
   }

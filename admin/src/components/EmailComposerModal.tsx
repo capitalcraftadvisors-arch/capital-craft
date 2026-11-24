@@ -10,12 +10,15 @@
 //      (email_contacts), and every address sent is saved back for next time.
 //   3. Send (mode:"send") posts the edited content.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { authHeaders } from "@/lib/auth";
 import Modal from "@/components/ui/Modal";
 import { supabase } from "@/lib/supabase";
 import { useLenders } from "@/lib/lenders";
 import { EMAIL_RE } from "@/lib/validators";
+
+// The id of the shared address-book <datalist> behind every email box.
+const ADDRESS_BOOK = "email-book";
 
 type Preview = { subject: string; toName: string; detail: [string, string][]; docLabels: string[]; ccDefault: string[]; bccDefault: string[]; allowedLenders?: string[] };
 
@@ -40,6 +43,7 @@ export default function EmailComposerModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const titleId = useId();
 
   async function api(payload: Record<string, unknown>) {
     const res = await fetch(endpoint, {
@@ -82,7 +86,6 @@ export default function EmailComposerModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  const dl = useMemo(() => "email-book", []);
   // Only the lenders that approved this EPC (empty = no restriction, e.g. a
   // grandfathered EPC — fall back to all so a legitimate send is never blocked).
   const options = allowed.length ? LENDERS.filter((x) => allowed.includes(x.v)) : LENDERS;
@@ -102,19 +105,19 @@ export default function EmailComposerModal({
   }
 
   return (
-    <Modal onClose={onClose} busy={busy} className="w-full max-w-lg bg-white rounded-lg shadow-lg p-6 max-h-[92vh] overflow-y-auto">
+    <Modal onClose={onClose} busy={busy} className="w-full max-w-lg bg-white rounded-lg shadow-lg p-6 max-h-[92vh] overflow-y-auto" aria-labelledby={titleId}>
       <div className="flex items-start justify-between mb-3">
-        <h3 className="font-display font-semibold text-[18px] text-text">{title}</h3>
+        <h3 id={titleId} className="font-display font-semibold text-[18px] text-text">{title}</h3>
         <button type="button" onClick={onClose} disabled={busy} className="text-[18px] text-text-muted hover:text-text leading-none" aria-label="Close">×</button>
       </div>
 
       {/* Shared datalist backing every email input's autocomplete. */}
-      <datalist id={dl}>{contacts.map((e) => <option key={e} value={e} />)}</datalist>
+      <datalist id={ADDRESS_BOOK}>{contacts.map((e) => <option key={e} value={e} />)}</datalist>
 
       {done ? (
         <div className="space-y-4">
-          <div className="p-3 rounded-input bg-[#e9f7f0] border border-[#cdeadd] text-[13px] text-[#0f3d2e]">✓ {done}</div>
-          <div className="flex justify-end"><button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold">Done</button></div>
+          <div className="p-3 rounded-input bg-[#e9f7f0] border border-cc-line text-[13px] text-cc-ink">✓ {done}</div>
+          <div className="flex justify-end"><button type="button" onClick={onClose} className="px-4 py-2 rounded-lg bg-cc-green text-white text-[13px] font-semibold">Done</button></div>
         </div>
       ) : loading ? (
         <p className="text-[13px] text-text-muted py-6 text-center">Loading preview…</p>
@@ -136,12 +139,12 @@ export default function EmailComposerModal({
           </div>
 
           <label className="block text-[13px] font-medium text-text-mid">TO
-            <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="lender@example.com" inputMode="email" list={dl}
+            <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="lender@example.com" inputMode="email" list={ADDRESS_BOOK}
               className="mt-1 w-full rounded-input border border-line px-3 py-2.5 text-[14px] outline-none focus:border-blue" />
           </label>
 
-          <ChipField label="CC" values={cc} onChange={setCc} listId={dl} />
-          <ChipField label="BCC" values={bcc} onChange={setBcc} listId={dl} />
+          <ChipField label="CC" values={cc} onChange={setCc} listId={ADDRESS_BOOK} />
+          <ChipField label="BCC" values={bcc} onChange={setBcc} listId={ADDRESS_BOOK} />
 
           <label className="block text-[13px] font-medium text-text-mid">Subject
             <input value={subject} onChange={(e) => setSubject(e.target.value)}
@@ -155,7 +158,7 @@ export default function EmailComposerModal({
               {detail.map(([k, v], i) => (
                 <div key={i} className="flex items-center gap-2 px-2.5 py-1.5">
                   <span className="text-[12px] text-text-muted w-40 shrink-0 truncate">{k}</span>
-                  <input value={v} onChange={(e) => { const n = detail.slice(); n[i] = [k, e.target.value]; setDetail(n); }}
+                  <input aria-label={k} value={v} onChange={(e) => { const n = detail.slice(); n[i] = [k, e.target.value]; setDetail(n); }}
                     className="flex-1 min-w-0 border-0 border-b border-transparent focus:border-blue text-[13px] py-1 outline-none bg-transparent" />
                 </div>
               ))}
@@ -169,7 +172,7 @@ export default function EmailComposerModal({
           {error && <div className="p-2.5 rounded-input bg-red-50 border border-red-200 text-[12px] text-red-700">{error}</div>}
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={onClose} disabled={busy} className="px-4 py-2 rounded-lg border border-line text-[13px] text-text-mid disabled:opacity-60">Cancel</button>
-            <button type="button" onClick={() => void send()} disabled={busy} className="px-5 py-2 rounded-lg bg-[#178a5c] text-white text-[13px] font-semibold disabled:opacity-60">{busy ? "Sending…" : "Send"}</button>
+            <button type="button" onClick={() => void send()} disabled={busy} className="px-5 py-2 rounded-lg bg-cc-green text-white text-[13px] font-semibold disabled:opacity-60">{busy ? "Sending…" : "Send"}</button>
           </div>
         </div>
       )}
@@ -194,7 +197,7 @@ export function ChipField({ label, values, onChange, listId }: { label: string; 
       {values.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-1.5">
           {values.map((e) => (
-            <span key={e} className="inline-flex items-center gap-1 text-[12px] rounded-full bg-[#eef2f7] text-[#334155] pl-2.5 pr-1 py-0.5">
+            <span key={e} className="inline-flex items-center gap-1 text-[12px] rounded-full bg-grey-pill text-slate-700 pl-2.5 pr-1 py-0.5">
               {e}
               <button type="button" onClick={() => onChange(values.filter((x) => x !== e))} className="text-[14px] leading-none text-text-muted hover:text-text px-0.5" aria-label={`Remove ${e}`}>×</button>
             </span>
@@ -202,7 +205,7 @@ export function ChipField({ label, values, onChange, listId }: { label: string; 
         </div>
       )}
       <div className="flex gap-2">
-        <input value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={add} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
+        <input aria-label={label} value={draft} onChange={(e) => setDraft(e.target.value)} onBlur={add} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
           placeholder={`Add ${label} address`} inputMode="email" list={listId}
           className="flex-1 min-w-0 rounded-input border border-line px-3 py-2 text-[13px] outline-none focus:border-blue" />
         <button type="button" onClick={add} disabled={!EMAIL_RE.test(draft.trim())}

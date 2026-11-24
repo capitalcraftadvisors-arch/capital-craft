@@ -36,8 +36,8 @@ export type InsRow = {
 };
 
 export const INS_STATUS_PILL: Record<string, string> = {
-  draft: "bg-[#eef1f0] text-[#5a8a76]", under_review: "bg-[#fef0d6] text-[#854f0b]",
-  issued: "bg-[#e6f6ee] text-[#178a5c]", rejected: "bg-red-50 text-red-700", hold: "bg-[#dceffb] text-[#185fa5]",
+  draft: "bg-cc-chip text-cc-muted", under_review: "bg-warn-tint text-warn-ink",
+  issued: "bg-cc-tint text-cc-green", rejected: "bg-red-50 text-red-700", hold: "bg-cc-blue-tint text-cc-blue",
 };
 export type Stage4 = "under_review" | "updated" | "approved" | "rejected";
 // Loan-table filter chips: the 4 stages + "all" + the 2nd-tranche-pending view.
@@ -46,8 +46,8 @@ export type FilterKey = "all" | Stage4 | "tranche_pending";
 export type InsFilter = "all" | "under_review" | "issued" | "hold" | "rejected" | "expiring" | "renewal";
 export const STAGE4_LABEL: Record<Stage4, string> = { under_review: "Under review", updated: "Updated", approved: "Approved", rejected: "Rejected" };
 export const STAGE4_PILL: Record<Stage4, string> = {
-  under_review: "bg-[#fef0d6] text-[#854f0b]", updated: "bg-[#e8effc] text-[#1e3a8a]",
-  approved: "bg-[#e6f6ee] text-[#178a5c]", rejected: "bg-red-50 text-red-700",
+  under_review: "bg-warn-tint text-warn-ink", updated: "bg-navy-tint text-navy",
+  approved: "bg-cc-tint text-cc-green", rejected: "bg-red-50 text-red-700",
 };
 
 /** fmtDateTime, or "" when there's no timestamp. */

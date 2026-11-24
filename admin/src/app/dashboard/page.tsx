@@ -19,6 +19,7 @@ import { canWork, hasModule, isSiteStaff, portalV2 } from "@/lib/epc-roles";
 import DashboardV2 from "@/components/partner/DashboardV2";
 import { fetchEpcName, shortEpcName } from "@/lib/epc-name";
 import { supabase } from "@/lib/supabase";
+import { notify } from "@/lib/notify";
 import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template";
 import { SARVATRA } from "@/lib/quotation-brands";
 import CustomerApplications from "@/components/quotation/CustomerApplications";
@@ -45,7 +46,7 @@ export default function DashboardPage() {
 function SiteStaffToProjects({ children }: { children: ReactNode }) {
   const router = useRouter();
   const site = isSiteStaff(getBusiness());
-  useEffect(() => { if (site) router.replace("/dashboard/projects" as any); }, [site, router]);
+  useEffect(() => { if (site) router.replace("/dashboard/projects"); }, [site, router]);
   return site ? null : <>{children}</>;
 }
 
@@ -109,9 +110,9 @@ function DashboardInner() {
     try {
       const res = await fetch("/api/epc/insurance/create", { method: "POST", headers: authHeaders() });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) { alert("Couldn't start the insurance application: " + (data?.error || `HTTP ${res.status}`)); return; }
-      router.push(`/dashboard/insurance/${data.application.id}/chat` as any);
-    } catch (e) { alert("Network error: " + (e as Error).message); } finally { setInsBusy(false); }
+      if (!res.ok || !data?.ok) { notify.error("Couldn't start the insurance application: " + (data?.error || `HTTP ${res.status}`)); return; }
+      router.push(`/dashboard/insurance/${data.application.id}/chat`);
+    } catch (e) { notify.error("Network error: " + (e as Error).message); } finally { setInsBusy(false); }
   }
 
   // ── Derived ─────────────────────────────────────────────────────────────────
@@ -124,50 +125,50 @@ function DashboardInner() {
 
   return (
     <PartnerShell active={section} onSection={open} badge={attnCount} quoteTpl={quoteTpl}
-      title={<h1 className="font-display text-[22px] sm:text-[28px] font-bold text-[#0f3d2e]">नमस्ते, {epcName}</h1>}>
+      title={<h1 className="font-display text-[22px] sm:text-[28px] font-bold text-cc-ink">नमस्ते, {epcName}</h1>}>
       <LoginWelcome />
 
-        <main className="px-5 sm:px-8 pb-12 pt-3">
-          {section === "home" && hasModule(me, "quotes") && <CustomTemplateBanner tpl={quoteTpl} />}
-          {section === "home" && v2 && (
-            <DashboardV2 rms={RMS}
-              onQuotation={() => (customers ? setSection("customers") : router.push("/dashboard/quotes" as any))}
-              onLoans={(f) => { setLoanFilter(f); setSection("loans"); }}
-              onInsurance={(due) => { setInsFilter(due ? "renewal" : "all"); setSection("insurance"); }}
-              onRenew={() => void startInsurance()} renewing={insBusy}
-              onOpenMessage={(id) => router.push(`/dashboard/messages/loan/${id}` as any)} />
-          )}
-          {section === "home" && !v2 && (
-            <HomeSection loans={rows} loading={loading} attnCount={attnCount}
-              canLoan={canLoan && work} canInsurance={canInsurance && work}
-              onApplyLoan={() => router.push("/dashboard/apply/chat" as any)}
-              onApplyInsurance={() => void startInsurance()} applyingInsurance={insBusy}
-              onOpenCase={(r) => setOpenCase(r)} onEmi={() => setSection("emi")}
-              canQuote={hasModule(me, "quotes")} onQuotation={() => (customers ? setSection("customers") : router.push("/dashboard/quotes" as any))} onAttention={() => setSection("documents")} />
-          )}
-          {section === "loans" && (
-            <LoansSection loans={sortedLoans} loading={loading} canLoan={canLoan && work} readOnly={!work} initial={loanFilter}
-              onOpenCase={(r) => setOpenCase(r)} onApply={() => router.push("/dashboard/apply/chat" as any)}
-              onEdit={(r) => router.push(`/dashboard/apply/chat?id=${r.id}&edit=1` as any)}
-              onTranche={(r) => router.push(`/dashboard/${r.id}/disbursement` as any)} />
-          )}
-          {section === "insurance" && (
-            <InsuranceSection insRows={insRows} loading={loading} onApply={work ? () => void startInsurance() : null} applying={insBusy}
-              v2={v2} initial={insFilter} onRenew={v2 && work ? () => void startInsurance() : null}
-              // A draft continues in the chat; a sent one opens its form to view / change.
-              onOpen={(id) => router.push(`/dashboard/insurance/${id}/${insRows.find((r) => r.id === id)?.status === "draft" ? "chat" : "step-1"}` as any)} />
-          )}
-          {section === "emi" && <EmiSection />}
-          {section === "customers" && customers && <CustomerApplications serialNext={quoteTpl.serial_next} whatsapp={!!quoteTpl.unlocked}
-            onSerial={(n) => setQuoteTpl((t) => t && { ...t, serial_next: Math.max(t.serial_next ?? 1, n) })} />}
-          {section === "documents" && <DocumentsSection loans={rows} insRows={insRows} onOpenMessage={(kind, id) => router.push(`/dashboard/messages/${kind}/${id}` as any)} />}
-        </main>
+      <main className="px-5 sm:px-8 pb-12 pt-3">
+        {section === "home" && hasModule(me, "quotes") && <CustomTemplateBanner tpl={quoteTpl} />}
+        {section === "home" && v2 && (
+          <DashboardV2 rms={RMS}
+            onQuotation={() => (customers ? setSection("customers") : router.push("/dashboard/quotes"))}
+            onLoans={(f) => { setLoanFilter(f); setSection("loans"); }}
+            onInsurance={(due) => { setInsFilter(due ? "renewal" : "all"); setSection("insurance"); }}
+            onRenew={() => void startInsurance()} renewing={insBusy}
+            onOpenMessage={(id) => router.push(`/dashboard/messages/loan/${id}`)} />
+        )}
+        {section === "home" && !v2 && (
+          <HomeSection loans={rows} loading={loading} attnCount={attnCount}
+            canLoan={canLoan && work} canInsurance={canInsurance && work}
+            onApplyLoan={() => router.push("/dashboard/apply/chat")}
+            onApplyInsurance={() => void startInsurance()} applyingInsurance={insBusy}
+            onOpenCase={(r) => setOpenCase(r)} onEmi={() => setSection("emi")}
+            canQuote={hasModule(me, "quotes")} onQuotation={() => (customers ? setSection("customers") : router.push("/dashboard/quotes"))} onAttention={() => setSection("documents")} />
+        )}
+        {section === "loans" && (
+          <LoansSection loans={sortedLoans} loading={loading} canLoan={canLoan && work} readOnly={!work} initial={loanFilter}
+            onOpenCase={(r) => setOpenCase(r)} onApply={() => router.push("/dashboard/apply/chat")}
+            onEdit={(r) => router.push(`/dashboard/apply/chat?id=${r.id}&edit=1`)}
+            onTranche={(r) => router.push(`/dashboard/${r.id}/disbursement`)} />
+        )}
+        {section === "insurance" && (
+          <InsuranceSection insRows={insRows} loading={loading} onApply={work ? () => void startInsurance() : null} applying={insBusy}
+            v2={v2} initial={insFilter} onRenew={v2 && work ? () => void startInsurance() : null}
+            // A draft continues in the chat; a sent one opens its form to view / change.
+            onOpen={(id) => router.push(`/dashboard/insurance/${id}/${insRows.find((r) => r.id === id)?.status === "draft" ? "chat" : "step-1"}`)} />
+        )}
+        {section === "emi" && <EmiSection />}
+        {section === "customers" && customers && <CustomerApplications serialNext={quoteTpl.serial_next} whatsapp={!!quoteTpl.unlocked}
+          onSerial={(n) => setQuoteTpl((t) => t && { ...t, serial_next: Math.max(t.serial_next ?? 1, n) })} />}
+        {section === "documents" && <DocumentsSection loans={rows} insRows={insRows} onOpenMessage={(kind, id) => router.push(`/dashboard/messages/${kind}/${id}`)} />}
+      </main>
 
       {openCase && (
         <TimelineDrawer row={openCase} onClose={() => setOpenCase(null)} readOnly={!work}
-          onEdit={() => router.push(`/dashboard/apply/chat?id=${openCase.id}&edit=1` as any)}
-          onTranche={() => router.push(`/dashboard/${openCase.id}/disbursement` as any)}
-          onMessage={() => router.push(`/dashboard/messages/loan/${openCase.id}` as any)} />
+          onEdit={() => router.push(`/dashboard/apply/chat?id=${openCase.id}&edit=1`)}
+          onTranche={() => router.push(`/dashboard/${openCase.id}/disbursement`)}
+          onMessage={() => router.push(`/dashboard/messages/loan/${openCase.id}`)} />
       )}
     </PartnerShell>
   );

@@ -415,8 +415,8 @@ export function arrowFor(d: Delta): { glyph: string; cls: string; text: string }
   if (d.changePct == null || d.m.nPrev < MIN_PREV) return { glyph: "→", cls: "text-text-muted", text: "no prior data" };
   if (Math.abs(d.changePct) < STABLE_PCT) return { glyph: "→", cls: "text-text-muted", text: `${Math.abs(d.changePct).toFixed(0)}% · stable` };
   return improving(d)
-    ? { glyph: "↑", cls: "text-[#178a5c]", text: `${Math.abs(d.changePct).toFixed(0)}% · improving` }
-    : { glyph: "↓", cls: "text-[#b42318]", text: `${Math.abs(d.changePct).toFixed(0)}% · declining` };
+    ? { glyph: "↑", cls: "text-cc-green", text: `${Math.abs(d.changePct).toFixed(0)}% · improving` }
+    : { glyph: "↓", cls: "text-danger-ink", text: `${Math.abs(d.changePct).toFixed(0)}% · declining` };
 }
 
 // ── health score (transparent weighted formula, documented) ───────────────────

@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { err, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { emailLoginPassword, sendPasswordDraft, publicOrigin } from "@/lib/login-password-server";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (!r.ok) return err(r.error, r.status);
     return NextResponse.json({ ok: true, sentTo: r.sentTo ?? null });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[login-password] error:", msg);
     return err(msg, 500);
   }

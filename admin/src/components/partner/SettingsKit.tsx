@@ -10,7 +10,7 @@ export function Card({ title, right, children }: { title: string; right?: ReactN
   return (
     <section className="bg-white rounded-2xl border border-line p-5 sm:p-6 mb-5">
       <div className="flex items-center justify-between gap-3 mb-4">
-        <h2 className="text-[14px] font-semibold text-[#0f3d2e]">{title}</h2>
+        <h2 className="text-[14px] font-semibold text-cc-ink">{title}</h2>
         {right}
       </div>
       <div className="flex flex-col gap-3.5">{children}</div>
@@ -43,7 +43,7 @@ export function SaveBar({ busy, saved, error, onSave, disabled }: { busy: boolea
         className="px-5 py-2.5 rounded-xl text-white text-[14px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
         {busy ? "Saving…" : "Save"}
       </button>
-      {saved && !error && <span className="text-[13px] text-[#178a5c] font-medium">Saved</span>}
+      {saved && !error && <span className="text-[13px] text-cc-green font-medium">Saved</span>}
       {error && <span className="text-[13px] text-red-600">{error}</span>}
     </div>
   );

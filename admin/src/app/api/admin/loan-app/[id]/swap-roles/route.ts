@@ -25,6 +25,7 @@ import { isMainAdmin } from "@/lib/hierarchy";
 import { logLoanActivityServer, type LoanAction } from "@/lib/loan-activity-server";
 import { fmtDate, toIsoDate } from "@/lib/dates";
 import { isUndefinedColumn } from "@/lib/optional-column";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -139,7 +140,7 @@ export async function POST(
 
     return NextResponse.json({ ok: true });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[swap-roles] error:", msg);
     return err(msg, 500);
   }

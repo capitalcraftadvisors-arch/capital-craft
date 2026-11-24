@@ -9,7 +9,7 @@
 // document), Email (each made document, from Sustera's own Gmail) and WhatsApp
 // (a ready message with the document's link; on phones the PDF itself via Share).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getBusiness, authHeaders } from "@/lib/auth";
 import { fmtDateTime } from "@/lib/dates";
@@ -144,7 +144,7 @@ const DECIMALS = new Set<Key>(["inverter_kw", "sanctioned_load"]);
 const short = (k: Key) => LABEL[k].replace(/\s*(₹|\().*$/, "");
 
 const fullName = (d: Fields) => `${d.title} ${d.customer_name}`.trim();
-const TOOL = "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-line text-[12px] font-semibold text-text-mid hover:border-[#1e3a8a] hover:text-[#1e3a8a]";
+const TOOL = "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-line text-[12px] font-semibold text-text-mid hover:border-navy hover:text-navy";
 // A document's tab is open once that document is made (the quotation always is).
 const made = (r: Row, doc: Doc) => !!docOf(doc).at(r);
 
@@ -197,7 +197,7 @@ export default function CustomerApplications({ serialNext, onSerial, whatsapp }:
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h2 className="font-display text-[20px] font-bold text-[#0f3d2e]">Customer applications</h2>
+        <h2 className="font-display text-[20px] font-bold text-cc-ink">Customer applications</h2>
         <button onClick={() => setForm({ doc: "quotation", row: null })} disabled={!rows}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-white text-[13px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
@@ -205,7 +205,7 @@ export default function CustomerApplications({ serialNext, onSerial, whatsapp }:
         </button>
       </div>
 
-      <div className="flex items-center gap-2 max-w-[420px] bg-white border border-line rounded-xl px-3.5 h-11 focus-within:border-[#1e3a8a] focus-within:ring-2 focus-within:ring-[#1e3a8a]/15 transition">
+      <div className="flex items-center gap-2 max-w-[420px] bg-white border border-line rounded-xl px-3.5 h-11 focus-within:border-navy focus-within:ring-2 focus-within:ring-navy/15 transition">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search by name, mobile, quote no. or site…" className="flex-1 min-w-0 bg-transparent text-[14px] text-text outline-none placeholder:text-text-muted" />
         {q && <button onClick={() => setQ("")} className="text-text-muted hover:text-text text-[15px] leading-none" aria-label="Clear">✕</button>}
@@ -233,8 +233,8 @@ export default function CustomerApplications({ serialNext, onSerial, whatsapp }:
                     {r.data.contact && <div className="text-[11.5px] text-text-muted mt-0.5">+91 {r.data.contact}</div>}
                   </td>
                   <td className="px-3 py-3.5 whitespace-nowrap">
-                    <div className="font-semibold text-[#0f3d2e]">{r.data.kw} kW · ₹{inr(Number(r.data.price))}</div>
-                    {r.data.quote_no && <div className="text-[11px] font-mono text-[#185fa5] mt-0.5">{r.data.quote_no}</div>}
+                    <div className="font-semibold text-cc-ink">{r.data.kw} kW · ₹{inr(Number(r.data.price))}</div>
+                    {r.data.quote_no && <div className="text-[11px] font-mono text-cc-blue mt-0.5">{r.data.quote_no}</div>}
                   </td>
                   <td className="px-3 py-3.5">
                     <div className="text-text">{[r.data.city, r.data.state].filter(Boolean).join(", ") || "—"}</div>
@@ -248,13 +248,13 @@ export default function CustomerApplications({ serialNext, onSerial, whatsapp }:
                         <div key={d.key} className="flex items-center gap-2 py-0.5">
                           <button type="button" role="checkbox" aria-checked={done} aria-label={d.label} disabled={done}
                             onClick={() => setAsk({ row: r, doc: d.key })}
-                            className={["w-[17px] h-[17px] rounded-[5px] grid place-items-center border shrink-0", done ? "border-transparent" : "border-[#b6bfc9] bg-white hover:border-[#1e3a8a]"].join(" ")}
+                            className={["w-[17px] h-[17px] rounded-[5px] grid place-items-center border shrink-0", done ? "border-transparent" : "border-[#b6bfc9] bg-white hover:border-navy"].join(" ")}
                             style={done ? { background: NAVY } : undefined}>
                             {done && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 5 5 9-10" /></svg>}
                           </button>
                           <span className={["text-[12.5px] w-[128px]", done ? "text-text font-medium" : "text-text-muted"].join(" ")}>{d.label}</span>
                           <button type="button" onClick={() => void download(r, d.key)} disabled={!done || !!busy}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[12px] font-semibold border-[#1e3a8a] text-[#1e3a8a] hover:bg-[#1e3a8a]/[0.06] disabled:border-line disabled:text-text-muted disabled:hover:bg-transparent">
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[12px] font-semibold border-navy text-navy hover:bg-navy/[0.06] disabled:border-line disabled:text-text-muted disabled:hover:bg-transparent">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14" /></svg>
                             {busy === r.id + d.key ? "Downloading…" : "Download"}
                           </button>
@@ -302,9 +302,10 @@ export default function CustomerApplications({ serialNext, onSerial, whatsapp }:
 }
 
 function Confirm({ text, onYes, onNo }: { text: string; onYes: () => void; onNo: () => void }) {
+  const titleId = useId();
   return (
-    <Modal onClose={onNo} closeOnBackdrop={false} overlayClassName={OVERLAY.grid} className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-[400px]">
-      <p className="text-[15px] font-semibold text-text">{text}</p>
+    <Modal onClose={onNo} closeOnBackdrop={false} overlayClassName={OVERLAY.grid} className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-[400px]" aria-labelledby={titleId}>
+      <p id={titleId} className="text-[15px] font-semibold text-text">{text}</p>
       <div className="mt-6 flex justify-end gap-2">
         <button onClick={onNo} className="px-4 py-2 rounded-xl border border-line text-[13px] font-semibold text-text-mid">Cancel</button>
         <button onClick={onYes} autoFocus className="px-5 py-2 rounded-xl text-white text-[13px] font-semibold" style={{ background: NAVY }}>Yes</button>
@@ -328,6 +329,7 @@ function CustomerForm({ doc: start, row, quoteNo, onClose, onSaved }: {
   const set = <K extends keyof Fields>(k: K, v: Fields[K]) => setF((p) => ({ ...p, [k]: v }));
   const spec = FORMS[doc];
   const isNew = !row;
+  const titleId = useId();
 
   const t = sarvatraTerms(f);
   const { kw, price } = t;
@@ -407,11 +409,11 @@ function CustomerForm({ doc: start, row, quoteNo, onClose, onSaved }: {
   }
 
   return (
-    <Modal onClose={onClose} closeOnBackdrop={false} overlayClassName={OVERLAY.scroll} className="max-w-[900px] mx-auto my-4 sm:my-10 px-4">
+    <Modal onClose={onClose} closeOnBackdrop={false} overlayClassName={OVERLAY.scroll} className="max-w-[900px] mx-auto my-4 sm:my-10 px-4" aria-labelledby={titleId}>
       <div className="bg-bg-soft rounded-2xl shadow-xl p-5 sm:p-7" ref={formRef} onKeyDown={onFormKey}>
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="font-display text-[22px] sm:text-[26px] font-bold text-text">{isNew ? "Quotation builder" : fullName(row.data)}</h2>
+            <h2 id={titleId} className="font-display text-[22px] sm:text-[26px] font-bold text-text">{isNew ? "Quotation builder" : fullName(row.data)}</h2>
           </div>
           <button onClick={onClose} aria-label="Close" className="w-9 h-9 grid place-items-center rounded-xl text-text-muted hover:text-text hover:bg-white text-[18px]">✕</button>
         </div>
@@ -445,7 +447,7 @@ function BrandList({ label, value, onChange, options, field }: {
       {list.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {list.map((b) => (
-            <span key={b} className="inline-flex items-center gap-1 text-[12.5px] rounded-full bg-[#eef2f7] text-[#1e3a8a] font-medium pl-2.5 pr-1 py-0.5">
+            <span key={b} className="inline-flex items-center gap-1 text-[12.5px] rounded-full bg-grey-pill text-navy font-medium pl-2.5 pr-1 py-0.5">
               {b}
               {list.length > 1 && (
                 <button type="button" onClick={() => onChange(list.filter((x) => x !== b).join(" / "))} aria-label={`Remove ${b}`}
@@ -505,7 +507,8 @@ function QuotationEmail({ row, onClose }: { row: Row; onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const m = drafts[doc] ?? emailDraft(doc, row.data);
   const edit = (patch: Partial<Draft>) => setDrafts((all) => ({ ...all, [doc]: { ...m, ...patch } }));
-  const field = "mt-1 w-full rounded-input border border-line px-3 py-2.5 text-[14px] outline-none focus:border-[#1e3a8a]";
+  const field = "mt-1 w-full rounded-input border border-line px-3 py-2.5 text-[14px] outline-none focus:border-navy";
+  const titleId = useId();
 
   async function send() {
     if (!EMAIL_RE.test(m.to.trim())) { setError("Enter a valid TO email."); return; }
@@ -525,11 +528,11 @@ function QuotationEmail({ row, onClose }: { row: Row; onClose: () => void }) {
   }
 
   return (
-    <Modal onClose={onClose} busy={busy} overlayClassName={OVERLAY.scroll} className="max-w-[640px] mx-auto my-4 sm:my-10 px-4">
+    <Modal onClose={onClose} busy={busy} overlayClassName={OVERLAY.scroll} className="max-w-[640px] mx-auto my-4 sm:my-10 px-4" aria-labelledby={titleId}>
       <div className="bg-white rounded-2xl shadow-xl p-5 sm:p-6">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="font-display text-[20px] font-bold text-text">Email</h2>
+            <h2 id={titleId} className="font-display text-[20px] font-bold text-text">Email</h2>
             <div className="text-[13px] text-text-muted mt-0.5">{fullName(row.data)} · From {SARVATRA.sender}</div>
           </div>
           <button onClick={onClose} disabled={busy} aria-label="Close" className="w-9 h-9 grid place-items-center rounded-xl text-text-muted hover:text-text hover:bg-bg-soft text-[18px]">✕</button>
@@ -538,7 +541,7 @@ function QuotationEmail({ row, onClose }: { row: Row; onClose: () => void }) {
 
         {sent[doc] ? (
           <div className="mt-5 space-y-4">
-            <div className="p-3 rounded-input bg-[#e9f7f0] border border-[#cdeadd] text-[13px] text-[#0f3d2e]">✓ {sent[doc]}</div>
+            <div className="p-3 rounded-input bg-[#e9f7f0] border border-cc-line text-[13px] text-cc-ink">✓ {sent[doc]}</div>
             <div className="flex justify-end"><button type="button" onClick={onClose} className="px-4 py-2 rounded-xl text-white text-[13px] font-semibold" style={{ background: NAVY }}>Done</button></div>
           </div>
         ) : (
@@ -609,6 +612,7 @@ function QuotationWhatsApp({ row, onClose }: { row: Row; onClose: () => void }) 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [share] = useState(canSharePdf);
+  const titleId = useId();
   useEffect(() => { setMsg(waDraft(doc, row.data, lang)); setError(null); }, [doc, lang, row.data]);
   const body = { ...row.data, doc, date: docOf(doc).at(row) };
 
@@ -658,10 +662,10 @@ function QuotationWhatsApp({ row, onClose }: { row: Row; onClose: () => void }) 
 
   return (
     <Modal onClose={onClose} busy={busy} overlayClassName={OVERLAY.layered} backdropClassName={BACKDROP}
-      className="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-5 max-h-[90vh] overflow-y-auto">
+      className="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-5 max-h-[90vh] overflow-y-auto" aria-labelledby={titleId}>
       <div className="flex items-start justify-between gap-2">
         <div>
-          <div className="text-[15px] font-bold text-text">Send WhatsApp</div>
+          <div id={titleId} className="text-[15px] font-bold text-text">Send WhatsApp</div>
           <div className="text-[12px] text-text-muted">{fullName(row.data)}</div>
         </div>
         <button type="button" onClick={onClose} disabled={busy} aria-label="Close" className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
@@ -673,7 +677,7 @@ function QuotationWhatsApp({ row, onClose }: { row: Row; onClose: () => void }) 
         <div className="inline-flex border border-line rounded-lg overflow-hidden">
           {WA_LANGS.map((l) => (
             <button key={l.key} type="button" onClick={() => setLang(l.key)}
-              className={["px-2.5 py-1 text-[12px] font-semibold border-r border-line last:border-r-0", lang === l.key ? "bg-[#128C7E] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
+              className={["px-2.5 py-1 text-[12px] font-semibold border-r border-line last:border-r-0", lang === l.key ? "bg-whatsapp text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
               {l.label}
             </button>
           ))}
@@ -684,12 +688,12 @@ function QuotationWhatsApp({ row, onClose }: { row: Row; onClose: () => void }) 
       <div className="flex items-center gap-2 mt-1 mb-3">
         <span className="text-[13px] text-text-muted">+91</span>
         <input value={to} onChange={(e) => setTo(e.target.value)} inputMode="numeric" placeholder="10-digit number"
-          className="flex-1 border border-line rounded-lg px-3 py-2 text-[13px] outline-none focus:border-[#128C7E]" />
+          className="flex-1 border border-line rounded-lg px-3 py-2 text-[13px] outline-none focus:border-whatsapp" />
       </div>
 
       <div className="text-[11px] font-semibold uppercase tracking-wide text-text-mid">Message preview</div>
       <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={8}
-        className="w-full mt-1 border border-line rounded-lg px-3 py-2 text-[13px] leading-relaxed outline-none focus:border-[#128C7E] resize-none" />
+        className="w-full mt-1 border border-line rounded-lg px-3 py-2 text-[13px] leading-relaxed outline-none focus:border-whatsapp resize-none" />
       <div className="text-[11.5px] text-text-muted mt-1">📄 {docOf(doc).label} link is added on send</div>
 
       {error && <div className="mt-3 p-2.5 rounded-input bg-red-50 border border-red-200 text-[12px] text-red-700">{error}</div>}
@@ -699,12 +703,12 @@ function QuotationWhatsApp({ row, onClose }: { row: Row; onClose: () => void }) 
           <button type="button" onClick={onClose} disabled={busy} className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-line text-text-mid hover:bg-bg-tint disabled:opacity-50">Cancel</button>
           {share && (
             <button type="button" onClick={() => void sharePdf()} disabled={busy}
-              className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-[#128C7E] text-[#128C7E] hover:bg-[#128C7E]/[0.06] disabled:opacity-50">
+              className="text-[12px] font-semibold px-3.5 py-2 rounded-lg border border-whatsapp text-whatsapp hover:bg-whatsapp/[0.06] disabled:opacity-50">
               Share PDF
             </button>
           )}
           <button type="button" onClick={() => void send()} disabled={busy || !waTel(to)}
-            className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-[#128C7E] text-white hover:bg-[#0f766e] disabled:opacity-50">
+            className="text-[12px] font-semibold px-4 py-2 rounded-lg bg-whatsapp text-white hover:bg-teal-700 disabled:opacity-50">
             {busy ? "Preparing…" : "Send on WhatsApp →"}
           </button>
         </div>

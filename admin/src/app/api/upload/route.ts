@@ -28,6 +28,7 @@ import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { compressUpload } from "@/lib/image-compress";
 import { isProjectDocCategory } from "@/lib/project-docs";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -244,7 +245,7 @@ export async function POST(req: NextRequest) {
         : {}),
     });
   } catch (e: unknown) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[upload] error:", msg);
     return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }

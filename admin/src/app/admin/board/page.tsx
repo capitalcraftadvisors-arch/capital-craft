@@ -7,7 +7,7 @@
 // card opens a side panel with the case details, actions that persist + log,
 // and the case's comments. Footer surfaces SLA breaches + monthly disbursement.
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import AdminSidebar, { ACCENTS, SectionMark, themeStyle } from "@/components/AdminSidebar";
@@ -27,6 +27,7 @@ import { useLenders } from "@/lib/lenders";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { rupeesShort } from "@/lib/money";
 import { fmtAgo } from "@/lib/dates";
+import { notify } from "@/lib/notify";
 // The board's parts (./_parts): case rules, the screen state, My Day, the card, the month cards, the side-panel details, the lender pop-up.
 import { LOAN_OPENS_SCREEN, COMMENT_TBL, stageCheck, attention, loanOutline, nextAction, monthEnd, monthKey } from "./_parts/rules";
 import { tmState, saveTm } from "./_parts/tm-state";
@@ -36,6 +37,12 @@ import BoardCard from "./_parts/BoardCard";
 import CaseDetails, { DETAIL_COLS } from "./_parts/CaseDetails";
 import LenderPickerPopup from "./_parts/LenderPickerPopup";
 import { MyMonthCard, WorkloadStrip } from "./_parts/MonthCards";
+
+// A case page's back link returns to the board (app/[id]/view reads this key).
+// Blocked storage just means the back link goes to its usual place.
+function rememberBoardReturn() {
+  try { sessionStorage.setItem("ccReturnTo", "/admin/board"); } catch { /* storage blocked */ }
+}
 
 export default function OpsBoardPage() {
   return (
@@ -93,6 +100,7 @@ function Inner() {
   // Side-panel view: "details" (full, with comments) vs "emi" (EMI-confirmation
   // view — same details but comments hidden, so it's clean to share/screenshot).
   const [panelTab, setPanelTab] = useState<"details" | "emi">("details");
+  const dropTitleId = useId(); // names the drag-drop pop-up for screen readers
 
   // force=true after any action so the board reflects the change immediately;
   // plain mount/navigation reuses the short (20s) cache to cut egress.
@@ -169,19 +177,27 @@ function Inner() {
     return () => { cancelled = true; };
   }, [sel, selSource]);
 
+  // The card whose panel is open right now (addComment checks it after each wait).
+  const openCardRef = useRef(sel);
+  useEffect(() => { openCardRef.current = sel; }, [sel]);
+
   async function addComment() {
-    const c = cases.find((x) => x.id === sel);
+    const id = sel;
+    const c = cases.find((x) => x.id === id);
     const meta = c ? COMMENT_TBL[c.source] : null;
-    if (!sel || !meta || !commentText.trim()) return;
+    if (!id || !meta || !commentText.trim()) return;
     setCommentBusy(true);
     try {
-      await supabase().from(meta.table).insert({ [meta.key]: sel, author_id: me?.id ?? null, author_name: me?.contact_name ?? "Admin", comment_text: commentText.trim() });
+      const { error } = await supabase().from(meta.table).insert({ [meta.key]: id, author_id: me?.id ?? null, author_name: me?.contact_name ?? "Admin", comment_text: commentText.trim() });
+      if (error) throw new Error(error.message);
+      // Another card opened meanwhile: its own comments are already loading.
+      if (openCardRef.current !== id) return;
       setCommentText("");
       const { data } = await supabase().from(meta.table)
-        .select("id, author_name, comment_text, created_at").eq(meta.key, sel)
+        .select("id, author_name, comment_text, created_at").eq(meta.key, id)
         .order("created_at", { ascending: false }).limit(50);
-      setComments((data ?? []) as typeof comments);
-    } catch (e) { alert("Couldn’t post comment: " + (e as Error).message); }
+      if (openCardRef.current === id) setComments((data ?? []) as typeof comments);
+    } catch (e) { notify.error("Couldn’t post comment: " + (e as Error).message); }
     finally { setCommentBusy(false); }
   }
 
@@ -284,7 +300,7 @@ function Inner() {
         body: JSON.stringify({ source: target.source, id: target.id, action, payload }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j?.ok) { alert(j?.error || "Action failed."); return false; }
+      if (!res.ok || !j?.ok) { notify.error(j?.error || "Action failed."); return false; }
       setTouches((t) => t + 1);
       await reload(true);
       return true;
@@ -319,8 +335,8 @@ function Inner() {
       // opens the approval-details page, and 1st-Phase opens disbursement.
       if (col === "send_lender") { setDrop(null); await openLenderPicker(c, "docsent"); return; }
       if (col === "approved" || col === "rejected") { setDrop(null); await openLenderPicker(c, col === "rejected" ? "reject" : "approve"); return; }
-      if (col === "phase1") { sessionStorage.setItem("ccReturnTo", "/admin/board"); setDrop(null); router.push(`/admin/app/${c.id}/disbursement` as unknown as string); return; }
-      if (col === "abort") { sessionStorage.setItem("ccReturnTo", "/admin/board"); setDrop(null); router.push(`/admin/app/${c.id}/view?do=abort` as unknown as string); return; }
+      if (col === "phase1") { rememberBoardReturn(); setDrop(null); router.push(`/admin/app/${c.id}/disbursement`); return; }
+      if (col === "abort") { rememberBoardReturn(); setDrop(null); router.push(`/admin/app/${c.id}/view?do=abort`); return; }
     }
     // Simple status move (loan → Docs Pending / hold, or an EPC / insurance / lead stage).
     const ok = await runAction(c, "set_stage", { column: drop.column });
@@ -349,7 +365,7 @@ function Inner() {
       if (error) throw new Error(error.message);
       await logLoanActivity(c.id, "status_change", { detail: `Docs sent to ${lender.label}` });
       setPicker(null); setTouches((t) => t + 1); await reload(true);
-    } catch (e) { alert("Couldn’t record: " + (e as Error).message); }
+    } catch (e) { notify.error("Couldn’t record: " + (e as Error).message); }
     finally { setPickerBusy(false); }
   }
   async function pickerReject(lender: PickerLender, reason?: string, date?: string) {
@@ -370,15 +386,15 @@ function Inner() {
       if (error) throw new Error(error.message);
       await logLoanActivity(c.id, "rejected", { detail: `Rejected by ${lender.label}${reason ? ` — ${reason}` : ""}` });
       setPicker(null); setTouches((t) => t + 1); await reload(true);
-    } catch (e) { alert("Couldn’t record: " + (e as Error).message); }
+    } catch (e) { notify.error("Couldn’t record: " + (e as Error).message); }
     finally { setPickerBusy(false); }
   }
   function pickerApprove(lender: PickerLender) {
     if (!picker) return;
     const id = picker.c.id;
-    sessionStorage.setItem("ccReturnTo", "/admin/board");
+    rememberBoardReturn();
     setPicker(null);
-    router.push(`/admin/app/${id}/approval?lender=${lender.key}&label=${encodeURIComponent(lender.label)}` as unknown as string);
+    router.push(`/admin/app/${id}/approval?lender=${lender.key}&label=${encodeURIComponent(lender.label)}`);
   }
 
   // RMs an overseer manages: a MANAGER sees only their own RMs; MAIN_ADMIN all.
@@ -406,7 +422,7 @@ function Inner() {
     return new Set(ids.filter(Boolean) as string[]);
   }, [isMainAdmin, isManager, boardPeople, myRms, me]);
   // Open a case from My Day; its page's back link returns here.
-  const openCase = (href: string) => { sessionStorage.setItem("ccReturnTo", "/admin/board"); router.push(href as unknown as string); };
+  const openCase = (href: string) => { rememberBoardReturn(); router.push(href); };
   // Today in IST ("YYYY-MM-DD") — for follow-up due/overdue comparisons.
   const todayStr = useMemo(() => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date()), []);
   const myDay = useMemo(() => {
@@ -485,7 +501,7 @@ function Inner() {
         {/* Header */}
         <header className="px-4 sm:px-6 py-5 border-b border-line shrink-0">
           <p className="text-[15px] font-semibold text-text mb-2">
-            Hi <span className="font-bold text-[#178a5c]">{greetingName(me)}</span>
+            Hi <span className="font-bold text-cc-green">{greetingName(me)}</span>
           </p>
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-3">
@@ -499,7 +515,7 @@ function Inner() {
               <div className="inline-flex border border-line rounded-lg overflow-hidden">
                 {(["myday", "board"] as const).map((v) => (
                   <button key={v} type="button" onClick={() => { setView(v); if (v === "myday") setSel(null); }}
-                    className={["px-3.5 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", view === v ? "bg-[#0f766e] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
+                    className={["px-3.5 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", view === v ? "bg-teal-700 text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
                     {v === "myday" ? "My Day" : "Board"}
                   </button>
                 ))}
@@ -535,12 +551,12 @@ function Inner() {
             <div className="relative">
               <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search cases…"
-                className="w-64 sm:w-80 border-2 border-line rounded-lg pl-9 pr-3 py-2 text-[13px] outline-none focus:border-[#0f766e] transition-colors" />
+                className="w-64 sm:w-80 border-2 border-line rounded-lg pl-9 pr-3 py-2 text-[13px] outline-none focus:border-teal-700 transition-colors" />
             </div>
             {/* Period filter (by creation date). "This Week" removed; custom is a
                 month-to-month range. */}
             <select value={boardPeriod} onChange={(e) => changeBoardPeriod(e.target.value as Period)}
-              className="rounded-lg border border-line bg-white px-3 py-2 text-[12px] font-medium text-text outline-none focus:border-[#0f766e] cursor-pointer">
+              className="rounded-lg border border-line bg-white px-3 py-2 text-[12px] font-medium text-text outline-none focus:border-teal-700 cursor-pointer">
               {PERIOD_OPTIONS.filter((o) => o.value !== "week").map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.value === "month" ? "Current Month" : o.value === "custom" ? "Month to month" : o.label}
@@ -550,10 +566,10 @@ function Inner() {
             {boardPeriod === "custom" && (
               <div className="inline-flex items-center gap-1.5">
                 <input type="month" value={boardFrom} max={boardTo || undefined} onChange={(e) => changeBoardFrom(e.target.value)}
-                  className="rounded-lg border border-line bg-white px-2.5 py-2 text-[12px] outline-none focus:border-[#0f766e]" aria-label="From month" />
+                  className="rounded-lg border border-line bg-white px-2.5 py-2 text-[12px] outline-none focus:border-teal-700" aria-label="From month" />
                 <span className="text-[12px] text-text-muted">to</span>
                 <input type="month" value={boardTo} min={boardFrom || undefined} onChange={(e) => changeBoardTo(e.target.value)}
-                  className="rounded-lg border border-line bg-white px-2.5 py-2 text-[12px] outline-none focus:border-[#0f766e]" aria-label="To month" />
+                  className="rounded-lg border border-line bg-white px-2.5 py-2 text-[12px] outline-none focus:border-teal-700" aria-label="To month" />
               </div>
             )}
             {/* Owner tabs + quick filters are pushed to the right-most of the
@@ -564,7 +580,7 @@ function Inner() {
                 <div className="inline-flex border border-line rounded-lg overflow-hidden">
                   {ownerTabs.map((o) => (
                     <button key={o.id} type="button" onClick={() => setOwnerFilter(o.id)}
-                      className={["px-3 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", ownerFilter === o.id ? "bg-[#178a5c] text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
+                      className={["px-3 py-1.5 text-[12px] font-semibold border-r border-line last:border-r-0", ownerFilter === o.id ? "bg-cc-green text-white" : "text-text-mid bg-white hover:bg-bg-tint"].join(" ")}>
                       {o.name}
                     </button>
                   ))}
@@ -574,7 +590,7 @@ function Inner() {
                 .filter(([, , vis]) => vis === "all" || (vis === "admin" && isMainAdmin) || (vis === "oversee" && canOversee))
                 .map(([k, lbl]) => (
                 <button key={k} type="button" onClick={() => setQuick(quick === k ? "none" : k)}
-                  className={["px-3 py-1.5 text-[12px] font-semibold rounded-lg border", quick === k ? "bg-[#b45309] text-white border-[#b45309]" : "bg-white text-text-mid border-line hover:bg-bg-tint"].join(" ")}>
+                  className={["px-3 py-1.5 text-[12px] font-semibold rounded-lg border", quick === k ? "bg-amber-700 text-white border-amber-700" : "bg-white text-text-mid border-line hover:bg-bg-tint"].join(" ")}>
                   {lbl}
                 </button>
               ))}
@@ -598,7 +614,7 @@ function Inner() {
                   onAddNote={(c, t) => void addNote(c, t)} onDetectDocs={detectPendingDocs}
                   ownerControl={canOversee ? (
                     <select value={myDayOwner} onChange={(e) => setMyDayOwner(e.target.value)}
-                      className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-[12px] font-medium text-text outline-none focus:border-[#0f766e] cursor-pointer">
+                      className="rounded-lg border border-line bg-white px-2.5 py-1.5 text-[12px] font-medium text-text outline-none focus:border-teal-700 cursor-pointer">
                       <option value="all">Everyone</option>
                       <option value="unassigned">Unassigned</option>
                       {isManager && <option value="me">Me</option>}
@@ -628,7 +644,7 @@ function Inner() {
                         <div className="text-[11px] font-bold uppercase tracking-wide text-text-mid">{col.label}</div>
                         {/* Count in front of the ₹ value — e.g. "5 · ₹39.2 L".
                             EPC has no loan value, so it shows the count only. */}
-                        <div className="text-[11px] font-semibold text-[#0f3d2e] mt-0.5">
+                        <div className="text-[11px] font-semibold text-cc-ink mt-0.5">
                           <span className="text-text-muted">{items.length}</span>
                           {srcFilter !== "epc" && <> · {rupeesShort(colValue)}</>}
                         </div>
@@ -659,7 +675,7 @@ function Inner() {
                 <div className="min-w-0">
                   <h2 className="text-[18px] font-bold text-text truncate">{selCase.name}</h2>
                 </div>
-                <button type="button" onClick={() => setSel(null)} className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
+                <button type="button" onClick={() => setSel(null)} aria-label="Close" className="text-[18px] text-text-muted hover:text-text leading-none p-1">✕</button>
               </div>
 
               {/* View switch — Update (stats + reassign + view profile + comments,
@@ -670,7 +686,7 @@ function Inner() {
               <div className="flex gap-1.5 shrink-0">
                 {([["details", "Update"], ["emi", "EMI confirmation"]] as const).map(([k, lbl]) => (
                   <button key={k} type="button" onClick={() => setPanelTab(k)}
-                    className={["text-[12px] font-semibold rounded-lg border px-3 py-1.5 transition-colors", panelTab === k ? "border-[#0f766e] bg-[#0f766e] text-white" : "border-line bg-white text-text-mid hover:bg-bg-tint"].join(" ")}>
+                    className={["text-[12px] font-semibold rounded-lg border px-3 py-1.5 transition-colors", panelTab === k ? "border-teal-700 bg-teal-700 text-white" : "border-line bg-white text-text-mid hover:bg-bg-tint"].join(" ")}>
                     {lbl}
                   </button>
                 ))}
@@ -704,7 +720,7 @@ function Inner() {
                   <div className="text-[11px] text-text-muted mb-1">&nbsp;</div>
                   <button type="button"
                     className="w-full rounded-input border border-line bg-white text-text py-3 text-[14px] font-semibold inline-flex items-center justify-center gap-1.5 hover:bg-[#f5f8f6]"
-                    onClick={() => { sessionStorage.setItem("ccReturnTo", "/admin/board"); router.push(selCase.href as unknown as string); }}>
+                    onClick={() => { rememberBoardReturn(); router.push(selCase.href); }}>
                     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M1.5 12s3.5-7 10.5-7 10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3"/></svg>
                     View profile
                   </button>
@@ -739,7 +755,7 @@ function Inner() {
                           </div>
                         ))}
                         {comments.length > 1 && (
-                          <button type="button" className="text-[11px] font-semibold text-[#178a5c] hover:underline self-start" onClick={() => setShowCmtHist((v) => !v)}>
+                          <button type="button" className="text-[11px] font-semibold text-cc-green hover:underline self-start" onClick={() => setShowCmtHist((v) => !v)}>
                             {showCmtHist ? "Hide history ▲" : `Show history (${comments.length}) ▼`}
                           </button>
                         )}
@@ -783,8 +799,8 @@ function Inner() {
         const opensScreen = c.source === "loan" && !!drop.column && LOAN_OPENS_SCREEN.has(drop.column);
         const title = !chk.ok ? "Can’t move there" : opensScreen ? "Continue to the loan?" : "Move this case?";
         return (
-          <Modal onClose={() => setDrop(null)} busy={busy} overlayClassName={OVERLAY.grid} className="w-full max-w-sm rounded-[12px] bg-white p-5 shadow-xl">
-            <div className="text-[15px] font-semibold text-text">{title}</div>
+          <Modal onClose={() => setDrop(null)} busy={busy} overlayClassName={OVERLAY.grid} className="w-full max-w-sm rounded-[12px] bg-white p-5 shadow-xl" aria-labelledby={dropTitleId}>
+            <div id={dropTitleId} className="text-[15px] font-semibold text-text">{title}</div>
             <p className={"text-[13px] mt-2 " + (chk.ok ? "text-text-mid" : "text-red-700")}>{chk.msg}</p>
             <div className="mt-4 flex items-center justify-end gap-2">
               <button className="btn-act ghost" onClick={() => setDrop(null)} disabled={busy}>{chk.ok ? "Cancel" : "OK"}</button>

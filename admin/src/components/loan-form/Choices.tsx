@@ -22,11 +22,11 @@ export function RadioDot({ active, fade }: { active: boolean; fade?: boolean }) 
     <span
       className={[
         "absolute top-3 right-3 w-4 h-4 rounded-full border-2 flex items-center justify-center" + (fade ? " transition-colors" : ""),
-        active ? "border-[#178a5c]" : "border-line",
+        active ? "border-cc-green" : "border-line",
       ].join(" ")}
       aria-hidden
     >
-      {active && <span className="w-2 h-2 rounded-full bg-[#178a5c]" />}
+      {active && <span className="w-2 h-2 rounded-full bg-cc-green" />}
     </span>
   );
 }
@@ -47,14 +47,14 @@ export function ChoiceTile({
       onClick={onClick}
       className={[
         "text-left rounded-input border-2 p-4 transition-colors relative",
-        "focus:outline-none focus-visible:ring-2 focus-visible:ring-[#185fa5]",
+        "focus:outline-none focus-visible:ring-2 focus-visible:ring-cc-blue",
         active
-          ? "border-[#178a5c] bg-[#f0faf5]"
-          : "border-line bg-white hover:border-[#185fa5]",
+          ? "border-cc-green bg-cc-wash"
+          : "border-line bg-white hover:border-cc-blue",
       ].join(" ")}
     >
       <RadioDot active={active} fade={fadeDot} />
-      <p className={"font-display font-semibold text-[14px] pr-6 " + (active ? "text-[#0f3d2e]" : "text-text")}>
+      <p className={"font-display font-semibold text-[14px] pr-6 " + (active ? "text-cc-ink" : "text-text")}>
         {title}
       </p>
       <p className="text-[12px] text-text-muted mt-1">{desc}</p>

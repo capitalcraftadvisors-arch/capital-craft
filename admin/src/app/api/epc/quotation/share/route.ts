@@ -16,6 +16,7 @@ import { SUBSCRIPTION_MSG } from "@/lib/custom-template";
 import { uploadBuffer } from "@/lib/gcs";
 import { fileLinkUrl } from "@/lib/file-links";
 import { publicOrigin } from "@/lib/login-password-server";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,7 +45,7 @@ export async function POST(req: NextRequest) {
     await uploadBuffer(path, Buffer.from(file.pdf), "application/pdf");
     return NextResponse.json({ ok: true, url: fileLinkUrl(publicOrigin(req), path), file: file.name });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[epc/quotation/share] error:", msg);
     return err(msg, 500);
   }

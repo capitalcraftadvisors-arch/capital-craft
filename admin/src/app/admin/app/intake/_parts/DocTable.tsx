@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { authHeaders } from "@/lib/auth";
+import { errText } from "@/lib/errors";
 import { LOAN_INTAKE_THEME as THEME } from "@/components/chat/theme";
 import type { FileReceipt, Form } from "@/components/chat/types";
 import { AddFileButton, ContinueRow, DocSlotTable, FieldRows, ReadingLine, SlotFileChip } from "@/components/chat/DocSlotTable";
@@ -124,7 +125,7 @@ export default function DocTable({ appId, form, onPatch, onSkipChange, onDone, l
       onPatch(patch);
       if (mounted.current) setReads((s) => ({ ...s, [unit]: { status: "done" } }));
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Couldn't read that — replace the file and try again.";
+      const msg = errText(e, "Couldn't read that — replace the file and try again.");
       if (mounted.current) setReads((s) => ({ ...s, [unit]: { status: "error", error: msg } }));
     }
   }
@@ -147,7 +148,7 @@ export default function DocTable({ appId, form, onPatch, onSkipChange, onDone, l
       const n = Array.isArray(j.documents) ? j.documents.length : 0;
       if (mounted.current) setCombo({ status: "done", filled: n });
     } catch (e) {
-      if (mounted.current) setCombo({ status: "error", error: e instanceof Error ? e.message : "Couldn't read that PDF." });
+      if (mounted.current) setCombo({ status: "error", error: errText(e, "Couldn't read that PDF.") });
     }
   }
 
@@ -224,7 +225,7 @@ export default function DocTable({ appId, form, onPatch, onSkipChange, onDone, l
       return (
         <span className="flex flex-wrap items-center gap-2 text-[11.5px]">
           <span className="text-red-600">{rd.error || "Couldn't read that."}</span>
-          {canRetry && <button onClick={() => void runUnit(unit, filesRef.current)} className="text-[#178a5c] font-semibold hover:underline">Try again</button>}
+          {canRetry && <button onClick={() => void runUnit(unit, filesRef.current)} className="text-cc-green font-semibold hover:underline">Try again</button>}
           <span className="text-text-muted">or use “Replace” above.</span>
         </span>
       );
@@ -233,13 +234,13 @@ export default function DocTable({ appId, form, onPatch, onSkipChange, onDone, l
       const build = DOC_UNIT_FIELDS[unit];
       return build
         ? <FieldRows theme={THEME} fields={build(form)} onEdit={(field, value) => onPatch({ [field]: value })} />
-        : <span className="text-[11.5px] text-[#178a5c] font-medium">Uploaded ✓</span>;
+        : <span className="text-[11.5px] text-cc-green font-medium">Uploaded ✓</span>;
     }
     if (replacing[unit] && unitPrefilled(unit)) {
       return (
         <span className="flex items-center gap-2 text-[11.5px] text-text-muted">
           Replacing — attach the file{DOC_UNIT_PARTS[unit].length > 1 ? "s" : ""} above, or
-          <button onClick={() => setReplacing((s) => ({ ...s, [unit]: false }))} className="text-[#178a5c] font-semibold hover:underline">keep the current one</button>
+          <button onClick={() => setReplacing((s) => ({ ...s, [unit]: false }))} className="text-cc-green font-semibold hover:underline">keep the current one</button>
         </span>
       );
     }
@@ -254,15 +255,15 @@ export default function DocTable({ appId, form, onPatch, onSkipChange, onDone, l
     const canContinue = combo?.status === "done" || foundUnits.length > 0;
     return (
       <div className="flex flex-col gap-2">
-        <div className="rounded-xl border border-dashed border-[#cdeadd] bg-[#f7fcf9] px-3 py-3">
+        <div className="rounded-xl border border-dashed border-cc-line bg-cc-mist px-3 py-3">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div className="text-[12.5px] text-text-mid">
-              <span className="font-semibold text-[#0f3d2e]">Upload the combined PDF</span> — I&rsquo;ll read every document inside it.
+              <span className="font-semibold text-cc-ink">Upload the combined PDF</span> — I&rsquo;ll read every document inside it.
             </div>
             <label onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) void runCombo(f); }}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[#178a5c] bg-white px-3 py-1.5 cursor-pointer text-[12px] font-semibold text-[#178a5c] hover:bg-[#f0faf5] shrink-0">
+              className="inline-flex items-center gap-1.5 rounded-lg border border-cc-green bg-white px-3 py-1.5 cursor-pointer text-[12px] font-semibold text-cc-green hover:bg-cc-wash shrink-0">
               {combo?.status === "reading"
-                ? <><span className="w-3.5 h-3.5 rounded-full border-2 border-[#178a5c]/30 border-t-[#178a5c] animate-spin" /> Reading…</>
+                ? <><span className="w-3.5 h-3.5 rounded-full border-2 border-cc-green/30 border-t-cc-green animate-spin" /> Reading…</>
                 : <>＋ {combo?.status === "done" ? "Re-upload PDF" : "Upload combined PDF"}</>}
               <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void runCombo(f); e.currentTarget.value = ""; }} />
             </label>
@@ -277,7 +278,7 @@ export default function DocTable({ appId, form, onPatch, onSkipChange, onDone, l
               const build = DOC_UNIT_FIELDS[u];
               return (
                 <div key={u} className="px-3 py-2.5">
-                  <div className="text-[12px] font-semibold text-[#0f3d2e] mb-1">{UNIT_LABEL[u]} <span className="text-[#178a5c]">✓</span></div>
+                  <div className="text-[12px] font-semibold text-cc-ink mb-1">{UNIT_LABEL[u]} <span className="text-cc-green">✓</span></div>
                   {build ? <FieldRows theme={THEME} fields={build(form)} onEdit={(field, value) => onPatch({ [field]: value })} /> : <span className="text-[11.5px] text-text-muted">Uploaded</span>}
                 </div>
               );

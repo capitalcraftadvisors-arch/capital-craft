@@ -47,7 +47,6 @@ async function _stubSend(_p: ConfirmationPayload): Promise<ConfirmationResult> {
   };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 async function _sendViaAiSensy(p: ConfirmationPayload): Promise<ConfirmationResult> {
   // Placeholder for the real integration. The exact request shape
   // depends on which AiSensy endpoint you use (Campaign API vs the

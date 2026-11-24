@@ -16,6 +16,7 @@ import { dbAs } from "./api";
 import { generateStrongPassword, issuedPasswordOk, ISSUED_PASSWORD_RULE } from "./password-gen";
 import { sendMail, mailConfigured } from "./mailer";
 import { EMAIL_RE } from "./validators";
+import { errText } from "./errors";
 
 /** The portal's public origin as the browser saw it (Cloud Run sits behind a
  *  proxy, so the forwarded host wins over the container's own address). */
@@ -69,7 +70,7 @@ export async function emailLoginPassword(
       </div>`,
     });
   } catch (e) {
-    return { ok: false, error: "Couldn't send the email — " + (e instanceof Error ? e.message : String(e)), status: 502 };
+    return { ok: false, error: "Couldn't send the email — " + (errText(e)), status: 502 };
   }
 
   return savePassword(db, accountId, password, to);
@@ -111,7 +112,7 @@ export async function sendPasswordDraft(
       html: `<div style="font-family:Arial,sans-serif;font-size:14px;color:#0f3d2e;line-height:1.55;white-space:pre-wrap">${esc(d.body)}</div>`,
     });
   } catch (e) {
-    return { ok: false, error: "Couldn't send the email — " + (e instanceof Error ? e.message : String(e)), status: 502 };
+    return { ok: false, error: "Couldn't send the email — " + (errText(e)), status: 502 };
   }
   return savePassword(db, accountId, d.password, to);
 }

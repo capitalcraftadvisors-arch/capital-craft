@@ -25,6 +25,7 @@
 // offers) stays in its page. Only layout/chrome lives here.
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { askConfirm } from "@/lib/confirm";
 
 // Layout effect in the browser (measure before paint), plain effect on the server.
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
@@ -84,7 +85,7 @@ export function CopyButton({ value, label = "Copy" }: { value: string; label?: s
       onClick={copy}
       title={label}
       aria-label={label}
-      className={["inline-flex shrink-0 align-middle transition-colors", done ? "text-[#178a5c]" : "text-[#8ab3a1] hover:text-[#185fa5]"].join(" ")}
+      className={["inline-flex shrink-0 align-middle transition-colors", done ? "text-cc-green" : "text-cc-hint hover:text-cc-blue"].join(" ")}
     >
       {done ? I.check : I.copy}
     </button>
@@ -119,13 +120,13 @@ export function HAction({
   small?: boolean;
 }) {
   const cls =
-    variant === "approve" ? "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd] hover:bg-[#d6efe3]" :
+    variant === "approve" ? "bg-cc-tint text-cc-green border-cc-line hover:bg-cc-tint-strong" :
     variant === "reject"  ? "bg-red-50 text-red-700 border-red-200 hover:bg-red-100" :
-    variant === "primary" ? "bg-[#178a5c] text-white border-[#178a5c] hover:bg-[#12734c]" :
-    variant === "blue"    ? "bg-[#dceffb] text-[#185fa5] border-[#bfe0f5] hover:bg-[#cde6f8]" :
-    variant === "amber"   ? "bg-[#fef8ee] text-[#854f0b] border-[#854f0b]/30 hover:bg-[#fef0d6]" :
-    variant === "outline" ? "bg-white text-[#178a5c] border-[#cdeadd] hover:bg-[#f0faf5]" :
-                            "bg-white text-[#0f3d2e] border-[#cdeadd] hover:bg-[#f0faf5]";
+    variant === "primary" ? "bg-cc-green text-white border-cc-green hover:bg-cc-green-hover" :
+    variant === "blue"    ? "bg-cc-blue-tint text-cc-blue border-[#bfe0f5] hover:bg-[#cde6f8]" :
+    variant === "amber"   ? "bg-warn-wash text-warn-ink border-warn-ink/30 hover:bg-warn-tint" :
+    variant === "outline" ? "bg-white text-cc-green border-cc-line hover:bg-cc-wash" :
+                            "bg-white text-cc-ink border-cc-line hover:bg-cc-wash";
   return (
     <button
       type="button"
@@ -153,9 +154,9 @@ export function ProgressTabs({
   onChange: (key: string) => void;
 }) {
   const circle: Record<StageState, string> = {
-    done: "bg-[#178a5c] text-white",
+    done: "bg-cc-green text-white",
     current: "bg-[#ef9f27] text-white",
-    failed: "bg-[#dc2626] text-white",
+    failed: "bg-red-600 text-white",
     hold: "bg-[#f3c969] text-[#6b4a00]",
     pending: "bg-[#e3eeff] text-[#6b93c4]",
   };
@@ -180,19 +181,19 @@ export function ProgressTabs({
                 <span className={[
                   "w-[56px] h-[56px] rounded-full grid place-items-center transition-shadow [&>svg]:w-[22px] [&>svg]:h-[22px]",
                   circle[it.state],
-                  active ? "ring-4 ring-offset-2 ring-[#178a5c]/30" : "group-hover:ring-4 group-hover:ring-[#178a5c]/10",
+                  active ? "ring-4 ring-offset-2 ring-cc-green/30" : "group-hover:ring-4 group-hover:ring-cc-green/10",
                 ].join(" ")}>
                   {it.icon}
                 </span>
-                <span className={["text-[14px] leading-tight text-center", it.state === "failed" ? "font-semibold text-red-700" : it.state === "pending" && !active ? "font-medium text-[#5a8a76]" : "font-semibold text-[#0f3d2e]"].join(" ")}>
+                <span className={["text-[14px] leading-tight text-center", it.state === "failed" ? "font-semibold text-red-700" : it.state === "pending" && !active ? "font-medium text-cc-muted" : "font-semibold text-cc-ink"].join(" ")}>
                   {it.label}
                 </span>
                 {it.sub && (
-                  <span className={["-mt-1 text-[12px] text-center leading-tight", it.state === "failed" ? "text-red-700" : it.state === "pending" ? "text-[#9fb9ae]" : "text-[#5a8a76]"].join(" ")}>
+                  <span className={["-mt-1 text-[12px] text-center leading-tight", it.state === "failed" ? "text-red-700" : it.state === "pending" ? "text-[#9fb9ae]" : "text-cc-muted"].join(" ")}>
                     {it.sub}
                   </span>
                 )}
-                <span className={["h-[3px] w-12 rounded-full", active ? "bg-[#178a5c]" : "bg-transparent"].join(" ")} />
+                <span className={["h-[3px] w-12 rounded-full", active ? "bg-cc-green" : "bg-transparent"].join(" ")} />
               </button>
             </React.Fragment>
           );
@@ -274,20 +275,20 @@ export function Section({
   }
   const toggles = !!fold || !!dropdown;
   const titleEl = card ? (
-    <span className="flex items-center gap-2 text-[15px] font-semibold text-[#178a5c] shrink-0">
+    <span className="flex items-center gap-2 text-[15px] font-semibold text-cc-green shrink-0">
       {icon && <span style={{ transform: "scale(1.2)", transformOrigin: "left center", display: "inline-flex" }}>{icon}</span>}
       {title}
     </span>
-  ) : <span className="text-[15px] font-semibold text-[#0f3d2e] shrink-0">{title}</span>;
-  const summaryEl = summary && (dropdown || !fold || !open) ? <span className="text-[13px] text-[#7a958a] truncate">{summary}</span> : null;
+  ) : <span className="text-[15px] font-semibold text-cc-ink shrink-0">{title}</span>;
+  const summaryEl = summary && (dropdown || !fold || !open) ? <span className="text-[13px] text-cc-faint truncate">{summary}</span> : null;
   // A card points down and sits at the right; a flat row's points right, before the title.
   const chevron = (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"
       className={[
         "shrink-0 transition-transform duration-200",
         card
-          ? (open ? "rotate-180 text-[#178a5c]" : "text-[#8ab3a1] group-hover:text-[#178a5c]")
-          : open ? (dropdown ? "rotate-90 text-[#178a5c]" : "rotate-90 text-[#8ab3a1]") : "text-[#8ab3a1] group-hover:text-[#0f3d2e]",
+          ? (open ? "rotate-180 text-cc-green" : "text-cc-hint group-hover:text-cc-green")
+          : open ? (dropdown ? "rotate-90 text-cc-green" : "rotate-90 text-cc-hint") : "text-cc-hint group-hover:text-cc-ink",
       ].join(" ")}>
       <path d={card ? "m6 9 6 6 6-6" : "m9 18 6-6-6-6"} />
     </svg>
@@ -298,9 +299,9 @@ export function Section({
       className={
         card
           ? ["relative rounded-[12px] border px-5 py-4 transition-colors duration-200",
-              dropdown && open ? "border-[#9fd6bd] bg-[#e9f6ef]" : white ? "border-[#cdeadd] bg-white" : "border-[#cdeadd] bg-[#f4fbf7]",
+              dropdown && open ? "border-[#9fd6bd] bg-[#e9f6ef]" : white ? "border-cc-line bg-white" : "border-cc-line bg-cc-soft",
               dropdown ? "hover:border-[#9fd6bd]" : ""].join(" ")
-          : ["py-5 border-b border-[#eef3f1] last:border-b-0", dropdown ? "relative" : ""].join(" ")
+          : ["py-5 border-b border-cc-rule last:border-b-0", dropdown ? "relative" : ""].join(" ")
       }
       // A short rest before opening, so passing over a title doesn't open it.
       onMouseEnter={dropdown ? () => drop(true, 120) : undefined}
@@ -346,7 +347,7 @@ export function Section({
           >
             <div
               ref={panelRef}
-              className="rounded-[12px] border border-[#9fd6bd] bg-[#f4fbf7] p-5 shadow-[0_16px_40px_-12px_rgba(15,61,46,0.25)]"
+              className="rounded-[12px] border border-[#9fd6bd] bg-cc-soft p-5 shadow-[0_16px_40px_-12px_rgba(15,61,46,0.25)]"
               style={place.maxH ? { maxHeight: place.maxH, overflowY: "auto" } : undefined}
             >
               <div ref={bodyRef}>{children}</div>
@@ -360,7 +361,7 @@ export function Section({
 
 // ── "filled / total" — red under half, yellow from half, green "100%" ─
 export function fillTone(have: number, total: number): string {
-  if (total <= 0 || have >= total) return "text-[#178a5c]";
+  if (total <= 0 || have >= total) return "text-cc-green";
   return have / total < 0.5 ? "text-red-600" : "text-[#d4900f]";
 }
 export function fillText(have: number, total: number): string {
@@ -379,10 +380,10 @@ export function StatCards({ items }: { items: Array<{ label: string; value: stri
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       {items.map((s) => (
-        <div key={s.label} className="min-w-0 rounded-[12px] border border-[#cdeadd] bg-[#f4fbf7] px-5 py-4 shadow-[0_1px_2px_rgba(15,61,46,0.05)]">
-          <div className="text-[12.5px] text-[#5a8a76]">{s.label}</div>
-          <div className={["text-[24px] font-semibold leading-tight mt-1 truncate", s.tone ?? "text-[#0f3d2e]"].join(" ")}>{s.value}</div>
-          {s.sub && <div className="text-[12px] text-[#7a958a] mt-0.5 truncate">{s.sub}</div>}
+        <div key={s.label} className="min-w-0 rounded-[12px] border border-cc-line bg-cc-soft px-5 py-4 shadow-[0_1px_2px_rgba(15,61,46,0.05)]">
+          <div className="text-[12.5px] text-cc-muted">{s.label}</div>
+          <div className={["text-[24px] font-semibold leading-tight mt-1 truncate", s.tone ?? "text-cc-ink"].join(" ")}>{s.value}</div>
+          {s.sub && <div className="text-[12px] text-cc-faint mt-0.5 truncate">{s.sub}</div>}
         </div>
       ))}
     </div>
@@ -402,21 +403,21 @@ export function ChecksPanel({ items, extra }: { items: CheckItem[]; extra?: Reco
   const sorted = [...items].sort((a, b) => order[a.status] - order[b.status]);
   const shown = all ? sorted : sorted.filter((i) => i.status === "fail" || i.status === "partial");
   const icon = { pass: I.checkCircle, partial: I.alertCircle, fail: I.xCircle, na: I.minusCircle };
-  const iconCls = { pass: "text-[#178a5c]", partial: "text-[#b7791f]", fail: "text-red-600", na: "text-[#b4bdb9]" };
-  const valCls = { pass: "text-[#5a8a76]", partial: "text-[#854f0b] bg-[#fef0d6]", fail: "text-red-700 bg-red-50", na: "text-[#9aa5a0]" };
+  const iconCls = { pass: "text-cc-green", partial: "text-[#b7791f]", fail: "text-red-600", na: "text-[#b4bdb9]" };
+  const valCls = { pass: "text-cc-muted", partial: "text-warn-ink bg-warn-tint", fail: "text-red-700 bg-red-50", na: "text-cc-empty" };
   return (
     <div>
       <div className="flex items-center gap-3">
-        <div className="h-1.5 flex-1 rounded-full bg-[#eef3f1] overflow-hidden flex">
+        <div className="h-1.5 flex-1 rounded-full bg-cc-rule overflow-hidden flex">
           {counted > 0 && <>
-            <div className="bg-[#178a5c]" style={{ width: `${(pass / counted) * 100}%` }} />
+            <div className="bg-cc-green" style={{ width: `${(pass / counted) * 100}%` }} />
             <div className="bg-[#ef9f27]" style={{ width: `${(partial / counted) * 100}%` }} />
             <div className="bg-red-500" style={{ width: `${(fail / counted) * 100}%` }} />
           </>}
         </div>
-        <span className="shrink-0 text-[12.5px] text-[#7a958a]">
-          <span className="text-[#178a5c] font-semibold">{pass} passed</span>
-          {partial > 0 && <> · <span className="text-[#854f0b] font-semibold">{partial} partial</span></>}
+        <span className="shrink-0 text-[12.5px] text-cc-faint">
+          <span className="text-cc-green font-semibold">{pass} passed</span>
+          {partial > 0 && <> · <span className="text-warn-ink font-semibold">{partial} partial</span></>}
           {fail > 0 && <> · <span className="text-red-700 font-semibold">{fail} failed</span></>}
         </span>
       </div>
@@ -425,7 +426,7 @@ export function ChecksPanel({ items, extra }: { items: CheckItem[]; extra?: Reco
           <li key={it.key} className="py-2 text-[13px]">
             <div className="flex items-center gap-2">
               <span className={["inline-flex shrink-0", iconCls[it.status]].join(" ")}>{icon[it.status]}</span>
-              <span className={["flex-1 min-w-0 truncate", it.status === "na" ? "text-[#9aa5a0]" : "text-[#0f3d2e] font-medium"].join(" ")}>{it.label}</span>
+              <span className={["flex-1 min-w-0 truncate", it.status === "na" ? "text-cc-empty" : "text-cc-ink font-medium"].join(" ")}>{it.label}</span>
               {it.value && (
                 <span className={["shrink-0 text-[12px] font-semibold rounded-[6px]", it.status === "partial" || it.status === "fail" ? "px-2 py-0.5" : "", valCls[it.status]].join(" ")}>{it.value}</span>
               )}
@@ -435,7 +436,7 @@ export function ChecksPanel({ items, extra }: { items: CheckItem[]; extra?: Reco
         ))}
       </ul>
       {sorted.length > shown.length || all ? (
-        <button type="button" onClick={() => setAll((v) => !v)} className="mt-2 text-[12.5px] font-semibold text-[#185fa5] hover:underline">
+        <button type="button" onClick={() => setAll((v) => !v)} className="mt-2 text-[12.5px] font-semibold text-cc-blue hover:underline">
           {all ? "Show less" : `Show all ${items.length}`}
         </button>
       ) : null}
@@ -471,8 +472,8 @@ export function Pill({ children, tint, icon }: {
   icon?: React.ReactNode;
 }) {
   const cls = tint === "amber"
-    ? "bg-[#fef0d6] text-[#854f0b] font-semibold"
-    : "bg-[#dceffb] text-[#185fa5] font-medium";
+    ? "bg-warn-tint text-warn-ink font-semibold"
+    : "bg-cc-blue-tint text-cc-blue font-medium";
   return (
     <span className={["inline-flex items-center gap-1.5 text-[13px] px-3 py-1.5 rounded-[8px]", cls].join(" ")}>
       {icon && <span className="opacity-90">{icon}</span>}
@@ -491,18 +492,15 @@ export function SectionCard({
   tint?: boolean;
   adminOnly?: boolean;
 }) {
-  const borderCls =
-    accent === "blue" ? "border-[#d3e9f7]" :
-    accent === "green" ? "border-[#cdeadd]" :
-    "border-[#cdeadd]";
-  const bgCls = tint ? "bg-[#f0faf5]" : "bg-white";
-  const titleCls = accent === "blue" ? "text-[#185fa5]" : "text-[#178a5c]";
+  const borderCls = accent === "blue" ? "border-cc-blue-line" : "border-cc-line";
+  const bgCls = tint ? "bg-cc-wash" : "bg-white";
+  const titleCls = accent === "blue" ? "text-cc-blue" : "text-cc-green";
   return (
     <div className={["rounded-[12px] border p-5", borderCls, bgCls].join(" ")}>
       <div className={["text-[14px] font-semibold mb-3 flex items-center gap-2", titleCls].join(" ")}>
         <span style={{ transform: "scale(1.2)", transformOrigin: "left center", display: "inline-flex" }}>{icon}</span>
         <span>{title}</span>
-        {adminOnly && <span className="ml-1.5 text-[11px] text-[#8ab3a1] font-normal">admin</span>}
+        {adminOnly && <span className="ml-1.5 text-[11px] text-cc-hint font-normal">admin</span>}
       </div>
       <div>{children}</div>
     </div>
@@ -520,9 +518,9 @@ export function KV({ k, v, valueClass, wrap, copy, mark }: { k: string; v: unkno
   const missing = mark && display === "—";
   return (
     <div className="flex justify-between text-[14px] py-[5px] gap-3">
-      <span className="text-[#5a8a76] shrink-0">{k}</span>
+      <span className="text-cc-muted shrink-0">{k}</span>
       <span className="flex items-center gap-1.5 min-w-0">
-        <span className={[wrap ? "text-right min-w-0 break-words font-medium" : "text-right min-w-0 truncate font-medium", missing ? "text-[#d4900f]" : valueClass ?? "text-[#0f3d2e]"].join(" ")}>{display}</span>
+        <span className={[wrap ? "text-right min-w-0 break-words font-medium" : "text-right min-w-0 truncate font-medium", missing ? "text-[#d4900f]" : valueClass ?? "text-cc-ink"].join(" ")}>{display}</span>
         {copy && display !== "—" && <CopyButton value={copy} />}
       </span>
     </div>
@@ -547,8 +545,8 @@ export function FieldCol({ title, rows, children }: { title: string; rows: Field
   const fill = fieldFill(rows);
   return (
     <div className="min-w-0">
-      <div className="flex items-center justify-between gap-2 mb-1.5 pb-1.5 border-b border-[#eef3f1]">
-        <span className="text-[12.5px] font-semibold text-[#178a5c] uppercase tracking-wide">{title}</span>
+      <div className="flex items-center justify-between gap-2 mb-1.5 pb-1.5 border-b border-cc-rule">
+        <span className="text-[12.5px] font-semibold text-cc-green uppercase tracking-wide">{title}</span>
         {fill.total > 0 && <FillCount have={fill.have} total={fill.total} />}
       </div>
       {rows.map((r) => (
@@ -562,7 +560,7 @@ export function FieldCol({ title, rows, children }: { title: string; rows: Field
 export function StepBlock({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="text-[12px] font-semibold text-[#5a8a76] uppercase tracking-wider mb-2 pb-1.5 border-b border-[#cdeadd]">
+      <div className="text-[12px] font-semibold text-cc-muted uppercase tracking-wider mb-2 pb-1.5 border-b border-cc-line">
         {title}
       </div>
       {children}
@@ -589,7 +587,7 @@ export type ViewDocSlot = {
 // the same rule.
 function deleteHandler(s: ViewDocSlot): (() => void) | undefined {
   if (!s.onDelete) return undefined;
-  return () => { if (window.confirm(`Delete "${s.label}"? This can't be undone.`)) s.onDelete!(); };
+  return async () => { if (await askConfirm(`Delete "${s.label}"? This can't be undone.`, { danger: true })) s.onDelete!(); };
 }
 
 export function DocGrid({
@@ -604,13 +602,13 @@ export function DocGrid({
         s.onView ? (
           <div
             key={s.key}
-            className="border border-[#b9e2cc] bg-[#e6f6ee] rounded-[8px] px-3 py-2.5 text-[13px] flex items-center justify-between gap-2 min-w-0"
+            className="border border-[#b9e2cc] bg-cc-tint rounded-[8px] px-3 py-2.5 text-[13px] flex items-center justify-between gap-2 min-w-0"
             title={s.title}
           >
             <button
               type="button"
               onClick={s.onView}
-              className="flex-1 min-w-0 text-left text-[#0f3d2e] font-medium truncate hover:text-[#185fa5]"
+              className="flex-1 min-w-0 text-left text-cc-ink font-medium truncate hover:text-cc-blue"
             >
               {s.label}
             </button>
@@ -619,7 +617,7 @@ export function DocGrid({
                 type="button"
                 onClick={s.onView}
                 title="View" aria-label="View"
-                className="text-[#185fa5] hover:text-[#0f3d2e]"
+                className="text-cc-blue hover:text-cc-ink"
                 style={{ transform: "scale(1.15)" }}
               >
                 {eyeIcon}
@@ -629,12 +627,12 @@ export function DocGrid({
                   type="button"
                   onClick={s.onDownload}
                   title="Download" aria-label="Download"
-                  className="text-[#185fa5] hover:text-[#0f3d2e]"
+                  className="text-cc-blue hover:text-cc-ink"
                 >
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
                 </button>
               )}
-              {deleteHandler(s) && (
+              {s.onDelete && (
                 <button
                   type="button"
                   onClick={deleteHandler(s)}
@@ -652,7 +650,7 @@ export function DocGrid({
             className="border border-dashed border-[#dfe4e2] bg-[#f6f7f7] rounded-[8px] px-3 py-2.5 text-[13px] flex items-center justify-between gap-2 min-w-0"
             title="Not uploaded"
           >
-            <span className="text-[#9aa5a0] font-medium truncate">{s.label}</span>
+            <span className="text-cc-empty font-medium truncate">{s.label}</span>
             <span className="text-[#aeb8b3] text-[11px] shrink-0 whitespace-nowrap">Not uploaded</span>
           </div>
         )
@@ -726,7 +724,6 @@ export function DocViewer({
         ) : it.pdf ? (
           <iframe key={url} src={url} title={it.label} onClick={stop} className="w-full h-full max-w-[1100px] bg-white rounded-[6px]" />
         ) : (
-          /* eslint-disable-next-line @next/next/no-img-element */
           <img key={url} src={url} alt={it.label} onClick={stop} className="max-w-full max-h-full object-contain rounded-[4px]" style={{ imageOrientation: "from-image" }} />
         )}
         {index > 0 && (

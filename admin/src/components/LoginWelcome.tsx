@@ -21,13 +21,13 @@ import { fetchEpcName } from "@/lib/epc-name";
 import WelcomeScreen, { PartnerLine, PartnerLockup, WelcomePhoto } from "./WelcomeScreen";
 
 const TEAM_MESSAGES = [
-  <>Great things happen when we <b className="text-[#178a5c]">work together</b>.</>,
-  <>Every day is another opportunity to build something <b className="text-[#178a5c]">meaningful</b>.</>,
-  <>Every great journey is built by a strong team. Let&apos;s make <b className="text-[#178a5c]">today</b> count.</>,
+  <>Great things happen when we <b className="text-cc-green">work together</b>.</>,
+  <>Every day is another opportunity to build something <b className="text-cc-green">meaningful</b>.</>,
+  <>Every great journey is built by a strong team. Let&apos;s make <b className="text-cc-green">today</b> count.</>,
 ];
 const PARTNER_MESSAGE = (
   <>Thank you for being a part of our journey. Together, let&apos;s make rooftop solar more accessible,{" "}
-    <b className="text-[#178a5c]">sustainable</b> and <b className="text-[#102b5c]">impactful</b>.</>
+    <b className="text-cc-green">sustainable</b> and <b className="text-[#102b5c]">impactful</b>.</>
 );
 
 export default function LoginWelcome() {

@@ -32,6 +32,7 @@ import { publicOrigin } from "@/lib/login-password-server";
 import { fmtDateIST } from "@/lib/dates";
 import { waTel } from "@/lib/wa-link";
 import { EMAIL_RE } from "@/lib/validators";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -98,12 +99,12 @@ export async function POST(req: NextRequest) {
         sent++;
       } catch (e) {
         failed++;
-        console.error("[cron/followups] send failed:", to, e instanceof Error ? e.message : String(e));
+        console.error("[cron/followups] send failed:", to, errText(e));
       }
     }
     return NextResponse.json({ ok: true, sent, failed });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[cron/followups] error:", msg);
     return err(msg, 500);
   }

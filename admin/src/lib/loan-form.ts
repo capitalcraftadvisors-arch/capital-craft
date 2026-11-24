@@ -37,7 +37,7 @@ export async function hydrateLoanForm(id: string): Promise<HydratedLoan> {
   ]);
   const a = (la ?? {}) as Record<string, any>;
   const p: LoanForm = {};
-  const S = (k: string, v: any) => { if (v != null && String(v).trim() !== "") p[k] = String(v); };
+  const S = (k: string, v: unknown) => { if (v != null && String(v).trim() !== "") p[k] = String(v); };
   S("borrower_mobile", a.borrower_mobile); S("borrower_name", a.borrower_name); S("borrower_email", a.borrower_email);
   S("borrower_pan", a.borrower_pan); S("borrower_father_name", a.borrower_father_name);
   S("aadhaar_name", a.aadhaar_name); S("aadhaar_dob", a.aadhaar_dob); S("aadhaar_gender", a.aadhaar_gender);

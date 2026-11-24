@@ -24,8 +24,8 @@ export default function LenderLines({ keys, lender, lenderLabel }: { keys: strin
           : l?.docs_given && l.docs_given_at ? fmtDateTime(l.docs_given_at) : null;
         return (
           <li key={key} className="py-2.5 flex items-center gap-3 text-[14px]">
-            <span className="flex-1 min-w-0 font-semibold text-[#0f3d2e] truncate">{lenderLabel(key)}</span>
-            {when && <span className="text-[12px] text-[#7a958a] whitespace-nowrap">{when}</span>}
+            <span className="flex-1 min-w-0 font-semibold text-cc-ink truncate">{lenderLabel(key)}</span>
+            {when && <span className="text-[12px] text-cc-faint whitespace-nowrap">{when}</span>}
             <LenderStatePill state={lenderStateOf(key)} />
           </li>
         );
@@ -36,19 +36,19 @@ export default function LenderLines({ keys, lender, lenderLabel }: { keys: strin
 
 function LenderStatePill({ state }: { state: "approved" | "docs" | "none" | "rejected" }) {
   if (state === "rejected") {
-    return <span className="text-[13px] text-[#dc2626] font-semibold inline-flex items-center gap-1.5">
-      <span className="inline-block w-2.5 h-2.5 rounded-full bg-[#dc2626]" /> rejected
+    return <span className="text-[13px] text-red-600 font-semibold inline-flex items-center gap-1.5">
+      <span className="inline-block w-2.5 h-2.5 rounded-full bg-red-600" /> rejected
     </span>;
   }
   if (state === "approved") {
-    return <span className="text-[13px] text-[#178a5c] font-semibold inline-flex items-center gap-1.5">
-      <span className="inline-block w-2.5 h-2.5 rounded-full bg-[#178a5c]" /> approved
+    return <span className="text-[13px] text-cc-green font-semibold inline-flex items-center gap-1.5">
+      <span className="inline-block w-2.5 h-2.5 rounded-full bg-cc-green" /> approved
     </span>;
   }
   if (state === "docs") {
-    return <span className="text-[13px] text-[#854f0b] font-medium inline-flex items-center gap-1.5">
+    return <span className="text-[13px] text-warn-ink font-medium inline-flex items-center gap-1.5">
       <span className="inline-block w-2.5 h-2.5 rounded-full bg-[#ef9f27]" /> docs sent
     </span>;
   }
-  return <span className="text-[13px] text-[#8ab3a1]">not sent</span>;
+  return <span className="text-[13px] text-cc-hint">not sent</span>;
 }

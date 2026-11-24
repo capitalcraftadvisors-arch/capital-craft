@@ -183,7 +183,7 @@ function GeoStateTable({ loans, w }: { loans: Loan[]; w: Windows }) {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.label} className="border-b border-[#eef1f4] last:border-0">
+                <tr key={r.label} className="border-b border-grey-line last:border-0">
                   <td className="py-2.5 pr-3 font-semibold text-text">{r.label}</td>
                   <td className="py-2.5 px-3 text-center">{fmtInt(r.apps)}</td>
                   <td className="py-2.5 px-3 text-center">{fmtInt(r.san)}</td>
@@ -256,7 +256,7 @@ export function CrossTable({ res, com, ins, epc }: { res: LoanSection; com: Loan
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.name} className="border-b border-[#eef1f4] last:border-0">
+              <tr key={r.name} className="border-b border-grey-line last:border-0">
                 <td className="py-2.5 pr-3 font-semibold text-text">{r.name}</td>
                 <td className="py-2.5 px-3 text-center">{fmtInt(r.apps)}</td>
                 <td className="py-2.5 px-3 text-center">{r.rate == null ? "—" : fmtPct1(r.rate)}</td>

@@ -12,6 +12,7 @@ import { getBusiness, setBusiness, isImpersonating } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { EMAIL_RE } from "@/lib/validators";
 import { DESIGNATION_OPTIONS as STANDARD_OPTIONS } from "@/lib/epc-stakeholders";
+import { notify } from "@/lib/notify";
 
 // Designation choices for the dropdown. "Other" reveals a free-text field
 // below the dropdown; the typed value goes into contact_designation (NOT
@@ -141,7 +142,7 @@ export default function Step1Page() {
       })
       .eq("id", biz.id);
     setSaving(false);
-    if (error) return alert(error.message);
+    if (error) return notify.error(error.message);
     setBusiness({ ...biz, current_step: 2 });
     router.push("/onboarding/step-2");
   }

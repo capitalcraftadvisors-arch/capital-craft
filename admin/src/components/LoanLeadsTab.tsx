@@ -1,5 +1,4 @@
 "use client";
-import { fmtDate } from "@/lib/dates";
 
 // Loan-lead dashboard (admin console "Lead" tab). Admin-created early-stage
 // loan leads (table `loan_leads`), DISTINCT from the non-EPC marketing leads
@@ -10,9 +9,11 @@ import { fmtDate } from "@/lib/dates";
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
 import { supabase } from "@/lib/supabase";
+import { fmtDate } from "@/lib/dates";
 import { fmtRupees } from "@/lib/money";
+import { notify } from "@/lib/notify";
+import { askConfirm } from "@/lib/confirm";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import RowLink from "@/components/RowLink";
@@ -140,7 +141,7 @@ export default function LoanLeadsTab() {
       .select("id")
       .single();
     setAdding(false);
-    if (error || !data) { alert("Couldn't create the lead: " + (error?.message ?? "unknown error")); return; }
+    if (error || !data) { notify.error("Couldn't create the lead: " + (error?.message ?? "unknown error")); return; }
     router.push(`/admin/lead/${(data as { id: string }).id}/step-1`);
   }
 
@@ -149,11 +150,11 @@ export default function LoanLeadsTab() {
   async function readyForLoan(r: LeadRow) {
     if (converting) return;
     if (!r.epc_business_id) {
-      toast.error("This lead has a typed EPC name. Open the lead and assign an onboarded EPC before moving it to Loan Applications.");
+      notify.error("This lead has a typed EPC name. Open the lead and assign an onboarded EPC before moving it to Loan Applications.");
       router.push(`/admin/lead/${r.id}/view`);
       return;
     }
-    if (!window.confirm(`Move "${r.name || "this lead"}" to Loan Applications as a new draft? It will disappear from Leads.`)) return;
+    if (!(await askConfirm(`Move "${r.name || "this lead"}" to Loan Applications as a new draft? It will disappear from Leads.`))) return;
     setConverting(r.id);
     try {
       const res = await fetch(`/api/admin/lead/${r.id}/convert-to-loan-app`, {
@@ -161,10 +162,10 @@ export default function LoanLeadsTab() {
         headers: authHeaders(),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) { toast.error(data?.error || `Conversion failed (HTTP ${res.status}).`); setConverting(null); return; }
+      if (!res.ok || !data?.ok) { notify.error(data?.error || `Conversion failed (HTTP ${res.status}).`); setConverting(null); return; }
       router.push(`/admin/app/${data.application_id}/view`);
     } catch (e) {
-      alert("Conversion failed: " + (e as Error).message);
+      notify.error("Conversion failed: " + (e as Error).message);
       setConverting(null);
     }
   }
@@ -207,54 +208,53 @@ export default function LoanLeadsTab() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-[#5a8a76]">Loading…</td></tr>
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-cc-muted">Loading…</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-[#5a8a76]">{counts[view] > 0 ? "No leads match." : VIEW_TABS.find((t) => t.key === view)!.empty}</td></tr>
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-cc-muted">{counts[view] > 0 ? "No leads match." : VIEW_TABS.find((t) => t.key === view)!.empty}</td></tr>
               ) : (
                 filtered.map((r) => (
                   <tr
                     key={r.id}
                     onClick={() => openLead(r.id)}
                     style={{ transition: "background-color 2s ease-out", backgroundColor: highlightId === r.id ? "var(--acc-tint)" : undefined }}
-                    className={"border-b border-[#f0f4f2] last:border-0 cursor-pointer " + (r.aborted_at ? "bg-[#f4f5f7] hover:bg-[#eceef1]" : r.dead_at ? "bg-[#fdf0f0] hover:bg-[#fbe6e6]" : "hover:bg-[#f7f7fd]")}
+                    className={"border-b border-cc-row-line-soft last:border-0 cursor-pointer " + (r.aborted_at ? "bg-[#f4f5f7] hover:bg-[#eceef1]" : r.dead_at ? "bg-[#fdf0f0] hover:bg-[#fbe6e6]" : "hover:bg-[#f7f7fd]")}
                   >
                     <td className="px-4 py-3">
-                      <div className="font-semibold text-[#0f3d2e]">{r.name ? <RowLink href={`/admin/lead/${r.id}/view`} onOpen={() => openLead(r.id)}>{r.name}</RowLink> : "—"}</div>
-                      <div className="text-[12px] text-[#5a8a76] flex items-center gap-2">
+                      <div className="font-semibold text-cc-ink">{r.name ? <RowLink href={`/admin/lead/${r.id}/view`} onOpen={() => openLead(r.id)}>{r.name}</RowLink> : "—"}</div>
+                      <div className="text-[12px] text-cc-muted flex items-center gap-2">
                         <span className="font-mono text-[#4338ca]">{r.lead_display_id || "—"}</span>
                         {r.mobile && <span>· +91 {r.mobile}</span>}
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="text-[#0f3d2e]">{epcName(r)}</div>
+                      <div className="text-cc-ink">{epcName(r)}</div>
                       {r.lead_owner_name
-                        ? <div className="text-[12px] text-[#5a8a76]">Owner: {r.lead_owner_name}</div>
+                        ? <div className="text-[12px] text-cc-muted">Owner: {r.lead_owner_name}</div>
                         : <div className="text-[12px] text-[#b6bfc9]">Owner: —</div>}
                       {!r.epc_business_id && r.epc_name_custom && <div className="text-[11px] text-amber-700">Not onboarded</div>}
                     </td>
-                    <td className="px-4 py-3 text-center text-[#0f3d2e]">
+                    <td className="px-4 py-3 text-center text-cc-ink">
                       {r.project_size != null ? `${r.project_size} ${(r.project_size_unit || "kw").toUpperCase()}` : "—"}
                     </td>
-                    <td className="px-4 py-3 text-center font-semibold text-[#0f3d2e]">{fmtRupees(r.loan_amount)}</td>
-                    <td className="px-4 py-3 text-center text-[13px] text-[#5a8a76]">
+                    <td className="px-4 py-3 text-center font-semibold text-cc-ink">{fmtRupees(r.loan_amount)}</td>
+                    <td className="px-4 py-3 text-center text-[13px] text-cc-muted">
                       {fmtDate(r.created_at)}
                     </td>
-                    <td className="px-4 py-3 text-center text-[13px] text-[#5a8a76]">{r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : createdByLabel(r.created_by)}</td>
+                    <td className="px-4 py-3 text-center text-[13px] text-cc-muted">{r.created_by_user_id ? (adminNames.get(r.created_by_user_id) ?? "Admin") : createdByLabel(r.created_by)}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-center gap-2 flex-wrap">
                         {r.aborted_at ? (
                           <span title={r.abort_reason ? `Reason: ${r.abort_reason}` : undefined} className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#eceef1] text-[#475467] border border-[#d0d5dd]">Aborted</span>
                         ) : r.dead_at ? (
-                          <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#fbe0e0] text-[#b42318] border border-[#f2c4c4]">Dead lead</span>
+                          <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#fbe0e0] text-danger-ink border border-danger-line">Dead lead</span>
                         ) : (
                           <>
-                            <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#e7f5ee] text-[#0f7a52] border border-[#cdeadd]">New</span>
+                            <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-[#e7f5ee] text-cc-green-text border border-cc-line">New</span>
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); void readyForLoan(r); }}
                               disabled={converting === r.id}
-                              className="inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-60"
-                              style={{ backgroundColor: "#178a5c" }}
+                              className="inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-[12px] font-semibold text-white bg-cc-green disabled:opacity-60"
                               title="Move this lead to Loan Applications"
                             >
                               {converting === r.id ? "Moving…" : "Ready for Loan"}

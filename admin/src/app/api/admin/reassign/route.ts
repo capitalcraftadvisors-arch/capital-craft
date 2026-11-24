@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { logUserActivity } from "@/lib/user-activity-server";
+import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,10 +39,10 @@ export async function POST(req: NextRequest) {
     const body = (await req.json().catch(() => ({}))) as {
       module?: string; record_id?: string; assigned_to_user_id?: string | null;
     };
-    const module = String(body.module ?? "");
+    const moduleKey = String(body.module ?? "");
     const recordId = String(body.record_id ?? "");
     const assignee = body.assigned_to_user_id ?? null;
-    const table = TABLES[module];
+    const table = TABLES[moduleKey];
     if (!table) return err("invalid module", 400);
     if (!UUID_RE.test(recordId)) return err("invalid record_id", 400);
     if (assignee !== null && !UUID_RE.test(String(assignee))) return err("invalid assigned_to_user_id", 400);
@@ -67,7 +68,7 @@ export async function POST(req: NextRequest) {
     await logUserActivity(supabase, {
       actor_user_id: claims.business_id,
       subject_user_id: assignee,
-      module,
+      module: moduleKey,
       record_id: recordId,
       action: previous ? "reassigned" : "assigned",
       previous_value: previous,
@@ -76,7 +77,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ ok: true, previous, assigned_to_user_id: assignee });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
+    const msg = errText(e);
     console.error("[reassign] error:", msg);
     return err(msg, 500);
   }

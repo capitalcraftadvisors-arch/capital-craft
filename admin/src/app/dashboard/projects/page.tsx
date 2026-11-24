@@ -7,7 +7,7 @@
 // only the projects given to them and change only the stage, photos and notes.
 // Partner Portal v2 — the demo EPC only for now (portalV2).
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { NAVY } from "@/components/partner/PartnerShell";
 import ProjectMoney from "@/components/partner/ProjectMoney";
@@ -21,6 +21,7 @@ import { fetchMembers, type MemberRow } from "@/lib/members";
 import { fmtDate } from "@/lib/dates";
 import { fmtRupees } from "@/lib/money";
 import { MOBILE_RE } from "@/lib/validators";
+import { askConfirm } from "@/lib/confirm";
 import {
   fetchProjects, fetchHistory, saveProject, saveNotes, setStage, deleteProject, fetchPhotos, addPhoto, removePhoto,
   stagesFor, needsPhotos, daysInStage, PROJECT_STAGES, STAGE_LABEL, PAYMENT_MODES, PAYMENT_LABEL, PHOTOS_NEEDED,
@@ -29,8 +30,8 @@ import {
 
 type Filter = "all" | ProjectStage;
 const STAGE_PILL = (s: ProjectStage) =>
-  s === "closed" ? "bg-[#eef1f5] text-[#475569]" : s === "commissioned" ? "bg-[#e6f6ee] text-[#178a5c]"
-  : needsPhotos(s) ? "bg-[#efedff] text-[#5b3fc4]" : "bg-[#e8effc] text-[#1e3a8a]";
+  s === "closed" ? "bg-grey-chip text-[#475569]" : s === "commissioned" ? "bg-cc-tint text-cc-green"
+  : needsPhotos(s) ? "bg-[#efedff] text-[#5b3fc4]" : "bg-navy-tint text-navy";
 const days = (n: number) => `${n} day${n === 1 ? "" : "s"}`;
 
 export default function ProjectsPage() {
@@ -45,7 +46,7 @@ export default function ProjectsPage() {
   const [open, setOpen] = useState<ProjectRow | "new" | null>(null);
   const [crew, setCrew] = useState<MemberRow[]>([]); // Site staff to give a project to
 
-  useEffect(() => { if (!v2) router.replace("/dashboard" as any); }, [v2, router]);
+  useEffect(() => { if (!v2) router.replace("/dashboard"); }, [v2, router]);
   useEffect(() => {
     fetchProjects().then((r) => {
       setRows(r);
@@ -83,7 +84,7 @@ export default function ProjectsPage() {
             </button>
           ))}
         </div>
-        <input className={input + " max-w-[240px] ml-auto"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, mobile, city" />
+        <input className={input + " max-w-[240px] ml-auto"} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, mobile, city" aria-label="Search name, mobile, city" />
         {work && (
           <button type="button" onClick={() => setOpen("new")} className="px-4 py-2.5 rounded-xl text-white text-[13.5px] font-semibold" style={{ background: NAVY }}>
             + New project
@@ -136,7 +137,7 @@ export default function ProjectsPage() {
 
       {open && rows && (
         <ProjectEditor project={open === "new" ? null : open} crew={crew} assign={assign} site={site}
-          canEdit={work} canDelete={assign} onGo={(href) => router.push(href as any)}
+          canEdit={work} canDelete={assign} onGo={(href) => router.push(href)}
           onSaved={(r, isNew) => { if (isNew) setRows([r, ...rows]); else replace(r); setOpen(r); }}
           onDeleted={(id) => { setRows(rows.filter((x) => x.id !== id)); setOpen(null); }}
           onClose={() => setOpen(null)} />
@@ -165,6 +166,7 @@ function ProjectEditor({ project, crew, assign, site, canEdit, canDelete, onGo, 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const titleId = useId();
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((x) => ({ ...x, [k]: v }));
   const work = canEdit || site; // may move the stage, add photos, write notes
 
@@ -204,21 +206,21 @@ function ProjectEditor({ project, crew, assign, site, canEdit, canDelete, onGo, 
   });
 
   const upload = (f: File) => run(async () => { if (p) setPhotos(await addPhoto(p.id, f)); });
-  const unphoto = (path: string) => {
-    if (!p || !window.confirm("Delete this photo? This can't be undone.")) return;
+  const unphoto = async (path: string) => {
+    if (!p || !(await askConfirm("Delete this photo? This can't be undone.", { danger: true }))) return;
     void run(async () => setPhotos(await removePhoto(p.id, path)));
   };
-  const remove = () => {
-    if (!p || !window.confirm(`Delete the project ${p.customer_name}? This can't be undone.`)) return;
+  const remove = async () => {
+    if (!p || !(await askConfirm(`Delete the project ${p.customer_name}? This can't be undone.`, { danger: true }))) return;
     void run(async () => { await deleteProject(p.id); onDeleted(p.id); });
   };
 
   return (
-    <Modal onClose={onClose} closeOnBackdrop="mousedown" busy={busy} overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[760px] max-h-[92vh] overflow-y-auto p-6">
+    <Modal onClose={onClose} closeOnBackdrop="mousedown" busy={busy} overlayClassName={OVERLAY.soft} className="bg-white rounded-2xl shadow-xl w-full max-w-[760px] max-h-[92vh] overflow-y-auto p-6" aria-labelledby={titleId}>
       <div className="flex items-start justify-between gap-3 mb-4">
-        <div className="text-[17px] font-display font-bold text-[#0f3d2e]">{p ? p.customer_name : "New project"}</div>
+        <div id={titleId} className="text-[17px] font-display font-bold text-cc-ink">{p ? p.customer_name : "New project"}</div>
         {p?.application_id && !site && (
-          <button type="button" onClick={() => onGo(`/dashboard/${p.application_id}`)} className="text-[13px] font-semibold text-[#1e3a8a] hover:underline">Open loan</button>
+          <button type="button" onClick={() => onGo(`/dashboard/${p.application_id}`)} className="text-[13px] font-semibold text-navy hover:underline">Open loan</button>
         )}
       </div>
 
@@ -228,7 +230,7 @@ function ProjectEditor({ project, crew, assign, site, canEdit, canDelete, onGo, 
           <div className="flex flex-wrap gap-1.5">
             {stages.map((s, i) => (
               <span key={s} className={["px-2.5 py-1 rounded-full text-[12px] font-semibold border",
-                i < at ? "bg-[#e6f6ee] text-[#178a5c] border-transparent" : i === at ? "text-white border-transparent" : "bg-white text-text-muted border-line"].join(" ")}
+                i < at ? "bg-cc-tint text-cc-green border-transparent" : i === at ? "text-white border-transparent" : "bg-white text-text-muted border-line"].join(" ")}
                 style={i === at ? { background: NAVY } : undefined}>
                 {i < at ? "✓ " : ""}{STAGE_LABEL[s]}
               </span>
@@ -261,14 +263,14 @@ function ProjectEditor({ project, crew, assign, site, canEdit, canDelete, onGo, 
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <a href={ph.url} target="_blank" rel="noreferrer"><img src={ph.url} alt="" className="w-full h-full object-cover" /></a>
                 {work && (
-                  <button type="button" onClick={() => unphoto(ph.path)} disabled={busy} aria-label="Delete photo"
+                  <button type="button" onClick={() => void unphoto(ph.path)} disabled={busy} aria-label="Delete photo"
                     className="absolute top-1 right-1 w-6 h-6 rounded-full bg-white/90 text-red-600 text-[13px] font-bold grid place-items-center">×</button>
                 )}
               </div>
             ))}
             {work && (
-              <button type="button" onClick={() => fileRef.current?.click()} disabled={busy}
-                className="w-24 h-24 rounded-xl border-2 border-dashed border-line text-text-muted text-[22px] grid place-items-center hover:border-[#1e3a8a] hover:text-[#1e3a8a] disabled:opacity-60">+</button>
+              <button type="button" onClick={() => fileRef.current?.click()} disabled={busy} aria-label="Add photo"
+                className="w-24 h-24 rounded-xl border-2 border-dashed border-line text-text-muted text-[22px] grid place-items-center hover:border-navy hover:text-navy disabled:opacity-60">+</button>
             )}
             <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden"
               onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void upload(f); }} />
@@ -324,7 +326,7 @@ function ProjectEditor({ project, crew, assign, site, canEdit, canDelete, onGo, 
       {error && <p className="text-[13px] text-red-600 mt-3">{error}</p>}
       <div className="flex items-center gap-2 mt-5">
         {canDelete && p && (
-          <button type="button" onClick={remove} disabled={busy} className="px-3 py-2 rounded-xl text-[13.5px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60">Delete</button>
+          <button type="button" onClick={() => void remove()} disabled={busy} className="px-3 py-2 rounded-xl text-[13.5px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60">Delete</button>
         )}
         <button type="button" onClick={onClose} disabled={busy} className="ml-auto px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-text-mid hover:bg-bg-soft disabled:opacity-60">{work ? "Cancel" : "Close"}</button>
         {work && (

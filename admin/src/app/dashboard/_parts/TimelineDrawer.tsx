@@ -2,6 +2,7 @@
 
 // Partner dashboard · the per-application timeline drawer.
 
+import { useId } from "react";
 import Modal from "@/components/ui/Modal";
 import { NAVY_ACCENT } from "@/components/partner/PartnerShell";
 import { fmtRupees } from "@/lib/money";
@@ -11,6 +12,7 @@ import { STAGE4_LABEL, STAGE4_PILL, appliedAmount, borrower, canEpcEdit, capacit
 export default function TimelineDrawer({ row, onClose, onEdit, onTranche, onMessage, readOnly }: {
   row: AppRow; onClose: () => void; onEdit: () => void; onTranche: () => void; onMessage: () => void; readOnly: boolean;
 }) {
+  const titleId = useId();
   const stg = stage4(row);
   const rejected = stg === "rejected";
   type Step = { label: string; at: string | null; note?: string; amount?: number | null };
@@ -24,11 +26,11 @@ export default function TimelineDrawer({ row, onClose, onEdit, onTranche, onMess
   ];
   const firstPendingIdx = steps.findIndex((s) => !s.at);
   return (
-    <Modal onClose={onClose} overlayClassName="fixed inset-0 z-50 flex justify-end" backdropClassName="absolute inset-0 bg-black/30" as="aside" className="relative w-full max-w-[440px] h-full bg-white shadow-2xl overflow-y-auto">
+    <Modal onClose={onClose} overlayClassName="fixed inset-0 z-50 flex justify-end" backdropClassName="absolute inset-0 bg-black/30" as="aside" className="relative w-full max-w-[440px] h-full bg-white shadow-2xl overflow-y-auto" aria-labelledby={titleId}>
       <div className="sticky top-0 bg-white border-b border-line px-5 py-4 flex items-start justify-between gap-3">
-        <div><div className="font-display text-[18px] font-bold text-[#0f3d2e]">{borrower(row)}</div>
-          <div className="text-[11px] font-mono text-[#185fa5]">{row.loan_display_id ?? row.id.slice(0, 8).toUpperCase()}</div></div>
-        <button onClick={onClose} className="text-text-muted hover:text-text text-[20px] leading-none">✕</button>
+        <div><div id={titleId} className="font-display text-[18px] font-bold text-cc-ink">{borrower(row)}</div>
+          <div className="text-[11px] font-mono text-cc-blue">{row.loan_display_id ?? row.id.slice(0, 8).toUpperCase()}</div></div>
+        <button onClick={onClose} aria-label="Close" className="text-text-muted hover:text-text text-[20px] leading-none">✕</button>
       </div>
 
       <div className="px-5 py-4">
@@ -48,7 +50,7 @@ export default function TimelineDrawer({ row, onClose, onEdit, onTranche, onMess
               <div key={s.label} className={["flex gap-3", stop ? "opacity-40" : ""].join(" ")}>
                 <div className="flex flex-col items-center">
                   <div className={["w-6 h-6 rounded-full grid place-items-center shrink-0",
-                    done ? "bg-[#178a5c] text-white" : current ? "text-white" : "border-2 border-line text-text-muted"].join(" ")}
+                    done ? "bg-cc-green text-white" : current ? "text-white" : "border-2 border-line text-text-muted"].join(" ")}
                     style={current ? { background: NAVY_ACCENT } : undefined}>
                     {done ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg> : current ? <span className="w-2 h-2 rounded-full bg-white" /> : <span className="w-1.5 h-1.5 rounded-full bg-line" />}
                   </div>
@@ -83,7 +85,7 @@ export default function TimelineDrawer({ row, onClose, onEdit, onTranche, onMess
             stg !== "rejected" ? (
               <button onClick={onEdit} className="flex-1 px-4 py-2.5 rounded-xl text-white text-[13px] font-semibold" style={{ background: NAVY_ACCENT }}>Edit application</button>
             ) : (
-              <button onClick={onEdit} className="flex-1 px-4 py-2.5 rounded-xl border border-[#1e3a8a] text-[#1e3a8a] text-[13px] font-semibold">Re-submit</button>
+              <button onClick={onEdit} className="flex-1 px-4 py-2.5 rounded-xl border border-navy text-navy text-[13px] font-semibold">Re-submit</button>
             )
           ) : (
             <div className="flex-1 px-4 py-2.5 rounded-xl border border-line text-text-muted text-[13px] font-semibold inline-flex items-center justify-center gap-1.5 select-none">

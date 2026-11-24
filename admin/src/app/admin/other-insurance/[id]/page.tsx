@@ -105,40 +105,39 @@ function Inner() {
     if (id) {
       const { error: e } = await supabase().from("other_insurance").update(fields()).eq("id", id);
       if (e) setError("Couldn't save — " + e.message);
-      else { invalidate(OTHER_INS_LIST_CACHE); router.push(`/admin/other-insurance/${id}/view` as any); return; }
+      else { invalidate(OTHER_INS_LIST_CACHE); router.push(`/admin/other-insurance/${id}/view`); return; }
     }
     setSaving(false);
   }
 
   function back() {
-    if (rowId) { router.push(`/admin/other-insurance/${rowId}/view` as any); return; }
+    if (rowId) { router.push(`/admin/other-insurance/${rowId}/view`); return; }
     sessionStorage.setItem("adminList.tab", "otherins");
     router.push("/admin");
   }
 
   if (!allowed) return null;
-  if (loading) return <main className="min-h-screen grid place-items-center"><p className="text-[#5a8a76]">Loading…</p></main>;
+  if (loading) return <main className="min-h-screen grid place-items-center"><p className="text-cc-muted">Loading…</p></main>;
   if (rowId && !row) return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Insurance file not found.</p></main>;
 
   const docs = otherInsDocLists(row);
-  const inputCls = "w-full border border-[#cdeadd] rounded-[8px] px-3 py-2.5 text-[14px] focus:border-[#185fa5] outline-none bg-white";
+  const inputCls = "w-full border border-cc-line rounded-[8px] px-3 py-2.5 text-[14px] focus:border-cc-blue outline-none bg-white";
 
   return (
     <main className="min-h-screen bg-white">
-      <header className="border-b border-[#cdeadd] bg-white sticky top-0 z-30">
+      <header className="border-b border-cc-line bg-white sticky top-0 z-30">
         <div className="w-full px-5 sm:px-8 h-14 flex items-center justify-between">
-          <button onClick={back} className="text-[14px] text-[#5a8a76] hover:text-[#0f3d2e] inline-flex items-center gap-1">
+          <button onClick={back} className="text-[14px] text-cc-muted hover:text-cc-ink inline-flex items-center gap-1">
             ← {rowId ? "Back to profile" : "Back to Other Insurance"}
           </button>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/brand/capital-craft.png" alt="Capital Craft" className="h-7 w-auto object-contain" />
         </div>
       </header>
 
       <section className="max-w-3xl mx-auto px-5 sm:px-8 py-8 space-y-5">
         <div>
-          <h1 className="font-display text-[24px] font-bold text-[#0f3d2e]">{row?.customer_name || "New insurance file"}</h1>
-          {row?.display_id && <p className="text-[12px] font-mono text-[#185fa5] mt-0.5">{row.display_id}</p>}
+          <h1 className="font-display text-[24px] font-bold text-cc-ink">{row?.customer_name || "New insurance file"}</h1>
+          {row?.display_id && <p className="text-[12px] font-mono text-cc-blue mt-0.5">{row.display_id}</p>}
         </div>
 
         <SectionCard title="KYC documents" accent="green" icon={I.id}>
@@ -152,11 +151,11 @@ function Inner() {
         <SectionCard title="Validity period" accent="green" icon={I.invoice}>
           <div className="grid sm:grid-cols-2 gap-3">
             <div>
-              <p className="text-[12px] text-[#5a8a76] mb-1">Valid from</p>
+              <p className="text-[12px] text-cc-muted mb-1">Valid from</p>
               <DateField className={inputCls} value={from} onChange={setFrom} ariaLabel="Valid from" />
             </div>
             <div>
-              <p className="text-[12px] text-[#5a8a76] mb-1">Valid to</p>
+              <p className="text-[12px] text-cc-muted mb-1">Valid to</p>
               <DateField className={inputCls} value={to} onChange={setTo} min={from || undefined} ariaLabel="Valid to" />
             </div>
           </div>
@@ -165,19 +164,19 @@ function Inner() {
         <SectionCard title="Customer" accent="green" icon={I.user}>
           <div className="space-y-3">
             <div>
-              <p className="text-[12px] text-[#5a8a76] mb-1">Customer name</p>
+              <p className="text-[12px] text-cc-muted mb-1">Customer name</p>
               <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
             </div>
             <div className="grid sm:grid-cols-2 gap-3">
               <div>
-                <p className="text-[12px] text-[#5a8a76] mb-1">Sum insured (optional)</p>
+                <p className="text-[12px] text-cc-muted mb-1">Sum insured (optional)</p>
                 <input className={inputCls} inputMode="decimal" value={sumInsured}
                   onChange={(e) => setSumInsured(amountInput(e.target.value))} />
               </div>
               <div>
-                <p className="text-[12px] text-[#5a8a76] mb-1">Insurance company (optional)</p>
+                <p className="text-[12px] text-cc-muted mb-1">Insurance company (optional)</p>
                 <SearchableSelect label="" value={company} options={companies} onChange={setCompany} clearable
-                  triggerClass={inputCls + " hover:border-[#185fa5]"} />
+                  triggerClass={inputCls + " hover:border-cc-blue"} />
               </div>
             </div>
           </div>
@@ -186,7 +185,7 @@ function Inner() {
         {error && <p className="text-[13px] text-red-700 bg-red-50 border border-red-200 rounded-[8px] px-3 py-2">{error}</p>}
         <div className="flex justify-end">
           <button type="button" onClick={() => void save()} disabled={saving}
-            className="px-5 py-2.5 bg-[#178a5c] text-white rounded-[8px] text-[14px] font-semibold hover:bg-[#12734c] disabled:opacity-60">
+            className="px-5 py-2.5 bg-cc-green text-white rounded-[8px] text-[14px] font-semibold hover:bg-cc-green-hover disabled:opacity-60">
             {saving ? "Saving…" : "Save"}
           </button>
         </div>

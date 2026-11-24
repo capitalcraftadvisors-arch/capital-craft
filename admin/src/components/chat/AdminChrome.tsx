@@ -27,7 +27,7 @@ export function AdminChatHeader({ theme, title, subtitle, progress, onBack, onCl
   return (
     <>
       <header className={`shrink-0 px-3 sm:px-5 py-2.5 ${theme.headerBg} text-white flex items-center gap-3 shadow-sm`}>
-        <button onClick={onBack} className="p-1 -ml-1 text-white/80 hover:text-white text-[20px] leading-none">←</button>
+        <button onClick={onBack} aria-label="Back" className="p-1 -ml-1 text-white/80 hover:text-white text-[20px] leading-none">←</button>
         <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${theme.avatar} ring-2 ring-white/15 flex items-center justify-center font-display font-bold text-[15px]`}>CC</div>
         <div className="min-w-0 flex-1">
           <div className="font-display font-bold text-[15px] leading-tight truncate">Capital Craft · {title}</div>

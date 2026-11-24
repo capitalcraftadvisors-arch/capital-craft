@@ -17,6 +17,7 @@ import { useAdminNames } from "@/lib/use-admin-names";
 import RowLink from "@/components/RowLink";
 import { fmtRupees } from "@/lib/money";
 import { fmtDateTime } from "@/lib/dates";
+import { notify } from "@/lib/notify";
 import { otherInsDoc, OTHER_INS_LIST_CACHE } from "@/lib/other-insurance";
 import { inPeriod, usePeriodRows, type TabPeriodProps } from "./console-period";
 import {
@@ -74,7 +75,7 @@ export default function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps
   // Row → the file's view profile; Edit / Add → the form ("new" adds one).
   const open = (id: string, edit = false) => {
     sessionStorage.setItem("adminList.tab", "otherins");
-    router.push((edit ? `/admin/other-insurance/${id}` : `/admin/other-insurance/${id}/view`) as any);
+    router.push(edit ? `/admin/other-insurance/${id}` : `/admin/other-insurance/${id}/view`);
   };
   const customer = (r: Row) => r.customer_name || "—";
   const issued = (r: Row) => r.policy_path != null;
@@ -85,9 +86,9 @@ export default function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps
     try {
       const res = await otherInsDoc(r.id, r.policy_path, "sign");
       if (res.ok && res.url) window.open(res.url, "_blank", "noopener");
-      else alert("Couldn't open the policy: " + res.error);
+      else notify.error("Couldn't open the policy: " + res.error);
     } catch (e) {
-      alert("Couldn't open the policy: " + (e as Error).message);
+      notify.error("Couldn't open the policy: " + (e as Error).message);
     } finally {
       setBusyId(null);
     }
@@ -204,34 +205,34 @@ export default function OtherInsuranceTab({ period, pFrom, pTo }: TabPeriodProps
             {filtered.length === 0 ? (
               <EmptyRow cols={8} loaded={loaded} hasRows={rows.length > 0} noun="insurance applications" />
             ) : filtered.map((r) => (
-              <tr key={r.id} onClick={() => open(r.id)} className="border-b border-[#eaf3ee] cursor-pointer hover:bg-[#f7fcfa] align-top">
+              <tr key={r.id} onClick={() => open(r.id)} className="border-b border-cc-row-line cursor-pointer hover:bg-cc-row-hover align-top">
                 <td className="px-3 py-3">
                   <div className="flex items-start gap-3">
                     <span className="w-9 h-9 rounded-md grid place-items-center shrink-0" style={{ backgroundColor: ACCENTS.otherins.tint, color: ACCENTS.otherins.color }}>
                       {IconPolicyDoc}
                     </span>
                     <div className="min-w-0">
-                      <p className="text-[15px] font-semibold text-[#0f3d2e] truncate"><RowLink href={`/admin/other-insurance/${r.id}/view`} onOpen={() => open(r.id)}>{customer(r)}</RowLink></p>
-                      {r.display_id && <p className="text-[12px] font-mono text-[#185fa5] mt-0.5">{r.display_id}</p>}
+                      <p className="text-[15px] font-semibold text-cc-ink truncate"><RowLink href={`/admin/other-insurance/${r.id}/view`} onOpen={() => open(r.id)}>{customer(r)}</RowLink></p>
+                      {r.display_id && <p className="text-[12px] font-mono text-cc-blue mt-0.5">{r.display_id}</p>}
                     </div>
                   </div>
                 </td>
-                <td className="px-3 py-3 text-center text-[13px] font-semibold text-[#0f3d2e]">{fmtRupees(r.sum_insured)}</td>
-                <td className="px-3 py-3 text-center text-[13px] text-[#0f3d2e] truncate">{r.insurance_company || "—"}</td>
+                <td className="px-3 py-3 text-center text-[13px] font-semibold text-cc-ink">{fmtRupees(r.sum_insured)}</td>
+                <td className="px-3 py-3 text-center text-[13px] text-cc-ink truncate">{r.insurance_company || "—"}</td>
                 <td className="px-3 py-3 text-center">
-                  <span className={`${PILL} ${issued(r) ? "bg-[#e6f6ee] text-[#178a5c]" : "bg-[#fef0d6] text-[#854f0b]"}`}>
+                  <span className={`${PILL} ${issued(r) ? "bg-cc-tint text-cc-green" : "bg-warn-tint text-warn-ink"}`}>
                     {issued(r) ? "Issued" : "Awaiting policy"}
                   </span>
                 </td>
                 <td className="px-3 py-3 text-center"><PolicyValidityCell from={r.policy_from_date} to={r.policy_to_date} /></td>
                 <CreatedOnCell at={r.created_at} />
-                <td className="px-3 py-3 text-center text-[13px] text-[#5a8a76]">
+                <td className="px-3 py-3 text-center text-[13px] text-cc-muted">
                   {createdBy(r)}
                 </td>
                 <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                   <div className="flex flex-col gap-1.5">
                     <button type="button" onClick={() => open(r.id, true)}
-                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5]">
+                      className="text-[12px] font-semibold px-2.5 py-1.5 rounded-input border border-cc-green/30 bg-white text-cc-green hover:bg-cc-wash">
                       Edit
                     </button>
                     {r.policy_path && <DownloadPolicyButton busy={busyId === r.id} onClick={() => void downloadPolicy(r)} />}

@@ -10,10 +10,10 @@
 // the page). Error → shown inline; the pop-up stays open to retry or cancel.
 // Closing is blocked while the delete runs.
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useId, useState, type ReactNode } from "react";
 import Button from "@/components/ui/Button";
 import Modal from "@/components/ui/Modal";
-import { getToken } from "@/lib/auth";
+import { authHeaders } from "@/lib/auth";
 
 const CONFIRM_WORD = "DELETE";
 
@@ -46,6 +46,7 @@ export default function ConfirmDeleteModal<T = { id: string }>({
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const uid = useId(); // ids that tie the heading and label to the pop-up and its field
 
   useEffect(() => {
     if (open) { setTyped(""); setError(null); }
@@ -61,13 +62,9 @@ export default function ConfirmDeleteModal<T = { id: string }>({
     setBusy(true);
     setError(null);
     try {
-      const token = getToken();
       const res = await fetch(endpoint, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
@@ -90,6 +87,7 @@ export default function ConfirmDeleteModal<T = { id: string }>({
       busy={busy}
       overlayClassName={stacked ? "fixed inset-0 z-[60] bg-black/40 flex items-center justify-center p-4" : undefined}
       className={"bg-white rounded-card w-full " + (narrow ? "max-w-[480px]" : "max-w-[520px]") + " shadow-2xl overflow-hidden"}
+      aria-labelledby={`${uid}-title`}
     >
       {/* Header — red-tinted to signal a destructive action. */}
       <div className="bg-red-50 border-b border-red-100 px-6 py-4">
@@ -99,7 +97,7 @@ export default function ConfirmDeleteModal<T = { id: string }>({
             <line x1="12" y1="9" x2="12" y2="13" />
             <line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
-          <h2 className="font-display font-bold text-[17px] text-red-700">{title}</h2>
+          <h2 id={`${uid}-title`} className="font-display font-bold text-[17px] text-red-700">{title}</h2>
         </div>
       </div>
 
@@ -127,10 +125,11 @@ export default function ConfirmDeleteModal<T = { id: string }>({
 
         {/* Type-to-confirm */}
         <div>
-          <label className="block text-[12px] text-text-muted mb-1.5">
+          <label htmlFor={`${uid}-typed`} className="block text-[12px] text-text-muted mb-1.5">
             Type <span className="font-mono font-bold text-red-700">{CONFIRM_WORD}</span> to confirm.
           </label>
           <input
+            id={`${uid}-typed`}
             type="text"
             value={typed}
             onChange={(e) => setTyped(e.target.value)}

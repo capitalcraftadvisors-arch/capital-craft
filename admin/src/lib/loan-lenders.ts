@@ -38,7 +38,7 @@ export function slugifyLender(name: string): string {
 }
 
 // Any Supabase client — the browser's or a route's (the caller's JWT).
-type Reader = { from: (t: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
+type Reader = { from: (t: string) => any };
 
 /** The active lenders, in their set order (falls back to the original three). */
 export async function fetchLenders(client: Reader): Promise<Lender[]> {

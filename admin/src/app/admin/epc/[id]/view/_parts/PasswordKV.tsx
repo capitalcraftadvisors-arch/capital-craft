@@ -3,7 +3,7 @@
 // EPC View · the Contact card's Password row (main admin only).
 
 import { useState } from "react";
-import { toast } from "sonner";
+import { notify } from "@/lib/notify";
 import { epcLoginPassword } from "@/lib/passwords";
 import { CopyButton, I } from "@/components/view/ViewKit";
 
@@ -14,18 +14,18 @@ export default function PasswordKV({ businessId }: { businessId: string }) {
   const [shown, setShown] = useState(false);
   async function toggle() {
     if (!shown && pw === undefined) {
-      try { setPw(await epcLoginPassword(businessId)); } catch { toast.error("Couldn't load the password"); return; }
+      try { setPw(await epcLoginPassword(businessId)); } catch { notify.error("Couldn't load the password"); return; }
     }
     setShown((s) => !s);
   }
   return (
     <div className="flex justify-between text-[14px] py-[5px] gap-3">
-      <span className="text-[#5a8a76] shrink-0">Password</span>
+      <span className="text-cc-muted shrink-0">Password</span>
       <span className="flex items-center gap-1.5 min-w-0">
-        <span className="text-right min-w-0 truncate font-medium text-[#0f3d2e]">{shown ? pw ?? "—" : "••••••••"}</span>
+        <span className="text-right min-w-0 truncate font-medium text-cc-ink">{shown ? pw ?? "—" : "••••••••"}</span>
         {shown && pw && <CopyButton value={pw} />}
         <button type="button" onClick={toggle} aria-label={shown ? "Hide password" : "Show password"} title={shown ? "Hide password" : "Show password"}
-          className="p-1 rounded text-[#5a8a76] hover:text-[#0f3d2e]">
+          className="p-1 rounded text-cc-muted hover:text-cc-ink">
           {I.eye}
         </button>
       </span>

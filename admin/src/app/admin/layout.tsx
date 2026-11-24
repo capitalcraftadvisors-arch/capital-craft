@@ -1,12 +1,15 @@
 "use client";
 
-// Admin-area chrome: the ⌘K command palette + toast host. It also bridges every
-// legacy window.alert() to a toast, so the whole console gets clean, non-blocking
-// notifications without touching each call site. (window.confirm is left alone —
-// it must stay blocking and return a boolean.)
+// Admin-area chrome: the ⌘K command palette. It also bridges every legacy
+// window.alert() to a toast, so the whole console gets clean, non-blocking
+// notifications without touching each call site: red when the text reads like
+// a failure (the regex below), green otherwise. The toasts are drawn by the
+// <Toaster/> in the root layout (app/layout.tsx).
+// New code: lib/notify (notify.error / .success / .info) instead of alert(),
+// lib/confirm (await askConfirm(…)) instead of confirm().
 
 import { useEffect } from "react";
-import { Toaster, toast } from "sonner";
+import { toast } from "sonner";
 import CommandPalette from "@/components/CommandPalette";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -24,7 +27,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     <>
       {children}
       <CommandPalette />
-      <Toaster richColors position="top-right" toastOptions={{ style: { fontSize: "13px" } }} />
     </>
   );
 }
