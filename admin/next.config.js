@@ -39,6 +39,9 @@ const nextConfig = {
       { source: '/dashboard/apply', destination: '/dashboard/apply/chat', permanent: false },
       { source: '/dashboard/apply/:id/docs', destination: '/dashboard/apply/chat?id=:id&edit=1', permanent: false },
       { source: '/dashboard/apply/:id/loan', destination: '/dashboard/apply/chat?id=:id&edit=1', permanent: false },
+      // The old loan status page; a loan's page is /view now. Only a loan id
+      // matches, so /admin/app/intake is untouched.
+      { source: '/admin/app/:id([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})', destination: '/admin/app/:id/view', permanent: false },
     ];
   },
   async headers() {
