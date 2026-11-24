@@ -15,6 +15,7 @@ import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template
 import { SARVATRA } from "@/lib/quotation-brands";
 import { canManageOrg, epcRole, hasModule, isSiteStaff, personName, portalV2, roleLabel } from "@/lib/epc-roles";
 import { watchDue } from "@/lib/leads";
+import { useCloseOnOutsideClick } from "@/lib/use-close-on-outside-click";
 
 export const NAVY = "#14235c", NAVY_ACCENT = "#1e3a8a";
 
@@ -162,12 +163,7 @@ function OrgMenu({ name, logo, person, onSettings, onLogout }: {
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const close = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [open]);
+  useCloseOnOutsideClick(ref, open, setOpen);
   const avatar = (size: string) => logo ? (
     /* eslint-disable-next-line @next/next/no-img-element */
     <img src={orgImageUrl(logo)} alt="" className={`${size} rounded-full bg-white border border-line object-contain p-1`} />

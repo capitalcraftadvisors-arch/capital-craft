@@ -88,6 +88,22 @@ export function triggerDownload(url: string) {
   a.remove();
 }
 
+/** Saves a URL (usually a blob: link) as the file `name`. */
+export function saveUrl(url: string, name: string) {
+  const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+}
+
+/** Saves a fetched file (ZIP, PDF, Excel) under the name the server gave it
+ *  (Content-Disposition), else `fallback`. */
+export async function saveDownload(res: Response, fallback: string): Promise<void> {
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const cd = res.headers.get("content-disposition") || "";
+  const m = /filename="?([^"]+)"?/.exec(cd);
+  saveUrl(url, m?.[1] || fallback);
+  URL.revokeObjectURL(url);
+}
+
 /** Saves a stored document under its own file name. */
 export async function downloadDocument(docId: string): Promise<void> {
   const url = await getDocumentUrl(docId, { download: true });
@@ -130,6 +146,18 @@ export async function openLoanDoc(appId: string, src: { url?: string; path?: str
     if (src.rowId) { const u = await getDocumentUrl(src.rowId); if (u) { openTab(u); return; } }
     alert(OPEN_FAILED);
   } catch { alert(OPEN_FAILED); }
+}
+
+/** Opens a loan application's stored *_path document in a new tab (the admin
+ *  steps' "view existing"); a network error alerts with its message. */
+export async function openLoanPath(appId: string, path: string): Promise<void> {
+  try {
+    const u = await postSignDoc(appId, path);
+    if (u) openTab(u);
+    else alert(OPEN_FAILED);
+  } catch (e) {
+    alert("Couldn't open the document: " + (e as Error).message);
+  }
 }
 
 export async function deleteDocument(docId: string): Promise<boolean> {

@@ -326,7 +326,7 @@ function ProjectEditor({ project, crew, assign, site, canEdit, canDelete, onGo, 
         {canDelete && p && (
           <button type="button" onClick={remove} disabled={busy} className="px-3 py-2 rounded-xl text-[13.5px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60">Delete</button>
         )}
-        <button type="button" onClick={onClose} className="ml-auto px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-text-mid hover:bg-bg-soft">{work ? "Cancel" : "Close"}</button>
+        <button type="button" onClick={onClose} disabled={busy} className="ml-auto px-4 py-2.5 rounded-xl text-[13.5px] font-semibold text-text-mid hover:bg-bg-soft disabled:opacity-60">{work ? "Cancel" : "Close"}</button>
         {work && (
           <button type="button" onClick={() => void save()} disabled={busy} className="px-5 py-2.5 rounded-xl text-white text-[13.5px] font-semibold disabled:opacity-60" style={{ background: NAVY }}>
             {busy ? "Saving…" : "Save"}

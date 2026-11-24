@@ -33,10 +33,11 @@ import { PDFDocument } from "pdf-lib";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
+import { ACCEPTED, safeName } from "@/lib/upload-rules";
 import { uploadBuffer, getSignedReadUrl, downloadBuffer } from "@/lib/gcs";
 import { geminiExtract } from "@/lib/gemini-extract";
 import { geminiExtractPan, geminiExtractBankStatement, geminiExtractEbill } from "@/lib/doc-extractors";
-import { geminiExtractAadhaar, cropAndUploadFace, maskAadhaar } from "@/lib/aadhaar";
+import { geminiExtractAadhaar, cropAndUploadFace } from "@/lib/aadhaar";
 import { isValidPan, isValidIfsc, isValidAadhaar } from "@/lib/doc-validation";
 
 export const runtime = "nodejs";
@@ -44,11 +45,6 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const MAX_DIMENSION = 1100; // smaller image → far faster Gemini read (fewer vision tiles); still readable for KYC
-const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
-
-function safeName(fileName: string, fallback: string): string {
-  return (fileName || fallback).replace(/[^\w.\-]+/g, "_").slice(0, 80) || fallback;
-}
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 
 // ── Document types + filing metadata ─────────────────────────────────────────
@@ -97,7 +93,7 @@ const num = (v: unknown): number | null => {
 };
 
 // Validate + normalize the raw fields Gemini returned for one document.
-function normalizeFields(type: DocType, raw: Record<string, unknown>): Normalized {
+function normalizeFields(raw: Record<string, unknown>): Normalized {
   const panRaw = (str(raw.pan) || "").toUpperCase().replace(/\s/g, "");
   const ifscRaw = (str(raw.ifsc) || "").toUpperCase().replace(/\s/g, "");
   const aadhaarDigits = (str(raw.aadhaar_number) || "").replace(/\D/g, "");
@@ -172,7 +168,7 @@ function applyDoc(
       return `PAN ${f.pan || "—"}${f.name ? " · " + f.name : ""}`;
     }
     case "applicant_aadhaar_front": {
-      const numOut = f.aadhaar_number ?? maskAadhaar(f.aadhaar_number ?? "");
+      const numOut = f.aadhaar_number;
       if (numOut) { setDb("aadhaar_number", numOut); form.aadhaar_number = numOut; }
       if (f.name) { setDb("aadhaar_name", f.name); form.aadhaar_name = f.name; form.borrower_name = f.name; setDb("borrower_name", f.name); }
       if (f.gender) { setDb("aadhaar_gender", f.gender); form.aadhaar_gender = f.gender; }
@@ -216,7 +212,7 @@ function applyDoc(
       return `Co-app PAN ${f.pan || "—"}${f.name ? " · " + f.name : ""}`;
     }
     case "coapp_aadhaar_front": {
-      const numOut = f.aadhaar_number ?? maskAadhaar(f.aadhaar_number ?? "");
+      const numOut = f.aadhaar_number;
       if (numOut) { setDb("coapp_aadhaar_number", numOut); form.coapp_aadhaar_number = numOut; }
       if (f.name) { setDb("coapp_aadhaar_name", f.name); form.coapp_aadhaar_name = f.name; setDb("coapp_name", f.name); form.coapp_name = f.name; }
       if (f.gender) { setDb("coapp_aadhaar_gender", f.gender); form.coapp_aadhaar_gender = f.gender; }
@@ -434,7 +430,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           const type: DocType = ALLOWED_TYPES.has(rawType) ? rawType : "other";
           if (type === "other") continue; // quotation / unknown → separate step, not stored here
           d.source_index = fi; // keep same-file docs grouped for the name-assignment sort
-          pend.push({ file, isPdf, srcPdf, pageCount, scanBuffer, scanMime, raw: d, type, fields: normalizeFields(type, d) });
+          pend.push({ file, isPdf, srcPdf, pageCount, scanBuffer, scanMime, raw: d, type, fields: normalizeFields(d) });
         }
       } catch (e) {
         console.error("[bundle-docs] file failed:", fileLabel, (e as Error)?.message);

@@ -17,41 +17,37 @@ import { fmtRupees } from "@/lib/money";
 //   - Never touches epc_business — the EPC partner is shown only for
 //     display via the joined row and only reads name/display_id.
 //   - Capital Craft branding throughout. No "Solfin" or "pre-approved" copy.
+//
+// The page frame (header, tracker, title, error box) comes from the shared
+// loan-form kit (components/loan-form).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Button from "@/components/ui/Button";
-import LoanAppStepTracker from "@/components/LoanAppStepTracker";
 import { supabase } from "@/lib/supabase";
 import { authHeaders } from "@/lib/auth";
+import {
+  StepHeader, StepLoading, StepNotFound, StepTracker, StepTitle, ErrorBox,
+  EPC_JOIN, SYSTEM_OPTIONS, customerNameOf, type EpcNames,
+} from "@/components/loan-form";
+import { EMPLOYMENT_LABEL, loanDisplayId } from "@/lib/loan-labels";
 
-type Loan = Record<string, any>;
+// Every column of the row (*), plus the joined EPC names the tracker reads.
+type Loan = Record<string, any> & { id: string; created_at: string; epc_business: EpcNames | null };
 
-const SYSTEM_LABEL: Record<string, string> = {
-  on_grid:  "On-Grid Solar System",
-  off_grid: "Off-Grid Solar System",
-  hybrid:   "Hybrid Solar System",
-};
-
-const EMPLOYMENT_LABEL: Record<string, string> = {
-  salaried:      "Salaried",
-  self_employed: "Self-employed",
-};
+// "On-Grid Solar System" … — the titles of Step 1's choice cards.
+const SYSTEM_LABEL: Record<string, string> = Object.fromEntries(SYSTEM_OPTIONS.map((o) => [o.value, o.title]));
 
 const METHOD_LABEL: Record<string, string> = {
   manual_epdf: "Manual E-PDF Upload",
   scanned_pdf: "Scanned PDF Upload",
 };
 
-// Customer-facing application id. Prefers the stored loan_display_id
-// (LA-<last5 mobile>-<seq>, assigned by the 0030 trigger when Step 1
-// lands the mobile). Falls back to a uuid-derived reference for rows
-// created before the migration ran.
+// Customer-facing application id (lib/loan-labels).
 function displayId(loan: Loan): string {
-  if (loan.loan_display_id) return loan.loan_display_id;
-  return "LA-" + String(loan.id).replace(/-/g, "").slice(0, 8).toUpperCase();
+  return loanDisplayId(loan.id, loan.loan_display_id);
 }
 
 // fmtRupees imported from @/lib/money
@@ -79,9 +75,7 @@ function Inner() {
     void (async () => {
       const { data } = await supabase()
         .from("epc_applications")
-        .select(
-          "*, epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
-        )
+        .select("*, " + EPC_JOIN)
         .eq("id", params.id)
         .maybeSingle();
       setLoan(data as unknown as Loan | null);
@@ -97,13 +91,7 @@ function Inner() {
     }
   }, [loan, router]);
 
-  const epcName = useMemo(() => {
-    if (!loan?.epc_business) return "(customer)";
-    return loan.epc_business.trade_name ||
-           loan.epc_business.legal_name ||
-           loan.epc_business.contact_name ||
-           "(customer)";
-  }, [loan]);
+  const epcName = customerNameOf(loan?.epc_business);
 
   async function submit() {
     if (!loan || submitting) return;
@@ -129,12 +117,8 @@ function Inner() {
     }
   }
 
-  if (loading) {
-    return <main className="min-h-screen grid place-items-center"><p className="text-text-muted">Loading…</p></main>;
-  }
-  if (!loan) {
-    return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Loan application not found.</p></main>;
-  }
+  if (loading) return <StepLoading />;
+  if (!loan) return <StepNotFound />;
 
   // Thank-you takeover on successful submit
   if (submittedNow) {
@@ -143,39 +127,12 @@ function Inner() {
 
   return (
     <main className="min-h-screen bg-bg-soft">
-      <header className="border-b border-line bg-white">
-        <div className="w-full px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => router.push(`/admin/app/${params.id}/step-5` as any)}
-              aria-label="Back to previous step"
-              className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#185fa5] hover:text-[#0f3d2e] transition-colors"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
-              Back
-            </button>
-            <span className="text-[12px] px-2 py-0.5 rounded-full bg-bg-tint text-blue-dark font-semibold uppercase tracking-wide">
-              Loan Application · Step 6
-            </span>
-          </div>
-        </div>
-      </header>
+      <StepHeader step={6} backTo={`/admin/app/${params.id}/step-5`} />
 
       <section className="max-w-[900px] mx-auto px-5 sm:px-7 py-8 space-y-6">
-        <LoanAppStepTracker
-          applicationId={loan.id}
-          displayId={loan.epc_business?.epc_display_id ?? null}
-          name={epcName}
-          createdAt={loan.created_at}
-          currentStep={6}
-        />
+        <StepTracker loan={loan} step={6} />
 
-        <div>
-          <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
-            Review &amp; Submit
-          </h1>
-        </div>
+        <StepTitle title="Review & Submit" />
 
         {/* Section 1 — Registration */}
         <ReviewSection
@@ -318,11 +275,7 @@ function Inner() {
 
         {/* Submit strip */}
         <Card className="p-6 bg-[#f0faf5] border-[#cdeadd]">
-          {submitError && (
-            <div className="p-3.5 rounded-input bg-red-50 border border-red-200 text-[13px] text-red-700 mb-4">
-              {submitError}
-            </div>
-          )}
+          <ErrorBox message={submitError} roomy className="mb-4" />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-[13px] font-semibold text-[#0f3d2e]">

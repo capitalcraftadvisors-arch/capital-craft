@@ -10,24 +10,17 @@
 // and calls complete-step-3 to persist.
 
 import { NextRequest, NextResponse } from "next/server";
-import sharp from "sharp";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
-import { uploadBuffer, getSignedReadUrl } from "@/lib/gcs";
 import { visionDocumentText } from "@/lib/vision-server";
-import { parsePanFields } from "@/lib/pan-parser";
+import { parsePanFields, type PanFields } from "@/lib/pan-parser";
 import { geminiExtractPan } from "@/lib/doc-extractors";
+import { checkLoanAppForUpload, readDoc, saveOcrRaw, signedUrlOrNull, storeLoanFile } from "@/lib/extract-server";
+import { ACCEPTED } from "@/lib/upload-rules";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-
-const MAX_DIMENSION = 2000;
-const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
-
-function safeName(fileName: string, fallback: string): string {
-  return (fileName || fallback).replace(/[^\w.\-]+/g, "_").slice(0, 80) || fallback;
-}
 
 export async function POST(
   req: NextRequest,
@@ -49,39 +42,17 @@ export async function POST(
     if (!ACCEPTED.has(file.type)) return err("File must be JPEG, PNG, WebP, or PDF.", 400);
 
     const supabase = dbAs(token);
-    const { data: app, error: loadErr } = await supabase
-      .from("epc_applications")
-      .select("id, current_step, epc_business_id")
-      .eq("id", appId)
-      .maybeSingle();
-    if (loadErr) return err(loadErr.message, 500);
-    if (!app)    return err("Loan application not found.", 404);
-    if (claims.business_type !== "admin" && app.epc_business_id !== claims.business_id) {
-      return err("forbidden", 403);
-    }
     // Gate relaxed to step 2 — the EPC apply flow captures co-applicant
     // docs on its Page 2 (application is at current_step=2 then).
-    if (claims.business_type !== "admin" && (app.current_step ?? 1) < 2) return err("Complete registration before uploads.", 409);
+    const blocked = await checkLoanAppForUpload(supabase, claims, appId, "id, current_step, epc_business_id", "Complete registration before uploads.");
+    if (blocked) return blocked;
 
     // Compress + upload.
-    const ab = await file.arrayBuffer();
-    const input = Buffer.from(ab);
-    let output: Buffer = input;
-    let mime = file.type;
-    if (file.type.startsWith("image/")) {
-      output = await sharp(input)
-        .rotate()
-        .resize({ width: MAX_DIMENSION, height: MAX_DIMENSION, fit: "inside", withoutEnlargement: true })
-        .jpeg({ quality: 75, mozjpeg: true })
-        .toBuffer();
-      mime = "image/jpeg";
-    }
     // The chatbot reuses this route for the APPLICANT's PAN (applicant=1). File
     // it under a matching folder and, below, register a borrower_pan doc row.
     const isApplicant = String(form.get("applicant") ?? "") === "1";
     const folder = isApplicant ? "borrower_pan" : "coapp_pan";
-    const path = `applications/${appId}/${folder}/${Date.now()}_${safeName(file.name, folder)}`;
-    await uploadBuffer(path, output, mime);
+    const { buffer: output, mime, path } = await storeLoanFile(appId, folder, file, folder);
 
     // Applicant PAN has no path column on epc_applications — the profile shows
     // it from a user_application_docs row (category "borrower_pan"), exactly as
@@ -100,35 +71,17 @@ export async function POST(
     // OCR + parse. Gemini reads the PAN faithfully (primary); on any failure
     // it returns null and we fall back to Vision + regex. Vision-error message
     // flows through to the client.
-    let fields: { pan: string | null; name: string | null; father_name: string | null; dob: string | null } = {
-      pan: null, name: null, father_name: null, dob: null,
-    };
-    let rawText: string | null = null;
-    let visionError: string | null = null;
-    let source: "gemini" | "vision" = "gemini";
+    const { fields, rawText, visionError, source } = await readDoc<PanFields>(
+      { buffer: output, mime },
+      { pan: null, name: null, father_name: null, dob: null },
+      geminiExtractPan,
+      async (buf, m) => { const raw_text = await visionDocumentText(buf, m); return { fields: parsePanFields(raw_text), raw_text }; },
+      "[extract-coapp-pan] vision error:",
+    );
 
-    const gemini = await geminiExtractPan([{ buffer: output, mime }]);
-    if (gemini) {
-      fields = gemini;
-      rawText = JSON.stringify(gemini);
-    } else {
-      source = "vision";
-      try {
-        rawText = await visionDocumentText(output, mime);
-        fields = parsePanFields(rawText);
-      } catch (e) {
-        visionError = e instanceof Error ? e.message : String(e);
-        console.error("[extract-coapp-pan] vision error:", visionError);
-      }
-    }
+    const signed = await signedUrlOrNull(path);
 
-    let signed: string | null = null;
-    try { signed = await getSignedReadUrl(path, 3600); } catch { /* non-fatal */ }
-
-    if (rawText) {
-      supabase.rpc("append_ocr_raw", { app_id: appId, key_name: "coapp_pan", raw_text: rawText })
-        .then((r) => r.error && console.warn("[extract-coapp-pan] raw-text save:", r.error.message));
-    }
+    if (rawText) saveOcrRaw(supabase, appId, "coapp_pan", rawText, "[extract-coapp-pan] raw-text save:");
 
     return NextResponse.json({
       ok: true,

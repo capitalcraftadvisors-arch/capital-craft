@@ -14,17 +14,20 @@
 // EMI math is REDUCING BALANCE, computed client-side and reactive to
 // ROI / state-subsidy changes. The subsidy EMI applies to (loan - central - state),
 // floored at zero.
+//
+// The page frame, section cards, Previous/Save bar and the save call come
+// from the shared loan-form kit (components/loan-form).
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
-import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
-import Button from "@/components/ui/Button";
-import LoanAppStepTracker from "@/components/LoanAppStepTracker";
 import { supabase } from "@/lib/supabase";
-import { authHeaders } from "@/lib/auth";
+import {
+  StepHeader, StepLoading, StepNotFound, StepTracker, StepTitle, StepNav,
+  FormSection, H18, FIELD_LABEL, RadioDot, EPC_JOIN, saveStep, type EpcNames,
+} from "@/components/loan-form";
 import { amountInput, fmtRupees } from "@/lib/money";
 
 type Loan = {
@@ -42,12 +45,7 @@ type Loan = {
   central_subsidy:        number | null;
   state_subsidy:          number | null;
   selected_tenure_years:  number | null;
-  epc_business: {
-    contact_name: string | null;
-    trade_name: string | null;
-    legal_name: string | null;
-    epc_display_id: string | null;
-  } | null;
+  epc_business: EpcNames | null;
 };
 
 // EMI + subsidy math shared with the EPC apply flow — see lib/emi.ts.
@@ -90,7 +88,7 @@ function Inner() {
           "loan_amount_required, monthly_bill_amount, annual_income, " +
           "project_size, project_size_unit, plant_use_type, " +
           "roi_percent, central_subsidy, state_subsidy, selected_tenure_years, " +
-          "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
+          EPC_JOIN,
         )
         .eq("id", params.id)
         .maybeSingle();
@@ -158,24 +156,15 @@ function Inner() {
     try {
       // Admin-only flow: a tenure may not be picked — save null-safe as a draft.
       const chosen = emiRows.find((r) => r.years === selectedTenure);
-      const res = await fetch(`/api/admin/loan-app/${loan.id}/complete-step-5`, {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          roi_percent:           roiNum,
-          central_subsidy:       centralSubsidy,
-          state_subsidy:         stateSubsidyN,
-          selected_tenure_years: chosen?.years ?? null,
-          selected_monthly_emi:  chosen?.monthly ?? null,
-          selected_subsidy_emi:  chosen?.subsidy ?? null,
-        }),
+      const error = await saveStep(loan.id, 5, {
+        roi_percent:           roiNum,
+        central_subsidy:       centralSubsidy,
+        state_subsidy:         stateSubsidyN,
+        selected_tenure_years: chosen?.years ?? null,
+        selected_monthly_emi:  chosen?.monthly ?? null,
+        selected_subsidy_emi:  chosen?.subsidy ?? null,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        setSaveError(data?.error || `Save failed (HTTP ${res.status}).`);
-        setSaving(false);
-        return;
-      }
+      if (error) { setSaveError(error); setSaving(false); return; }
       router.push(`/admin/app/${loan.id}/step-6` as any);
     } catch (e) {
       setSaveError((e as Error)?.message || "Network error.");
@@ -183,70 +172,29 @@ function Inner() {
     }
   }
 
-  if (loading) {
-    return <main className="min-h-screen grid place-items-center"><p className="text-text-muted">Loading…</p></main>;
-  }
-  if (!loan) {
-    return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Loan application not found.</p></main>;
-  }
-
-  const customerName =
-    loan.epc_business?.trade_name ||
-    loan.epc_business?.legal_name ||
-    loan.epc_business?.contact_name ||
-    "(customer)";
+  if (loading) return <StepLoading />;
+  if (!loan) return <StepNotFound />;
 
   return (
     <main className="min-h-screen bg-bg-soft">
-      <header className="border-b border-line bg-white">
-        <div className="w-full px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => router.push(`/admin/app/${params.id}/step-4` as any)}
-              aria-label="Back to previous step"
-              className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#185fa5] hover:text-[#0f3d2e] transition-colors"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
-              Back
-            </button>
-            <span className="text-[12px] px-2 py-0.5 rounded-full bg-bg-tint text-blue-dark font-semibold uppercase tracking-wide">
-              Loan Application · Step 5
-            </span>
-          </div>
-        </div>
-      </header>
+      <StepHeader step={5} backTo={`/admin/app/${params.id}/step-4`} />
 
       <section className="max-w-[900px] mx-auto px-5 sm:px-7 py-8 space-y-6">
-        <LoanAppStepTracker
-          applicationId={loan.id}
-          displayId={loan.epc_business?.epc_display_id ?? null}
-          name={customerName}
-          createdAt={loan.created_at}
-          currentStep={5}
-        />
+        <StepTracker loan={loan} step={5} />
 
-        <div>
-          <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
-            Loan Offers
-          </h1>
-          <p className="text-text-mid mt-2 text-[15px]">
-            Set the subsidy inputs, then pick a tenure. Monthly EMI and
-            Subsidy EMI recompute live as you adjust the fields.
-          </p>
-        </div>
+        <StepTitle title="Loan Offers">
+          Set the subsidy inputs, then pick a tenure. Monthly EMI and
+          Subsidy EMI recompute live as you adjust the fields.
+        </StepTitle>
 
         {/* b. Your Loan Profile */}
-        <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[18px] text-[#0f3d2e]">
-            Your loan profile
-          </h2>
+        <FormSection title="Your loan profile" titleClassName={H18}>
           <div className="grid sm:grid-cols-3 gap-4">
             <ProfileTile label="Loan amount required" value={fmtRupees(loan.loan_amount_required)} accent="green" />
             <ProfileTile label="Monthly bill" value={fmtRupees(loan.monthly_bill_amount)}   accent="sky" />
             <ProfileTile label="Annual income" value={fmtRupees(loan.annual_income)}         accent="green" />
           </div>
-        </Card>
+        </FormSection>
 
         {/* c. Info box — Capital Craft wording */}
         <div className="rounded-input border border-[#d3e9f7] bg-[#dceffb] p-5 flex gap-3">
@@ -280,16 +228,13 @@ function Inner() {
         </div>
 
         {/* d. RM inputs */}
-        <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[18px] text-[#0f3d2e]">
-            Loan configuration
-          </h2>
+        <FormSection title="Loan configuration" titleClassName={H18}>
           {/* ROI input removed — EMI is computed at a fixed backend rate that is
               never surfaced. Only subsidy inputs remain here. */}
           <div className="grid sm:grid-cols-2 gap-4">
             {/* Subsidy vs non-subsidy — admin's explicit choice. */}
             <div>
-              <label className="block mb-1.5 text-[13px] font-medium text-text-mid">Subsidy case?</label>
+              <label className={FIELD_LABEL}>Subsidy case?</label>
               <Select
                 value={subsidyCase}
                 onChange={(e) => {
@@ -327,21 +272,16 @@ function Inner() {
               hint="Enter applicable state subsidy if any; conditional per state/eligibility."
             />
           </div>
-        </Card>
+        </FormSection>
 
         {/* e. Tenure cards */}
-        <Card className="p-6 space-y-4">
-          <div>
-            <h2 className="font-display font-semibold text-[18px] text-[#0f3d2e]">
-              Select loan tenure
-            </h2>
-            <p className="text-[13px] text-text-mid mt-1">
-              {roiValid
-                ? "Pick the tenure the customer prefers. EMIs recompute automatically."
-                : "Enter the loan amount in Step 3 to see EMI options."}
-            </p>
-          </div>
-
+        <FormSection
+          title="Select loan tenure"
+          subtitle={roiValid
+            ? "Pick the tenure the customer prefers. EMIs recompute automatically."
+            : "Enter the loan amount in Step 3 to see EMI options."}
+          titleClassName={H18}
+        >
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             {emiRows.map((row) => {
               const active = selectedTenure === row.years;
@@ -361,15 +301,7 @@ function Inner() {
                       : "border-line bg-white hover:border-[#185fa5]",
                   ].join(" ")}
                 >
-                  <span
-                    className={[
-                      "absolute top-3 right-3 w-4 h-4 rounded-full border-2 flex items-center justify-center",
-                      active ? "border-[#178a5c]" : "border-line",
-                    ].join(" ")}
-                    aria-hidden
-                  >
-                    {active && <span className="w-2 h-2 rounded-full bg-[#178a5c]" />}
-                  </span>
+                  <RadioDot active={active} />
 
                   <p className="font-display font-bold text-[18px] text-[#0f3d2e]">
                     {row.years} {row.years === 1 ? "Year" : "Years"}
@@ -403,34 +335,17 @@ function Inner() {
               Enter the loan amount to see EMIs.
             </p>
           )}
-        </Card>
+        </FormSection>
 
         {/* f. Prev / Save */}
-        <Card className="p-6">
-          {saveError && (
-            <div className="p-3.5 rounded-input bg-red-50 border border-red-200 text-[13px] text-red-700 mb-4">
-              {saveError}
-            </div>
-          )}
-          <div className="flex justify-between gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => router.push(`/admin/app/${loan.id}/step-4` as any)}
-            >
-              ← Previous
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              onClick={saveAndNext}
-              loading={saving}
-              disabled={saving}
-            >
-              Save &amp; Continue
-            </Button>
-          </div>
-        </Card>
+        <StepNav
+          error={saveError}
+          roomyError
+          prevTo={`/admin/app/${loan.id}/step-4`}
+          onNext={saveAndNext}
+          saving={saving}
+          nextLabel="Save & Continue"
+        />
       </section>
     </main>
   );

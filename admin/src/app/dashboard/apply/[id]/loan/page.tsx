@@ -22,6 +22,7 @@ import { authHeaders } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { amountInput, numberInput, fmtRupees } from "@/lib/money";
 import LoanShareChips from "@/components/LoanShareChips";
+import { ApplyFrame } from "@/components/loan-form";
 import {
   TENURES, DEFAULT_INDICATIVE_ROI,
   computeCentralSubsidy, computeEmi,
@@ -157,126 +158,117 @@ function Inner() {
   }
 
   return (
-    <main className="min-h-screen bg-bg-soft">
-      <header className="border-b border-line bg-white">
-        <div className="max-w-container mx-auto px-7 h-16 flex items-center justify-between">
-          <a href="/dashboard" className="font-display font-bold text-[20px] grad-text">Capital Craft</a>
-          <span className="text-[13px] text-text-muted">Loan Application</span>
+    <ApplyFrame>
+      <EpcApplyTracker step={3} />
+
+      <div>
+        <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
+          Project &amp; loan
+        </h1>
+        <p className="text-text-mid mt-2 text-[15px]">
+          Enter the project details and pick a tenure — EMIs update live.
+        </p>
+      </div>
+
+      <Card className="p-7 space-y-4">
+        <div className="grid sm:grid-cols-3 gap-4">
+          <Input
+            label="Project size (kW)"
+            inputMode="decimal"
+            value={sizeKw}
+            onChange={(e) => setSizeKw(numberInput(e.target.value))}
+            placeholder="e.g. 5"
+          />
+          <Input
+            label="Total project cost (₹)"
+            inputMode="numeric"
+            value={totalCost}
+            onChange={(e) => setTotalCost(amountInput(e.target.value))}
+            placeholder="e.g. 350000"
+          />
+          <Input
+            label="Loan amount required (₹)"
+            inputMode="numeric"
+            value={loanAmount}
+            onChange={(e) => setLoanAmount(amountInput(e.target.value))}
+            placeholder="e.g. 250000"
+            error={loanExceeds ? "Cannot exceed project cost." : undefined}
+          />
         </div>
-      </header>
+        {/* Applied loan amount: 80 / 90 / 100 % of the project cost, or Custom. */}
+        <LoanShareChips cost={Number(totalCost) || 0} value={loanAmount} onPick={setLoanAmount} tone="#1e3a8a" />
+        {validSize && validCost && (
+          <p className="text-[12px] text-[#5a8a76]">
+            Per kW price:{" "}
+            <span className="font-semibold text-[#0f3d2e]">{fmtRupees(Math.round(costN / sizeN))}/kW</span>
+            <span className="text-text-muted"> (total project cost ÷ project size)</span>
+          </p>
+        )}
+      </Card>
 
-      <section className="max-w-[760px] mx-auto px-5 sm:px-7 py-10 space-y-6">
-        <EpcApplyTracker step={3} />
-
+      {/* Tenure + live EMI — same math as admin Step 5 (lib/emi.ts) */}
+      <Card className="p-6 space-y-4">
         <div>
-          <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
-            Project &amp; loan
-          </h1>
-          <p className="text-text-mid mt-2 text-[15px]">
-            Enter the project details and pick a tenure — EMIs update live.
+          <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Select loan tenure</h2>
+          <p className="text-[13px] text-text-mid mt-1">
+            {validLoan
+              ? "Indicative EMIs — the final rate is set after review."
+              : "Enter the loan amount to see EMI options."}
           </p>
         </div>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          {emiRows.map((row) => {
+            const active = tenure === row.years;
+            return (
+              <button
+                key={row.years}
+                type="button"
+                onClick={() => validLoan && setTenure(row.years)}
+                disabled={!validLoan}
+                className={[
+                  "text-left rounded-input border-2 p-4 transition-colors relative",
+                  !validLoan ? "border-line bg-white opacity-60 cursor-not-allowed" :
+                  active ? "border-[#178a5c] bg-[#f0faf5]" : "border-line bg-white hover:border-[#185fa5]",
+                ].join(" ")}
+              >
+                <span className={[
+                  "absolute top-3 right-3 w-4 h-4 rounded-full border-2 flex items-center justify-center",
+                  active ? "border-[#178a5c]" : "border-line",
+                ].join(" ")} aria-hidden>
+                  {active && <span className="w-2 h-2 rounded-full bg-[#178a5c]" />}
+                </span>
+                <p className="font-display font-bold text-[16px] text-[#0f3d2e]">
+                  {row.years} {row.years === 1 ? "Year" : "Years"}
+                </p>
+              </button>
+            );
+          })}
+        </div>
 
-        <Card className="p-7 space-y-4">
-          <div className="grid sm:grid-cols-3 gap-4">
-            <Input
-              label="Project size (kW)"
-              inputMode="decimal"
-              value={sizeKw}
-              onChange={(e) => setSizeKw(numberInput(e.target.value))}
-              placeholder="e.g. 5"
-            />
-            <Input
-              label="Total project cost (₹)"
-              inputMode="numeric"
-              value={totalCost}
-              onChange={(e) => setTotalCost(amountInput(e.target.value))}
-              placeholder="e.g. 350000"
-            />
-            <Input
-              label="Loan amount required (₹)"
-              inputMode="numeric"
-              value={loanAmount}
-              onChange={(e) => setLoanAmount(amountInput(e.target.value))}
-              placeholder="e.g. 250000"
-              error={loanExceeds ? "Cannot exceed project cost." : undefined}
-            />
-          </div>
-          {/* Applied loan amount: 80 / 90 / 100 % of the project cost, or Custom. */}
-          <LoanShareChips cost={Number(totalCost) || 0} value={loanAmount} onPick={setLoanAmount} tone="#1e3a8a" />
-          {validSize && validCost && (
-            <p className="text-[12px] text-[#5a8a76]">
-              Per kW price:{" "}
-              <span className="font-semibold text-[#0f3d2e]">{fmtRupees(Math.round(costN / sizeN))}/kW</span>
-              <span className="text-text-muted"> (total project cost ÷ project size)</span>
-            </p>
-          )}
-        </Card>
+        <div className="rounded-input border-l-4 border-l-amber-400 border border-amber-200 bg-amber-50 p-3.5">
+          <p className="text-[11px] text-[#854f0b] leading-relaxed">
+            <span className="font-semibold">Disclaimer:</span> ROI and EMI figures shown are
+            indicative only and subject to the lender&rsquo;s discretion, finalized after
+            document verification and lender approval.
+          </p>
+        </div>
+      </Card>
 
-        {/* Tenure + live EMI — same math as admin Step 5 (lib/emi.ts) */}
-        <Card className="p-6 space-y-4">
-          <div>
-            <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Select loan tenure</h2>
-            <p className="text-[13px] text-text-mid mt-1">
-              {validLoan
-                ? "Indicative EMIs — the final rate is set after review."
-                : "Enter the loan amount to see EMI options."}
-            </p>
+      <Card className="p-6">
+        {submitError && (
+          <div className="p-3.5 rounded-input bg-red-50 border border-red-200 text-[13px] text-red-700 mb-4">
+            {submitError}
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-            {emiRows.map((row) => {
-              const active = tenure === row.years;
-              return (
-                <button
-                  key={row.years}
-                  type="button"
-                  onClick={() => validLoan && setTenure(row.years)}
-                  disabled={!validLoan}
-                  className={[
-                    "text-left rounded-input border-2 p-4 transition-colors relative",
-                    !validLoan ? "border-line bg-white opacity-60 cursor-not-allowed" :
-                    active ? "border-[#178a5c] bg-[#f0faf5]" : "border-line bg-white hover:border-[#185fa5]",
-                  ].join(" ")}
-                >
-                  <span className={[
-                    "absolute top-3 right-3 w-4 h-4 rounded-full border-2 flex items-center justify-center",
-                    active ? "border-[#178a5c]" : "border-line",
-                  ].join(" ")} aria-hidden>
-                    {active && <span className="w-2 h-2 rounded-full bg-[#178a5c]" />}
-                  </span>
-                  <p className="font-display font-bold text-[16px] text-[#0f3d2e]">
-                    {row.years} {row.years === 1 ? "Year" : "Years"}
-                  </p>
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="rounded-input border-l-4 border-l-amber-400 border border-amber-200 bg-amber-50 p-3.5">
-            <p className="text-[11px] text-[#854f0b] leading-relaxed">
-              <span className="font-semibold">Disclaimer:</span> ROI and EMI figures shown are
-              indicative only and subject to the lender&rsquo;s discretion, finalized after
-              document verification and lender approval.
-            </p>
-          </div>
-        </Card>
-
-        <Card className="p-6">
-          {submitError && (
-            <div className="p-3.5 rounded-input bg-red-50 border border-red-200 text-[13px] text-red-700 mb-4">
-              {submitError}
-            </div>
-          )}
-          <div className="flex justify-between gap-2">
-            <Button type="button" variant="outline" onClick={() => router.push(`/dashboard/apply/${appId}/docs` as any)}>
-              ← Previous
-            </Button>
-            <Button type="button" variant="primary" onClick={submit} loading={submitting} disabled={!canSubmit}>
-              Submit application
-            </Button>
-          </div>
-        </Card>
-      </section>
-    </main>
+        )}
+        <div className="flex justify-between gap-2">
+          <Button type="button" variant="outline" onClick={() => router.push(`/dashboard/apply/${appId}/docs` as any)}>
+            ← Previous
+          </Button>
+          <Button type="button" variant="primary" onClick={submit} loading={submitting} disabled={!canSubmit}>
+            Submit application
+          </Button>
+        </div>
+      </Card>
+    </ApplyFrame>
   );
 }

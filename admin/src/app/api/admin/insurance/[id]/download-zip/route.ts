@@ -8,21 +8,20 @@
 // invoice). Mirrors the loan ZIP route (archiver → Node Readable → Web
 // ReadableStream); missing GCS objects are logged and skipped.
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import archiver from "archiver";
 import ExcelJS from "exceljs";
-import { Readable } from "node:stream";
 import { downloadBuffer } from "@/lib/gcs";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { rupees } from "@/lib/money";
 import { fmtDate } from "@/lib/dates";
+import { baseName, zipResponse } from "@/lib/zip-response";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-function baseName(path: string): string { return path.split("/").pop() || "file"; }
 // rupees imported from @/lib/money
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
@@ -117,14 +116,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     void archive.finalize();
 
     const safeName = `${displayId}_${applicant}`.replace(/[^\w-]+/g, "_").slice(0, 80);
-    const webStream = Readable.toWeb(archive) as unknown as ReadableStream;
-    return new NextResponse(webStream, {
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${safeName}.zip"`,
-        "Cache-Control": "no-store",
-      },
-    });
+    return zipResponse(archive, safeName);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[insurance-zip] error:", msg);

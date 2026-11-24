@@ -5,6 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { authHeaders } from "@/lib/auth";
+import { saveUrl } from "@/lib/storage";
 import { inrPlain, numberInput } from "@/lib/money";
 
 export const NAVY = "#1e3a8a";
@@ -86,10 +87,6 @@ export function useBrandOptions() {
     (base: string[], field: string) => Array.from(new Set([...base, ...(custom[field] || []), ...(added[field] || [])])),
     [custom],
   );
-}
-
-export function saveUrl(url: string, name: string) {
-  const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
 }
 
 // POST /api/epc/quotation → the generated file (named as the server named it)

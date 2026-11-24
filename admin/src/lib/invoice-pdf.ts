@@ -8,17 +8,15 @@
 // Read with the caller's client: RLS decides who may (Owner / Admin / Viewer /
 // Sales; never Site staff). No subscription check: old invoices stay downloadable.
 
-import fs from "fs";
-import path from "path";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { PDFDocument, degrees, rgb, type PDFFont, type PDFImage, type PDFPage, type RGB } from "pdf-lib";
-import { embedHelvetica, printable, textWidth, wrap, type Fonts } from "./pdf-template";
-import { safeName } from "./insurance-server";
-import { downloadBuffer } from "./gcs";
-import { ACCENTS, ORG_COLS, ORG_V2_COLS, type OrgProfile } from "./org-profile";
+import { PDFDocument, degrees, rgb, type PDFImage, type PDFPage, type RGB } from "pdf-lib";
+import { embedHelvetica, printable, textWidth, type Fonts } from "./pdf-template";
+import { safeName } from "./upload-rules";
+import { ACCENTS, ORG_COLS, ORG_V2_COLS } from "./org-profile";
 import type { StdOrg } from "./quotation-standard";
-import { formatGstAddress } from "./gst-address";
-import { GST_STATE_CODES, stateOfGstin } from "./india-states";
+import { mark, stdOrgOf } from "./pdf-org-server";
+import { CW, FOOTER_TOP, H, HEADER_END, M, PdfPen, W, hex3, mix, type Col } from "./pdf-pen";
+import { GST_STATE_CODES } from "./india-states";
 import { rupeesInWords } from "./numberToWords";
 import { inrPlain } from "./money";
 import { fmtDateIST } from "./dates";
@@ -38,16 +36,7 @@ type Invoice = {
 };
 type Org = StdOrg & { upi: string };
 
-let ccMark: Buffer | null | undefined;
-function mark(): Buffer | null {
-  if (ccMark === undefined) {
-    try { ccMark = fs.readFileSync(path.join(process.cwd(), "public", "brand", "capital-craft-mark.png")); } catch { ccMark = null; }
-  }
-  return ccMark;
-}
-const image = (p: string | null | undefined) => (p ? downloadBuffer(p).catch(() => null) : Promise.resolve(null));
-
-export type SavedInvoicePdf = { bytes: Uint8Array; name: string };
+type SavedInvoicePdf = { bytes: Uint8Array; name: string };
 
 /** The invoice's PDF, or null when the caller can't read it. */
 export async function buildInvoicePdf(db: SupabaseClient, id: string): Promise<SavedInvoicePdf | null> {
@@ -62,36 +51,15 @@ export async function buildInvoicePdf(db: SupabaseClient, id: string): Promise<S
   ]);
   if (!b) return null;
   const biz = b as Record<string, any>;
-  const op = (Array.isArray(biz.epc_org_profile) ? biz.epc_org_profile[0] : biz.epc_org_profile) as OrgProfile | null;
-
-  const [logo, signature, stamp] = await Promise.all([image(op?.logo_path), image(op?.signature_path), image(op?.stamp_path)]);
-  const own = [op?.address_line, op?.city, [op?.state, op?.pincode].filter(Boolean).join(" ")].filter(Boolean).join(", ");
-  const org: Org = {
-    name: op?.display_name || biz.trade_name || biz.legal_name || "",
-    address: own || formatGstAddress(biz.gst_address),
-    gstin: biz.gstin_number || "",
-    phone: op?.phone || biz.contact_mobile || "",
-    email: op?.email || biz.contact_email || "",
-    website: op?.website || "",
-    contact: biz.contact_name || "",
-    state: stateOfGstin(biz.gstin_number) || op?.state || "",
-    accent: op?.accent ?? null,
-    bank: biz.bank_account_number ? { name: biz.bank_name || "", holder: biz.bank_account_holder || "", account: biz.bank_account_number, ifsc: biz.bank_ifsc || "", branch: biz.bank_branch || "" } : null,
-    logo, signature, stamp,
-    upi: op?.upi_id || "",
-  };
+  const { org: std, op } = await stdOrgOf(biz);
+  const org: Org = { ...std, upi: op?.upi_id || "" };
 
   const bytes = await drawInvoice(v, replaced, org, mark());
   const name = `Invoice ${safeName(v.invoice_no, "invoice")} - ${safeName(v.customer_name || "customer", "customer")}.pdf`;
   return { bytes, name };
 }
 
-// ── Look (as the standard quotation) ──────────────────────────────────────────
-const W = 595.28, H = 841.89, M = 40, CW = W - 2 * M;
-const HEADER_END = 104, FOOTER_TOP = H - 44;
-type Rgb3 = [number, number, number];
-const hex3 = (h: string): Rgb3 => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
-const mix = (a: Rgb3, b: Rgb3, t: number): RGB => rgb(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t);
+// ── Look (as the standard quotation; the page and the pen are lib/pdf-pen) ───
 function palette(accent: string | null) {
   const a = hex3(/^#[0-9a-f]{6}$/i.test(accent || "") ? accent! : ACCENTS[0]);
   return {
@@ -107,42 +75,12 @@ const rs = (n: number) => `Rs. ${amt(n)}`;
 const pct = (n: number) => `${+Number(n).toFixed(2)}%`;
 /** "Rajasthan (08)" — a state with its GST code. */
 const withCode = (s: string | null | undefined) => (s ? (GST_STATE_CODES[s] ? `${s} (${GST_STATE_CODES[s]})` : s) : "");
-type TextOpts = { size?: number; bold?: boolean; color?: RGB; align?: "left" | "right" | "center"; max?: number };
-type Col = { w: number; align?: "left" | "right" | "center" };
 
-// A small top-down drawing kit over pdf-lib (y = distance from the top). One page.
-class Pen {
-  constructor(readonly page: PDFPage, readonly f: Fonts, readonly c: Palette) {}
-  font(bold?: boolean): PDFFont { return bold ? this.f.bold : this.f.reg; }
-  text(s: string, x: number, y: number, o: TextOpts = {}) {
-    const font = this.font(o.bold);
-    let size = o.size ?? 9.5;
-    const t = printable(font, s);
-    let w = textWidth(font, t, size);
-    if (o.max && w > o.max) { size = (size * o.max) / w; w = o.max; }
-    const left = o.align === "right" ? x - w : o.align === "center" ? x - w / 2 : x;
-    this.page.drawText(t, { x: left, y: H - y, size, font, color: o.color ?? this.c.ink });
-    return w;
-  }
-  lines(s: string, size: number, max: number, bold = false) {
-    const font = this.font(bold);
-    return String(s ?? "").split(/\r?\n/).flatMap((p) => wrap(printable(font, p), (t) => textWidth(font, t, size), max, 999));
-  }
-  rect(x: number, y: number, w: number, h: number, color: RGB, border?: RGB) {
-    this.page.drawRectangle({ x, y: H - y - h, width: w, height: h, color, borderColor: border, borderWidth: border ? 0.7 : 0 });
-  }
-  round(x: number, y: number, w: number, h: number, r: number, color: RGB, border?: RGB) {
-    const p = `M ${r} 0 H ${w - r} Q ${w} 0 ${w} ${r} V ${h - r} Q ${w} ${h} ${w - r} ${h} H ${r} Q 0 ${h} 0 ${h - r} V ${r} Q 0 0 ${r} 0 Z`;
-    this.page.drawSvgPath(p, { x, y: H - y, color, borderColor: border, borderWidth: border ? 0.7 : 0 });
-  }
-  hline(x: number, y: number, w: number, color = this.c.line, t = 0.7) {
-    this.page.drawLine({ start: { x, y: H - y }, end: { x: x + w, y: H - y }, thickness: t, color });
-  }
-  image(img: PDFImage, x: number, y: number, maxW: number, maxH: number) {
-    const sc = Math.min(maxW / img.width, maxH / img.height);
-    this.page.drawImage(img, { x, y: H - y - img.height * sc, width: img.width * sc, height: img.height * sc });
-    return img.width * sc;
-  }
+// The drawing kit (lib/pdf-pen) on the invoice's one page.
+class Pen extends PdfPen<Palette> {
+  constructor(page: PDFPage, f: Fonts, c: Palette) { super(f, c); this.page = page; }
+  /** A small bold accent-colour caption over a block ("BILL TO", "AMOUNT IN WORDS"). */
+  caption(s: string, x: number, y: number) { this.text(s, x, y, { size: 7.8, bold: true, color: this.c.accent }); }
 }
 
 async function drawInvoice(v: Invoice, replaced: string, org: Org, ccMark: Buffer | null): Promise<Uint8Array> {
@@ -212,9 +150,10 @@ async function drawInvoice(v: Invoice, replaced: string, org: Org, ccMark: Buffe
   const head = intra
     ? ["#", "Description", "HSN/SAC", "Taxable value", "GST", "CGST", "SGST", "Amount"]
     : ["#", "Description", "HSN/SAC", "Taxable value", "GST", "IGST", "Amount"];
-  const rows = lines.map((l, n) => [String(n + 1), l.description, l.hsn, amt(l.taxable), pct(l.rate),
-    ...(intra ? [amt(l.cgst), amt(l.sgst)] : [amt(l.igst)]), amt(l.amount)]);
-  rows.push(["", "Total", "", amt(v.taxable), "", ...(intra ? [amt(v.cgst), amt(v.sgst)] : [amt(v.igst)]), amt(v.total)]);
+  // The tax cells of a row: CGST + SGST within the state, else IGST.
+  const taxCells = (t: { cgst: number; sgst: number; igst: number }) => (intra ? [amt(t.cgst), amt(t.sgst)] : [amt(t.igst)]);
+  const rows = lines.map((l, n) => [String(n + 1), l.description, l.hsn, amt(l.taxable), pct(l.rate), ...taxCells(l), amt(l.amount)]);
+  rows.push(["", "Total", "", amt(v.taxable), "", ...taxCells(v), amt(v.total)]);
   y = table(s, y, cols, head, rows, (n) => n === rows.length - 1);
   y += 16;
 
@@ -233,7 +172,7 @@ async function drawInvoice(v: Invoice, replaced: string, org: Org, ccMark: Buffe
     y += last ? 22 : 16;
   });
   const words = s.lines(rupeesInWords(Number(v.total) || 0), 9, CW - tw - 24, true).slice(0, 4);
-  s.text("AMOUNT IN WORDS", M, top + 8, { size: 7.8, bold: true, color: c.accent });
+  s.caption("AMOUNT IN WORDS", M, top + 8);
   words.forEach((l, n) => s.text(l, M, top + 22 + n * 12.5, { size: 9, bold: true }));
   y = Math.max(y, top + 22 + words.length * 12.5) + 20;
 
@@ -262,7 +201,7 @@ function infoBox(s: Pen, x: number, y: number, w: number, title: string, rows: [
   const wrapped = rows.map(([, t]) => s.lines(t, size, vw, true).slice(0, 4));
   const h = 30 + wrapped.reduce((a, l) => a + l.length * lead + 3, 0) + 6;
   s.round(x, y, w, h, 8, s.c.soft);
-  s.text(title.toUpperCase(), x + 12, y + 18, { size: 7.8, bold: true, color: s.c.accent });
+  s.caption(title.toUpperCase(), x + 12, y + 18);
   let yy = y + 32;
   rows.forEach(([l], n) => {
     s.text(l, x + 12, yy + size, { size: 8.2, color: s.c.muted });
@@ -308,7 +247,7 @@ function bankAndSign(s: Pen, top: number, org: Org, signature: PDFImage | null, 
   const h = Math.max(128, 30 + rows.length * 15 + 8);
   if (rows.length) {
     s.round(M, top, w, h, 8, s.c.soft);
-    s.text("BANK DETAILS FOR PAYMENT", M + 12, top + 18, { size: 7.8, bold: true, color: s.c.accent });
+    s.caption("BANK DETAILS FOR PAYMENT", M + 12, top + 18);
     rows.forEach(([l, t], n) => {
       s.text(l, M + 12, top + 36 + n * 15, { size: 8.2, color: s.c.muted });
       s.text(t, M + 92, top + 36 + n * 15, { size: 8.8, bold: true, max: w - 104 });

@@ -13,7 +13,7 @@
 //     the whole loan)
 
 import { NextRequest, NextResponse } from "next/server";
-import { err, dbAs, requireLogin } from "@/lib/api";
+import { err, dbAs, requireLogin, loadLoanRow } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { logLoanActivityServer } from "@/lib/loan-activity-server";
 
@@ -78,13 +78,8 @@ export async function POST(
 
     const supabase = dbAs(token);
 
-    const { data: app, error: loadErr } = await supabase
-      .from("epc_applications")
-      .select("id, current_step")
-      .eq("id", appId)
-      .maybeSingle();
-    if (loadErr) return err(loadErr.message, 500);
-    if (!app)    return err("Loan application not found.", 404);
+    const app = await loadLoanRow(supabase, appId, "id, current_step");
+    if (app instanceof Response) return app;
     if ((app.current_step ?? 1) < 5) return err("Complete Step 4 before Step 5.", 409);
 
     const nextStep = Math.max(app.current_step ?? 5, 6);

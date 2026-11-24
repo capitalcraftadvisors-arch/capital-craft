@@ -20,23 +20,13 @@ import WizardProgress from "@/components/WizardProgress";
 import { getBusiness, setBusiness, isImpersonating } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { MOBILE_RE } from "@/lib/validators";
+import { REFERRAL_OPTIONS, type EpcReference as Ref } from "@/lib/epc-stakeholders";
 
-type RefType = "customer" | "supplier";
-type Ref = { type: RefType; name: string; mobile: string };
+type RefType = Ref["type"];
 
 function isValid(r: Ref) {
   return !!r.name.trim() && MOBILE_RE.test(r.mobile);
 }
-
-const REFERRAL_OPTIONS = [
-  { value: "facebook", label: "Facebook" },
-  { value: "instagram", label: "Instagram" },
-  { value: "website", label: "Website" },
-  { value: "linkedin", label: "LinkedIn" },
-  { value: "friend", label: "Friend" },
-  { value: "epc_partner", label: "EPC Partner" },
-  { value: "others", label: "Others (Please specify)" },
-];
 
 export default function Step6Page() {
   const router = useRouter();

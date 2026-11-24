@@ -13,7 +13,8 @@ import Docxtemplater from "docxtemplater";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { downloadBuffer } from "./gcs";
 import { inr } from "./pdf-template";
-import { fmtDate } from "./dates";
+import { fmtDateIST } from "./dates";
+import { stateSubsidyFor } from "./emi";
 
 export type QuotationInput = {
   customer_name: string;
@@ -36,13 +37,6 @@ export type QuotationInput = {
   make_cable?: string;
   make_battery?: string;
 };
-
-// State subsidy by system size: 1 kW ₹30,000 · 2 kW ₹60,000 · 3 kW+ ₹78,000 (capped).
-export function stateSubsidyFor(kw: number): number {
-  if (!kw || kw <= 0) return 0;
-  if (kw >= 3) return 78000;
-  return Math.round(kw * 30000);
-}
 
 // EPCs' own PDF templates (bundled:<key>) hold a real customer's sample values, so
 // they live only in the private bucket (templates/<file>) — never in the public repo,
@@ -75,7 +69,7 @@ export function buildQuotationData(input: QuotationInput) {
     customer_name: input.customer_name || "",
     city: input.city || "",
     state: input.state || "",
-    date: input.date || fmtDate(new Date()),
+    date: input.date || fmtDateIST(new Date()), // server clock is UTC
     quote_no: input.quote_no || "",
     kw: String(kwNum || input.kw || ""),
     system_type: input.system_type || "",

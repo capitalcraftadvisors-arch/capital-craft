@@ -13,35 +13,16 @@
 // page shows the fields for review and calls complete-step-3 to persist.
 
 import { NextRequest, NextResponse } from "next/server";
-import sharp from "sharp";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
-import { uploadBuffer, getSignedReadUrl } from "@/lib/gcs";
 import { extractProforma, extractEbill, type ProformaFields, type EbillFields } from "@/lib/loan-docs";
 import { geminiExtractProforma, geminiExtractEbill } from "@/lib/doc-extractors";
+import { checkLoanAppForUpload, readDoc, saveOcrRaw, signedUrlOrNull, storeLoanFile } from "@/lib/extract-server";
+import { ACCEPTED } from "@/lib/upload-rules";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-
-const MAX_DIMENSION = 2000;
-const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
-
-async function compress(file: File): Promise<{ buffer: Buffer; mime: string }> {
-  const ab = await file.arrayBuffer();
-  const input = Buffer.from(ab);
-  if (!file.type.startsWith("image/")) return { buffer: input, mime: file.type };
-  const output = await sharp(input)
-    .rotate()
-    .resize({ width: MAX_DIMENSION, height: MAX_DIMENSION, fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 75, mozjpeg: true })
-    .toBuffer();
-  return { buffer: output, mime: "image/jpeg" };
-}
-
-function safeName(fileName: string, fallback: string): string {
-  return (fileName || fallback).replace(/[^\w.\-]+/g, "_").slice(0, 80) || fallback;
-}
 
 export async function POST(
   req: NextRequest,
@@ -68,21 +49,11 @@ export async function POST(
     if (proformaFile && !ACCEPTED.has(proformaFile.type)) return err("Proforma must be JPEG, PNG, WebP, or PDF.", 400);
     if (ebillFile    && !ACCEPTED.has(ebillFile.type))    return err("E-bill must be JPEG, PNG, WebP, or PDF.", 400);
 
-    // Row check.
+    // Row check. Gate relaxed to step 2 — the EPC apply flow uploads the
+    // e-bill on its Page 2 (application is at current_step=2 then).
     const supabase = dbAs(token);
-    const { data: app, error: loadErr } = await supabase
-      .from("epc_applications")
-      .select("id, current_step, epc_business_id")
-      .eq("id", appId)
-      .maybeSingle();
-    if (loadErr) return err(loadErr.message, 500);
-    if (!app)    return err("Loan application not found.", 404);
-    if (claims.business_type !== "admin" && app.epc_business_id !== claims.business_id) {
-      return err("forbidden", 403);
-    }
-    // Gate relaxed to step 2 — the EPC apply flow uploads the e-bill on
-    // its Page 2 (application is at current_step=2 then).
-    if (claims.business_type !== "admin" && (app.current_step ?? 1) < 2) return err("Complete registration before uploads.", 409);
+    const blocked = await checkLoanAppForUpload(supabase, claims, appId, "id, current_step, epc_business_id", "Complete registration before uploads.");
+    if (blocked) return blocked;
 
     // Handle each side independently. If either OCR fails we still keep
     // the upload — admin can fill fields in by hand.
@@ -107,64 +78,40 @@ export async function POST(
     let ebillRaw:    string | null = null;
 
     if (proformaFile) {
-      const { buffer, mime } = await compress(proformaFile);
-      const path = `applications/${appId}/loan_docs/proforma/${Date.now()}_${safeName(proformaFile.name, "proforma")}`;
-      await uploadBuffer(path, buffer, mime);
-      let fields: ProformaFields = { total_project_cost: null, project_size: null, project_size_unit: null };
-      const gProforma = await geminiExtractProforma([{ buffer, mime }]);
-      if (gProforma) {
-        fields = gProforma;
-        proformaRaw = JSON.stringify(gProforma);
-      } else {
-        try {
-          const r = await extractProforma(buffer, mime);
-          fields = r.fields;
-          proformaRaw = r.raw_text;
-        } catch (e) {
-          visionError = e instanceof Error ? e.message : String(e);
-          console.error("[extract-loan-docs] proforma vision error:", visionError);
-        }
-      }
-      let signed: string | null = null;
-      try { signed = await getSignedReadUrl(path, 3600); } catch { /* non-fatal */ }
-      proformaOut = { fields, storage_path: path, signed_url: signed, uploaded_at: new Date().toISOString() };
+      const { buffer, mime, path } = await storeLoanFile(appId, "loan_docs/proforma", proformaFile, "proforma");
+      const r = await readDoc<ProformaFields>(
+        { buffer, mime },
+        { total_project_cost: null, project_size: null, project_size_unit: null },
+        geminiExtractProforma,
+        extractProforma,
+        "[extract-loan-docs] proforma vision error:",
+      );
+      proformaRaw = r.rawText;
+      visionError = r.visionError ?? visionError;
+      const signed = await signedUrlOrNull(path);
+      proformaOut = { fields: r.fields, storage_path: path, signed_url: signed, uploaded_at: new Date().toISOString() };
 
-      if (proformaRaw) {
-        supabase.rpc("append_ocr_raw", { app_id: appId, key_name: "proforma", raw_text: proformaRaw })
-          .then((r) => r.error && console.warn("[extract-loan-docs] raw-text save (proforma):", r.error.message));
-      }
+      if (proformaRaw) saveOcrRaw(supabase, appId, "proforma", proformaRaw, "[extract-loan-docs] raw-text save (proforma):");
     }
 
     if (ebillFile) {
-      const { buffer, mime } = await compress(ebillFile);
-      const path = `applications/${appId}/loan_docs/ebill/${Date.now()}_${safeName(ebillFile.name, "ebill")}`;
-      await uploadBuffer(path, buffer, mime);
-      let fields: EbillFields = {
-        monthly_bill_amount: null, discom_name: null, ca_number: null,
-        pincode: null, ebill_address_line: null, ebill_name: null,
-      };
-      const gEbill = await geminiExtractEbill([{ buffer, mime }]);
-      if (gEbill) {
-        fields = gEbill;
-        ebillRaw = JSON.stringify(gEbill);
-      } else {
-        try {
-          const r = await extractEbill(buffer, mime);
-          fields = r.fields;
-          ebillRaw = r.raw_text;
-        } catch (e) {
-          visionError = e instanceof Error ? e.message : String(e);
-          console.error("[extract-loan-docs] ebill vision error:", visionError);
-        }
-      }
-      let signed: string | null = null;
-      try { signed = await getSignedReadUrl(path, 3600); } catch { /* non-fatal */ }
-      ebillOut = { fields, storage_path: path, signed_url: signed, uploaded_at: new Date().toISOString() };
+      const { buffer, mime, path } = await storeLoanFile(appId, "loan_docs/ebill", ebillFile, "ebill");
+      const r = await readDoc<EbillFields>(
+        { buffer, mime },
+        {
+          monthly_bill_amount: null, discom_name: null, ca_number: null,
+          pincode: null, ebill_address_line: null, ebill_name: null,
+        },
+        geminiExtractEbill,
+        extractEbill,
+        "[extract-loan-docs] ebill vision error:",
+      );
+      ebillRaw = r.rawText;
+      visionError = r.visionError ?? visionError;
+      const signed = await signedUrlOrNull(path);
+      ebillOut = { fields: r.fields, storage_path: path, signed_url: signed, uploaded_at: new Date().toISOString() };
 
-      if (ebillRaw) {
-        supabase.rpc("append_ocr_raw", { app_id: appId, key_name: "ebill", raw_text: ebillRaw })
-          .then((r) => r.error && console.warn("[extract-loan-docs] raw-text save (ebill):", r.error.message));
-      }
+      if (ebillRaw) saveOcrRaw(supabase, appId, "ebill", ebillRaw, "[extract-loan-docs] raw-text save (ebill):");
     }
 
     return NextResponse.json({

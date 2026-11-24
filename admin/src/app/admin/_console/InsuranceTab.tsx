@@ -186,6 +186,8 @@ export default function InsuranceTab({ period, pFrom, pTo }: TabPeriodProps) {
       a.target = "_blank";
       a.rel = "noopener";
       document.body.appendChild(a); a.click(); a.remove();
+    } catch (e) {
+      alert("Couldn't open the policy: " + (e as Error).message);
     } finally { setPolicyBusy(null); }
   }
 

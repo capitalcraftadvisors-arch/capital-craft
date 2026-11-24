@@ -14,6 +14,7 @@ import AddNewLoanAppModal from "@/components/AddNewLoanAppModal";
 import { ACCENTS } from "@/components/AdminSidebar";
 import { supabase } from "@/lib/supabase";
 import { authHeaders } from "@/lib/auth";
+import { saveDownload } from "@/lib/storage";
 import { lenderOutcome, OUTCOME_LABEL, OUTCOME_PILL } from "@/lib/loan-status";
 import { getCached, setCached } from "@/lib/list-cache";
 import { invalidateLoanBoards } from "@/lib/ops-board";
@@ -548,12 +549,7 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
       const qs = type === "monthly" ? `type=monthly&month=${month}` : "type=pending";
       const res = await fetch(`/api/admin/loan-reports?${qs}`, { headers: authHeaders() });
       if (!res.ok) { const j = await res.json().catch(() => ({})); toast.error(j?.error || "Couldn't build the report."); return; }
-      const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? "report.xlsx";
-      const url = URL.createObjectURL(await res.blob());
-      const a = document.createElement("a");
-      a.href = url; a.download = name;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
+      await saveDownload(res, "report.xlsx");
     } finally {
       setReportBusy(null);
     }

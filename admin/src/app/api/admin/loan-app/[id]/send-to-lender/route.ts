@@ -12,18 +12,12 @@
 // Admin-only. Keeps the Download-ZIP button untouched.
 
 import { NextRequest, NextResponse } from "next/server";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import ExcelJS from "exceljs";
-import archiver from "archiver";
-import { sendMail, mailConfigured } from "@/lib/mailer";
 import { err, dbAs, requireLogin } from "@/lib/api";
-import { UUID_RE, EMAIL_RE } from "@/lib/validators";
+import { UUID_RE } from "@/lib/validators";
 import { fmtRupees } from "@/lib/money";
 import { isMainAdmin } from "@/lib/hierarchy";
-import { uploadBuffer, downloadBuffer } from "@/lib/gcs";
-import { fileLinkUrl } from "@/lib/file-links";
-import { publicOrigin } from "@/lib/login-password-server";
 import { creditFairEmailRows } from "@/lib/lender-summary";
+import { esc, readSendFields, sendLenderPack, titleCaseCategory, type ComposerBody } from "@/lib/lender-pack";
 import { fetchLenders, lenderLabelIn } from "@/lib/loan-lenders";
 import { logLoanActivityServer } from "@/lib/loan-activity-server";
 
@@ -33,21 +27,13 @@ export const maxDuration = 180;
 
 const LOAN_CC_DEFAULT = ["malvikasaxena323@gmail.com"];
 
-function extOf(p: string): string { const m = p.split("/").pop()?.match(/\.[a-z0-9]+$/i); return m ? m[0] : ""; }
-function safe(s: string): string { return s.replace(/[^\w .-]+/g, "_").slice(0, 80); }
-function esc(s: string): string { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string)); }
-function cleanEmails(v: unknown): string[] {
-  if (!Array.isArray(v)) return [];
-  return Array.from(new Set(v.map((x) => String(x).trim().toLowerCase()).filter((x) => EMAIL_RE.test(x))));
-}
-
 const CATEGORY_LABEL: Record<string, string> = {
   borrower_pan: "PAN", customer_photo: "Applicant photo", electricity_bill: "Electricity bill",
   bank_statement: "Bank statement", quotation: "Quotation", income_proof: "Income proof",
   property_doc: "Property document", sanction_letter: "Sanction letter", other: "Other document",
 };
 function prettyCategory(c: string): string {
-  return CATEGORY_LABEL[c] || c.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+  return CATEGORY_LABEL[c] || titleCaseCategory(c);
 }
 
 // Every attachable document for a loan, de-duplicated by path.
@@ -100,13 +86,6 @@ function completionDetail(loan: Record<string, any>, epcName: string): [string, 
   ];
 }
 
-async function saveContacts(supabase: SupabaseClient, emails: string[]) {
-  const now = new Date().toISOString();
-  for (const email of emails) {
-    try { await supabase.from("email_contacts").upsert({ email, last_used_at: now }, { onConflict: "email" }); } catch { /* non-blocking */ }
-  }
-}
-
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const auth = await requireLogin(req, { role: "admin" });
@@ -116,10 +95,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const appId = params.id;
     if (!UUID_RE.test(appId)) return err("Invalid application id.", 400);
 
-    const body = (await req.json().catch(() => ({}))) as {
-      mode?: string; lender?: string; scope?: string; to?: string; toName?: string;
-      cc?: string[]; bcc?: string[]; subject?: string; detail?: [string, string][];
-    };
+    const body = (await req.json().catch(() => ({}))) as ComposerBody & { scope?: string };
     const mode = body.mode === "send" ? "send" : "preview";
     // scope "completion" = email the 2nd-tranche completion documents (to the
     // lender who approved the loan); default = the full loan application.
@@ -195,84 +171,26 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
 
     // ── SEND ──
-    if (!mailConfigured()) return err("Email isn't configured yet (app password missing).", 500);
-    const to = String(body.to ?? "").trim().toLowerCase();
-    if (!EMAIL_RE.test(to)) return err("Enter a valid recipient (TO) email.", 400);
-    const cc = cleanEmails(body.cc);
-    const bcc = cleanEmails(body.bcc);
-    const subject = String(body.subject ?? "").trim() || defaultSubject;
-    const toName = String(body.toName ?? "").trim();
-    const detail = Array.isArray(body.detail) && body.detail.length
-      ? body.detail.map((r) => [String(r?.[0] ?? ""), String(r?.[1] ?? "")] as [string, string])
-      : defaultDetail;
-
-    // summary.xlsx built from the (edited) detail rows.
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("Application");
-    ws.columns = [{ width: 34 }, { width: 50 }];
-    const title = ws.addRow(["Capital Craft — Loan Application", ""]);
-    title.font = { bold: true, size: 14 };
-    ws.addRow([]);
-    for (const [k, v] of detail) { const r = ws.addRow([k, v]); r.getCell(1).font = { bold: true, color: { argb: "FF0F3D2E" } }; }
-    const xlsxBuffer = Buffer.from(await wb.xlsx.writeBuffer());
-
-    // flat ZIP + per-doc signed links.
-    const archive = archiver("zip", { zlib: { level: 6 } });
-    const chunks: Buffer[] = [];
-    archive.on("data", (c: Buffer) => chunks.push(c));
-    archive.on("warning", (e) => console.warn("[send-to-lender] zip warn:", e));
-    const zipDone = new Promise<void>((resolve, reject) => { archive.on("end", () => resolve()); archive.on("error", reject); });
-    archive.append(xlsxBuffer, { name: "summary.xlsx" });
-    const buffers = new Map<string, Buffer>();
-    for (const d of docList) {
-      try { const buf = await downloadBuffer(d.path); buffers.set(d.path, buf); archive.append(buf, { name: `${safe(`${d.label} - ${borrowerName}`)}${extOf(d.path)}` }); }
-      catch (e) { console.warn(`[send-to-lender] skip ${d.path}:`, e); }
-    }
-    void archive.finalize();
-    await zipDone;
-    const zipBuffer = Buffer.concat(chunks);
-
-    const zipName = `${safe(`${borrowerName}_${lenderLabel}`)}.zip`;
-    const zipPath = `lender-packs/${appId}/${Date.now()}_${zipName}`;
-    await uploadBuffer(zipPath, zipBuffer, "application/zip");
-    // Links go through the portal so they outlive Google's 7-day cap (lib/file-links).
-    const origin = publicOrigin(req);
-    const zipUrl = fileLinkUrl(origin, zipPath);
-
-    const links: Array<{ label: string; url: string }> = [];
-    for (const d of docList) { if (!buffers.has(d.path)) continue; links.push({ label: d.label, url: fileLinkUrl(origin, d.path) }); }
-
-    const linksHtml = links.map((l) => `<li style="margin:4px 0"><a href="${esc(l.url)}" style="color:#178a5c">${esc(l.label)}</a></li>`).join("");
-    const detailHtml = `<table style="border-collapse:collapse;margin:8px 0 18px;font-size:13px">${detail
-      .map(([k, v]) => `<tr><td style="padding:3px 16px 3px 0;color:#5a8a76;vertical-align:top;white-space:nowrap">${esc(k)}</td><td style="padding:3px 0;font-weight:600;color:#12271f">${esc(v || "—")}</td></tr>`)
-      .join("")}</table>`;
-    const html = `
-      <div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;font-size:14px;color:#12271f;line-height:1.55">
-        <p>Dear ${esc(toName || "Team")},</p>
-        <p>${isCompletion
-          ? `Please find the completion (2nd tranche) documents for <b>${esc(borrowerName)}</b> below. Kindly review and release the second tranche.`
-          : `Please find the applicant details for <b>${esc(borrowerName)}</b> below, along with the supporting documents. Kindly review and revert at the earliest.`}</p>
-        ${detailHtml}
-        <p style="margin:16px 0 6px"><b>Documents</b></p>
-        <ul style="margin:0 0 16px;padding-left:20px">${linksHtml || "<li>(no documents on file)</li>"}</ul>
-        <p><b>Download all as a single ZIP:</b> <a href="${esc(zipUrl)}" style="color:#178a5c">${esc(zipName)}</a></p>
-        <p style="color:#5a8a76;font-size:12.5px">A summary sheet is attached.</p>
-        <p style="margin-top:18px">Regards,<br/>Capital Craft Advisors</p>
-      </div>`;
-
-    await sendMail({
-      to,
-      ...(cc.length ? { cc } : {}),
-      ...(bcc.length ? { bcc } : {}),
-      subject,
-      html,
-      attachments: [{ filename: "summary.xlsx", content: xlsxBuffer }],
+    const mail = readSendFields(body, defaultSubject, defaultDetail);
+    if (mail instanceof Response) return mail;
+    const { to } = mail;
+    const documents = await sendLenderPack(req, supabase, {
+      mail,
+      sheetName: "Application",
+      sheetTitle: "Capital Craft — Loan Application",
+      docs: docList,
+      name: borrowerName,
+      lenderLabel,
+      zipFolder: `lender-packs/${appId}`,
+      introHtml: isCompletion
+        ? `Please find the completion (2nd tranche) documents for <b>${esc(borrowerName)}</b> below. Kindly review and release the second tranche.`
+        : `Please find the applicant details for <b>${esc(borrowerName)}</b> below, along with the supporting documents. Kindly review and revert at the earliest.`,
+      logTag: "send-to-lender",
     });
 
-    await saveContacts(supabase, [to, ...cc, ...bcc]);
     await logLoanActivityServer(supabase, appId, "email_sent", claims.business_id ?? null, { detail: `Emailed ${isCompletion ? "completion documents" : "to"} ${lenderLabel} — ${to}` });
 
-    return NextResponse.json({ ok: true, sent_to: to, documents: links.length });
+    return NextResponse.json({ ok: true, sent_to: to, documents });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[send-to-lender] error:", msg);

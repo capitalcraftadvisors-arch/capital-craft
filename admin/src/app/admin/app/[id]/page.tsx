@@ -1,5 +1,5 @@
 "use client";
-import { fmtDate } from "@/lib/dates";
+import { fmtDate, fmtDateTime } from "@/lib/dates";
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
@@ -10,11 +10,9 @@ import Input from "@/components/ui/Input";
 import StatusBadge from "@/components/StatusBadge";
 import FileUpload from "@/components/FileUpload";
 import { supabase } from "@/lib/supabase";
-import { getDocumentUrl } from "@/lib/storage";
 import { getBusiness } from "@/lib/auth";
 
 type App = Record<string, any>;
-type Doc = { id: string; category: string; storage_path: string; mime_type: string | null; file_name: string | null };
 type StatusEntry = { from: string; to: string; by: string; at: string; note: string };
 
 const DOC_CATEGORIES = [
@@ -34,13 +32,12 @@ export default function AdminAppDetailPage() {
 function Inner() {
   const params = useParams<{ id: string }>();
   const [app, setApp] = useState<App | null>(null);
-  const [docs, setDocs] = useState<Doc[]>([]);
-  const [thumbs, setThumbs] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<App>({});
   const [notes, setNotes] = useState("");
   const [nbfc, setNbfc] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => { void load(); }, [params.id]);
 
@@ -48,34 +45,22 @@ function Inner() {
     const { data: a } = await supabase().from("epc_applications").select("*").eq("id", params.id).maybeSingle();
     setApp(a); setForm(a || {});
     setNotes(a?.review_notes || "");
-    const { data: d } = await supabase().from("user_application_docs")
-      .select("id, category, storage_path, mime_type, file_name")
-      .eq("application_id", params.id);
-    const rows = (d ?? []) as Doc[];
-    setDocs(rows);
-    const t: Record<string, string> = {};
-    for (const r of rows) {
-      if ((r.mime_type || "").startsWith("image/")) {
-        const u = await getDocumentUrl(r.id);
-        if (u) t[r.id] = u;
-      }
-    }
-    setThumbs(t);
   }
 
   async function saveEdits() {
-    setBusy(true);
+    setBusy(true); setError(null);
     const payload: Record<string, any> = {};
     for (const k of [
       "borrower_name","borrower_mobile","borrower_email","borrower_pan","borrower_dob",
       "borrower_address","borrower_pincode","borrower_city","borrower_state",
       "loan_amount","tenure_months","system_capacity_kw","system_cost","down_payment",
       "install_address","monthly_income","employment_type",
-    ]) payload[k] = form[k] || null;
+    ]) payload[k] = form[k] === "" || form[k] == null ? null : form[k]; // a 0 stays 0
     payload.review_notes = notes || null;
-    await supabase().from("epc_applications").update(payload).eq("id", params.id);
-    setEditing(false);
+    const { error } = await supabase().from("epc_applications").update(payload).eq("id", params.id);
     setBusy(false);
+    if (error) { setError(error.message); return; } // keep the editor open
+    setEditing(false);
     void load();
   }
 
@@ -128,7 +113,7 @@ function Inner() {
           <div>
             <h1 className="font-display text-[26px] sm:text-[30px] font-bold">{app.borrower_name || "Untitled"}</h1>
             <p className="text-text-mid mt-1">
-              ₹{app.loan_amount ? Number(app.loan_amount).toLocaleString("en-IN") : "—"}
+              {app.loan_amount ? `₹${Number(app.loan_amount).toLocaleString("en-IN")}` : "—"}
               {" · "}created {fmtDate(app.created_at)}
             </p>
           </div>
@@ -162,8 +147,9 @@ function Inner() {
               <div className="sm:col-span-2">
                 <Input label="Install address" value={form.install_address ?? ""} onChange={(e) => setForm({ ...form, install_address: e.target.value })} />
               </div>
+              {error && <p className="sm:col-span-2 text-[13px] text-red-600">{error}</p>}
               <div className="sm:col-span-2 flex gap-3 justify-end">
-                <Button variant="outline" onClick={() => { setEditing(false); setForm(app); }}>Cancel</Button>
+                <Button variant="outline" onClick={() => { setEditing(false); setForm(app); setError(null); }}>Cancel</Button>
                 <Button variant="primary" loading={busy} onClick={saveEdits}>Save</Button>
               </div>
             </div>
@@ -240,7 +226,7 @@ function Inner() {
               <p className="text-[13px] text-text-muted">No transitions yet.</p>
             ) : (app.status_history ?? []).map((h: StatusEntry, i: number) => (
               <li key={i} className="flex items-start gap-3 text-[13px] border-l-2 border-blue pl-3">
-                <span className="text-text-muted shrink-0">{new Date(h.at).toLocaleString("en-IN")}</span>
+                <span className="text-text-muted shrink-0">{fmtDateTime(h.at)}</span>
                 <span><span className="capitalize">{h.from}</span> → <span className="capitalize font-semibold">{h.to}</span>
                   {h.note && <span className="text-text-muted"> · {h.note}</span>}
                 </span>

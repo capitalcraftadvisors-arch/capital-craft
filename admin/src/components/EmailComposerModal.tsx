@@ -56,21 +56,23 @@ export default function EmailComposerModal({
     if (!open) return;
     setLoading(true); setError(null); setDone(null);
     void (async () => {
-      const { ok, j } = await api({ mode: "preview", lender: defaultLender || "creditfair" });
-      if (ok) {
-        const p = j as Preview;
-        setSubject(p.subject || ""); setToName(p.toName || "");
-        setDetail(p.detail || []); setDocLabels(p.docLabels || []);
-        setCc(p.ccDefault || []); setBcc(p.bccDefault || []);
-        const allowedList = Array.isArray(p.allowedLenders) ? p.allowedLenders : [];
-        setAllowed(allowedList);
-        // Default to the approved lender if it's allowed, else the first allowed one
-        // (in the canonical LENDERS order, not the DB row order).
-        const valid = (allowedList.length ? LENDERS.filter((x) => allowedList.includes(x.v)) : LENDERS).map((x) => x.v);
-        setLender((defaultLender && valid.includes(defaultLender)) ? defaultLender : valid[0]);
-      } else {
-        setError(j?.error || "Couldn't load the email preview.");
-      }
+      try {
+        const { ok, j } = await api({ mode: "preview", lender: defaultLender || "creditfair" });
+        if (ok) {
+          const p = j as Preview;
+          setSubject(p.subject || ""); setToName(p.toName || "");
+          setDetail(p.detail || []); setDocLabels(p.docLabels || []);
+          setCc(p.ccDefault || []); setBcc(p.bccDefault || []);
+          const allowedList = Array.isArray(p.allowedLenders) ? p.allowedLenders : [];
+          setAllowed(allowedList);
+          // Default to the approved lender if it's allowed, else the first allowed one
+          // (in the canonical LENDERS order, not the DB row order).
+          const valid = (allowedList.length ? LENDERS.filter((x) => allowedList.includes(x.v)) : LENDERS).map((x) => x.v);
+          setLender((defaultLender && valid.includes(defaultLender)) ? defaultLender : valid[0]);
+        } else {
+          setError(j?.error || "Couldn't load the email preview.");
+        }
+      } catch { setError("Couldn't load the email preview."); }
       try {
         const { data } = await supabase().from("email_contacts").select("email").order("last_used_at", { ascending: false }).limit(500);
         setContacts(((data ?? []) as { email: string }[]).map((r) => r.email).filter(Boolean));

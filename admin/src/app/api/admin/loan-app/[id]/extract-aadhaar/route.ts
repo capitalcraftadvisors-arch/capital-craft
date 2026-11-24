@@ -25,50 +25,16 @@
 // here — that would blank the number the RM needs to verify against the card.
 
 import { NextRequest, NextResponse } from "next/server";
-import sharp from "sharp";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { uploadBuffer, getSignedReadUrl } from "@/lib/gcs";
 import { extractAadhaar, geminiExtractAadhaar, cropAndUploadFace, type AadhaarFields } from "@/lib/aadhaar";
+import { checkLoanAppForUpload, compressFile, saveOcrRaw } from "@/lib/extract-server";
+import { ACCEPTED, safeName } from "@/lib/upload-rules";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
-
-const MAX_DIMENSION = 2000;
-const ACCEPTED = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "application/pdf",
-]);
-
-// Compress an image with the same pipeline as /api/upload. PDFs pass
-// through untouched. Returns { output, outputMime, originalSize }.
-async function compress(file: File): Promise<{ output: Buffer; outputMime: string; originalSize: number }> {
-  const ab = await file.arrayBuffer();
-  const input = Buffer.from(ab);
-  const originalSize = input.length;
-  if (!file.type.startsWith("image/")) {
-    return { output: input, outputMime: file.type, originalSize };
-  }
-  const output = await sharp(input)
-    .rotate()
-    .resize({
-      width: MAX_DIMENSION,
-      height: MAX_DIMENSION,
-      fit: "inside",
-      withoutEnlargement: true,
-    })
-    .jpeg({ quality: 75, mozjpeg: true })
-    .toBuffer();
-  return { output, outputMime: "image/jpeg", originalSize };
-}
-
-function safeName(fileName: string, fallback: string): string {
-  const raw = (fileName || fallback).replace(/[^\w.\-]+/g, "_").slice(0, 80);
-  return raw || fallback;
-}
 
 export async function POST(
   req: NextRequest,
@@ -98,32 +64,22 @@ export async function POST(
     }
 
     // ── target row check ─────────────────────────────────────
-    const supabase = dbAs(token);
-    const { data: app, error: loadErr } = await supabase
-      .from("epc_applications")
-      .select("id, current_step, status, epc_business_id")
-      .eq("id", appId)
-      .maybeSingle();
-    if (loadErr) return err(loadErr.message, 500);
-    if (!app)    return err("Loan application not found.", 404);
-    if (claims.business_type !== "admin" && app.epc_business_id !== claims.business_id) {
-      return err("forbidden", 403);
-    }
     // Admin (incl. the AI intake chat) may upload documents before step 1 is
     // formally completed; the EPC-facing flow still follows the step order.
-    if (claims.business_type !== "admin" && (app.current_step ?? 1) < 2) {
-      return err("Complete Step 1 before uploading Aadhaar.", 409);
-    }
+    const supabase = dbAs(token);
+    const blocked = await checkLoanAppForUpload(supabase, claims, appId, "id, current_step, status, epc_business_id", "Complete Step 1 before uploading Aadhaar.");
+    if (blocked) return blocked;
 
     // ── compress + upload ────────────────────────────────────
-    const [frontComp, backComp] = await Promise.all([compress(front), compress(back)]);
+    // Same pipeline as /api/upload (images → JPEG, 2000 px; PDFs untouched).
+    const [frontComp, backComp] = await Promise.all([compressFile(front), compressFile(back)]);
 
     const frontPath = `applications/${appId}/aadhaar_front/${Date.now()}_${safeName(front.name, "front")}`;
     const backPath  = `applications/${appId}/aadhaar_back/${Date.now()}_${safeName(back.name, "back")}`;
 
     await Promise.all([
-      uploadBuffer(frontPath, frontComp.output, frontComp.outputMime),
-      uploadBuffer(backPath,  backComp.output,  backComp.outputMime),
+      uploadBuffer(frontPath, frontComp.output, frontComp.mime),
+      uploadBuffer(backPath,  backComp.output,  backComp.mime),
     ]);
 
     // ── Extract fields ───────────────────────────────────────
@@ -133,8 +89,8 @@ export async function POST(
     // Vision + regex parser below. The face crop further down always uses
     // Vision regardless.
     let merged = await geminiExtractAadhaar([
-      { buffer: frontComp.output, mime: frontComp.outputMime },
-      { buffer: backComp.output,  mime: backComp.outputMime },
+      { buffer: frontComp.output, mime: frontComp.mime },
+      { buffer: backComp.output,  mime: backComp.mime },
     ]);
     let source: "gemini" | "vision" = "gemini";
     let frontOut: { fields: AadhaarFields; raw_text: string } | null = null;
@@ -147,8 +103,8 @@ export async function POST(
       source = "vision";
       try {
         [frontOut, backOut] = await Promise.all([
-          extractAadhaar(frontComp.output, frontComp.outputMime),
-          extractAadhaar(backComp.output,  backComp.outputMime),
+          extractAadhaar(frontComp.output, frontComp.mime),
+          extractAadhaar(backComp.output,  backComp.mime),
         ]);
       } catch (e) {
         visionError = e instanceof Error ? e.message : String(e);
@@ -170,14 +126,14 @@ export async function POST(
     // Audit trail (fire-and-forget): the Vision raw text on the fallback path,
     // or the Gemini result when it was used — so misses can be debugged without
     // re-uploading. See 0027_ocr_raw_text.sql.
-    if (frontOut) supabase.rpc("append_ocr_raw", { app_id: appId, key_name: "aadhaar_front", raw_text: frontOut.raw_text }).then((r) => r.error && console.warn("[extract-aadhaar] raw-text save (front):", r.error.message));
-    if (backOut)  supabase.rpc("append_ocr_raw", { app_id: appId, key_name: "aadhaar_back",  raw_text: backOut.raw_text  }).then((r) => r.error && console.warn("[extract-aadhaar] raw-text save (back):", r.error.message));
-    if (source === "gemini") supabase.rpc("append_ocr_raw", { app_id: appId, key_name: "aadhaar_gemini", raw_text: JSON.stringify(merged) }).then((r) => r.error && console.warn("[extract-aadhaar] gemini audit:", r.error.message));
+    if (frontOut) saveOcrRaw(supabase, appId, "aadhaar_front", frontOut.raw_text, "[extract-aadhaar] raw-text save (front):");
+    if (backOut)  saveOcrRaw(supabase, appId, "aadhaar_back",  backOut.raw_text,  "[extract-aadhaar] raw-text save (back):");
+    if (source === "gemini") saveOcrRaw(supabase, appId, "aadhaar_gemini", JSON.stringify(merged), "[extract-aadhaar] gemini audit:");
 
     // ── face crop on front (image only) ──────────────────────
     let facePath: string | null = null;
     try {
-      const face = await cropAndUploadFace(frontComp.output, frontComp.outputMime, appId);
+      const face = await cropAndUploadFace(frontComp.output, frontComp.mime, appId);
       facePath = face.storage_path;
     } catch (e) {
       // Non-fatal: KYC still works without the cropped face; the front

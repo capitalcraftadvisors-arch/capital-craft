@@ -26,18 +26,7 @@ import FileUpload from "@/components/FileUpload";
 import { getBusiness, setBusiness, isImpersonating } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { MOBILE_RE, EMAIL_RE } from "@/lib/validators";
-
-type Stakeholder = {
-  id: string;
-  name: string;
-  designation: string;
-  mobile: string;
-  email: string;
-  father_name: string;
-  dob: string;
-  aadhaar_number: string;
-  aadhaar_address: string;
-};
+import { normalizeStakeholder, type Stakeholder } from "@/lib/epc-stakeholders";
 
 type BizType = "proprietorship" | "pvt_ltd" | "partnership" | "llp" | null;
 
@@ -64,21 +53,6 @@ function configFor(bt: BizType): RoleConfig {
     default:
       return { heading: "Stakeholders details", roleLabel: "Stakeholder", addButtonLabel: "+ Add Stakeholder", defaultDesignation: "", minRows: 1, maxRows: Infinity };
   }
-}
-
-function normalizeStakeholder(raw: unknown): Stakeholder {
-  const r = raw as Record<string, unknown>;
-  return {
-    id: (r.id as string) ?? crypto.randomUUID(),
-    name: (r.name as string) ?? "",
-    designation: (r.designation as string) ?? "",
-    mobile: (r.mobile as string) ?? "",
-    email: (r.email as string) ?? "",
-    father_name: (r.father_name as string) ?? "",
-    dob: (r.dob as string) ?? "",
-    aadhaar_number: (r.aadhaar_number as string) ?? "",
-    aadhaar_address: (r.aadhaar_address as string) ?? "",
-  };
 }
 
 export default function Step3Page() {

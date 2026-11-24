@@ -7,7 +7,7 @@ import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import StatusBadge from "@/components/StatusBadge";
 import { supabase } from "@/lib/supabase";
-import { getDocumentUrl } from "@/lib/storage";
+import { getDocumentUrl, openDocument } from "@/lib/storage";
 
 type App = Record<string, any>;
 type Doc = { id: string; category: string; storage_path: string; mime_type: string | null; file_name: string | null };
@@ -61,7 +61,7 @@ function Inner() {
           <div>
             <h1 className="font-display text-[26px] sm:text-[30px] font-bold">{app.borrower_name || "Untitled"}</h1>
             <p className="text-text-mid mt-1">
-              ₹{app.loan_amount ? Number(app.loan_amount).toLocaleString("en-IN") : "—"} &middot; created {fmtDate(app.created_at)}
+              {app.loan_amount ? `₹${Number(app.loan_amount).toLocaleString("en-IN")}` : "—"} &middot; created {fmtDate(app.created_at)}
             </p>
           </div>
           <StatusBadge status={app.status} />
@@ -108,10 +108,7 @@ function Inner() {
                     <p className="text-[13px] truncate">{d.file_name || d.category}</p>
                     <p className="text-[11px] text-text-muted">{d.category}</p>
                   </div>
-                  <button onClick={async () => {
-                    const u = await getDocumentUrl(d.id);
-                    if (u) window.open(u, "_blank");
-                  }} className="text-[12px] text-blue hover:underline">View</button>
+                  <button onClick={() => void openDocument(d.id)} className="text-[12px] text-blue hover:underline">View</button>
                 </li>
               ))}
             </ul>

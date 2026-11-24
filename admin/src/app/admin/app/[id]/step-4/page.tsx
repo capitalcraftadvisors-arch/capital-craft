@@ -1,5 +1,4 @@
 "use client";
-import { fmtDateTime } from "@/lib/dates";
 
 // Loan Application — Step 4 (Personal Details)
 //
@@ -17,6 +16,9 @@ import { fmtDateTime } from "@/lib/dates";
 //   e. Retrieved Bank Information — labeled fields, OCR-prefilled, editable
 //         · "Details Extracted" badge; confirm checkbox
 //   f. Previous / Next
+//
+// The page frame, choice cards, upload box and the save / OCR calls come from
+// the shared loan-form kit (components/loan-form).
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -24,15 +26,19 @@ import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
-import Button from "@/components/ui/Button";
-import LoanAppStepTracker from "@/components/LoanAppStepTracker";
 import FileUpload from "@/components/FileUpload";
 import { supabase } from "@/lib/supabase";
-import { authHeaders } from "@/lib/auth";
-import { openDocument } from "@/lib/storage";
+import { openDocument, openLoanPath } from "@/lib/storage";
 import { IFSC_RE, MOBILE_RE, EMAIL_RE } from "@/lib/validators";
 import { professionsFor } from "@/lib/loan-form";
 import { amountInput } from "@/lib/money";
+// Type only (erased at build) — lib/bank-statement itself is server-side OCR code.
+import type { BankStatementFields } from "@/lib/bank-statement";
+import {
+  StepHeader, StepLoading, StepNotFound, StepTracker, StepTitle, StepNav,
+  FormSection, H16_GREEN, ErrorBox, TickCircle, CheckRow, ChoiceTile, UploadedDoc, HiddenFileInput,
+  EPC_JOIN, INCOMPLETE_NOTE, postLoanFiles, saveStep, nextStepPath, type EpcNames,
+} from "@/components/loan-form";
 
 // ── Static option lists ──────────────────────────────────────────────
 
@@ -50,22 +56,7 @@ type Loan = {
   aadhaar_dob:           string | null;
   aadhaar_address:       string | null;
   aadhaar_number_masked: string | null;
-  epc_business: {
-    contact_name: string | null;
-    trade_name: string | null;
-    legal_name: string | null;
-    epc_display_id: string | null;
-  } | null;
-};
-
-type BankFields = {
-  account_holder: string | null;
-  bank_name:      string | null;
-  account_no:     string | null;
-  ifsc:           string | null;
-  account_type:   string | null;
-  mobile:         string | null;
-  email:          string | null;
+  epc_business: EpcNames | null;
 };
 
 type BankDoc = {
@@ -137,7 +128,7 @@ function Inner() {
           "employment_type, profession, profession_other, organization_name, annual_income, " +
           "bank_statement_method, bank_statement_path, bank_statement_uploaded_at, step4_completed_at, " +
           "bank_account_holder, bank_name, bank_account_no, bank_ifsc, bank_account_type, bank_mobile, " +
-          "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
+          EPC_JOIN,
         )
         .eq("id", params.id)
         .maybeSingle();
@@ -198,24 +189,6 @@ function Inner() {
 
   // ── Bank statement upload ──────────────────────────────────────────
 
-  // View a stored bank statement — signs the *_path on demand via the admin
-  // sign-doc route, so it works on edit/resume load (where no signed_url was
-  // fetched), not only right after a fresh upload.
-  async function signAndOpen(path: string) {
-    try {
-      const res = await fetch(`/api/admin/loan-app/${params.id}/sign-doc`, {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ path }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (data?.ok && data.url) window.open(data.url, "_blank", "noopener");
-      else alert("Couldn't open the document.");
-    } catch (e) {
-      alert("Couldn't open the document: " + (e as Error).message);
-    }
-  }
-
   async function uploadBankStatement(file: File) {
     if (!loan || !method) return;
     setUploadError(null);
@@ -224,19 +197,12 @@ function Inner() {
     // and confirm state — admin needs to re-review the new extraction.
     setBankConfirmed(false);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("method", method);
-      const res = await fetch(`/api/admin/loan-app/${loan.id}/extract-bank-statement`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: fd,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        setUploadError(data?.error || `Upload failed (HTTP ${res.status}).`);
+      const r = await postLoanFiles(loan.id, "extract-bank-statement", { file, method });
+      if (!r.ok) {
+        setUploadError(r.error);
         return;
       }
+      const data = r.data;
       setBankDoc({
         path: data.storage_path,
         uploaded_at: data.uploaded_at,
@@ -246,7 +212,7 @@ function Inner() {
       });
       // Prefill retrieved bank info — never blow away what admin
       // already typed manually.
-      const f = data.fields as BankFields;
+      const f = data.fields as BankStatementFields;
       // Account-holder NAME is deliberately NOT auto-filled — OCR gets it wrong
       // too often, so the admin types it manually. (The parser still extracts it
       // into ocr_raw_text/debug; we just don't populate the form field.)
@@ -292,10 +258,6 @@ function Inner() {
 
   async function saveAndNext() {
     if (!loan) return; // admin-only flow: never block on missing fields/docs
-    // The bank statement upload must have succeeded before we can persist its
-    // storage path. If it was skipped or its upload failed silently, `bankDoc`
-    // is null — stop with a clear message instead of crashing on `.method`/
-    // `.path` ("Cannot read properties of null").
     setSaveError(null);
     setSaving(true);
     try {
@@ -319,78 +281,34 @@ function Inner() {
         bank_mobile:         bankMobile || null,
         bank_email:          bankEmail.trim() || null,
       };
-      const res = await fetch(`/api/admin/loan-app/${loan.id}/complete-step-4`, {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        setSaveError(data?.error || `Save failed (HTTP ${res.status}).`);
+      const error = await saveStep(loan.id, 4, body);
+      if (error) {
+        setSaveError(error);
         setSaving(false);
         return;
       }
-      const fromReview = new URLSearchParams(window.location.search).get("from") === "review";
-      router.push(`/admin/app/${loan.id}/${fromReview ? "step-6" : "step-5"}` as any);
+      router.push(nextStepPath(loan.id, "step-5") as any);
     } catch (e) {
       setSaveError((e as Error)?.message || "Network error.");
       setSaving(false);
     }
   }
 
-  if (loading) {
-    return <main className="min-h-screen grid place-items-center"><p className="text-text-muted">Loading…</p></main>;
-  }
-  if (!loan) {
-    return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Loan application not found.</p></main>;
-  }
-
-  const customerName =
-    loan.epc_business?.trade_name ||
-    loan.epc_business?.legal_name ||
-    loan.epc_business?.contact_name ||
-    "(customer)";
+  if (loading) return <StepLoading />;
+  if (!loan) return <StepNotFound />;
 
   return (
     <main className="min-h-screen bg-bg-soft">
-      <header className="border-b border-line bg-white">
-        <div className="w-full px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => router.push(`/admin/app/${params.id}/step-3` as any)}
-              aria-label="Back to previous step"
-              className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#185fa5] hover:text-[#0f3d2e] transition-colors"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
-              Back
-            </button>
-            <span className="text-[12px] px-2 py-0.5 rounded-full bg-bg-tint text-blue-dark font-semibold uppercase tracking-wide">
-              Loan Application · Step 4
-            </span>
-          </div>
-        </div>
-      </header>
+      <StepHeader step={4} backTo={`/admin/app/${params.id}/step-3`} />
 
       <section className="max-w-[880px] mx-auto px-5 sm:px-7 py-8 space-y-5">
-        <LoanAppStepTracker
-          applicationId={loan.id}
-          displayId={loan.epc_business?.epc_display_id ?? null}
-          name={customerName}
-          createdAt={loan.created_at}
-          currentStep={4}
-        />
+        <StepTracker loan={loan} step={4} />
 
-        <div>
-          <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
-            Personal Details
-          </h1>
-          <p className="text-text-mid mt-2 text-[15px]">
-            Capture the customer&rsquo;s employment info and verify bank details from
-            a recent statement. All bank fields are prefilled from OCR — every one
-            is editable, so correct anything before confirming.
-          </p>
-        </div>
+        <StepTitle title="Personal Details">
+          Capture the customer&rsquo;s employment info and verify bank details from
+          a recent statement. All bank fields are prefilled from OCR — every one
+          is editable, so correct anything before confirming.
+        </StepTitle>
 
         {/* b. Verified Information (collapsible) */}
         <Card className="p-0 overflow-hidden">
@@ -400,11 +318,7 @@ function Inner() {
             className="w-full flex items-center justify-between px-6 py-4 hover:bg-bg-tint transition-colors"
           >
             <div className="flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-[#178a5c] flex items-center justify-center">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              </span>
+              <TickCircle />
               <span className="text-[14px] font-semibold text-[#0f3d2e]">
                 Details verified via KYC
               </span>
@@ -430,19 +344,19 @@ function Inner() {
         </Card>
 
         {/* c. Employment Information */}
-        <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px]">Employment information</h2>
-
+        <FormSection title="Employment information">
           <div>
             <p className="block mb-2 text-[13px] font-medium text-text-mid">Employment type</p>
             <div className="grid sm:grid-cols-2 gap-3">
-              <EmploymentTile
+              <ChoiceTile
+                fadeDot
                 active={employment === "salaried"}
                 onClick={() => { setEmployment("salaried"); setProfession(""); setProfessionOther(""); }}
                 title="Salaried"
                 desc="Employee of a company / organisation"
               />
-              <EmploymentTile
+              <ChoiceTile
+                fadeDot
                 active={employment === "self_employed"}
                 onClick={() => { setEmployment("self_employed"); setProfession(""); setProfessionOther(""); }}
                 title="Self-employed"
@@ -484,24 +398,25 @@ function Inner() {
               </div>
             </>
           )}
-        </Card>
+        </FormSection>
 
         {/* d. Bank Statement */}
-        <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px]">Bank statement</h2>
+        <FormSection title="Bank statement">
           <p className="text-[13px] text-text-mid">
             Upload a recent bank statement so we can verify income and pull the
             customer&rsquo;s account details. Pick the source that matches the file.
           </p>
 
           <div className="grid sm:grid-cols-2 gap-3">
-            <MethodTile
+            <ChoiceTile
+              fadeDot
               active={method === "manual_epdf"}
               onClick={() => setMethod("manual_epdf")}
               title="Manual E-PDF Upload"
               desc="E-PDF downloaded from netbanking / bank email"
             />
-            <MethodTile
+            <ChoiceTile
+              fadeDot
               active={method === "scanned_pdf"}
               onClick={() => setMethod("scanned_pdf")}
               title="Scanned PDF Upload"
@@ -521,17 +436,13 @@ function Inner() {
                   // for a reloaded doc where no signed_url is in hand.
                   if (bankDoc.signed_url) window.open(bankDoc.signed_url, "_blank", "noopener");
                   else if (bankDoc.docId) void openDocument(bankDoc.docId);
-                  else void signAndOpen(bankDoc.path);
+                  else void openLoanPath(params.id, bankDoc.path);
                 } : undefined}
               />
             </div>
           )}
 
-          {uploadError && (
-            <div className="p-3 rounded-input bg-red-50 border border-red-200 text-[13px] text-red-700">
-              {uploadError}
-            </div>
-          )}
+          <ErrorBox message={uploadError} />
 
           {/* Additional bank statements — stored as user_application_docs rows
               (category "bank_statement"), separate from the primary column
@@ -553,13 +464,14 @@ function Inner() {
               hideIds={bankDoc?.docId ? [bankDoc.docId] : undefined}
             />
           </div>
-        </Card>
+        </FormSection>
 
         {/* Other supporting documents — any extra files, as many as needed. */}
-        <Card className="p-6 space-y-2">
-          <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">
-            Other documents <span className="text-text-muted font-normal text-[13px]">(optional)</span>
-          </h2>
+        <FormSection
+          title={<>Other documents <span className="text-text-muted font-normal text-[13px]">(optional)</span></>}
+          className="p-6 space-y-2"
+          titleClassName={H16_GREEN}
+        >
           <p className="text-[12px] text-text-muted">
             Add any other supporting documents for this application — add as many as you need.
           </p>
@@ -571,18 +483,14 @@ function Inner() {
             maxFiles={20}
             uploadHint="PDF or image — add as many as needed"
           />
-        </Card>
+        </FormSection>
 
         {/* e. Retrieved Bank Information */}
         {bankDoc && (
           <Card className="p-6 bg-[#f0faf5] border-[#cdeadd] space-y-4">
             <div className="flex items-center gap-2">
-              <span className="w-6 h-6 rounded-full bg-[#178a5c] flex items-center justify-center">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              </span>
-              <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">
+              <TickCircle />
+              <h2 className={H16_GREEN}>
                 Details Extracted
               </h2>
             </div>
@@ -638,48 +546,25 @@ function Inner() {
                   compatibility but no longer collected from the UI. */}
             </div>
 
-            <label className="flex items-start gap-2 text-[14px] cursor-pointer pt-1">
-              <input
-                type="checkbox"
-                checked={bankConfirmed}
-                onChange={(e) => setBankConfirmed(e.target.checked)}
-                className="mt-1 h-4 w-4 shrink-0 accent-[#178a5c]"
-              />
-              <span className="text-text">
-                I have reviewed the retrieved bank information above and confirm
-                it is correct.
-              </span>
-            </label>
+            <CheckRow
+              checked={bankConfirmed}
+              onChange={setBankConfirmed}
+              className="flex items-start gap-2 text-[14px] cursor-pointer pt-1"
+            >
+              I have reviewed the retrieved bank information above and confirm
+              it is correct.
+            </CheckRow>
           </Card>
         )}
 
         {/* f. Previous / Next */}
-        <Card className="p-6">
-          {saveError && (
-            <div className="p-3 rounded-input bg-red-50 border border-red-200 text-[13px] text-red-700 mb-4">
-              {saveError}
-            </div>
-          )}
-          <div className="flex justify-between gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => router.push(`/admin/app/${loan.id}/step-3` as any)}
-            >
-              ← Previous
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              onClick={saveAndNext}
-              loading={saving}
-              disabled={saving}
-              title={canNext ? undefined : "Some fields are incomplete — you can still continue as admin."}
-            >
-              Next
-            </Button>
-          </div>
-        </Card>
+        <StepNav
+          error={saveError}
+          prevTo={`/admin/app/${loan.id}/step-3`}
+          onNext={saveAndNext}
+          saving={saving}
+          nextTitle={canNext ? undefined : INCOMPLETE_NOTE}
+        />
       </section>
     </main>
   );
@@ -687,58 +572,8 @@ function Inner() {
 
 // ── Small helpers ────────────────────────────────────────────────────
 
-const ACCEPT = "image/*,application/pdf";
-
-function EmploymentTile({
-  active, onClick, title, desc,
-}: {
-  active: boolean;
-  onClick: () => void;
-  title: string;
-  desc: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "text-left rounded-input border-2 p-4 transition-colors relative",
-        "focus:outline-none focus-visible:ring-2 focus-visible:ring-[#185fa5]",
-        active
-          ? "border-[#178a5c] bg-[#f0faf5]"
-          : "border-line bg-white hover:border-[#185fa5]",
-      ].join(" ")}
-    >
-      <span
-        className={[
-          "absolute top-3 right-3 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors",
-          active ? "border-[#178a5c]" : "border-line",
-        ].join(" ")}
-        aria-hidden
-      >
-        {active && <span className="w-2 h-2 rounded-full bg-[#178a5c]" />}
-      </span>
-      <p className={"font-display font-semibold text-[14px] pr-6 " + (active ? "text-[#0f3d2e]" : "text-text")}>
-        {title}
-      </p>
-      <p className="text-[12px] text-text-muted mt-1">{desc}</p>
-    </button>
-  );
-}
-
-function MethodTile({
-  active, onClick, title, desc,
-}: {
-  active: boolean;
-  onClick: () => void;
-  title: string;
-  desc: string;
-}) {
-  // Same visual shape as EmploymentTile — kept as a separate helper in
-  // case the two diverge later (icons, chips, etc.).
-  return <EmploymentTile active={active} onClick={onClick} title={title} desc={desc} />;
-}
-
+// The bank statement slot: the shared "file on record" box once uploaded,
+// otherwise this page's own large upload tile (with an upload icon).
 function BankDocSlot({
   doc, uploading, onFile, onView,
 }: {
@@ -748,44 +583,16 @@ function BankDocSlot({
   onView?: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const has = !!doc;
-  const uploaded = has && doc ? new Date(doc.uploaded_at) : null;
   return (
     <div>
-      {has ? (
-        <div className="rounded-input border-2 border-[#178a5c] bg-[#f0faf5] p-4 space-y-2">
-          <p className="text-[13px] font-semibold text-[#0f3d2e]">{doc!.file_name}</p>
-          {uploaded && (
-            <p className="text-[11px] text-[#5a8a76]">
-              Uploaded on {fmtDateTime(uploaded)}
-            </p>
-          )}
-          <div className="flex items-center gap-2 pt-1">
-            {onView && (
-              <button
-                type="button"
-                onClick={onView}
-                title="View uploaded document"
-                aria-label="View uploaded document"
-                className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#185fa5] hover:underline"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                  <circle cx="12" cy="12" r="3" />
-                </svg>
-                View
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              disabled={uploading}
-              className="text-[12px] font-semibold text-[#178a5c] hover:underline disabled:opacity-60"
-            >
-              {uploading ? "Uploading…" : "Re-upload"}
-            </button>
-          </div>
-        </div>
+      {doc ? (
+        <UploadedDoc
+          fileName={doc.file_name}
+          uploadedAt={doc.uploaded_at}
+          onView={onView}
+          onReupload={() => inputRef.current?.click()}
+          uploading={uploading}
+        />
       ) : (
         <button
           type="button"
@@ -808,17 +615,7 @@ function BankDocSlot({
           <p className="text-[12px] text-[#5a86b3] mt-0.5">Photo, scan, or PDF</p>
         </button>
       )}
-      <input
-        ref={inputRef}
-        type="file"
-        accept={ACCEPT}
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          e.target.value = "";
-          if (f) onFile(f);
-        }}
-        className="hidden"
-      />
+      <HiddenFileInput ref={inputRef} onFile={onFile} />
     </div>
   );
 }

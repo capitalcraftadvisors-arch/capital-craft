@@ -13,9 +13,7 @@
 import { openLoanDoc } from "@/lib/storage";
 import { CATEGORY_LABEL, type LoanForm, type LoanDocRow } from "@/lib/loan-form";
 import { DOC_CATEGORY } from "@/lib/loan-doc-checklist";
-
-const SYS_LABEL: Record<string, string> = { on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" };
-const USE_LABEL: Record<string, string> = { residential: "Residential", commercial: "Commercial" };
+import { SYSTEM_LABEL, PLANT_USE_LABEL } from "@/lib/loan-labels";
 
 export type EditItem = { key: string; label: string; doc?: boolean; on?: boolean; path?: string | null; rowId?: string; value?: string };
 
@@ -64,8 +62,8 @@ export function editGroups(form: LoanForm, docRows: LoanDocRow[]): { title: stri
     { title: "Applicant details", items: [
       { key: "borrower_email", label: "Email", value: form.borrower_email || "—" },
       { key: "install_pincode", label: "Installation pincode", value: form.install_pincode || "—" },
-      { key: "system_type", label: "System type", value: SYS_LABEL[form.system_type] || "—" },
-      { key: "plant_use_type", label: "Property use", value: USE_LABEL[form.plant_use_type] || "—" },
+      { key: "system_type", label: "System type", value: SYSTEM_LABEL[form.system_type] || "—" },
+      { key: "plant_use_type", label: "Property use", value: PLANT_USE_LABEL[form.plant_use_type] || "—" },
       { key: "connection_category", label: "Category", value: CATEGORY_LABEL[form.connection_category] || "—" },
     ] },
     { title: "Quotation & loan", items: [

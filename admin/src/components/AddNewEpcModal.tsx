@@ -77,7 +77,7 @@ export default function AddNewEpcModal({ open, onClose }: Props) {
         headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ mobile: m }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) {
         setError(data.error || `HTTP ${res.status}`);
         return;
@@ -100,6 +100,8 @@ export default function AddNewEpcModal({ open, onClose }: Props) {
       });
       onClose();
       router.push("/onboarding/step-1");
+    } catch (e) {
+      setError((e as Error).message || "Couldn't create the EPC.");
     } finally {
       setBusy(false);
     }

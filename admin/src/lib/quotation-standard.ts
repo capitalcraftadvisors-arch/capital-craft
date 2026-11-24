@@ -12,7 +12,8 @@
 // Every page carries the EPC's letterhead and a "Powered by Capital Craft" footer.
 
 import { PDFDocument, PDFPage, PDFImage, rgb, type RGB } from "pdf-lib";
-import { embedHelvetica, inr, num, printable, textWidth, wrap, type Fonts } from "./pdf-template";
+import { embedHelvetica, inr, num, printable, textWidth, type Fonts } from "./pdf-template";
+import { CW, FOOTER_TOP, H, HEADER_END, M, PdfPen, W, hex3, mix, type Col, type Rgb3, type TextOpts } from "./pdf-pen";
 import { STANDARD } from "./quotation-brands";
 import { quoteEmis, quoteSavings, quoteTotals, type QuoteDoc } from "./quote-calc";
 import { ACCENTS } from "./org-profile";
@@ -34,12 +35,7 @@ export type StdOrg = {
   stamp: Buffer | null;
 };
 
-// ── Look ────────────────────────────────────────────────────────────────────
-const W = 595.28, H = 841.89, M = 40, CW = W - 2 * M;
-const HEADER_END = 104, FOOTER_TOP = H - 44;
-type Rgb3 = [number, number, number];
-const hex3 = (h: string): Rgb3 => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
-const mix = (a: Rgb3, b: Rgb3, t: number): RGB => rgb(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t);
+// ── Look (the page and the pen are lib/pdf-pen) ─────────────────────────────
 const WHITE3: Rgb3 = [1, 1, 1];
 
 // The page colours from the EPC's accent (headings, table heads, EMI box) + a warm highlight.
@@ -54,15 +50,13 @@ function palette(accent: string | null) {
 type Palette = ReturnType<typeof palette>;
 const rs = (n: number) => `Rs. ${inr(n)}`;
 const dmy = (iso: string) => (iso ? iso.split("-").reverse().join("/") : "");
-type TextOpts = { size?: number; bold?: boolean; color?: RGB; align?: "left" | "right" | "center"; max?: number };
-type Col = { w: number; align?: "left" | "right" | "center" };
 
-// A small layout kit over pdf-lib, in top-down coordinates (y = distance from the top).
-class Sheet {
+// The drawing kit (lib/pdf-pen) + pages that flow on: a cursor (y), a new page
+// with the letterhead when a block doesn't fit.
+class Sheet extends PdfPen<Palette> {
   pages: PDFPage[] = [];
-  page!: PDFPage;
   y = 0;
-  constructor(readonly doc: PDFDocument, readonly f: Fonts, readonly c: Palette, private header: (s: Sheet) => void) {}
+  constructor(readonly doc: PDFDocument, f: Fonts, c: Palette, private header: (s: Sheet) => void) { super(f, c); }
 
   add() {
     this.page = this.doc.addPage([W, H]);
@@ -73,20 +67,6 @@ class Sheet {
   /** Room for `h` more points on this page, else a new page. */
   need(h: number) { if (this.y + h > FOOTER_TOP - 10) this.add(); }
 
-  text(s: string, x: number, y: number, o: TextOpts = {}) {
-    const font = o.bold ? this.f.bold : this.f.reg;
-    let size = o.size ?? 9.5;
-    const t = printable(font, s);
-    let w = textWidth(font, t, size);
-    if (o.max && w > o.max) { size = (size * o.max) / w; w = o.max; }
-    const left = o.align === "right" ? x - w : o.align === "center" ? x - w / 2 : x;
-    this.page.drawText(t, { x: left, y: H - y, size, font, color: o.color ?? this.c.ink });
-    return w;
-  }
-  lines(s: string, size: number, max: number, bold = false) {
-    const font = bold ? this.f.bold : this.f.reg;
-    return String(s ?? "").split(/\r?\n/).flatMap((p) => wrap(printable(font, p), (t) => textWidth(font, t, size), max, 999));
-  }
   /** Wrapped text from the cursor; moves the cursor below it. */
   para(s: string, o: TextOpts & { x?: number; width?: number; lead?: number } = {}) {
     const size = o.size ?? 9.5, lead = o.lead ?? size * 1.45;
@@ -95,21 +75,6 @@ class Sheet {
       this.text(l, o.x ?? M, this.y + size, { ...o, max: undefined });
       this.y += lead;
     }
-  }
-  rect(x: number, y: number, w: number, h: number, color: RGB, border?: RGB) {
-    this.page.drawRectangle({ x, y: H - y - h, width: w, height: h, color, borderColor: border, borderWidth: border ? 0.7 : 0 });
-  }
-  round(x: number, y: number, w: number, h: number, r: number, color: RGB, border?: RGB) {
-    const p = `M ${r} 0 H ${w - r} Q ${w} 0 ${w} ${r} V ${h - r} Q ${w} ${h} ${w - r} ${h} H ${r} Q 0 ${h} 0 ${h - r} V ${r} Q 0 0 ${r} 0 Z`;
-    this.page.drawSvgPath(p, { x, y: H - y, color, borderColor: border, borderWidth: border ? 0.7 : 0 });
-  }
-  hline(x: number, y: number, w: number, color = this.c.line, t = 0.7) {
-    this.page.drawLine({ start: { x, y: H - y }, end: { x: x + w, y: H - y }, thickness: t, color });
-  }
-  image(img: PDFImage, x: number, y: number, maxW: number, maxH: number) {
-    const sc = Math.min(maxW / img.width, maxH / img.height);
-    this.page.drawImage(img, { x, y: H - y - img.height * sc, width: img.width * sc, height: img.height * sc });
-    return img.width * sc;
   }
   /** A section heading with the accent bar. */
   heading(s: string) {

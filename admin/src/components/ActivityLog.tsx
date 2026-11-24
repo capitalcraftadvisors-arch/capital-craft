@@ -94,7 +94,8 @@ export default function ActivityLog({ businessId, refreshKey }: Props) {
 
 type IconChoice = { svg: React.ReactNode; tone: string };
 
-const SVG_PROPS = {
+// Shared with the loan activity log (LoanActivityLogModal).
+export const SVG_PROPS = {
   width: 16,
   height: 16,
   viewBox: "0 0 24 24",
@@ -105,16 +106,16 @@ const SVG_PROPS = {
   strokeLinejoin: "round" as const,
 };
 
-const I_PENCIL      = (<svg {...SVG_PROPS}><path d="M17 3l4 4-13 13H4v-4z"/></svg>);
-const I_TARGET      = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></svg>);
+export const I_PENCIL      = (<svg {...SVG_PROPS}><path d="M17 3l4 4-13 13H4v-4z"/></svg>);
+export const I_TARGET      = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/></svg>);
 const I_UPLOAD      = (<svg {...SVG_PROPS}><path d="M12 4v13m0-13-5 5m5-5 5 5M4 20h16"/></svg>);
 const I_REFRESH     = (<svg {...SVG_PROPS}><path d="M4 12a8 8 0 0 1 14-5l3-3M20 12a8 8 0 0 1-14 5l-3 3M17 4h4v4M7 20H3v-4"/></svg>);
 const I_TRASH       = (<svg {...SVG_PROPS}><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14zM10 11v6M14 11v6"/></svg>);
 const I_USERS       = (<svg {...SVG_PROPS}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>);
 const I_STAR        = (<svg {...SVG_PROPS}><path d="M12 2 15.09 8.26 22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>);
-const I_SEND        = (<svg {...SVG_PROPS}><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>);
-const I_CHECK_CIRC  = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>);
-const I_X_CIRC      = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="10"/><path d="m9 9 6 6M15 9l-6 6"/></svg>);
+export const I_SEND        = (<svg {...SVG_PROPS}><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>);
+export const I_CHECK_CIRC  = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>);
+export const I_X_CIRC      = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="10"/><path d="m9 9 6 6M15 9l-6 6"/></svg>);
 const I_FILE_PLUS   = (<svg {...SVG_PROPS}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M12 12v6M9 15h6"/></svg>);
 const I_FILE_MINUS  = (<svg {...SVG_PROPS}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 15h6"/></svg>);
 const I_CHAT        = (<svg {...SVG_PROPS}><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10z"/></svg>);

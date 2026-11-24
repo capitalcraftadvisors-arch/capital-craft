@@ -13,6 +13,9 @@
 // Flow ends by PATCHing /api/admin/loan-app/[id]/complete-step-1,
 // which records consent, fires the WhatsApp stub, and advances
 // current_step to 2. Client then routes to /admin/app/[id]/step-2.
+//
+// The page frame, section cards, choice cards, consent row and the pincode
+// lookup come from the shared loan-form kit (components/loan-form).
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -27,6 +30,11 @@ import { authHeaders } from "@/lib/auth";
 import { extractPan } from "@/lib/ocr";
 import { EMAIL_RE, MOBILE_RE, PAN_RE, PINCODE_RE } from "@/lib/validators";
 import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
+import {
+  StepHeader, StepLoading, StepNotFound, StepTitle,
+  FormSection, H18, FIELD_LABEL, ErrorBox, GreenPill, CheckRow, PolicyLink,
+  SystemChoice, PlantUseChoice, INCOMPLETE_NOTE, PincodeFields, usePincode, nextStepPath,
+} from "@/components/loan-form";
 
 // The five policy keys recorded in the consent legal breadcrumb. The
 // visible consent line mentions three by name (Terms / Privacy / Cookie)
@@ -40,27 +48,6 @@ const CONSENT_KEYS = [
   "credit_information",
   "loan_application",
 ];
-
-// Solar system options rendered as three side-by-side clickable cards.
-// Each has a heading + short description. Order matches the design spec
-// (On-Grid first, then Off-Grid, then Hybrid).
-const SYSTEM_CARDS = [
-  {
-    value: "on_grid",
-    title: "On-Grid Solar System",
-    desc:  "Connected to electricity grid, can sell excess power",
-  },
-  {
-    value: "off_grid",
-    title: "Off-Grid Solar System",
-    desc:  "Independent system with battery storage",
-  },
-  {
-    value: "hybrid",
-    title: "Hybrid Solar System",
-    desc:  "Connected to the grid with battery storage",
-  },
-] as const;
 
 type Epc = {
   id: string;
@@ -94,13 +81,8 @@ function Inner() {
   const [loading, setLoading] = useState(true);
 
   // Form state
-  const [pin, setPin]                 = useState("");
-  const [state, setState]             = useState("");
-  const [district, setDistrict]       = useState("");
-  const [city, setCity]               = useState("");
-  const [pinBusy, setPinBusy]         = useState(false);
-  const [pinError, setPinError]       = useState<string | null>(null);
-  const [pinLocked, setPinLocked]     = useState(false);      // true after successful autofill
+  const pincode = usePincode();
+  const { pin, setPin, state, setState, district, setDistrict, city, setCity } = pincode;
 
   const [phone, setPhone]             = useState("");
   const [email, setEmail]             = useState("");
@@ -200,31 +182,6 @@ function Inner() {
     } finally { setEpcBusy(false); }
   }
 
-  async function lookupPincode(next: string) {
-    setPinError(null);
-    setPinLocked(false);
-    if (!PINCODE_RE.test(next)) return;
-    setPinBusy(true);
-    try {
-      const res = await fetch(`/api/admin/pincode-lookup?pin=${next}`, {
-        headers: authHeaders(),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        setPinError(data?.error || "Lookup failed — enter state manually.");
-        return;
-      }
-      setState(String(data.state ?? ""));
-      setDistrict(String(data.district ?? ""));
-      setCity(String(data.city ?? ""));
-      setPinLocked(true);
-    } catch {
-      setPinError("Lookup failed — enter state manually.");
-    } finally {
-      setPinBusy(false);
-    }
-  }
-
   // PAN OCR runs client-side after upload. Prefills the editable PAN
   // Number input — admin can always correct or type manually.
   async function onPanUploaded(info: { file: File }) {
@@ -294,62 +251,28 @@ function Inner() {
         return;
       }
       // Came here via a Step-6 "Edit" link? Go back to the review.
-      const fromReview = new URLSearchParams(window.location.search).get("from") === "review";
-      router.push(`/admin/app/${loan.id}/${fromReview ? "step-6" : "step-2"}` as any);
+      router.push(nextStepPath(loan.id, "step-2") as any);
     } catch (e) {
       setSendError((e as Error)?.message || "Network error.");
       setSending(false);
     }
   }
 
-  if (loading) {
-    return (
-      <main className="min-h-screen grid place-items-center">
-        <p className="text-text-muted">Loading…</p>
-      </main>
-    );
-  }
-  if (!loan || !epc) {
-    return (
-      <main className="min-h-screen grid place-items-center">
-        <p className="text-red-700">Loan application not found.</p>
-      </main>
-    );
-  }
+  if (loading) return <StepLoading />;
+  if (!loan || !epc) return <StepNotFound />;
 
   return (
     <main className="min-h-screen bg-bg-soft">
-      <header className="border-b border-line bg-white">
-        <div className="w-full px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => router.push(`/admin/app/${params.id}/view` as any)}
-              aria-label="Back to previous page"
-              className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#185fa5] hover:text-[#0f3d2e] transition-colors"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
-              Back
-            </button>
-            <span className="text-[12px] px-2 py-0.5 rounded-full bg-bg-tint text-blue-dark font-semibold uppercase tracking-wide">
-              Loan Application · Step 1
-            </span>
-          </div>
-          <a href="/admin" className="text-[13px] text-text-muted hover:text-text">← Back to console</a>
-        </div>
-      </header>
+      <StepHeader step={1} backTo={`/admin/app/${params.id}/view`} backLabel="Back to previous page">
+        <a href="/admin" className="text-[13px] text-text-muted hover:text-text">← Back to console</a>
+      </StepHeader>
 
       <section className="max-w-[880px] mx-auto px-5 sm:px-7 py-10 space-y-5">
-        <div>
-          <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
-            Registration
-          </h1>
-          <p className="text-text-mid mt-2 text-[15px]">
-            Capture the customer&rsquo;s basic details, upload their PAN card, and record
-            consent. All fields on this page are editable — OCR-detected values are
-            prefilled but you can correct anything before saving.
-          </p>
-        </div>
+        <StepTitle title="Registration">
+          Capture the customer&rsquo;s basic details, upload their PAN card, and record
+          consent. All fields on this page are editable — OCR-detected values are
+          prefilled but you can correct anything before saving.
+        </StepTitle>
 
         {/* EPC banner */}
         <Card className="p-4 flex items-center justify-between flex-wrap gap-3 bg-[#f0faf5] border-[#cdeadd]">
@@ -404,35 +327,18 @@ function Inner() {
         )}
 
         {/* Section: installation location */}
-        <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px]">Installation site</h2>
+        <FormSection title="Installation site">
 
-          <div className="grid sm:grid-cols-2 gap-4">
-            <Input
-              label="Pincode (installation address)"
-              inputMode="numeric"
-              maxLength={6}
-              value={pin}
-              onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
-              onBlur={(e) => void lookupPincode(e.target.value)}
-              placeholder="6-digit pincode"
-              error={pinError ?? undefined}
-              hint={pinBusy ? "Looking up state…" : undefined}
-            />
-
-            <Input
-              label="Installation state"
-              value={state}
-              onChange={(e) => setState(e.target.value)}
-              readOnly={pinLocked && !pinError}
-              placeholder={pinBusy ? "Fetching…" : "State"}
-              hint={
-                pinLocked && !pinError
-                  ? "Auto-filled from pincode. Manual override on lookup failure."
-                  : "If auto-fill fails, enter the state manually."
-              }
-            />
-          </div>
+          <PincodeFields
+            p={pincode}
+            pinPlaceholder="6-digit pincode"
+            stateReadOnly={pincode.locked && !pincode.error}
+            stateHint={
+              pincode.locked && !pincode.error
+                ? "Auto-filled from pincode. Manual override on lookup failure."
+                : "If auto-fill fails, enter the state manually."
+            }
+          />
 
           {(district || city) && (
             <div className="text-[12px] text-text-mid">
@@ -440,11 +346,10 @@ function Inner() {
               Area: <span className="font-semibold text-text">{city || "—"}</span>
             </div>
           )}
-        </Card>
+        </FormSection>
 
         {/* Section: customer contact */}
-        <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px]">Customer contact</h2>
+        <FormSection title="Customer contact">
 
           <div className="grid sm:grid-cols-2 gap-4">
             <Input
@@ -471,19 +376,17 @@ function Inner() {
               placeholder="Who owns this lead"
             />
           </div>
-        </Card>
+        </FormSection>
 
         {/* Section: PAN card — upload + editable PAN number in a proper box. */}
-        <Card className="p-6 space-y-5">
+        <FormSection
+          title="PAN card"
+          subtitle="Upload the PAN card, then confirm the number OCR pulled out. Correct it if wrong."
+          className="p-6 space-y-5"
+          titleClassName={H18}
+        >
           <div>
-            <h2 className="font-display font-semibold text-[18px] text-[#0f3d2e]">PAN card</h2>
-            <p className="text-[13px] text-text-mid mt-1">
-              Upload the PAN card, then confirm the number OCR pulled out. Correct it if wrong.
-            </p>
-          </div>
-
-          <div>
-            <p className="block mb-1.5 text-[13px] font-medium text-text-mid">
+            <p className={FIELD_LABEL}>
               Upload the customer&rsquo;s PAN card
             </p>
             <FileUpload
@@ -503,9 +406,7 @@ function Inner() {
                 PAN Number
               </label>
               {panUploaded && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#f0faf5] text-[#0f3d2e] font-semibold uppercase tracking-wide border border-[#cdeadd]">
-                  {panNumber ? "Extracted" : "Enter manually"}
-                </span>
+                <GreenPill>{panNumber ? "Extracted" : "Enter manually"}</GreenPill>
               )}
             </div>
             <input
@@ -542,16 +443,14 @@ function Inner() {
               className="w-full rounded-input border-2 border-line focus:border-[#185fa5] px-4 py-3 text-[15px] outline-none transition-colors bg-white"
             />
           </div>
-        </Card>
+        </FormSection>
 
         {/* Section: Applicant photo — passport-size, captured at registration. */}
-        <Card className="p-6 space-y-4">
-          <div>
-            <h2 className="font-display font-semibold text-[18px] text-[#0f3d2e]">Applicant photo</h2>
-            <p className="text-[13px] text-text-mid mt-1">
-              Upload a recent passport-size photograph of the applicant.
-            </p>
-          </div>
+        <FormSection
+          title="Applicant photo"
+          subtitle="Upload a recent passport-size photograph of the applicant."
+          titleClassName={H18}
+        >
           <FileUpload
             applicationId={loan.id}
             category="customer_photo"
@@ -560,138 +459,44 @@ function Inner() {
             onUploaded={(info) => { setPhotoUploaded(true); setPhotoPath(info.storagePath); }}
             hint="Clear, front-facing photo — JPG or PNG."
           />
-        </Card>
+        </FormSection>
 
         {/* Section: Solar system preference — three side-by-side clickable
             cards. Whole card is the click target; radio indicator in the
             top-right corner. Selected state uses the brand green palette. */}
-        <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px]">Solar system preference</h2>
-
-          <div className="grid sm:grid-cols-3 gap-3">
-            {SYSTEM_CARDS.map((opt) => {
-              const active = systemType === opt.value;
-              return (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setSystemType(opt.value)}
-                  className={[
-                    "text-left rounded-input border-2 p-4 transition-colors relative",
-                    "focus:outline-none focus-visible:ring-2 focus-visible:ring-[#185fa5]",
-                    active
-                      ? "border-[#178a5c] bg-[#f0faf5]"
-                      : "border-line bg-white hover:border-[#185fa5]",
-                  ].join(" ")}
-                >
-                  {/* Radio indicator — top-right corner */}
-                  <span
-                    className={[
-                      "absolute top-3 right-3 w-4 h-4 rounded-full border-2 flex items-center justify-center transition-colors",
-                      active ? "border-[#178a5c]" : "border-line",
-                    ].join(" ")}
-                    aria-hidden
-                  >
-                    {active && (
-                      <span className="w-2 h-2 rounded-full bg-[#178a5c]" />
-                    )}
-                  </span>
-
-                  <p
-                    className={[
-                      "font-display font-semibold text-[14px] pr-6",
-                      active ? "text-[#0f3d2e]" : "text-text",
-                    ].join(" ")}
-                  >
-                    {opt.title}
-                  </p>
-                  <p className="text-[12px] text-text-muted mt-1">
-                    {opt.desc}
-                  </p>
-                </button>
-              );
-            })}
-          </div>
+        <FormSection title="Solar system preference">
+          <SystemChoice value={systemType} onPick={setSystemType} />
 
           {/* Residential / Commercial — required */}
-          <div className="pt-4 border-t border-line">
-            <p className="block mb-2 text-[13px] font-medium text-text-mid">
-              Is the solar plant for Residential or Commercial use?
-            </p>
-            <div className="grid grid-cols-2 gap-3 max-w-[420px]">
-              {([
-                { value: "residential", label: "Residential", desc: "Home / housing society rooftop" },
-                { value: "commercial",  label: "Commercial",  desc: "Shop, office, factory, or institution" },
-              ] as const).map((opt) => {
-                const active = plantUse === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => setPlantUse(opt.value)}
-                    className={[
-                      "text-left rounded-input border-2 p-4 transition-colors relative",
-                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-[#185fa5]",
-                      active ? "border-[#178a5c] bg-[#f0faf5]" : "border-line bg-white hover:border-[#185fa5]",
-                    ].join(" ")}
-                  >
-                    <span className={[
-                      "absolute top-3 right-3 w-4 h-4 rounded-full border-2 flex items-center justify-center",
-                      active ? "border-[#178a5c]" : "border-line",
-                    ].join(" ")} aria-hidden>
-                      {active && <span className="w-2 h-2 rounded-full bg-[#178a5c]" />}
-                    </span>
-                    <p className={"font-display font-semibold text-[14px] pr-6 " + (active ? "text-[#0f3d2e]" : "text-text")}>
-                      {opt.label}
-                    </p>
-                    <p className="text-[12px] text-text-muted mt-1">{opt.desc}</p>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </Card>
+          <PlantUseChoice value={plantUse} onPick={setPlantUse} className="pt-4 border-t border-line" />
+        </FormSection>
 
         {/* Section: consent line + Next */}
-        <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px]">Consent &amp; authorization</h2>
+        <FormSection title="Consent & authorization">
+          <CheckRow checked={consented} onChange={setConsented} className="flex items-start gap-3 text-[14px] leading-relaxed cursor-pointer">
+            By clicking here, I state that I have read and understood the{" "}
+            <PolicyLink>
+              Terms and Conditions
+            </PolicyLink>
+            ,{" "}
+            <PolicyLink>
+              Privacy Policy
+            </PolicyLink>{" "}
+            and{" "}
+            <PolicyLink>
+              Cookie Policy
+            </PolicyLink>{" "}
+            and Allow{" "}
+            <span className="font-semibold">Capital Craft Financial Advisors</span>{" "}
+            and its lending partners to access my credit information.
+          </CheckRow>
 
-          <label className="flex items-start gap-3 text-[14px] leading-relaxed cursor-pointer">
-            <input
-              type="checkbox"
-              checked={consented}
-              onChange={(e) => setConsented(e.target.checked)}
-              className="mt-1 h-4 w-4 shrink-0 accent-[#178a5c]"
-            />
-            <span className="text-text">
-              By clicking here, I state that I have read and understood the{" "}
-              <a href="#" target="_blank" rel="noopener" className="text-[#185fa5] hover:underline font-medium">
-                Terms and Conditions
-              </a>
-              ,{" "}
-              <a href="#" target="_blank" rel="noopener" className="text-[#185fa5] hover:underline font-medium">
-                Privacy Policy
-              </a>{" "}
-              and{" "}
-              <a href="#" target="_blank" rel="noopener" className="text-[#185fa5] hover:underline font-medium">
-                Cookie Policy
-              </a>{" "}
-              and Allow{" "}
-              <span className="font-semibold">Capital Craft Financial Advisors</span>{" "}
-              and its lending partners to access my credit information.
-            </span>
-          </label>
-
-          {sendError && (
-            <div className="p-3 rounded-input bg-red-50 border border-red-200 text-[13px] text-red-700">
-              {sendError}
-            </div>
-          )}
+          <ErrorBox message={sendError} />
 
           <div className="flex flex-col items-end gap-2 pt-2">
             {!canSend && (
               <p className="text-[12px] text-amber-600">
-                Some fields are incomplete — you can still continue as admin.
+                {INCOMPLETE_NOTE}
               </p>
             )}
             <Button
@@ -704,7 +509,7 @@ function Inner() {
               Next
             </Button>
           </div>
-        </Card>
+        </FormSection>
       </section>
     </main>
   );

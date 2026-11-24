@@ -11,7 +11,8 @@
 import { useEffect, useRef, useState } from "react";
 import WhatsAppButton from "@/components/partner/WhatsAppButton";
 import { NAVY } from "@/components/partner/PartnerShell";
-import { input, saveUrl } from "@/components/quotation/form-kit";
+import { input } from "@/components/quotation/form-kit";
+import { saveUrl } from "@/lib/storage";
 import { getBusiness } from "@/lib/auth";
 import { isSiteStaff, portalV2 } from "@/lib/epc-roles";
 import { fetchEpcName } from "@/lib/epc-name";

@@ -21,12 +21,41 @@ export function err(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
 
+/** A request-body value as trimmed text, or null when missing / blank. */
+export function strOrNull(v: unknown): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  return s.length > 0 ? s : null;
+}
+
+/** A request-body value as a finite number, or null when missing / blank / not a number. */
+export function numOrNull(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** A Supabase client acting as the caller: their JWT on every request, so RLS applies. */
 export function dbAs(token: string): SupabaseClient {
   return createClient(SUPABASE_URL, SUPABASE_ANON, {
     global: { headers: { Authorization: `Bearer ${token}` } },
     auth: { persistSession: false, autoRefreshToken: false },
   });
+}
+
+/** Loads one loan application row (`select` = its columns). Answers the row, or
+ *  the reply to send back: 500 on a database error, 404 when there's no such row. */
+export async function loadLoanRow(
+  supabase: SupabaseClient, appId: string, select: string,
+): Promise<Record<string, any> | NextResponse> {
+  const { data, error } = await supabase
+    .from("epc_applications")
+    .select(select)
+    .eq("id", appId)
+    .maybeSingle();
+  if (error) return err(error.message, 500);
+  if (!data) return err("Loan application not found.", 404);
+  return data as Record<string, any>;
 }
 
 /** A Supabase client with no login (the anon role) — for public routes only. */

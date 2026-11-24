@@ -26,13 +26,28 @@ export function fmtDate(v: DateInput): string {
   return `${p2(d.getDate())}/${p2(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 
+const IST = "Asia/Kolkata";
+
 /** DD/MM/YYYY in India time — for SERVER output (the server's own clock is UTC,
  *  so fmtDate there could show a late-evening IST timestamp as the previous day). */
 export function fmtDateIST(v: DateInput): string {
   if (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v)) return fmtDate(v); // date-only: no zone
   const d = parseLocal(v);
   if (!d) return "—";
-  return new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
+  return new Intl.DateTimeFormat("en-GB", { timeZone: IST, day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
+}
+
+/** "05/07/2026, 5:52 am" in India time — fmtDateTime for SERVER output. */
+export function fmtDateTimeIST(v: DateInput): string {
+  const d = parseLocal(v);
+  if (!d) return "—";
+  return `${fmtDateIST(d)}, ${d.toLocaleTimeString("en-IN", { timeZone: IST, hour: "numeric", minute: "2-digit", hour12: true })}`;
+}
+
+/** Today's date "YYYY-MM-DD" in India time. (new Date().toISOString() is UTC —
+ *  still the previous day before 05:30 IST.) */
+export function todayIST(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: IST, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 }
 
 /** Local calendar date "YYYY-MM-DD" of a date / timestamp ("" when empty) — the DateField value. */
@@ -61,14 +76,26 @@ export function fmtDateTime(v: DateInput): string {
   return `${fmtDate(d)}, ${fmtTime(d)}`;
 }
 
-/** When a comment / message was written: "just now", "12m ago", "3h ago", then
- *  fmtDateTime ("05/07/2026, 5:52 am"). "—" for an invalid timestamp. */
-export function fmtWhen(iso: string): string {
-  const d = new Date(iso), diff = Date.now() - d.getTime();
+// "just now" / "12m ago" / "3h ago" within the last day; null when older (or invalid).
+function recently(d: Date): string | null {
+  const diff = Date.now() - d.getTime();
   if (diff < 60_000) return "just now";
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
   if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return fmtDateTime(d);
+  return null;
+}
+
+/** When a comment / message was written: "just now", "12m ago", "3h ago", then
+ *  fmtDateTime ("05/07/2026, 5:52 am"). "—" for an invalid timestamp. */
+export function fmtWhen(iso: string): string {
+  const d = new Date(iso);
+  return recently(d) ?? fmtDateTime(d);
+}
+
+/** Like fmtWhen, but older than a day shows the date only ("05/07/2026"). */
+export function fmtAgo(iso: string): string {
+  const d = new Date(iso);
+  return recently(d) ?? fmtDate(d);
 }
 
 // ── Date of birth as read by OCR ────────────────────────────────────────────
@@ -78,7 +105,7 @@ export function fmtWhen(iso: string): string {
 // One parser so every DATE-column writer and the chatbot's age check agree.
 
 /** iso = "YYYY-MM-DD" when a full valid date is known; year is set whenever any year is. */
-export type ParsedDob = { iso: string | null; year: number | null };
+type ParsedDob = { iso: string | null; year: number | null };
 
 // Calendar-checked ISO date, or null (rejects 31/02, month 13, absurd years).
 function isoOf(y: number, m: number, d: number): string | null {

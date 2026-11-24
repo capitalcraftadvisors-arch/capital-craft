@@ -16,7 +16,7 @@ import { getBusiness, authHeaders } from "./auth";
 import { getCached, setCached } from "./list-cache";
 import { invoiceFigures } from "./invoice-calc";
 import { SUBSCRIPTION_MSG } from "./subscription";
-import { saveUrl } from "@/components/quotation/form-kit";
+import { saveDownload } from "./storage";
 
 export type InvoiceStatus = "issued" | "cancelled";
 export const INVOICE_STATUSES: InvoiceStatus[] = ["issued", "cancelled"];
@@ -163,8 +163,5 @@ export const canReissue = (r: InvoiceRow, all: InvoiceRow[]) => r.status === "ca
 export async function downloadInvoicePdf(id: string) {
   const res = await fetch(`/api/epc/invoices/${id}/pdf`, { headers: authHeaders() });
   if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j?.error || "Couldn't make the PDF."); }
-  const name = ((res.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/) || [])[1] || "invoice.pdf";
-  const url = URL.createObjectURL(await res.blob());
-  saveUrl(url, name);
-  URL.revokeObjectURL(url);
+  await saveDownload(res, "invoice.pdf");
 }

@@ -2,7 +2,7 @@
 
 import { ButtonHTMLAttributes, forwardRef } from "react";
 
-type Variant = "primary" | "outline" | "grad" | "ghost";
+type Variant = "primary" | "outline" | "grad" | "ghost" | "danger";
 
 type Props = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: Variant;
@@ -28,6 +28,8 @@ const variants: Record<Variant, string> = {
     "bg-grad text-white shadow-sm hover:-translate-y-0.5 hover:scale-[1.02] hover:shadow-md",
   ghost:
     "bg-transparent text-text-mid hover:text-text",
+  danger:
+    "bg-red-600 text-white shadow-sm hover:-translate-y-0.5 hover:shadow-md",
 };
 
 const Button = forwardRef<HTMLButtonElement, Props>(function Button(

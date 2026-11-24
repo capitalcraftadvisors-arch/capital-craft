@@ -8,7 +8,7 @@ import { getBusiness, authHeaders } from "./auth";
 import { getCached, invalidate, setCached } from "./list-cache";
 import { quoteTotals, type QuoteDoc } from "./quote-calc";
 import type { Segment } from "./quotation-brands";
-import { saveUrl } from "@/components/quotation/form-kit";
+import { saveDownload } from "./storage";
 
 export type QuoteStatus = "draft" | "sent" | "accepted" | "declined";
 export const QUOTE_STATUSES: QuoteStatus[] = ["draft", "sent", "accepted", "declined"];
@@ -85,8 +85,5 @@ export async function deleteQuote(id: string) {
 export async function downloadQuotePdf(id: string) {
   const res = await fetch(`/api/epc/quotes/${id}/pdf`, { headers: authHeaders() });
   if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j?.error || "Couldn't make the PDF."); }
-  const name = ((res.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/) || [])[1] || "quotation.pdf";
-  const url = URL.createObjectURL(await res.blob());
-  saveUrl(url, name);
-  URL.revokeObjectURL(url);
+  await saveDownload(res, "quotation.pdf");
 }

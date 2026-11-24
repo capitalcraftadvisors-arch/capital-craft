@@ -49,8 +49,7 @@ export default function LoanLenderPickerModal({
     (!needReason || reason.trim().length > 0) &&
     (!needDate || !!date);
 
-  // Button has no red variant: the reject flow paints the primary one red.
-  const btnVariant = tone === "green" ? "grad" : "primary";
+  const btnVariant = tone === "green" ? "grad" : tone === "red" ? "danger" : "primary";
 
   function close() {
     if (busy) return;
@@ -72,6 +71,8 @@ export default function LoanLenderPickerModal({
       await onConfirm(lender, needReason ? reason.trim() : undefined, needDate ? date : undefined);
       setSel(""); setCustom(""); setReason(""); setDate(localIsoDate(new Date()));
       onClose();
+    } catch (e) {
+      alert("Couldn't save: " + (e as Error).message);
     } finally {
       setBusy(false);
     }
@@ -145,8 +146,7 @@ export default function LoanLenderPickerModal({
 
       <div className="mt-5 flex justify-end gap-2">
         <Button type="button" variant="outline" onClick={close} disabled={busy}>Cancel</Button>
-        <Button type="button" variant={btnVariant} onClick={submit} disabled={!canConfirm} loading={busy}
-          style={tone === "red" ? { backgroundColor: "#dc2626" } : undefined}>
+        <Button type="button" variant={btnVariant} onClick={submit} disabled={!canConfirm} loading={busy}>
           {confirmLabel || "Confirm"}
         </Button>
       </div>

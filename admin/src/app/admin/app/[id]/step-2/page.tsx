@@ -15,6 +15,9 @@
 // unmasked form. If OCR missed it, admin types just the LAST 4 digits;
 // the client always constructs the "xxxxxxxx####" masked form before
 // submitting. The unmasked number is never accepted from the client.
+//
+// The page frame, section cards and the save / OCR calls come from the
+// shared loan-form kit (components/loan-form).
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -23,22 +26,21 @@ import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Button from "@/components/ui/Button";
 import DatePicker from "@/components/ui/DatePicker";
-import LoanAppStepTracker from "@/components/LoanAppStepTracker";
 import { supabase } from "@/lib/supabase";
-import { authHeaders } from "@/lib/auth";
-import { signLoanPath } from "@/lib/storage";
+import { signLoanPath, openLoanPath } from "@/lib/storage";
+import { AADHAAR_RE } from "@/lib/validators";
+import {
+  StepHeader, StepLoading, StepNotFound, StepTracker, StepTitle,
+  FormSection, H18, FIELD_LABEL, ErrorBox, TickCircle, EyeIcon, TextAreaField,
+  EPC_JOIN, postLoanFiles, saveStep, nextStepPath, type EpcNames,
+} from "@/components/loan-form";
 
 type Loan = {
   id: string;
   status: string;
   current_step: number;
   created_at: string;
-  epc_business: {
-    contact_name: string | null;
-    trade_name: string | null;
-    legal_name: string | null;
-    epc_display_id: string | null;
-  } | null;
+  epc_business: EpcNames | null;
 };
 
 type ExtractedFields = {
@@ -120,7 +122,7 @@ function Inner() {
           "aadhaar_name, aadhaar_dob, aadhaar_gender, aadhaar_number, " +
           "aadhaar_care_of, aadhaar_address, " +
           "aadhaar_front_path, aadhaar_back_path, aadhaar_face_path, " +
-          "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
+          EPC_JOIN,
         )
         .eq("id", params.id)
         .maybeSingle();
@@ -166,20 +168,13 @@ function Inner() {
     setExtractError(null);
     setExtracting(true);
     try {
-      const form = new FormData();
-      form.append("front", frontFile);
-      form.append("back",  backFile);
-      const res = await fetch(`/api/admin/loan-app/${loan.id}/extract-aadhaar`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: form,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        setExtractError(data?.error || `Extraction failed (HTTP ${res.status}).`);
+      const r = await postLoanFiles(loan.id, "extract-aadhaar", { front: frontFile, back: backFile }, "Extraction failed");
+      if (!r.ok) {
+        setExtractError(r.error);
         setExtracting(false);
         return;
       }
+      const data = r.data;
       const result: ExtractionResult = {
         fields:          data.fields,
         storage_paths:   data.storage_paths,
@@ -197,7 +192,7 @@ function Inner() {
       if (result.fields.gender)  setGender(result.fields.gender);
       if (result.fields.care_of) setCareOf(result.fields.care_of);
       if (result.fields.address) setAddress(result.fields.address);
-      if (result.fields.aadhaar_number && /^\d{12}$/.test(result.fields.aadhaar_number)) {
+      if (result.fields.aadhaar_number && AADHAAR_RE.test(result.fields.aadhaar_number)) {
         setAadhaarNumber(result.fields.aadhaar_number);
       }
     } catch (e) {
@@ -215,24 +210,7 @@ function Inner() {
     // Editable fields stay so admin doesn't lose typed edits when swapping the doc.
   }
 
-  // View a previously-saved Aadhaar image (edit/reload) via the admin sign-doc
-  // route — the tiles have no local File to preview in that case.
-  async function signAndOpen(path: string) {
-    try {
-      const res = await fetch(`/api/admin/loan-app/${params.id}/sign-doc`, {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ path }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (data?.ok && data.url) window.open(data.url, "_blank", "noopener");
-      else alert("Couldn't open the document.");
-    } catch (e) {
-      alert("Couldn't open the document: " + (e as Error).message);
-    }
-  }
-
-  const validAadhaar = /^\d{12}$/.test(aadhaarNumber);
+  const validAadhaar = AADHAAR_RE.test(aadhaarNumber);
 
   async function saveAndNext() {
     if (!loan) return; // admin-only flow: never block on missing fields/docs
@@ -241,7 +219,7 @@ function Inner() {
     try {
       // Skippable: send only what's present. A partial Aadhaar number is stored
       // as NULL (never a truncated value), and missing docs send null paths.
-      const validNum = /^\d{12}$/.test(aadhaarNumber);
+      const validNum = AADHAAR_RE.test(aadhaarNumber);
       const body = {
         aadhaar_name:          name.trim() || null,
         aadhaar_dob:           dob.trim() || null,
@@ -254,90 +232,38 @@ function Inner() {
         aadhaar_back_path:     uploaded?.storage_paths.back ?? null,
         aadhaar_face_path:     uploaded?.storage_paths.face ?? null,
       };
-      const res = await fetch(`/api/admin/loan-app/${loan.id}/complete-step-2`, {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        setSaveError(data?.error || `Save failed (HTTP ${res.status}).`);
-        setSaving(false);
-        return;
-      }
+      const error = await saveStep(loan.id, 2, body);
+      if (error) { setSaveError(error); setSaving(false); return; }
       // Came here via a Step-6 "Edit" link? Go back to the review.
-      const fromReview = new URLSearchParams(window.location.search).get("from") === "review";
-      router.push(`/admin/app/${loan.id}/${fromReview ? "step-6" : "step-3"}` as any);
+      router.push(nextStepPath(loan.id, "step-3") as any);
     } catch (e) {
       setSaveError((e as Error)?.message || "Network error.");
       setSaving(false);
     }
   }
 
-  if (loading) {
-    return <main className="min-h-screen grid place-items-center"><p className="text-text-muted">Loading…</p></main>;
-  }
-  if (!loan) {
-    return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Loan application not found.</p></main>;
-  }
-
-  const customerName =
-    loan.epc_business?.trade_name ||
-    loan.epc_business?.legal_name ||
-    loan.epc_business?.contact_name ||
-    "(customer)";
+  if (loading) return <StepLoading />;
+  if (!loan) return <StepNotFound />;
 
   return (
     <main className="min-h-screen bg-bg-soft">
-      <header className="border-b border-line bg-white">
-        <div className="w-full px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => router.push(`/admin/app/${params.id}/step-1` as any)}
-              aria-label="Back to previous step"
-              className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#185fa5] hover:text-[#0f3d2e] transition-colors"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
-              Back
-            </button>
-            <span className="text-[12px] px-2 py-0.5 rounded-full bg-bg-tint text-blue-dark font-semibold uppercase tracking-wide">
-              Loan Application · Step 2
-            </span>
-          </div>
-        </div>
-      </header>
+      <StepHeader step={2} backTo={`/admin/app/${params.id}/step-1`} />
 
       <section className="max-w-[900px] mx-auto px-5 sm:px-7 py-8 space-y-6">
-        <LoanAppStepTracker
-          applicationId={loan.id}
-          displayId={loan.epc_business?.epc_display_id ?? null}
-          name={customerName}
-          createdAt={loan.created_at}
-          currentStep={2}
-        />
+        <StepTracker loan={loan} step={2} />
 
-        <div>
-          <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
-            KYC Verification
-          </h1>
-          <p className="text-text-mid mt-2 text-[15px]">
-            Upload the customer&rsquo;s Aadhaar card. We&rsquo;ll extract identity details
-            automatically — you review, correct if needed, and confirm before saving.
-          </p>
-        </div>
+        <StepTitle title="KYC Verification">
+          Upload the customer&rsquo;s Aadhaar card. We&rsquo;ll extract identity details
+          automatically — you review, correct if needed, and confirm before saving.
+        </StepTitle>
 
         {/* ─── Upload section ────────────────────────────────── */}
-        <Card className="p-7 space-y-5">
-          <div>
-            <h2 className="font-display font-semibold text-[18px] text-[#0f3d2e]">
-              Aadhaar upload
-            </h2>
-            <p className="text-[13px] text-text-mid mt-1">
-              Front and back both required.
-            </p>
-          </div>
-
+        <FormSection
+          title="Aadhaar upload"
+          subtitle="Front and back both required."
+          className="p-7 space-y-5"
+          titleClassName={H18}
+        >
           <div className="grid sm:grid-cols-2 gap-4">
             <UploadTile
               label="Aadhaar Front"
@@ -345,7 +271,7 @@ function Inner() {
               file={frontFile}
               onSelect={setFrontFile}
               disabled={extracting}
-              onViewExisting={!frontFile && uploaded?.storage_paths.front ? () => void signAndOpen(uploaded.storage_paths.front) : undefined}
+              onViewExisting={!frontFile && uploaded?.storage_paths.front ? () => void openLoanPath(params.id, uploaded.storage_paths.front) : undefined}
             />
             <UploadTile
               label="Aadhaar Back"
@@ -353,15 +279,11 @@ function Inner() {
               file={backFile}
               onSelect={setBackFile}
               disabled={extracting}
-              onViewExisting={!backFile && uploaded?.storage_paths.back ? () => void signAndOpen(uploaded.storage_paths.back) : undefined}
+              onViewExisting={!backFile && uploaded?.storage_paths.back ? () => void openLoanPath(params.id, uploaded.storage_paths.back) : undefined}
             />
           </div>
 
-          {extractError && (
-            <div className="p-3.5 rounded-input bg-red-50 border border-red-200 text-[13px] text-red-700">
-              {extractError}
-            </div>
-          )}
+          <ErrorBox message={extractError} roomy />
 
           {!uploaded && (
             <div className="flex justify-between items-center pt-1">
@@ -392,11 +314,7 @@ function Inner() {
           {uploaded && (
             <div className="flex items-center justify-between pt-1 border-t border-line pt-4">
               <div className="flex items-center gap-2">
-                <span className="w-5 h-5 rounded-full bg-[#178a5c] flex items-center justify-center">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                </span>
+                <TickCircle small />
                 <span className="text-[13px] font-semibold text-[#0f3d2e]">
                   Uploads captured
                 </span>
@@ -410,7 +328,7 @@ function Inner() {
               </button>
             </div>
           )}
-        </Card>
+        </FormSection>
 
         {/* ─── Extracted / editable details ───────────────────── */}
         {uploaded && (
@@ -445,7 +363,7 @@ function Inner() {
                   hint="Click the field to open a calendar."
                 />
                 <div>
-                  <label className="block mb-1.5 text-[13px] font-medium text-text-mid">
+                  <label className={FIELD_LABEL}>
                     Gender
                   </label>
                   <div className="flex gap-2">
@@ -467,7 +385,7 @@ function Inner() {
                   </div>
                 </div>
                 <div>
-                  <label className="block mb-1.5 text-[13px] font-medium text-text-mid">
+                  <label className={FIELD_LABEL}>
                     Aadhaar number
                   </label>
                   <input
@@ -497,18 +415,7 @@ function Inner() {
                   placeholder="e.g. S/O John Doe"
                   hint="Optional. Usually printed on the back of the Aadhaar."
                 />
-                <div className="sm:col-span-2">
-                  <label className="block mb-1.5 text-[13px] font-medium text-text-mid">
-                    Address
-                  </label>
-                  <textarea
-                    value={address}
-                    onChange={(e) => setAddress(e.target.value)}
-                    placeholder="As on Aadhaar"
-                    rows={3}
-                    className="w-full rounded-input border border-line bg-white px-3.5 py-2.5 text-[14px] outline-none focus:border-blue resize-y"
-                  />
-                </div>
+                <TextAreaField label="Address" value={address} onChange={setAddress} placeholder="As on Aadhaar" />
               </div>
 
               {/* Front / face preview — shows the detected face, a freshly
@@ -561,11 +468,7 @@ function Inner() {
         {/* ─── Save + Next ────────────────────────────────────── */}
         {uploaded && (
           <Card className="p-6 space-y-4">
-            {saveError && (
-              <div className="p-3.5 rounded-input bg-red-50 border border-red-200 text-[13px] text-red-700">
-                {saveError}
-              </div>
-            )}
+            <ErrorBox message={saveError} roomy />
             <div className="flex justify-between">
               <Button
                 type="button"
@@ -661,10 +564,7 @@ function UploadTile({
               aria-label="View uploaded file"
               className="absolute top-2 right-2 p-1.5 rounded bg-white/90 border border-[#cdeadd] text-[#185fa5] hover:bg-white hover:border-[#185fa5] disabled:opacity-50 transition-colors"
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                <circle cx="12" cy="12" r="3" />
-              </svg>
+              <EyeIcon size="16" />
             </button>
           </div>
         ) : (

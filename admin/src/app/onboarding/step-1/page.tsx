@@ -11,18 +11,12 @@ import WizardProgress from "@/components/WizardProgress";
 import { getBusiness, setBusiness, isImpersonating } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { EMAIL_RE } from "@/lib/validators";
+import { DESIGNATION_OPTIONS as STANDARD_OPTIONS } from "@/lib/epc-stakeholders";
 
 // Designation choices for the dropdown. "Other" reveals a free-text field
 // below the dropdown; the typed value goes into contact_designation (NOT
 // the literal word "Other").
-const DESIGNATION_OPTIONS = [
-  { value: "Partner",    label: "Partner" },
-  { value: "Director",   label: "Director" },
-  { value: "Proprietor", label: "Proprietor" },
-  { value: "Owner",      label: "Owner" },
-  { value: "Manager",    label: "Manager" },
-  { value: "Other",      label: "Other" },
-];
+const DESIGNATION_OPTIONS = [...STANDARD_OPTIONS, { value: "Other", label: "Other" }];
 
 const STANDARD_DESIGNATIONS = new Set(
   DESIGNATION_OPTIONS.filter((o) => o.value !== "Other").map((o) => o.value),

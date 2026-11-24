@@ -7,38 +7,17 @@
 // The team can't send while the profile waits for the main admin's check (0100).
 
 import { NextRequest, NextResponse } from "next/server";
-import type { SupabaseClient } from "@supabase/supabase-js";
-import ExcelJS from "exceljs";
-import archiver from "archiver";
-import { sendMail, mailConfigured } from "@/lib/mailer";
 import { err, dbAs, requireLogin } from "@/lib/api";
-import { UUID_RE, EMAIL_RE } from "@/lib/validators";
-import { uploadBuffer, downloadBuffer } from "@/lib/gcs";
-import { fileLinkUrl } from "@/lib/file-links";
-import { publicOrigin } from "@/lib/login-password-server";
+import { UUID_RE } from "@/lib/validators";
 import { epcSummaryRows } from "@/lib/lender-summary";
 import { fetchLenders, lenderLabelIn } from "@/lib/loan-lenders";
+import { esc, readSendFields, sendLenderPack, titleCaseCategory, type ComposerBody } from "@/lib/lender-pack";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 180;
 
 const EPC_CC_DEFAULT = ["Manishfrthanvi@gmail.com".toLowerCase()];
-
-function extOf(p: string): string { const m = p.split("/").pop()?.match(/\.[a-z0-9]+$/i); return m ? m[0] : ""; }
-function safe(s: string): string { return s.replace(/[^\w .-]+/g, "_").slice(0, 80); }
-function esc(s: string): string { return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c] as string)); }
-function cleanEmails(v: unknown): string[] {
-  if (!Array.isArray(v)) return [];
-  return Array.from(new Set(v.map((x) => String(x).trim().toLowerCase()).filter((x) => EMAIL_RE.test(x))));
-}
-function prettyCategory(c: string): string {
-  return c.replace(/_/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
-}
-async function saveContacts(supabase: SupabaseClient, emails: string[]) {
-  const now = new Date().toISOString();
-  for (const email of emails) { try { await supabase.from("email_contacts").upsert({ email, last_used_at: now }, { onConflict: "email" }); } catch { /* non-blocking */ } }
-}
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -49,10 +28,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const bizId = params.id;
     if (!UUID_RE.test(bizId)) return err("Invalid EPC id.", 400);
 
-    const body = (await req.json().catch(() => ({}))) as {
-      mode?: string; lender?: string; to?: string; toName?: string;
-      cc?: string[]; bcc?: string[]; subject?: string; detail?: [string, string][];
-    };
+    const body = (await req.json().catch(() => ({}))) as ComposerBody;
     const mode = body.mode === "send" ? "send" : "preview";
     const lender = String(body.lender ?? "").toLowerCase();
 
@@ -76,7 +52,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const docList: Array<{ label: string; path: string }> = [];
     for (const d of (docRows ?? []) as Array<{ category: string; storage_path: string }>) {
       if (!d.storage_path || seen.has(d.storage_path)) continue;
-      seen.add(d.storage_path); docList.push({ label: prettyCategory(d.category), path: d.storage_path });
+      seen.add(d.storage_path); docList.push({ label: titleCaseCategory(d.category), path: d.storage_path });
     }
 
     if (mode === "preview") {
@@ -91,77 +67,21 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       });
     }
 
-    if (!mailConfigured()) return err("Email isn't configured yet (app password missing).", 500);
-    const to = String(body.to ?? "").trim().toLowerCase();
-    if (!EMAIL_RE.test(to)) return err("Enter a valid recipient (TO) email.", 400);
-    const cc = cleanEmails(body.cc);
-    const bcc = cleanEmails(body.bcc);
-    const subject = String(body.subject ?? "").trim() || `EPC Onboarding Application _${epcName}`;
-    const toName = String(body.toName ?? "").trim();
-    const detail = Array.isArray(body.detail) && body.detail.length
-      ? body.detail.map((r) => [String(r?.[0] ?? ""), String(r?.[1] ?? "")] as [string, string])
-      : epcSummaryRows(epc);
-
-    const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet("EPC");
-    ws.columns = [{ width: 34 }, { width: 50 }];
-    const title = ws.addRow(["Capital Craft — EPC Partner", ""]);
-    title.font = { bold: true, size: 14 };
-    ws.addRow([]);
-    for (const [k, v] of detail) { const r = ws.addRow([k, v]); r.getCell(1).font = { bold: true, color: { argb: "FF0F3D2E" } }; }
-    const xlsxBuffer = Buffer.from(await wb.xlsx.writeBuffer());
-
-    const archive = archiver("zip", { zlib: { level: 6 } });
-    const chunks: Buffer[] = [];
-    archive.on("data", (c: Buffer) => chunks.push(c));
-    archive.on("warning", (e) => console.warn("[epc-send] zip warn:", e));
-    const zipDone = new Promise<void>((resolve, reject) => { archive.on("end", () => resolve()); archive.on("error", reject); });
-    archive.append(xlsxBuffer, { name: "summary.xlsx" });
-    const buffers = new Map<string, Buffer>();
-    for (const d of docList) {
-      try { const buf = await downloadBuffer(d.path); buffers.set(d.path, buf); archive.append(buf, { name: `${safe(`${d.label} - ${epcName}`)}${extOf(d.path)}` }); }
-      catch (e) { console.warn(`[epc-send] skip ${d.path}:`, e); }
-    }
-    void archive.finalize();
-    await zipDone;
-    const zipBuffer = Buffer.concat(chunks);
-
-    const zipName = `${safe(`${epcName}_${lenderLabelIn(lenders, lender)}`)}.zip`;
-    const zipPath = `epc-lender-packs/${bizId}/${Date.now()}_${zipName}`;
-    await uploadBuffer(zipPath, zipBuffer, "application/zip");
-    // Links go through the portal so they outlive Google's 7-day cap (lib/file-links).
-    const origin = publicOrigin(req);
-    const zipUrl = fileLinkUrl(origin, zipPath);
-
-    const links: Array<{ label: string; url: string }> = [];
-    for (const d of docList) { if (!buffers.has(d.path)) continue; links.push({ label: d.label, url: fileLinkUrl(origin, d.path) }); }
-
-    const linksHtml = links.map((l) => `<li style="margin:4px 0"><a href="${esc(l.url)}" style="color:#178a5c">${esc(l.label)}</a></li>`).join("");
-    const detailHtml = `<table style="border-collapse:collapse;margin:8px 0 18px;font-size:13px">${detail
-      .map(([k, v]) => `<tr><td style="padding:3px 16px 3px 0;color:#5a8a76;vertical-align:top;white-space:nowrap">${esc(k)}</td><td style="padding:3px 0;font-weight:600;color:#12271f">${esc(v || "—")}</td></tr>`)
-      .join("")}</table>`;
-    const html = `
-      <div style="font-family:-apple-system,Segoe UI,Arial,sans-serif;font-size:14px;color:#12271f;line-height:1.55">
-        <p>Dear ${esc(toName || "Team")},</p>
-        <p>Please find the EPC partner details for <b>${esc(epcName)}</b> below, along with the supporting documents. Kindly review and revert at the earliest.</p>
-        ${detailHtml}
-        <p style="margin:16px 0 6px"><b>Documents</b></p>
-        <ul style="margin:0 0 16px;padding-left:20px">${linksHtml || "<li>(no documents on file)</li>"}</ul>
-        <p><b>Download all as a single ZIP:</b> <a href="${esc(zipUrl)}" style="color:#178a5c">${esc(zipName)}</a></p>
-        <p style="color:#5a8a76;font-size:12.5px">A summary sheet is attached.</p>
-        <p style="margin-top:18px">Regards,<br/>Capital Craft Advisors</p>
-      </div>`;
-
-    await sendMail({
-      to,
-      ...(cc.length ? { cc } : {}),
-      ...(bcc.length ? { bcc } : {}),
-      subject,
-      html,
-      attachments: [{ filename: "summary.xlsx", content: xlsxBuffer }],
+    const mail = readSendFields(body, `EPC Onboarding Application _${epcName}`, epcSummaryRows(epc));
+    if (mail instanceof Response) return mail;
+    const { to } = mail;
+    const documents = await sendLenderPack(req, supabase, {
+      mail,
+      sheetName: "EPC",
+      sheetTitle: "Capital Craft — EPC Partner",
+      docs: docList,
+      name: epcName,
+      lenderLabel: lenderLabelIn(lenders, lender),
+      zipFolder: `epc-lender-packs/${bizId}`,
+      introHtml: `Please find the EPC partner details for <b>${esc(epcName)}</b> below, along with the supporting documents. Kindly review and revert at the earliest.`,
+      logTag: "epc-send",
     });
 
-    await saveContacts(supabase, [to, ...cc, ...bcc]);
     // Record the send in the EPC's activity log (best-effort; the mail already went).
     try {
       await supabase.from("admin_edit_log").insert({
@@ -169,7 +89,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         action: "email_sent", field: lender, new_value: to,
       });
     } catch (e) { console.warn("[epc-send-to-lender] activity log failed:", e); }
-    return NextResponse.json({ ok: true, sent_to: to, documents: links.length });
+    return NextResponse.json({ ok: true, sent_to: to, documents });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[epc-send-to-lender] error:", msg);

@@ -16,9 +16,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { authHeaders, getBusiness, isMainAdmin } from "@/lib/auth";
-import { getDocumentUrl, deleteDocument, downloadDocument, triggerDownload, signLoanPath } from "@/lib/storage";
-import { maskAcct } from "@/lib/epc-labels";
-import Modal from "@/components/ui/Modal";
+import { getDocumentUrl, deleteDocument, downloadDocument, triggerDownload, signLoanPath, saveDownload } from "@/lib/storage";
 import ConfirmDeleteModal from "@/components/ConfirmDeleteModal";
 import EditLoanDatesModal from "@/components/EditLoanDatesModal";
 import { invalidate } from "@/lib/list-cache";
@@ -38,312 +36,38 @@ import { useLenders } from "@/lib/lenders";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import { DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
 import { logLoanActivity } from "@/lib/loanAudit";
-import { aadhaarFaceCountsAsPhoto } from "@/lib/applicant-photo";
 import { loanDocChecklist } from "@/lib/loan-doc-checklist";
 import { loanChecks } from "@/lib/loan-verification";
 import { cachedLoanUpdateCount } from "@/lib/use-epc-updates";
 import { firstDisbursedShown } from "@/lib/disbursement";
 import { fmtDate, fmtDateTime } from "@/lib/dates";
-import { fmtRupees, fmtRupeesExact, pctOf } from "@/lib/money";
-import { CATEGORY_LABEL } from "@/lib/loan-form";
+import { fmtRupees } from "@/lib/money";
 import { initialsOf } from "@/lib/names";
 import { invalidateLoanBoards } from "@/lib/ops-board";
 import {
-  I, DocGrid, DocViewer, FieldCol, FillCount, fillOf, fillText, fillTone, HAction, ProgressTabs, ChecksPanel, CopyButton, Section, StatCards, StepBlock,
-  type FieldRow, type ViewDocSlot, type ViewerItem, type StageState,
+  I, DocViewer, FillCount, fillText, fillTone, HAction, ProgressTabs, CopyButton, Section, StatCards,
+  type ViewDocSlot, type ViewerItem, type StageState,
 } from "@/components/view/ViewKit";
+import { useStacked } from "@/components/view/hooks";
 import LoanApprovalForm from "@/components/LoanApprovalForm";
 import ApprovalSummary from "@/components/ApprovalSummary";
 import ReviewBar from "@/components/ReviewBar";
 import { reviewState, canEditReview, reviewError } from "@/lib/review";
 import LoanDisbursementPanel from "@/components/LoanDisbursementPanel";
+// This page's own pieces (./_parts).
+import { PATH_COLUMN, buildLoanDocGroups, type Doc, type Loan, type LoanDocGroup, type LoanSlot } from "./_parts/loan-docs";
+import { LOAN_STATUS_LABEL, MSG_EPC, PAUSE, SHIELD, StatusBadge, displayId, fmtApproval } from "./_parts/labels";
+import { SYSTEM_LABEL } from "@/lib/loan-labels";
+import StatusLines from "./_parts/StatusLines";
+import SubmittedTab, { type DupRow } from "./_parts/SubmittedTab";
+import AbortModal from "./_parts/AbortModal";
 
-type Loan = Record<string, any>;
-type Doc  = {
-  id: string; category: string; storage_path: string; file_name: string | null; mime_type: string | null;
-  created_at?: string | null;
-};
-// Another application with the same mobile / PAN / K number (Checks → Duplicate).
-type DupRow = {
-  id: string; loan_display_id: string | null; aadhaar_name: string | null; borrower_name: string | null;
-  status: string | null; aborted_at: string | null; created_at: string | null;
-  borrower_mobile: string | null; borrower_pan: string | null; ca_number: string | null;
-};
 // Signed URLs for every document, minted in ONE request (doc-urls) — pictures,
 // the header photo and instant View. They live 1h; reuse them for 50 min.
 type SignedUrls = { rows: Record<string, string>; paths: Record<string, string>; at: number };
 const URL_TTL_MS = 50 * 60_000;
 
 type Stage = "submitted" | "docs" | "approved" | "first" | "second";
-
-// Slot key → epc_applications *_path column, for admin doc-removal (trash) on
-// path-backed slots. Keys NOT listed here are doc-row backed (deleted by id).
-const PATH_COLUMN: Record<string, string> = {
-  applicant_photo:     "customer_photo_path",
-  aadhaar_front:       "aadhaar_front_path",
-  aadhaar_back:        "aadhaar_back_path",
-  quotation:           "proforma_invoice_path",
-  ebill:               "ebill_path",
-  rooftop:             "rooftop_photo_path",
-  coapp_pan:           "coapp_pan_path",
-  coapp_aadhaar_front: "coapp_aadhaar_front_path",
-  coapp_aadhaar_back:  "coapp_aadhaar_back_path",
-  bank_statement:      "bank_statement_path",
-};
-
-const SYSTEM_LABEL: Record<string, string> = {
-  on_grid:  "On-Grid",
-  off_grid: "Off-Grid",
-  hybrid:   "Hybrid",
-};
-const EMPLOYMENT_LABEL: Record<string, string> = {
-  salaried: "Salaried", self_employed: "Self-employed",
-};
-// Loan applications have exactly one status — the lender outcome.
-const LOAN_STATUS_LABEL: Record<string, string> = {
-  draft:        "Draft",
-  submitted:    "Submitted",
-  under_review: "Under Review",
-  docs_sent:    "Docs Sent",
-  on_hold:      "Hold",
-  aborted:      "Aborted",
-  approved:     "Approved by lender",
-  rfd:          "Ready for Disbursement",
-  rejected:     "Rejected by lender",
-};
-const DOC_LABEL: Record<string, string> = {
-  customer_photo:   "Applicant photo",
-  borrower_photo:   "Rooftop photo",
-  rooftop_photo_extra: "Rooftop photo",
-  borrower_pan:     "PAN card",
-  borrower_aadhaar: "Aadhaar",
-  quotation:        "Quotation / Proforma",
-  electricity_bill: "Electricity bill",
-  bank_statement:   "Bank statement",
-  income_proof:     "Income proof",
-  property_doc:     "Property document",
-};
-
-// Local trash glyph — kept here (not in ViewKit) so the shared kit and the
-// EPC View that imports it stay untouched.
-const PAUSE = (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M10 5v14M14 5v14" />
-  </svg>
-);
-// "Insurance" — a shield.
-const SHIELD = (
-  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-  </svg>
-);
-// "Message EPC" — a chat bubble with text lines.
-const MSG_EPC = (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.9A8 8 0 1 1 21 12z" />
-    <path d="M8.5 10.5h7M8.5 14h4.5" />
-  </svg>
-);
-
-function displayId(loan: Loan): string {
-  if (loan.loan_display_id) return loan.loan_display_id;
-  return "LA-" + String(loan.id).replace(/-/g, "").slice(0, 8).toUpperCase();
-}
-// fmtRupees imported from @/lib/money
-// Approval-details cell: money → ₹ exact (never rounded), tenure → "<n> years". Numbers only.
-function fmtApproval(v: number | null | undefined, money: boolean, suffix?: string): string {
-  if (v === null || v === undefined || !Number.isFinite(Number(v))) return "—";
-  const n = Number(v);
-  const base = money ? fmtRupeesExact(n) : String(n);
-  return suffix ? `${base} ${suffix}` : base;
-}
-
-// ── Document grouping (missing-doc visibility) ───────────────────────
-
-type LoanSlot = {
-  key: string; label: string; docId: string | null; path: string | null;
-  // Viewer details (filled when the slot has a file).
-  file?: string | null; mime?: string | null; at?: string | null;
-};
-type LoanDocGroup = { title: string; slots: LoanSlot[] };
-
-// Upload time of a *_path document: its *_uploaded_at column when there is one,
-// else the Date.now() prefix every upload route puts in the object name.
-const PATH_UPLOADED_AT: Record<string, string> = {
-  quotation: "proforma_uploaded_at", ebill: "ebill_uploaded_at",
-  rooftop: "rooftop_photo_uploaded_at", bank_statement: "bank_statement_uploaded_at",
-};
-function pathUploadedAt(loan: Loan, key: string, path: string): string | null {
-  const col = PATH_UPLOADED_AT[key];
-  if (col && loan[col]) return String(loan[col]);
-  const m = /\/(\d{13})[_.]/.exec(path);
-  return m ? new Date(Number(m[1])).toISOString() : null;
-}
-
-// Every user_application_docs category that a NAMED slot below owns. Any row in
-// one of these categories belongs to its slot — never to "Other documents".
-// This keeps a duplicate upload (e.g. a rooftop photo uploaded twice, or via
-// both the chatbot and the classic form) from leaking a second "Rooftop photo" /
-// "Applicant photo" card into the Other bucket. Extra copies are simply hidden;
-// the slot shows the latest one.
-const NAMED_SLOT_CATEGORIES = new Set<string>([
-  "borrower_pan", "customer_photo", "borrower_photo", "quotation", "electricity_bill",
-  "bank_statement", "sanction_letter", "disbursement_advice", "feasibility_report", "mmr_advance_receipt",
-  "completion_invoice", "completion_panel_photo", "completion_inverter_photo",
-  "completion_meter_photo", "completion_report", "rooftop_photo_extra",
-]);
-
-function buildLoanDocGroups(loan: Loan, docsIn: Doc[]): LoanDocGroup[] {
-  // Newest first, so a slot that matches by category shows the LATEST upload and
-  // any older duplicate is superseded (not the stale first copy).
-  const docs = [...docsIn].sort((a, b) => String(b.created_at ?? "").localeCompare(String(a.created_at ?? "")));
-  const usedRowIds = new Set<string>();
-  const fromRow = (key: string, label: string, d: Doc): LoanSlot => ({
-    key, label, docId: d.id, path: null, file: d.storage_path, mime: d.mime_type, at: d.created_at ?? null,
-  });
-  const fromPath = (key: string, label: string, path: string | null | undefined): LoanSlot => ({
-    key, label, docId: null, path: path ?? null, file: path ?? null, at: path ? pathUploadedAt(loan, key, path) : null,
-  });
-  const slot = (
-    key: string, label: string, cats: string[], path: string | null | undefined,
-  ): LoanSlot => {
-    for (const cat of cats) {
-      const row = docs.find((d) => d.category === cat && !usedRowIds.has(d.id));
-      if (row) { usedRowIds.add(row.id); return fromRow(key, label, row); }
-    }
-    return fromPath(key, label, path);
-  };
-
-  const groups: LoanDocGroup[] = [];
-
-  groups.push({
-    title: "Identity (Steps 1–2)",
-    slots: [
-      slot("applicant_pan",   "Applicant PAN card", ["borrower_pan"],   null),
-      slot("applicant_photo", "Applicant photo",    ["customer_photo"], loan.customer_photo_path ?? (aadhaarFaceCountsAsPhoto(loan) ? loan.aadhaar_face_path : null)),
-      slot("aadhaar_front",   "Aadhaar (front)",    [], loan.aadhaar_front_path),
-      slot("aadhaar_back",    "Aadhaar (back)",     [], loan.aadhaar_back_path),
-    ],
-  });
-
-  groups.push({
-    title: "Loan requirement (Step 3)",
-    slots: [
-      slot("quotation", "Quotation / Proforma invoice", ["quotation"],        loan.proforma_invoice_path),
-      ...billSlots(),
-      ...rooftopSlots(),
-    ],
-  });
-
-  // Rooftop photos: the first (borrower_photo / rooftop_photo_path), then the
-  // geo-tagged extra ones a commercial application adds (rooftop_photo_extra).
-  function rooftopSlots(): LoanSlot[] {
-    const out = [slot("rooftop", "Rooftop photo", ["borrower_photo"], loan.rooftop_photo_path)];
-    const extra = docs.filter((d) => d.category === "rooftop_photo_extra" && !usedRowIds.has(d.id)).reverse();
-    extra.forEach((d) => { usedRowIds.add(d.id); out.push(fromRow(`rooftop_${d.id}`, "Rooftop photo", d)); });
-    if (out.length > 1) out.forEach((x, i) => { x.label = `Rooftop photo ${i + 1}`; });
-    return out;
-  }
-
-  // Electricity bills: the read bill (ebill_path) first, then every other
-  // electricity_bill row — a commercial customer may add more than one; the
-  // classic form stores its bills as rows only. A row holding the same file as
-  // the column is the same bill.
-  function billSlots(): LoanSlot[] {
-    const rows = docs.filter((d) => d.category === "electricity_bill" && !usedRowIds.has(d.id) && d.storage_path !== loan.ebill_path);
-    docs.forEach((d) => { if (d.category === "electricity_bill") usedRowIds.add(d.id); });
-    const out: LoanSlot[] = [];
-    if (loan.ebill_path) out.push(fromPath("ebill", "Electricity bill", loan.ebill_path));
-    rows.reverse().forEach((d) => out.push(fromRow(`ebill_${d.id}`, "Electricity bill", d)));
-    if (out.length === 0) out.push(fromPath("ebill", "Electricity bill", null));
-    if (out.length > 1) out.forEach((s, i) => { s.label = `Electricity bill ${i + 1}`; });
-    return out;
-  }
-
-  const hasCoapp = loan.bill_on_applicant_name === false ||
-    !!(loan.coapp_pan_path || loan.coapp_aadhaar_front_path || loan.coapp_aadhaar_back_path);
-  if (hasCoapp) {
-    groups.push({
-      title: "Co-applicant (Step 3)",
-      slots: [
-        slot("coapp_pan",           "Co-applicant PAN card",        [], loan.coapp_pan_path),
-        slot("coapp_aadhaar_front", "Co-applicant Aadhaar (front)", [], loan.coapp_aadhaar_front_path),
-        slot("coapp_aadhaar_back",  "Co-applicant Aadhaar (back)",  [], loan.coapp_aadhaar_back_path),
-      ],
-    });
-  }
-
-  // Bank statements dual-read from BOTH stores: the legacy single column
-  // (the OCR'd primary uploaded via Step-4's BankDocSlot) AND every
-  // user_application_docs row in category "bank_statement" (the extra
-  // statements added by the Step-4 multi-file uploader). Show them all —
-  // taking only the first row (as slot() does) would hide the rest.
-  // (A row holding the same file as the column is shown once.)
-  const bankRows = docs.filter((d) => d.category === "bank_statement" && !usedRowIds.has(d.id) && d.storage_path !== loan.bank_statement_path);
-  bankRows.forEach((d) => usedRowIds.add(d.id));
-  const bankSlots: LoanSlot[] = [];
-  if (loan.bank_statement_path) {
-    bankSlots.push(fromPath("bank_statement", "Bank statement", loan.bank_statement_path));
-  }
-  bankRows.forEach((d) => {
-    bankSlots.push(fromRow(`bank_statement_${d.id}`, "Bank statement", d));
-  });
-  if (bankSlots.length === 0) {
-    bankSlots.push(fromPath("bank_statement", "Bank statement", null));
-  }
-  if (bankSlots.length > 1) {
-    bankSlots.forEach((s, i) => { s.label = `Bank statement ${i + 1}`; });
-  }
-  groups.push({ title: "Financial (Step 4)", slots: bankSlots });
-
-  groups.push({
-    title: "Step 5 — Sanction Letter",
-    slots: [
-      slot("sanction_letter", "Sanction letter", ["sanction_letter"], null),
-      slot("disbursement_advice", "Disbursement advice letter", ["disbursement_advice"], null),
-    ],
-  });
-
-  // Solfin takes no advance receipt — its slot shows only if one was uploaded anyway.
-  const receiptSlot = loan.approved_lender !== "solfin" || docs.some((d) => d.category === "mmr_advance_receipt");
-  groups.push({
-    title: "1st Tranche Docs",
-    slots: [
-      slot("feasibility_report",  "Feasibility Approval Report", ["feasibility_report"],  null),
-      ...(receiptSlot ? [slot("mmr_advance_receipt", "MMR / Advance Receipt", ["mmr_advance_receipt"], null)] : []),
-    ],
-  });
-
-  groups.push({
-    title: "2nd Tranche Docs",
-    slots: [
-      slot("comp_invoice",  "Invoice / tax invoice",       ["completion_invoice"],        null),
-      slot("comp_panel",    "Panel photo (geo-tagged)",    ["completion_panel_photo"],    null),
-      slot("comp_inverter", "Inverter photo (geo-tagged)", ["completion_inverter_photo"], null),
-      slot("comp_meter",    "Meter photo (geo-tagged)",    ["completion_meter_photo"],    null),
-      slot("comp_report",   "Work completion report",      ["completion_report"],         null),
-    ],
-  });
-
-  // "Other documents" = rows not consumed by a slot AND not owned by any named
-  // category. A duplicate of a named category (borrower_photo / customer_photo /
-  // borrower_pan / …) is never shown here — its slot already shows the latest.
-  const others = docs.filter((d) => !usedRowIds.has(d.id) && !NAMED_SLOT_CATEGORIES.has(d.category));
-  if (others.length > 0) {
-    groups.push({
-      title: "Other documents",
-      // An "other" upload is shown by its file name — the EPC chatbot names it
-      // after what the document is ("ITR 2024-25").
-      slots: others.map((d) => fromRow(
-        `other-${d.id}`,
-        d.category === "other" && d.file_name ? d.file_name.replace(/\.[^.]+$/, "") : DOC_LABEL[d.category] ?? d.category.replace(/_/g, " "),
-        d,
-      )),
-    });
-  }
-
-  return groups;
-}
 
 export default function LoanAppViewPage() {
   return (
@@ -363,16 +87,8 @@ function Inner() {
   const [returnTo, setReturnTo] = useState<string | null>(null);
   const lenders = useLenders();
   useEffect(() => { if (typeof window !== "undefined") setReturnTo(sessionStorage.getItem("ccReturnTo")); }, []);
-  // Under xl the Submitted cards stack ABOVE Documents, so their details open
-  // in place (pushing Documents down) instead of floating over it.
-  const [stacked, setStacked] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 1279px)");
-    const on = () => setStacked(mq.matches);
-    on();
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, []);
+  // Under xl the Submitted cards stack ABOVE Documents (their details open in place).
+  const stacked = useStacked();
   function goBack() {
     const to = typeof window !== "undefined" ? sessionStorage.getItem("ccReturnTo") : null;
     if (to) { sessionStorage.removeItem("ccReturnTo"); router.push(to as unknown as string); }
@@ -627,17 +343,7 @@ function Inner() {
         alert("ZIP failed: " + (d?.error || `HTTP ${res.status}`));
         return;
       }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const cd = res.headers.get("content-disposition") || "";
-      const m = /filename="?([^"]+)"?/.exec(cd);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = m?.[1] || `${displayId(loan)}_${String(applicantName).replace(/[^\w-]+/g, "_")}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await saveDownload(res, `${displayId(loan)}_${String(applicantName).replace(/[^\w-]+/g, "_")}.zip`);
     } catch (e) {
       alert("Download failed: " + (e as Error).message);
     } finally {
@@ -658,17 +364,7 @@ function Inner() {
         alert("Download failed: " + (d?.error || `HTTP ${res.status}`));
         return;
       }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const cd = res.headers.get("content-disposition") || "";
-      const m = /filename="?([^"]+)"?/.exec(cd);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = m?.[1] || `${displayId(loan)}_Tranche${tranche}.zip`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await saveDownload(res, `${displayId(loan)}_Tranche${tranche}.zip`);
     } catch (e) {
       alert("Download failed: " + (e as Error).message);
     } finally {
@@ -1110,25 +806,6 @@ function Inner() {
   const checks = loanChecks(loan, docs.map((d) => d.category), {
     approved: approvedPlus, decided: approvedPlus || rejected, duplicates: dups ? dups.length : null,
   });
-  const dupList = dups && dups.length > 0 ? (
-    <ul className="space-y-1">
-      {dups.map((d) => {
-        const why = [
-          d.borrower_mobile && d.borrower_mobile === loan.borrower_mobile ? "Mobile" : null,
-          d.borrower_pan && d.borrower_pan === loan.borrower_pan ? "PAN" : null,
-          d.ca_number && d.ca_number === loan.ca_number ? "K No." : null,
-        ].filter(Boolean).join(" · ");
-        return (
-          <li key={d.id} className="text-[12px]">
-            <a href={`/admin/app/${d.id}/view`} target="_blank" rel="noopener" className="font-semibold text-[#185fa5] hover:underline">
-              {d.loan_display_id ?? "—"}
-            </a>
-            <span className="text-[#7a958a]"> · {d.aadhaar_name || d.borrower_name || "—"} · {why} · {d.aborted_at ? "Aborted" : (LOAN_STATUS_LABEL[d.status ?? ""] ?? d.status)}</span>
-          </li>
-        );
-      })}
-    </ul>
-  ) : null;
 
   const approvedAmt = tApproved ? (loan.sanctioned_amount ?? approvalDetails?.approved_loan_amount ?? null) : null;
   // Credit Fair's 1st disbursement counts with its three charges (lib/disbursement).
@@ -1148,84 +825,6 @@ function Inner() {
     onDownload: () => void (s.docId ? downloadDoc(s.docId) : downloadPath(s.path!)),
   }));
   const viewerIndex = viewerKey ? viewerItems.findIndex((v) => v.key === viewerKey) : -1;
-
-  // ── Submitted — every field, per column (optional ones don't count) ──
-  const yesNo = (v: unknown) => (v == null ? null : v ? "Yes" : "No");
-  const applicantRows: FieldRow[] = [
-    { k: "Name", v: loan.aadhaar_name || loan.borrower_name },
-    { k: "Lead owner", v: loan.lead_owner_name, optional: true },
-    { k: "Father's name", v: loan.borrower_father_name },
-    { k: "Gender", v: loan.aadhaar_gender },
-    { k: "Date of birth", v: loan.aadhaar_dob },
-    { k: "PAN", v: loan.borrower_pan, copy: loan.borrower_pan },
-    { k: "Aadhaar", v: loan.aadhaar_number_masked },
-    { k: "Email", v: loan.borrower_email, valueClass: "text-[#185fa5]", copy: loan.borrower_email },
-    { k: "Phone no", v: loan.borrower_mobile ? `+91 ${loan.borrower_mobile}` : null, copy: loan.borrower_mobile },
-    { k: "Earning", v: yesNo(loan.applicant_earning) },
-    { k: "Monthly income", v: loan.monthly_income != null ? fmtRupees(loan.monthly_income) : null, optional: loan.applicant_earning !== true },
-    { k: "Address", v: loan.aadhaar_address, wrap: true },
-  ];
-  const coappRows: FieldRow[] = hasCoapp ? [
-    { k: "Name", v: loan.coapp_name },
-    { k: "Father's name", v: loan.coapp_father_name },
-    { k: "DOB", v: loan.coapp_dob },
-    { k: "Relation", v: loan.coapp_relation },
-    { k: "PAN", v: loan.coapp_pan, copy: loan.coapp_pan },
-    { k: "Mobile", v: loan.coapp_mobile ? `+91 ${loan.coapp_mobile}` : null, copy: loan.coapp_mobile },
-    { k: "Email", v: loan.coapp_email, copy: loan.coapp_email, optional: true },
-    { k: "Earning", v: yesNo(loan.coapp_earning) },
-    { k: "Monthly income", v: loan.coapp_monthly_income != null ? fmtRupees(loan.coapp_monthly_income) : null, optional: loan.coapp_earning !== true },
-    { k: "Aadhaar name", v: loan.coapp_aadhaar_name },
-    { k: "Aadhaar", v: loan.coapp_aadhaar_number_masked },
-    { k: "Address", v: loan.coapp_aadhaar_address, wrap: true },
-  ] : [];
-  const gps = loan.rooftop_photo_gps as { lat?: number; lng?: number } | null;
-  const siteRows: FieldRow[] = [
-    { k: "Name on E-Bill", v: loan.ebill_name },
-    { k: "Address", v: loan.ebill_address_line, wrap: true },
-    { k: "Pincode", v: loan.install_pincode },
-    { k: "City", v: loan.install_city },
-    { k: "District", v: loan.install_district },
-    { k: "State", v: loan.install_state },
-    ...(gps ? [{ k: "Rooftop GPS", v: `${gps.lat?.toFixed?.(5) ?? "?"}, ${gps.lng?.toFixed?.(5) ?? "?"}`, optional: true }] : []),
-  ];
-  const loanRows: FieldRow[] = [
-    { k: "Project size", v: kw },
-    { k: "Project cost", v: fmtRupees(loan.total_project_cost) },
-    {
-      k: "Loan amount required",
-      // With its share of the project cost — "₹1,60,000 (80% of project cost)".
-      v: loan.loan_amount_required != null
-        ? fmtRupees(loan.loan_amount_required) + (pctOf(loan.loan_amount_required, loan.total_project_cost) ? ` (${pctOf(loan.loan_amount_required, loan.total_project_cost)} of project cost)` : "")
-        : null,
-    },
-    {
-      k: "Down payment",
-      v: loan.total_project_cost && loan.loan_amount_required
-        ? fmtRupees(Math.max(0, Number(loan.total_project_cost) - Number(loan.loan_amount_required)))
-        : null,
-      optional: true,
-    },
-    { k: "Category", v: loan.connection_category ? CATEGORY_LABEL[loan.connection_category] ?? loan.connection_category : null },
-    { k: "Monthly bill", v: fmtRupees(loan.monthly_bill_amount) },
-    { k: "DISCOM", v: loan.discom_name },
-    { k: "K Number", v: loan.ca_number, copy: loan.ca_number },
-  ];
-  const employmentRows: FieldRow[] = [
-    { k: "Employment", v: loan.employment_type ? EMPLOYMENT_LABEL[loan.employment_type] ?? loan.employment_type : null },
-    { k: "Organization", v: loan.organization_name, optional: loan.employment_type !== "salaried" },
-    { k: "Profession", v: loan.profession === "Other" && loan.profession_other ? `Other — ${loan.profession_other}` : loan.profession, optional: loan.employment_type !== "self_employed" },
-    { k: "Annual income", v: fmtRupees(loan.annual_income) },
-  ];
-  const bankRows: FieldRow[] = [
-    { k: "Bank name", v: loan.bank_name },
-    { k: "Account holder", v: loan.bank_account_holder },
-    { k: "Account no", v: maskAcct(loan.bank_account_no), copy: loan.bank_account_no },
-    { k: "IFSC code", v: loan.bank_ifsc, copy: loan.bank_ifsc },
-    { k: "Type", v: loan.bank_account_type },
-  ];
-  const checksCounted = checks.filter((c) => c.status !== "na");
-  const checksOk = checksCounted.filter((c) => c.status === "pass").length;
 
   return (
     <main className="min-h-screen bg-white">
@@ -1294,33 +893,7 @@ function Inner() {
         {/* Status lines: the last action, an abort, or ONE rejection reason
             (per-lender rows de-duplicated by text; the app-level reason is the
             fallback; hidden once a lender approves). */}
-        {(() => {
-          const lines: Array<{ key: string; text: string; red?: boolean }> = [];
-          if (statusMsg && !rejected) lines.push({ key: "msg", text: statusMsg });
-          if (aborted && loan.abort_reason) lines.push({ key: "abort", text: `Aborted — ${loan.abort_reason}`, red: true });
-          const lenderRej = loan.status !== "approved"
-            ? lenderRows.filter((r) => r.rejected_at && (r.rejection_reason ?? "").trim())
-            : [];
-          if (lenderRej.length > 0) {
-            const seen = new Set<string>();
-            lenderRej.forEach((r) => {
-              const k = (r.rejection_reason ?? "").trim().toLowerCase();
-              if (seen.has(k)) return;
-              seen.add(k);
-              lines.push({ key: r.id, text: `Rejection reason${r.lender_label ? ` (${r.lender_label})` : ""}: ${r.rejection_reason}`, red: true });
-            });
-          } else if (rejected && loan.rejection_reason) {
-            lines.push({ key: "rej", text: `Rejection reason: ${loan.rejection_reason}`, red: true });
-          }
-          if (!lines.length) return null;
-          return (
-            <div className="w-full px-5 sm:px-8 pb-3 -mt-1 space-y-0.5">
-              {lines.map((l) => (
-                <div key={l.key} className={["text-[12.5px]", l.red ? "font-medium text-red-700" : "text-[#7a958a]"].join(" ")}>{l.text}</div>
-              ))}
-            </div>
-          );
-        })()}
+        <StatusLines statusMsg={statusMsg} rejected={rejected} aborted={aborted} loan={loan} lenderRows={lenderRows} />
       </header>
 
       <div className="w-full px-5 sm:px-8" style={{ fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", color: "#0f3d2e" }}>
@@ -1350,67 +923,9 @@ function Inner() {
             {/* ── SUBMITTED — the original card layout: details (and checks)
                 open on hover on the left, documents always open on the right ── */}
             {activeTab === "submitted" && (
-              <div className="grid gap-x-6 gap-y-4 pt-6 xl:grid-cols-2 items-start">
-                <div className="flex flex-col gap-4 min-w-0">
-                  <Section card dropdown inline={stacked} icon={I.users} title="Identity" summary={fillOf(applicantRows, coappRows)}>
-                    <div className="grid gap-x-12 gap-y-6 md:grid-cols-2 xl:grid-cols-1">
-                      <FieldCol title="Applicant" rows={applicantRows} />
-                      <FieldCol title="Co-applicant" rows={coappRows}>
-                        {!hasCoapp && <p className="text-[14px] text-[#9aa5a0] py-[5px]">No co-applicant</p>}
-                      </FieldCol>
-                    </div>
-                  </Section>
-
-                  <Section card dropdown inline={stacked} icon={I.building} title="Installation site" summary={fillOf(siteRows)}>
-                    <FieldCol title="Installation site" rows={siteRows} />
-                  </Section>
-
-                  <Section card dropdown inline={stacked} icon={I.money} title="Loan requirement" summary={fillOf(loanRows)}>
-                    <FieldCol title="Loan requirement" rows={loanRows} />
-                  </Section>
-
-                  <Section card dropdown inline={stacked} icon={I.briefcase} title="Employment" summary={fillOf(employmentRows)}>
-                    <FieldCol title="Employment" rows={employmentRows} />
-                  </Section>
-
-                  <Section card dropdown inline={stacked} icon={I.bank} title="Bank details" summary={fillOf(bankRows)}>
-                    <FieldCol title="Bank details" rows={bankRows} />
-                  </Section>
-
-                  <Section card dropdown inline={stacked} icon={I.circleCheck} title="Checks" summary={<FillCount have={checksOk} total={checksCounted.length} />}>
-                    <ChecksPanel items={checks} extra={dupList ? { dup: dupList } : undefined} />
-                  </Section>
-                </div>
-
-                <div className="flex flex-col gap-4 min-w-0">
-                  <Section card white icon={I.files} title="Documents" summary={<FillCount have={docsHave} total={checklist.length} />}>
-                    <div className="space-y-3">
-                      {docGroups.map((g) => {
-                        // A tranche's Download button sits at the bottom of ITS group
-                        // and shows only once every slot in that tranche is uploaded.
-                        const complete = g.slots.length > 0 && g.slots.every((s) => !!s.docId || !!s.path);
-                        const tranche: "1" | "2" | null =
-                          g.title === "1st Tranche Docs" ? "1" : g.title === "2nd Tranche Docs" ? "2" : null;
-                        return (
-                          <StepBlock key={g.title} title={g.title}>
-                            <DocGrid slots={toViewSlots(g)} eyeIcon={I.eye} />
-                            {tranche && complete && (
-                              <button
-                                type="button"
-                                disabled={trancheBusy !== null}
-                                onClick={() => void downloadTranche(tranche)}
-                                className="mt-3 text-[12px] font-semibold px-2.5 py-1.5 rounded-input inline-flex items-center gap-1.5 border border-[#178a5c]/30 bg-white text-[#178a5c] hover:bg-[#f0faf5] disabled:opacity-50"
-                              >
-                                {I.download} {trancheBusy === tranche ? "Preparing…" : `Download Tranche ${tranche}`}
-                              </button>
-                            )}
-                          </StepBlock>
-                        );
-                      })}
-                    </div>
-                  </Section>
-                </div>
-              </div>
+              <SubmittedTab loan={loan} hasCoapp={hasCoapp} kw={kw} stacked={stacked} checks={checks} dups={dups}
+                docGroups={docGroups} toViewSlots={toViewSlots} docsHave={docsHave} docsTotal={checklist.length}
+                trancheBusy={trancheBusy} downloadTranche={downloadTranche} />
             )}
 
             {/* ── DOCS SENT — lenders ── */}
@@ -1581,29 +1096,8 @@ function Inner() {
         onConfirm={(l, reason, date) => rejectLenderNow(l, reason, date)}
       />
       {abortOpen && (
-        <Modal onClose={() => setAbortOpen(false)} busy={statusBusy} className="w-full max-w-md bg-white rounded-lg shadow-lg p-6">
-          <h3 className="font-semibold text-[18px] text-[#0f3d2e]">Abort application</h3>
-          <p className="text-[12px] text-[#5a8a76] mt-0.5">Cancels this application. It stays on record (not deleted) and can&apos;t be edited afterwards. Record the reason.</p>
-          <label className="block text-[13px] font-medium text-[#0f3d2e] mt-4 mb-1">Reason for abort <span className="text-red-600">*</span></label>
-          <textarea
-            value={abortReason}
-            onChange={(e) => setAbortReason(e.target.value)}
-            rows={3}
-            placeholder="Why is this being aborted?"
-            className="w-full rounded-input border border-red-200 bg-white px-3 py-2 text-[14px] text-[#0f3d2e] focus:outline-none focus:ring-2 focus:ring-red-200 resize-y"
-          />
-          <div className="mt-5 flex justify-end gap-2">
-            <button type="button" onClick={() => setAbortOpen(false)} disabled={statusBusy}
-              className="text-[13px] font-semibold px-3 py-2 rounded-[8px] border border-[#cdeadd] bg-white text-[#0f3d2e] hover:bg-[#f0faf5] disabled:opacity-60">
-              Cancel
-            </button>
-            <button type="button" disabled={statusBusy || !abortReason.trim()}
-              onClick={() => { const r = abortReason.trim(); if (!r) return; void doAbort(r).then((ok) => { if (ok) { setAbortOpen(false); setAbortReason(""); } }); }}
-              className="text-[13px] font-semibold px-3 py-2 rounded-[8px] bg-red-600 text-white hover:bg-red-700 disabled:opacity-60">
-              Abort application
-            </button>
-          </div>
-        </Modal>
+        <AbortModal busy={statusBusy} reason={abortReason} onReason={setAbortReason} onClose={() => setAbortOpen(false)}
+          onAbort={(r) => { void doAbort(r).then((ok) => { if (ok) { setAbortOpen(false); setAbortReason(""); } }); }} />
       )}
       <DocViewer
         items={viewerItems}
@@ -1638,30 +1132,5 @@ function Inner() {
         ]}
       />
     </main>
-  );
-}
-
-// ── Status badge — the lender outcome, coloured. Names the deciding lender
-// when we know it ("Approved by Aerem"), else falls back to the generic label.
-function StatusBadge({ status, lender }: { status: string | null | undefined; lender?: string | null }) {
-  const s = status ?? "draft";
-  const generic = LOAN_STATUS_LABEL[s] ?? s;
-  const label =
-    lender && s === "approved" ? `Approved by ${lender}` :
-    lender && s === "rejected" ? `Rejected by ${lender}` :
-    generic;
-  const cls =
-    s === "approved" ? "bg-[#e6f6ee] text-[#178a5c] border-[#cdeadd]" :
-    s === "rejected" ? "bg-red-50 text-red-700 border-red-200" :
-    s === "docs_sent" ? "bg-[#dceffb] text-[#185fa5] border-[#bfe0f5]" :
-    s === "rfd" ? "bg-[#d6efe3] text-[#0f7a52] border-[#bfe0d3]" :
-    s === "on_hold" ? "bg-[#fff2cc] text-[#8a6500] border-[#f3d9a4]" :
-    s === "aborted" ? "bg-red-50 text-red-700 border-red-200" :
-    s === "under_review" ? "bg-[#fef0d6] text-[#854f0b] border-[#f3d9a4]" :
-                       "bg-slate-100 text-slate-600 border-slate-200";
-  return (
-    <span className={["shrink-0 inline-flex px-2.5 py-0.5 rounded-full border text-[12px] font-medium whitespace-nowrap", cls].join(" ")}>
-      {label}
-    </span>
   );
 }

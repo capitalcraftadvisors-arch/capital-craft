@@ -9,13 +9,14 @@
 //   Tranche 1: feasibility_report, mmr_advance_receipt
 //   Tranche 2: completion_invoice + 3 geo photos + completion_report
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import archiver from "archiver";
 import ExcelJS from "exceljs";
-import { Readable } from "node:stream";
 import { downloadBuffer } from "@/lib/gcs";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
+import { loanDisplayId } from "@/lib/loan-labels";
+import { baseName, loadLoanAndDocs, zipResponse } from "@/lib/zip-response";
 import { rupees } from "@/lib/money";
 
 export const runtime = "nodejs";
@@ -37,9 +38,6 @@ const TRANCHE_DOCS: Record<"1" | "2", { category: string; label: string }[]> = {
   ],
 };
 
-function baseName(path: string): string {
-  return path.split("/").pop() || "file";
-}
 // rupees imported from @/lib/money
 
 export async function GET(
@@ -62,23 +60,14 @@ export async function GET(
 
     const supabase = dbAs(token);
 
-    const [{ data: loan, error: loadErr }, { data: docsAll }] = await Promise.all([
-      supabase.from("epc_applications")
-        .select("*, epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)")
-        .eq("id", appId)
-        .maybeSingle(),
-      supabase.from("user_application_docs")
-        .select("id, category, storage_path, file_name")
-        .eq("application_id", appId),
-    ]);
+    const { loan, error: loadErr, docs: docsAll } = await loadLoanAndDocs(supabase, appId);
     if (loadErr) return err(loadErr.message, 500);
     if (!loan)   return err("Loan application not found.", 404);
 
     const docs = (docsAll ?? []).filter((d: { category: string }) => wantCats.has(d.category));
     const haveCats = new Set(docs.map((d: { category: string }) => d.category));
 
-    const displayId: string =
-      loan.loan_display_id || "LA-" + appId.replace(/-/g, "").slice(0, 8).toUpperCase();
+    const displayId = loanDisplayId(appId, loan.loan_display_id);
     const borrowerName: string = loan.borrower_name || loan.aadhaar_name || "applicant";
 
     // Approved amount — sanctioned_amount first, approval_details.approved_loan_amount fallback.
@@ -128,14 +117,7 @@ export async function GET(
     const safeName = `${displayId}_${borrowerName}_Tranche${tranche}`
       .replace(/[^\w-]+/g, "_")
       .slice(0, 80);
-    const webStream = Readable.toWeb(archive) as unknown as ReadableStream;
-    return new NextResponse(webStream, {
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${safeName}.zip"`,
-        "Cache-Control": "no-store",
-      },
-    });
+    return zipResponse(archive, safeName);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[tranche-zip] error:", msg);

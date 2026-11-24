@@ -11,6 +11,7 @@ import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
 import { authHeaders } from "@/lib/auth";
+import { saveDownload } from "@/lib/storage";
 import { I, SectionCard, KV, Pill, DocGrid, StatusBtn, type ViewDocSlot } from "@/components/view/ViewKit";
 import InsuranceUpload from "@/components/InsuranceUpload";
 import OwnershipCard from "@/components/OwnershipCard";
@@ -140,14 +141,7 @@ function Inner() {
         headers: authHeaders(),
       });
       if (!res.ok) { const d = await res.json().catch(() => ({})); alert("ZIP failed: " + (d?.error || `HTTP ${res.status}`)); return; }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const cd = res.headers.get("content-disposition") || "";
-      const m = /filename="?([^"]+)"?/.exec(cd);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = m?.[1] || `${app.insurance_display_id || app.id.slice(0, 8)}.zip`;
-      document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      await saveDownload(res, `${app.insurance_display_id || app.id.slice(0, 8)}.zip`);
     } catch (e) { alert("Download failed: " + (e as Error).message); }
     finally { setDownloading(false); }
   }

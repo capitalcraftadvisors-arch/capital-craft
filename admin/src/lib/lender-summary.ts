@@ -7,8 +7,8 @@
 // document-forwarding text used for Solfin / Aerem.
 
 import { rupees } from "@/lib/money";
-
-const SYSTEM_LABEL: Record<string, string> = { on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" };
+import { fmtDateTimeIST } from "@/lib/dates";
+import { SYSTEM_LABEL } from "@/lib/loan-labels";
 
 // rupees imported from @/lib/money
 function ddmmyyyy(s: unknown): string {
@@ -52,7 +52,7 @@ export function summaryRows(
     ["Application ID", ctx.displayId],
     ["Submitted to", lenderLabel],
     ["Status", String(loan.status ?? "—")],
-    ["Submitted", loan.submitted_at ? new Date(loan.submitted_at).toLocaleString("en-IN") : "—"],
+    ["Submitted", fmtDateTimeIST(loan.submitted_at)], // India time (the server clock is UTC)
     ["EPC Partner", `${ctx.epcName}${ctx.epcDisplayId ? ` (${ctx.epcDisplayId})` : ""}`],
     ["", ""],
     ["Applicant", name],

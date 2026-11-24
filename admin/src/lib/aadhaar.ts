@@ -25,6 +25,7 @@ import { uploadBuffer } from "@/lib/gcs";
 import { visionDocumentText, visionDetectFaceBox } from "@/lib/vision-server";
 import { isValidAadhaar, sanitizeIndianAddress } from "@/lib/doc-validation";
 import { geminiExtract, type GeminiImage } from "@/lib/gemini-extract";
+import { maskAadhaar } from "@/lib/aadhaar-mask";
 
 const AADHAAR_FILE_MAX = 6 * 1024 * 1024;   // safety cap on request bodies
 const FACE_PADDING_PCT = 0.15;
@@ -41,7 +42,7 @@ export type AadhaarFields = {
   address:        string | null;
 };
 
-export type FaceCropResult = {
+type FaceCropResult = {
   storage_path: string | null;   // GCS object path of the cropped face, or null if none detected
 };
 
@@ -169,21 +170,12 @@ export async function cropAndUploadFace(
   return { storage_path: null };
 }
 
-// Mask helper exposed for the route to use on raw candidate strings.
-// Example: mask("123456789012") -> "xxxxxxxx9012".
-export function maskAadhaar(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const digits = raw.replace(/\D/g, "");
-  if (digits.length !== 12) return null;
-  return "xxxxxxxx" + digits.slice(-4);
-}
-
 // ── Internals — Aadhaar text parser ──────────────────────────────────
 
 // Best-effort parser tuned to standard Indian Aadhaar cards. Not a
 // certified extractor — the returned fields are shown back to the admin
 // for verification before persistence.
-export function parseAadhaar(text: string): AadhaarFields {
+function parseAadhaar(text: string): AadhaarFields {
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
 
   // 12-digit Aadhaar number (usually printed as 3 groups of 4).

@@ -8,11 +8,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { err, dbAs, requireLogin } from "@/lib/api";
-import { uploadBuffer } from "@/lib/gcs";
 import { visionDocumentText } from "@/lib/vision-server";
 import { parseGstFields } from "@/lib/gst-parser";
 import { geminiExtractGst } from "@/lib/doc-extractors";
-import { compress, safeName, ACCEPTED } from "@/lib/insurance-server";
+import { storeInsuranceFile } from "@/lib/extract-server";
 import { UUID_RE } from "@/lib/validators";
 
 export const runtime = "nodejs";
@@ -27,14 +26,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const id = params.id;
     if (!UUID_RE.test(id)) return err("Invalid application id.", 400);
 
-    const form = await req.formData();
-    const file = form.get("file");
-    if (!(file instanceof File)) return err("GST certificate is required.", 400);
-    if (!ACCEPTED.has(file.type)) return err("File must be JPEG, PNG, WebP, or PDF.", 400);
-
-    const { buf, mime } = await compress(file);
-    const path = `insurance/${id}/gst/${Date.now()}_${safeName(file.name, "gst")}`;
-    await uploadBuffer(path, buf, mime);
+    const stored = await storeInsuranceFile(await req.formData(), id, "gst", "GST certificate is required.");
+    if (stored instanceof Response) return stored;
+    const { buf, mime, path } = stored;
 
     let fields = { gstin: null as string | null, legal_name: null as string | null, trade_name: null as string | null };
     const g = await geminiExtractGst([{ buffer: buf, mime }]);

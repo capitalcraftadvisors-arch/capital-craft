@@ -24,25 +24,22 @@
 // Node Readable → Web ReadableStream). Missing GCS objects are logged
 // and skipped so one lost file never fails the whole ZIP.
 
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import archiver from "archiver";
 import { summaryRows } from "@/lib/lender-summary";
 import { fetchLenders, lenderLabelIn } from "@/lib/loan-lenders";
 import ExcelJS from "exceljs";
-import { Readable } from "node:stream";
 import { downloadBuffer } from "@/lib/gcs";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
+import { loanDisplayId } from "@/lib/loan-labels";
+import { baseName, loadLoanAndDocs, zipResponse } from "@/lib/zip-response";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 // Same 3 lenders (and same labels) as the EPC ZIP route.
-
-function baseName(path: string): string {
-  return path.split("/").pop() || "file";
-}
 
 // (removed a dead local rupees() helper — this route uses summaryRows from lib/lender-summary)
 
@@ -67,20 +64,11 @@ export async function GET(
     if (!lenders.some((l) => l.key === lender)) return err("missing_or_invalid_lender", 400);
     const lenderLabel = lenderLabelIn(lenders, lender);
 
-    const [{ data: loan, error: loadErr }, { data: docs }] = await Promise.all([
-      supabase.from("epc_applications")
-        .select("*, epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)")
-        .eq("id", appId)
-        .maybeSingle(),
-      supabase.from("user_application_docs")
-        .select("id, category, storage_path, file_name")
-        .eq("application_id", appId),
-    ]);
+    const { loan, error: loadErr, docs } = await loadLoanAndDocs(supabase, appId);
     if (loadErr) return err(loadErr.message, 500);
     if (!loan)   return err("Loan application not found.", 404);
 
-    const displayId: string =
-      loan.loan_display_id || "LA-" + appId.replace(/-/g, "").slice(0, 8).toUpperCase();
+    const displayId = loanDisplayId(appId, loan.loan_display_id);
     const borrowerName: string = loan.borrower_name || loan.aadhaar_name || "applicant";
     const epcName: string =
       loan.epc_business?.trade_name || loan.epc_business?.legal_name ||
@@ -154,14 +142,7 @@ export async function GET(
     const safeName = `${displayId}_${borrowerName}_${lenderLabel}`
       .replace(/[^\w-]+/g, "_")
       .slice(0, 80);
-    const webStream = Readable.toWeb(archive) as unknown as ReadableStream;
-    return new NextResponse(webStream, {
-      headers: {
-        "Content-Type": "application/zip",
-        "Content-Disposition": `attachment; filename="${safeName}.zip"`,
-        "Cache-Control": "no-store",
-      },
-    });
+    return zipResponse(archive, safeName);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[loan-zip] error:", msg);

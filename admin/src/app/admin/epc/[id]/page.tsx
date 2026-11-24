@@ -27,43 +27,19 @@ import EpcAdminInfoSection from "@/components/EpcAdminInfoSection";
 import CommentsSection from "@/components/CommentsSection";
 import EditableField from "@/components/EditableField";
 import AdminDocSlot from "@/components/AdminDocSlot";
-import { authHeaders } from "@/lib/auth";
 import FileUpload from "@/components/FileUpload";
 import { supabase } from "@/lib/supabase";
 import { logAudit } from "@/lib/auditLog";
-import { EMAIL_RE, PAN_RE, MOBILE_RE, IFSC_RE, ACCOUNT_RE, GSTIN_RE } from "@/lib/validators";
+import { EMAIL_RE, PAN_RE, IFSC_RE, ACCOUNT_RE, GSTIN_RE } from "@/lib/validators";
 import { EPC_STATUS_LABEL } from "@/lib/epc-labels";
+import {
+  DESIGNATION_OPTIONS, REFERRAL_OPTIONS, normalizeStakeholderKeepId,
+  type EpcReference as Reference, type Stakeholder,
+} from "@/lib/epc-stakeholders";
+import MembersEditor from "./_parts/MembersEditor";
+import ReferencesEditor from "./_parts/ReferencesEditor";
 
 type Biz = Record<string, any>;
-type Stakeholder = { id: string; name: string; designation: string; mobile: string; email: string; father_name: string; dob: string; aadhaar_number: string; aadhaar_address: string };
-type Reference = { type: "customer" | "supplier"; name: string; mobile: string };
-
-// "How did you hear about us?" options — same set as onboarding step 6.
-const REFERRAL_OPTIONS = [
-  { value: "facebook", label: "Facebook" },
-  { value: "instagram", label: "Instagram" },
-  { value: "website", label: "Website" },
-  { value: "linkedin", label: "LinkedIn" },
-  { value: "friend", label: "Friend" },
-  { value: "epc_partner", label: "EPC Partner" },
-  { value: "others", label: "Others (Please specify)" },
-];
-
-// Backward-compat: legacy stakeholder rows may be missing mobile/email.
-function normStakeholder(raw: unknown): Stakeholder {
-  const r = raw as Record<string, unknown>;
-  return {
-    id: (r.id as string) ?? "",
-    name: (r.name as string) ?? "",
-    designation: (r.designation as string) ?? "",
-    mobile: (r.mobile as string) ?? "",
-    email: (r.email as string) ?? "",
-    father_name: (r.father_name as string) ?? "",
-    dob: (r.dob as string) ?? "",
-    aadhaar_number: (r.aadhaar_number as string) ?? "",
-    aadhaar_address: (r.aadhaar_address as string) ?? "",
-  };
-}
 
 const BUSINESS_TYPE_OPTIONS = [
   { value: "proprietorship", label: "Proprietorship" },
@@ -75,14 +51,6 @@ const BUSINESS_TYPE_OPTIONS = [
 const PM_SURYA_GHAR_OPTIONS = [
   { value: "yes",   label: "Yes" },
   { value: "no",    label: "No" },
-];
-
-const DESIGNATION_OPTIONS = [
-  { value: "Partner",    label: "Partner" },
-  { value: "Director",   label: "Director" },
-  { value: "Proprietor", label: "Proprietor" },
-  { value: "Owner",      label: "Owner" },
-  { value: "Manager",    label: "Manager" },
 ];
 
 export default function AdminEpcDetailPage() {
@@ -122,24 +90,20 @@ function Inner() {
     };
   }
 
-  // Members and References use coarse section-level saves per spec.
-  async function saveStakeholders(next: Stakeholder[]) {
+  // Members and References use coarse section-level saves per spec: the whole
+  // JSONB array, one audit row.
+  async function saveColumn(
+    column: "stakeholders" | "business_references",
+    action: "members_edited" | "references_edited",
+    next: Stakeholder[] | Reference[],
+  ) {
     const { error } = await supabase()
       .from("epc_business")
-      .update({ stakeholders: next })
+      .update({ [column]: next })
       .eq("id", params.id);
     if (error) throw error;
-    await logAudit(params.id, "members_edited", "stakeholders");
-    setBiz((b) => (b ? { ...b, stakeholders: next } : b));
-  }
-  async function saveReferences(next: Reference[]) {
-    const { error } = await supabase()
-      .from("epc_business")
-      .update({ business_references: next })
-      .eq("id", params.id);
-    if (error) throw error;
-    await logAudit(params.id, "references_edited", "business_references");
-    setBiz((b) => (b ? { ...b, business_references: next } : b));
+    await logAudit(params.id, action, column);
+    setBiz((b) => (b ? { ...b, [column]: next } : b));
   }
 
   if (!biz) return null;
@@ -338,8 +302,8 @@ function Inner() {
 
         <Section title="Stakeholders">
           <MembersEditor
-            value={((biz.stakeholders ?? []) as unknown[]).map(normStakeholder)}
-            onSave={saveStakeholders}
+            value={((biz.stakeholders ?? []) as unknown[]).map(normalizeStakeholderKeepId)}
+            onSave={(next) => saveColumn("stakeholders", "members_edited", next)}
             businessId={params.id}
             businessType={biz.business_type ?? null}
           />
@@ -356,7 +320,7 @@ function Inner() {
         <Section title="References">
           <ReferencesEditor
             value={(biz.business_references ?? []) as Reference[]}
-            onSave={saveReferences}
+            onSave={(next) => saveColumn("business_references", "references_edited", next)}
           />
           <div className="mt-4 pt-4 border-t border-line">
             <EditableField
@@ -440,438 +404,5 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       <h3 className="font-display font-semibold text-[16px] mb-3">{title}</h3>
       <div className="space-y-1">{children}</div>
     </Card>
-  );
-}
-
-// ── Members editor (edit-only per spec; no add/delete) ────────────────────
-// Minimum stakeholders per business type (LLP/Partnership = 2 partners,
-// Pvt Ltd = 2 directors). Enforced on save — existing submitted EPCs are
-// only affected when an admin actively re-saves this section.
-const MEMBER_RULES: Record<string, { min: number; max: number; role: string; defaultDesignation: string }> = {
-  proprietorship: { min: 1, max: 1,        role: "proprietor", defaultDesignation: "Proprietor" },
-  pvt_ltd:        { min: 2, max: Infinity, role: "director",   defaultDesignation: "Director" },
-  partnership:    { min: 2, max: Infinity, role: "partner",    defaultDesignation: "Partner" },
-  llp:            { min: 2, max: Infinity, role: "partner",    defaultDesignation: "Partner" },
-};
-function memberRule(bt: string | null) {
-  return MEMBER_RULES[bt ?? ""] ?? { min: 1, max: Infinity, role: "member", defaultDesignation: "" };
-}
-
-function MembersEditor({
-  value, onSave, businessId, businessType,
-}: {
-  value: Stakeholder[];
-  onSave: (next: Stakeholder[]) => Promise<void>;
-  businessId: string;
-  businessType: string | null;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<Stakeholder[]>(value);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => { setDraft(value); }, [value]);
-
-  const rule = memberRule(businessType);
-
-  // Auto-fill a stakeholder's KYC by reading their uploaded PAN / Aadhaar with
-  // Gemini. Fills only EMPTY fields (never overwrites what a human typed), then
-  // persists the stakeholders JSONB. Fully non-fatal — a miss just leaves the
-  // fields blank for manual entry.
-  async function ocrFill(s: Stakeholder, kind: "pan" | "aadhaar_front" | "aadhaar_back", file: File) {
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("kind", kind);
-      const res = await fetch(`/api/admin/epc/${businessId}/extract-stakeholder`, {
-        method: "POST", headers: authHeaders(), body: fd,
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j?.ok || !j.fields) return;
-      const f = j.fields as Record<string, string>;
-      const cur = value.find((x) => x.id === s.id) ?? s;
-      const patch: Partial<Stakeholder> = {};
-      if (f.name && !cur.name) patch.name = f.name;
-      if (f.father_name && !cur.father_name) patch.father_name = f.father_name;
-      if (f.dob && !cur.dob) patch.dob = f.dob;
-      if (f.aadhaar_number && !cur.aadhaar_number) patch.aadhaar_number = f.aadhaar_number;
-      if (f.address && !cur.aadhaar_address) patch.aadhaar_address = f.address;
-      if (Object.keys(patch).length === 0) return;
-      await onSave(value.map((x) => (x.id === s.id ? { ...x, ...patch } : x)));
-    } catch { /* non-fatal */ }
-  }
-
-  async function save() {
-    // Minimum-count rule (LLP/Partnership = 2 partners, Pvt Ltd = 2 directors).
-    if (draft.length < rule.min) {
-      setError(`Please add at least ${rule.min} ${rule.role}${rule.min > 1 ? "s" : ""}.`);
-      return;
-    }
-    setSaving(true);
-    try {
-      await onSave(draft);
-      setEditing(false);
-      setError(null);
-    } catch (e) {
-      setError((e as Error)?.message ?? "Save failed");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (value.length === 0 && !editing) {
-    return (
-      <div>
-        <p className="text-[13px] text-text-muted mb-2">No members.</p>
-        <button
-          type="button"
-          onClick={() => {
-            setDraft([{ id: crypto.randomUUID(), name: "", designation: rule.defaultDesignation, mobile: "", email: "", father_name: "", dob: "", aadhaar_number: "", aadhaar_address: "" }]);
-            setEditing(true);
-          }}
-          className="text-[12px] text-blue hover:underline"
-        >
-          + Add members
-        </button>
-      </div>
-    );
-  }
-
-  if (!editing) {
-    return (
-      <div>
-        {value.map((s) => (
-          <div key={s.id} className="py-3 border-t border-line first:border-0 first:pt-0">
-            <p className="text-[14px] font-semibold">
-              {s.name} <span className="text-text-muted font-normal">— {s.designation}</span>
-            </p>
-            <p className="text-[12px] text-text-muted mt-0.5">
-              {s.mobile ? `+91 ${s.mobile}` : "—"}
-              {s.email ? ` · ${s.email}` : ""}
-            </p>
-            <div className="grid sm:grid-cols-2 gap-3 mt-2">
-              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_pan"            label="Member PAN card"            onUploadedFile={(file) => void ocrFill(s, "pan", file)} />
-              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_aadhaar_front"  label="Member Aadhaar card (front)" onUploadedFile={(file) => void ocrFill(s, "aadhaar_front", file)} />
-              <AdminDocSlot businessId={businessId} stakeholderId={s.id} category="stakeholder_aadhaar_back"   label="Member Aadhaar card (back)"  onUploadedFile={(file) => void ocrFill(s, "aadhaar_back", file)} />
-              {/* Legacy category: shows only if a pre-split Aadhaar doc exists
-                  for this member (40 legacy EPCs). Never renders an upload
-                  affordance — admin can View / Replace / Remove only. */}
-              <AdminDocSlot
-                businessId={businessId}
-                stakeholderId={s.id}
-                category="stakeholder_aadhaar"
-                label="Member Aadhaar card (legacy)"
-                hideWhenEmpty
-              />
-            </div>
-          </div>
-        ))}
-        <div className="mt-3">
-          <button
-            type="button"
-            onClick={() => { setDraft(value); setEditing(true); }}
-            className="text-[12px] text-blue hover:underline"
-          >
-            Edit members
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-3">
-      {draft.map((s, i) => (
-        <div key={s.id} className="border border-line rounded-input p-3 bg-bg-soft">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-[11px] text-text-muted">{rule.role.charAt(0).toUpperCase() + rule.role.slice(1)} {i + 1}</p>
-            <button
-              type="button"
-              onClick={() => setDraft(draft.filter((_, idx) => idx !== i))}
-              className="text-[11px] text-red-500 hover:underline"
-            >
-              Remove
-            </button>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <input
-              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
-              placeholder="Name"
-              value={s.name}
-              onChange={(e) => {
-                const next = [...draft]; next[i] = { ...next[i], name: e.target.value };
-                setDraft(next);
-              }}
-            />
-            <input
-              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
-              placeholder="Designation"
-              value={s.designation}
-              onChange={(e) => {
-                const next = [...draft]; next[i] = { ...next[i], designation: e.target.value };
-                setDraft(next);
-              }}
-            />
-            <input
-              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
-              placeholder="Mobile (10 digits)"
-              inputMode="numeric"
-              maxLength={10}
-              value={s.mobile}
-              onChange={(e) => {
-                const v = e.target.value.replace(/\D/g, "");
-                const next = [...draft]; next[i] = { ...next[i], mobile: v };
-                setDraft(next);
-              }}
-            />
-            <input
-              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
-              placeholder="Email (optional)"
-              type="email"
-              value={s.email}
-              onChange={(e) => {
-                const next = [...draft]; next[i] = { ...next[i], email: e.target.value };
-                setDraft(next);
-              }}
-            />
-            {/* Father's Name / DOB / Address are captured in onboarding and shown
-                on the profile — not editable here. Aadhaar No. stays editable. */}
-            <input
-              className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
-              placeholder="Aadhaar No. (12 digits)"
-              inputMode="numeric"
-              maxLength={12}
-              value={s.aadhaar_number}
-              onChange={(e) => {
-                const v = e.target.value.replace(/\D/g, "");
-                const next = [...draft]; next[i] = { ...next[i], aadhaar_number: v };
-                setDraft(next);
-              }}
-            />
-          </div>
-        </div>
-      ))}
-      {draft.length < rule.max && (
-        <button
-          type="button"
-          onClick={() =>
-            setDraft([...draft, { id: crypto.randomUUID(), name: "", designation: rule.defaultDesignation, mobile: "", email: "", father_name: "", dob: "", aadhaar_number: "", aadhaar_address: "" }])
-          }
-          className="text-[12px] text-blue hover:underline"
-        >
-          + Add {rule.role}
-        </button>
-      )}
-      {rule.min > 1 && (
-        <p className="text-[11px] text-text-muted">Minimum {rule.min} {rule.role}s required.</p>
-      )}
-      {error && <p className="text-[12px] text-red-500">{error}</p>}
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={save}
-          disabled={saving}
-          className="px-3 py-1.5 bg-blue text-white rounded text-[12px] font-semibold hover:bg-blue-dark disabled:opacity-60"
-        >
-          {saving ? "Saving…" : "Save members"}
-        </button>
-        <button
-          type="button"
-          onClick={() => { setEditing(false); setError(null); }}
-          disabled={saving}
-          className="px-3 py-1.5 border border-line rounded text-[12px] hover:border-blue"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── References editor — freeform arrays of customer + supplier ─────────
-// No admin-side floor: admins can edit down to 0 during review; the min-2+2
-// requirement lives in Step 6 (draft-only). Same JSONB shape (type field).
-function ReferencesEditor({
-  value, onSave,
-}: {
-  value: Reference[];
-  onSave: (next: Reference[]) => Promise<void>;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draftCust, setDraftCust] = useState<Reference[]>(value.filter((r) => r.type === "customer"));
-  const [draftSupp, setDraftSupp] = useState<Reference[]>(value.filter((r) => r.type === "supplier"));
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setDraftCust(value.filter((r) => r.type === "customer"));
-    setDraftSupp(value.filter((r) => r.type === "supplier"));
-  }, [value]);
-
-  async function save() {
-    for (const r of [...draftCust, ...draftSupp]) {
-      if ((r.name || r.mobile) && !(r.name && MOBILE_RE.test(r.mobile))) {
-        setError(`Each ${r.type} reference needs both a name and a valid 10-digit mobile.`);
-        return;
-      }
-    }
-    const out: Reference[] = [
-      ...draftCust.filter((r) => r.name && r.mobile).map((r) => ({ ...r, type: "customer" as const })),
-      ...draftSupp.filter((r) => r.name && r.mobile).map((r) => ({ ...r, type: "supplier" as const })),
-    ];
-    setSaving(true);
-    try {
-      await onSave(out);
-      setEditing(false);
-      setError(null);
-    } catch (e) {
-      setError((e as Error)?.message ?? "Save failed");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  if (!editing) {
-    return (
-      <div>
-        {value.length === 0 ? (
-          <p className="text-[13px] text-text-muted">No references.</p>
-        ) : (
-          <>
-            <RefReadOnlyGroup title="Customer" refs={value.filter((r) => r.type === "customer")} />
-            <RefReadOnlyGroup title="Supplier" refs={value.filter((r) => r.type === "supplier")} />
-          </>
-        )}
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="text-[12px] text-blue hover:underline"
-          >
-            Edit references
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <RefEditGroup
-        title="Customer references"
-        which="customer"
-        refs={draftCust}
-        onChange={setDraftCust}
-      />
-      <RefEditGroup
-        title="Supplier references"
-        which="supplier"
-        refs={draftSupp}
-        onChange={setDraftSupp}
-      />
-      {error && <p className="text-[12px] text-red-500">{error}</p>}
-      <div className="flex gap-2">
-        <button
-          type="button"
-          onClick={save}
-          disabled={saving}
-          className="px-3 py-1.5 bg-blue text-white rounded text-[12px] font-semibold hover:bg-blue-dark disabled:opacity-60"
-        >
-          {saving ? "Saving…" : "Save references"}
-        </button>
-        <button
-          type="button"
-          onClick={() => { setEditing(false); setError(null); }}
-          disabled={saving}
-          className="px-3 py-1.5 border border-line rounded text-[12px] hover:border-blue"
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function RefReadOnlyGroup({ title, refs }: { title: string; refs: Reference[] }) {
-  if (refs.length === 0) return null;
-  return (
-    <div className="mb-3">
-      <p className="text-[12px] text-text-muted mb-1">{title}</p>
-      {refs.map((r, i) => (
-        <div key={i} className="flex gap-4 text-[13px] py-0.5">
-          <dd className="text-text">{r.name} <span className="text-text-muted">· {r.mobile}</span></dd>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function RefEditGroup({
-  title, which, refs, onChange,
-}: {
-  title: string;
-  which: "customer" | "supplier";
-  refs: Reference[];
-  onChange: (next: Reference[]) => void;
-}) {
-  function update(i: number, key: "name" | "mobile", value: string) {
-    const next = [...refs];
-    next[i] = { ...next[i], [key]: value };
-    onChange(next);
-  }
-  function remove(i: number) {
-    onChange(refs.filter((_, idx) => idx !== i));
-  }
-  function add() {
-    onChange([...refs, { type: which, name: "", mobile: "" }]);
-  }
-  return (
-    <div>
-      <p className="text-[12px] text-text-muted mb-2">{title}</p>
-      <div className="space-y-2">
-        {refs.map((r, i) => (
-          <div key={i} className="border border-line rounded-input p-3 bg-bg-soft">
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[11px] text-text-muted capitalize">{which} {i + 1}</p>
-              <button
-                type="button"
-                onClick={() => remove(i)}
-                className="text-[11px] text-text-muted hover:text-red-500 transition-colors"
-              >
-                Delete
-              </button>
-            </div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              <input
-                className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
-                placeholder="Name"
-                value={r.name}
-                onChange={(e) => update(i, "name", e.target.value)}
-              />
-              <input
-                className="border border-line rounded px-2 py-1.5 text-[13px] focus:border-blue outline-none bg-white"
-                placeholder="Mobile (10 digits)"
-                inputMode="numeric"
-                maxLength={10}
-                value={r.mobile}
-                onChange={(e) => update(i, "mobile", e.target.value.replace(/\D/g, ""))}
-              />
-            </div>
-          </div>
-        ))}
-        {refs.length === 0 && (
-          <p className="text-[12px] text-text-muted">No {which} references.</p>
-        )}
-      </div>
-      <div className="mt-2">
-        <button
-          type="button"
-          onClick={add}
-          className="text-[12px] text-blue hover:underline"
-        >
-          + Add {which} reference
-        </button>
-      </div>
-    </div>
   );
 }

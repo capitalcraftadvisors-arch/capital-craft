@@ -6,14 +6,11 @@
 // No route needs the service key.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import sharp from "sharp";
 import type { NextResponse } from "next/server";
 import { dbAs, err, requireLogin } from "./api";
 import { UUID_RE } from "./validators";
+import { compressUpload } from "./image-compress";
 import type { KycDoc } from "./other-insurance";
-
-export const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
-const MAX_DIMENSION = 2000;
 
 // Other Insurance (0093) routes: main admin only, row read through RLS. Answers
 // the row + the caller's client, or the reply to send back (401 / 403 / 400 / 404 / 500).
@@ -30,22 +27,11 @@ export async function otherInsuranceRow(req: Request, id: string):
   return { supabase, row: { kyc_docs: Array.isArray(d.kyc_docs) ? d.kyc_docs : [], policy_path: d.policy_path } };
 }
 
-export function safeName(fileName: string, fallback: string): string {
-  const raw = (fileName || fallback).replace(/[^\w.\-]+/g, "_").slice(0, 80);
-  return raw || fallback;
-}
-
-// Same compression as /api/upload and the loan extract routes: images →
-// 2000px longest side, JPEG-80; PDFs pass through untouched.
+// The insurance uploads' compression: the /api/upload one (images → 2000px
+// longest side, JPEG) at quality 80; PDFs pass through untouched.
 export async function compress(file: File): Promise<{ buf: Buffer; mime: string }> {
-  const input = Buffer.from(await file.arrayBuffer());
-  if (!file.type.startsWith("image/")) return { buf: input, mime: file.type };
-  const buf = await sharp(input)
-    .rotate()
-    .resize({ width: MAX_DIMENSION, height: MAX_DIMENSION, fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 80, mozjpeg: true })
-    .toBuffer();
-  return { buf, mime: "image/jpeg" };
+  const { output, mime } = await compressUpload(Buffer.from(await file.arrayBuffer()), file.type, 80);
+  return { buf: output, mime };
 }
 
 // ── Policy coverage period ───────────────────────────────

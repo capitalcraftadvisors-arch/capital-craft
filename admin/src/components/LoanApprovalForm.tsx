@@ -22,6 +22,7 @@ import ApprovalDetailsTable, { type ApprovalDetails, roiFromEmi, reducingRoiFrom
 import { useLenders } from "@/lib/lenders";
 import { lenderLabelIn } from "@/lib/loan-lenders";
 import { rupeesInWords } from "@/lib/numberToWords";
+import { todayIST } from "@/lib/dates";
 import { I, Section } from "@/components/view/ViewKit";
 import FileUpload from "@/components/FileUpload";
 import { fmtRupeesExact as fmtRs } from "@/lib/money"; // approval amounts are shown exact, never rounded
@@ -69,7 +70,7 @@ export default function LoanApprovalForm({
     const existing = (loan.approval_details ?? null) as ApprovalDetails | null;
     const hasSaved = !!(existing && (existing.approved_loan_amount != null || existing.approved_tenure_years != null || existing.approved_emi != null));
     const editing = editMode != null || hasSaved;
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayIST();
     setDetails({
       // On EDIT, restore EVERY previously-saved field (roi, approval_date,
       // approved_* …); only the "applied" snapshots refresh from the application.

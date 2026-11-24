@@ -1,5 +1,5 @@
 "use client";
-import { fmtDate } from "@/lib/dates";
+import { fmtAgo } from "@/lib/dates";
 
 // A bell + dropdown that surfaces comments OTHER admins (e.g. the manager) have
 // left on the cases assigned to the signed-in user — across the loan, EPC, and
@@ -17,6 +17,7 @@ import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { REVIEW_COLS, REVIEW_LABEL, loanReviews, reviewNotices } from "@/lib/review";
 import { markNotifSeen, notifSeen, onNotifSeen } from "@/lib/notif-seen";
 import { TRANCHE2_COLS, TRANCHE2_TOTAL, onTranche2, publishTranche2, readTranche2, tranche2Href, tranche2Of, type Tranche2 } from "@/lib/tranche2";
+import { useCloseOnOutsideClick } from "@/lib/use-close-on-outside-click";
 
 type Source = "loan" | "epc" | "lead" | "insurance";
 // kind "review": the admin approved / sent back a stage the team saved (lib/review).
@@ -53,14 +54,6 @@ function ring() {
       osc.start(s); osc.stop(s + 0.22);
     });
   } catch { /* audio is best-effort */ }
-}
-
-function ago(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  if (diff < 60000) return "just now";
-  if (diff < 3600000) return Math.floor(diff / 60000) + "m ago";
-  if (diff < 86400000) return Math.floor(diff / 3600000) + "h ago";
-  return fmtDate(iso);
 }
 
 export default function NotificationBell() {
@@ -202,12 +195,7 @@ export default function NotificationBell() {
   }
 
   // Close on outside click.
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open]);
+  useCloseOnOutsideClick(boxRef, open, setOpen);
 
   // 2nd-tranche uploads come from the list the pages already loaded (lib/tranche2),
   // so the red count shows on every page without asking the database.
@@ -279,7 +267,7 @@ export default function NotificationBell() {
                         : n.kind === "tranche"
                         ? <div className={["text-[12px] font-medium mt-0.5", n.ok ? "text-[#178a5c]" : "text-[#b45309]"].join(" ")}>{n.ok ? "✓ " : ""}{n.text}</div>
                         : <div className="text-[11px] text-[#178a5c] font-medium mt-0.5">New assignment — tap to open</div>}
-                      <div className="text-[10px] text-text-muted mt-1">{ago(n.at)}</div>
+                      <div className="text-[10px] text-text-muted mt-1">{fmtAgo(n.at)}</div>
                     </button>
                   </li>
                 );

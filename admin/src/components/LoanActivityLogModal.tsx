@@ -17,7 +17,8 @@ import { fmtDateTime } from "@/lib/dates";
 //        otherwise the log already covers those transitions.
 
 import { useEffect, useState } from "react";
-import Modal from "@/components/ui/Modal";
+import { LogModalFrame } from "@/components/ActivityLogModal";
+import { SVG_PROPS, I_CHECK_CIRC, I_PENCIL, I_SEND, I_TARGET, I_X_CIRC } from "@/components/ActivityLog";
 import { supabase } from "@/lib/supabase";
 import { useAdminNames } from "@/lib/use-admin-names";
 
@@ -41,24 +42,8 @@ type Props = {
   borrowerName?: string | null;
 };
 
-const SVG_PROPS = {
-  width: 16,
-  height: 16,
-  viewBox: "0 0 24 24",
-  fill: "none",
-  stroke: "currentColor",
-  strokeWidth: 1.8,
-  strokeLinecap: "round" as const,
-  strokeLinejoin: "round" as const,
-};
-
-const I_CHECK_CIRC = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="10" /><path d="m9 12 2 2 4-4" /></svg>);
-const I_X_CIRC     = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="10" /><path d="m9 9 6 6M15 9l-6 6" /></svg>);
-const I_TARGET     = (<svg {...SVG_PROPS}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1.5" /></svg>);
-const I_SEND       = (<svg {...SVG_PROPS}><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7z" /></svg>);
 const I_MAIL       = (<svg {...SVG_PROPS}><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>);
 const I_STEP       = (<svg {...SVG_PROPS}><path d="M20 6 9 17l-5-5" /></svg>);
-const I_PENCIL     = (<svg {...SVG_PROPS}><path d="M17 3l4 4-13 13H4v-4z" /></svg>);
 
 const GREEN = "text-[#178a5c]";
 const BLUE  = "text-[#185fa5]";
@@ -243,29 +228,12 @@ export default function LoanActivityLogModal({ open, onClose, loan, borrowerName
   if (!open) return null;
 
   return (
-    <Modal onClose={onClose} className="w-full max-w-2xl bg-white rounded-lg shadow-lg flex flex-col max-h-[90vh]">
-      <div className="p-5 border-b border-line flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="font-display font-semibold text-[18px] text-text truncate">
-            Activity log{borrowerName ? ` — ${borrowerName}` : ""}
-          </h3>
-          <p className="text-[12px] text-text-mid mt-0.5">
-            Chronological — every step save, submission, approval, rejection and status change.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-[20px] text-text-muted hover:text-text leading-none"
-          aria-label="Close"
-        >
-          ×
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-5">
-        {loan ? <LoanActivityList loan={loan} /> : null}
-      </div>
-    </Modal>
+    <LogModalFrame
+      onClose={onClose}
+      name={borrowerName}
+      subtitle="Chronological — every step save, submission, approval, rejection and status change."
+    >
+      {loan ? <LoanActivityList loan={loan} /> : null}
+    </LogModalFrame>
   );
 }

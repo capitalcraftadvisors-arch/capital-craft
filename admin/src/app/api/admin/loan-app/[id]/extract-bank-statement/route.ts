@@ -22,24 +22,19 @@
 //      with the confirmed values.
 
 import { NextRequest, NextResponse } from "next/server";
-import sharp from "sharp";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
-import { uploadBuffer, getSignedReadUrl, downloadBuffer } from "@/lib/gcs";
+import { downloadBuffer } from "@/lib/gcs";
 import { extractBankStatement, type BankStatementFields } from "@/lib/bank-statement";
 import { geminiExtractBankStatement } from "@/lib/doc-extractors";
+import { readDoc, saveOcrRaw, signedUrlOrNull, storeLoanFile } from "@/lib/extract-server";
+import { ACCEPTED } from "@/lib/upload-rules";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const MAX_DIMENSION = 2000;
-const ACCEPTED = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
 const METHODS = new Set(["manual_epdf", "scanned_pdf"]);
-
-function safeName(fileName: string, fallback: string): string {
-  return (fileName || fallback).replace(/[^\w.\-]+/g, "_").slice(0, 80) || fallback;
-}
 
 export async function POST(
   req: NextRequest,
@@ -85,20 +80,10 @@ export async function POST(
       path = onFile;
     } else {
       // Compress (images only) + upload.
-      const f = file as File;
-      const input = Buffer.from(await f.arrayBuffer());
-      output = input;
-      mime = f.type;
-      if (f.type.startsWith("image/")) {
-        output = await sharp(input)
-          .rotate()
-          .resize({ width: MAX_DIMENSION, height: MAX_DIMENSION, fit: "inside", withoutEnlargement: true })
-          .jpeg({ quality: 75, mozjpeg: true })
-          .toBuffer();
-        mime = "image/jpeg";
-      }
-      path = `applications/${appId}/bank_statement/${Date.now()}_${safeName(f.name, "bank_statement")}`;
-      await uploadBuffer(path, output, mime);
+      const stored = await storeLoanFile(appId, "bank_statement", file as File, "bank_statement");
+      output = stored.buffer;
+      mime = stored.mime;
+      path = stored.path;
     }
 
     // OCR — Gemini reads the statement faithfully (primary); on any failure
@@ -106,37 +91,20 @@ export async function POST(
     // field can still be null and the Step 4 UI lets admin fill in the rest.
     // Vision-error message flows through so we can diagnose from the client
     // Network tab / Cloud Run logs.
-    let fields: BankStatementFields = {
-      account_holder: null, bank_name: null, account_no: null,
-      ifsc: null, account_type: null, mobile: null, email: null,
-    };
-    let rawText: string | null = null;
-    let visionError: string | null = null;
-    let source: "gemini" | "vision" = "gemini";
+    const { fields, rawText, visionError, source } = await readDoc<BankStatementFields>(
+      { buffer: output, mime },
+      {
+        account_holder: null, bank_name: null, account_no: null,
+        ifsc: null, account_type: null, mobile: null, email: null,
+      },
+      geminiExtractBankStatement,
+      extractBankStatement,
+      "[extract-bank-statement] vision error:",
+    );
 
-    const gemini = await geminiExtractBankStatement([{ buffer: output, mime }]);
-    if (gemini) {
-      fields = gemini;
-      rawText = JSON.stringify(gemini);
-    } else {
-      source = "vision";
-      try {
-        const r = await extractBankStatement(output, mime);
-        fields = r.fields;
-        rawText = r.raw_text;
-      } catch (e) {
-        visionError = e instanceof Error ? e.message : String(e);
-        console.error("[extract-bank-statement] vision error:", visionError);
-      }
-    }
+    const signed = await signedUrlOrNull(path);
 
-    let signed: string | null = null;
-    try { signed = await getSignedReadUrl(path, 3600); } catch { /* non-fatal */ }
-
-    if (rawText) {
-      supabase.rpc("append_ocr_raw", { app_id: appId, key_name: "bank_statement", raw_text: rawText })
-        .then((r) => r.error && console.warn("[extract-bank-statement] raw-text save:", r.error.message));
-    }
+    if (rawText) saveOcrRaw(supabase, appId, "bank_statement", rawText, "[extract-bank-statement] raw-text save:");
 
     return NextResponse.json({
       ok: true,

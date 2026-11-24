@@ -1,5 +1,4 @@
 "use client";
-import { fmtDateTime } from "@/lib/dates";
 
 // Loan Application — Step 3 (Loan Requirements)
 //
@@ -17,33 +16,31 @@ import { fmtDateTime } from "@/lib/dates";
 //         · No reveals the co-applicant block
 //   h. Co-applicant (conditional): PAN upload w/ OCR + fields
 //   i. Previous / Next buttons
+//
+// The page frame, section cards, upload box and the save / OCR / pincode calls
+// come from the shared loan-form kit (components/loan-form).
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
-import Card from "@/components/ui/Card";
 import Input from "@/components/ui/Input";
 import Select from "@/components/ui/Select";
-import Button from "@/components/ui/Button";
-import DatePicker from "@/components/ui/DatePicker";
 import FileUpload from "@/components/FileUpload";
-import LoanAppStepTracker from "@/components/LoanAppStepTracker";
 import { supabase } from "@/lib/supabase";
-import { authHeaders } from "@/lib/auth";
 import { signLoanPath } from "@/lib/storage";
-import { MOBILE_RE, EMAIL_RE, PAN_RE, PINCODE_RE } from "@/lib/validators";
+import { MOBILE_RE, EMAIL_RE, PAN_RE, PINCODE_RE, AADHAAR_RE } from "@/lib/validators";
 import { INDIA_STATES } from "@/lib/india-states";
 import { amountInput, numberInput, fmtRupees } from "@/lib/money";
 import LoanShareChips from "@/components/LoanShareChips";
+import {
+  StepHeader, StepLoading, StepNotFound, StepTracker, StepTitle, StepNav,
+  FormSection, H16_GREEN, FIELD_LABEL, ErrorBox,
+  EPC_JOIN, INCOMPLETE_NOTE, postLoanFiles, fetchPincode, saveStep, nextStepPath, type EpcNames,
+} from "@/components/loan-form";
+import { DocSlot, OwnershipTile, SummaryRow, type DocState } from "./_parts/tiles";
+import CoappSection, { EMPTY_COAPP, useCoappUploads, type Coapp } from "./_parts/CoappSection";
 
-// ── Static option lists ──────────────────────────────────────────────
-
-
-const RELATIONS = [
-  "Father", "Mother", "Spouse", "Son", "Daughter", "Brother", "Sister", "Other",
-];
-
-// ── Types ────────────────────────────────────────────────────────────
+// ── Types (the document slot and the co-applicant ones: ./_parts) ────────
 
 type Loan = {
   id: string;
@@ -56,57 +53,7 @@ type Loan = {
   borrower_email:  string | null;
   rooftop_photo_path: string | null;
   system_type: string | null;
-  epc_business: {
-    contact_name: string | null;
-    trade_name: string | null;
-    legal_name: string | null;
-    epc_display_id: string | null;
-  } | null;
-};
-
-type DocState = {
-  path: string;
-  uploaded_at: string;
-  signed_url: string | null;
-  file_name: string;
-} | null;
-
-type Coapp = {
-  pan: string;
-  name: string;
-  father_name: string;
-  dob: string;
-  relation: string;
-  mobile: string;
-  email: string;
-  pan_path: string | null;
-  pan_uploaded_at: string | null;
-  pan_signed_url: string | null;
-  // Co-applicant Aadhaar OCR (mirrors applicant KYC — Step 2 shape).
-  aadhaar_name:   string;
-  aadhaar_dob:    string;
-  aadhaar_gender: string;
-  aadhaar_number: string;              // full 12 digits
-  aadhaar_care_of: string;
-  aadhaar_address: string;
-  aadhaar_front_path: string | null;
-  aadhaar_back_path:  string | null;
-  aadhaar_face_path:  string | null;
-  aadhaar_front_signed_url: string | null;
-  aadhaar_back_signed_url:  string | null;
-  aadhaar_uploading:  boolean;
-  aadhaar_error:      string | null;
-};
-
-const EMPTY_COAPP: Coapp = {
-  pan: "", name: "", father_name: "", dob: "",
-  relation: "", mobile: "", email: "",
-  pan_path: null, pan_uploaded_at: null, pan_signed_url: null,
-  aadhaar_name: "", aadhaar_dob: "", aadhaar_gender: "",
-  aadhaar_number: "", aadhaar_care_of: "", aadhaar_address: "",
-  aadhaar_front_path: null, aadhaar_back_path: null, aadhaar_face_path: null,
-  aadhaar_front_signed_url: null, aadhaar_back_signed_url: null,
-  aadhaar_uploading: false, aadhaar_error: null,
+  epc_business: EpcNames | null;
 };
 
 // ── Page ─────────────────────────────────────────────────────────────
@@ -164,8 +111,7 @@ function Inner() {
   // Bill ownership + co-applicant
   const [ownership, setOwnership] = useState<"yes" | "no" | null>(null);
   const [coapp, setCoapp] = useState<Coapp>(EMPTY_COAPP);
-  const [coappUploading, setCoappUploading] = useState(false);
-  const [coappUploadError, setCoappUploadError] = useState<string | null>(null);
+  const coappUploads = useCoappUploads(params.id, setCoapp);
 
   // Submit
   const [saving, setSaving] = useState(false);
@@ -188,7 +134,7 @@ function Inner() {
           "coapp_mobile, coapp_email, coapp_pan_path, " +
           "coapp_aadhaar_name, coapp_aadhaar_dob, coapp_aadhaar_gender, coapp_aadhaar_number, " +
           "coapp_aadhaar_care_of, coapp_aadhaar_address, coapp_aadhaar_front_path, coapp_aadhaar_back_path, " +
-          "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
+          EPC_JOIN,
         )
         .eq("id", params.id)
         .maybeSingle();
@@ -287,18 +233,12 @@ function Inner() {
     setUploadError(null);
     if (kind === "proforma") setProformaUploading(true); else setEbillUploading(true);
     try {
-      const fd = new FormData();
-      fd.append(kind, file);
-      const res = await fetch(`/api/admin/loan-app/${loan!.id}/extract-loan-docs`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: fd,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        setUploadError(data?.error || `Upload failed (HTTP ${res.status}).`);
+      const r = await postLoanFiles(loan!.id, "extract-loan-docs", { [kind]: file });
+      if (!r.ok) {
+        setUploadError(r.error);
         return;
       }
+      const data = r.data;
       if (kind === "proforma" && data.proforma) {
         const p = data.proforma;
         setProforma({
@@ -348,108 +288,14 @@ function Inner() {
     setPincodeError(null);
     if (!PINCODE_RE.test(pin)) return;
     setPincodeBusy(true);
-    try {
-      const res = await fetch(`/api/admin/pincode-lookup?pin=${pin}`, {
-        headers: authHeaders(),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        setPincodeError(data?.error || "Lookup failed — enter state manually.");
-        return;
-      }
-      if (!state) setState(String(data.state ?? ""));
-      if (!city)  setCity(String(data.city  ?? ""));
-    } catch {
-      setPincodeError("Lookup failed — enter state manually.");
-    } finally {
-      setPincodeBusy(false);
+    const r = await fetchPincode(pin);
+    setPincodeBusy(false);
+    if (!r.ok) {
+      setPincodeError(r.error);
+      return;
     }
-  }
-
-  async function uploadCoappPan(file: File) {
-    setCoappUploadError(null);
-    setCoappUploading(true);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch(`/api/admin/loan-app/${loan!.id}/extract-coapp-pan`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: fd,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        setCoappUploadError(data?.error || `Upload failed (HTTP ${res.status}).`);
-        return;
-      }
-      setCoapp((c) => ({
-        ...c,
-        pan:         c.pan         || (data.fields.pan ?? ""),
-        name:        c.name        || (data.fields.name ?? ""),
-        father_name: c.father_name || (data.fields.father_name ?? ""),
-        dob:         c.dob         || (data.fields.dob ?? ""),
-        pan_path:        data.storage_path ?? null,
-        pan_uploaded_at: data.uploaded_at ?? null,
-        pan_signed_url:  data.signed_url ?? null,
-      }));
-    } catch (e) {
-      setCoappUploadError((e as Error)?.message || "Network error.");
-    } finally {
-      setCoappUploading(false);
-    }
-  }
-
-  // Co-applicant Aadhaar OCR — reuses the same server route the applicant
-  // KYC on Step 2 uses. Uploads FRONT + BACK together, prefills fields.
-  async function uploadCoappAadhaar(front: File, back: File) {
-    setCoapp((c) => ({ ...c, aadhaar_uploading: true, aadhaar_error: null }));
-    try {
-      const fd = new FormData();
-      fd.append("front", front);
-      fd.append("back",  back);
-      const res = await fetch(`/api/admin/loan-app/${loan!.id}/extract-aadhaar`, {
-        method: "POST",
-        headers: authHeaders(),
-        body: fd,
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        setCoapp((c) => ({ ...c, aadhaar_uploading: false, aadhaar_error: data?.error || `Upload failed (HTTP ${res.status}).` }));
-        return;
-      }
-      const f = data.fields ?? {};
-      const frontPath = data.storage_paths?.front ?? null;
-      const backPath  = data.storage_paths?.back  ?? null;
-      // Sign the freshly-uploaded front/back so View is available immediately.
-      const [frontU, backU] = await Promise.all([
-        frontPath ? signLoanPath(params.id, frontPath) : Promise.resolve(null),
-        backPath  ? signLoanPath(params.id, backPath)  : Promise.resolve(null),
-      ]);
-      setCoapp((c) => ({
-        ...c,
-        aadhaar_uploading: false,
-        aadhaar_error: null,
-        aadhaar_name:    c.aadhaar_name    || (f.name    ?? ""),
-        aadhaar_dob:     c.aadhaar_dob     || (f.dob     ?? ""),
-        aadhaar_gender:  c.aadhaar_gender  || (f.gender  ?? ""),
-        aadhaar_care_of: c.aadhaar_care_of || (f.care_of ?? ""),
-        aadhaar_address: c.aadhaar_address || (f.address ?? ""),
-        aadhaar_number:  c.aadhaar_number  || (f.aadhaar_number ?? ""),
-        aadhaar_front_path: frontPath,
-        aadhaar_back_path:  backPath,
-        aadhaar_face_path:  data.storage_paths?.face  ?? null,
-        aadhaar_front_signed_url: frontU,
-        aadhaar_back_signed_url:  backU,
-        // Cross-fill the co-applicant's MAIN fields from the Aadhaar
-        // when they're still empty — same "fetch details properly"
-        // behavior the applicant gets. PAN OCR may already have filled
-        // name/dob; empty-only guard means neither source clobbers.
-        name: c.name || (f.name ?? ""),
-        dob:  c.dob  || (f.dob  ?? ""),
-      }));
-    } catch (e) {
-      setCoapp((c) => ({ ...c, aadhaar_uploading: false, aadhaar_error: (e as Error)?.message || "Network error." }));
-    }
+    if (!state) setState(r.state);
+    if (!city)  setCity(r.city);
   }
 
   // ── Derived ────────────────────────────────────────────────────────
@@ -516,10 +362,6 @@ function Inner() {
 
   async function saveAndNext() {
     if (!loan) return; // admin-only flow: never block on missing fields/docs
-    // The quotation and e-bill uploads must have succeeded before we can
-    // persist their storage paths. If one was skipped or its upload/OCR call
-    // failed silently, `proforma`/`ebill` are null — stop with a clear message
-    // instead of crashing on `.path` ("Cannot read properties of null").
     setSaveError(null);
     setSaving(true);
     try {
@@ -560,7 +402,7 @@ function Inner() {
         if (coapp.aadhaar_gender)      body.coapp_aadhaar_gender      = coapp.aadhaar_gender.trim();
         if (coapp.aadhaar_care_of)     body.coapp_aadhaar_care_of     = coapp.aadhaar_care_of.trim();
         if (coapp.aadhaar_address)     body.coapp_aadhaar_address     = coapp.aadhaar_address.trim();
-        if (coapp.aadhaar_number && /^\d{12}$/.test(coapp.aadhaar_number)) {
+        if (coapp.aadhaar_number && AADHAAR_RE.test(coapp.aadhaar_number)) {
           body.coapp_aadhaar_number = coapp.aadhaar_number;
         }
         if (coapp.aadhaar_front_path)  body.coapp_aadhaar_front_path  = coapp.aadhaar_front_path;
@@ -573,19 +415,13 @@ function Inner() {
         body.rooftop_photo_uploaded_at = new Date().toISOString();
         if (rooftopGps) body.rooftop_photo_gps = rooftopGps;
       }
-      const res = await fetch(`/api/admin/loan-app/${loan.id}/complete-step-3`, {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(body),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        setSaveError(data?.error || `Save failed (HTTP ${res.status}).`);
+      const error = await saveStep(loan.id, 3, body);
+      if (error) {
+        setSaveError(error);
         setSaving(false);
         return;
       }
-      const fromReview = new URLSearchParams(window.location.search).get("from") === "review";
-      router.push(`/admin/app/${loan.id}/${fromReview ? "step-6" : "step-4"}` as any);
+      router.push(nextStepPath(loan.id, "step-4") as any);
     } catch (e) {
       setSaveError((e as Error)?.message || "Network error.");
       setSaving(false);
@@ -594,63 +430,24 @@ function Inner() {
 
   // ── Render ─────────────────────────────────────────────────────────
 
-  if (loading) {
-    return <main className="min-h-screen grid place-items-center"><p className="text-text-muted">Loading…</p></main>;
-  }
-  if (!loan) {
-    return <main className="min-h-screen grid place-items-center"><p className="text-red-700">Loan application not found.</p></main>;
-  }
-
-  const customerName =
-    loan.epc_business?.trade_name ||
-    loan.epc_business?.legal_name ||
-    loan.epc_business?.contact_name ||
-    "(customer)";
+  if (loading) return <StepLoading />;
+  if (!loan) return <StepNotFound />;
 
   return (
     <main className="min-h-screen bg-bg-soft">
-      <header className="border-b border-line bg-white">
-        <div className="w-full px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => router.push(`/admin/app/${params.id}/step-2` as any)}
-              aria-label="Back to previous step"
-              className="inline-flex items-center gap-1.5 text-[14px] font-semibold text-[#185fa5] hover:text-[#0f3d2e] transition-colors"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
-              Back
-            </button>
-            <span className="text-[12px] px-2 py-0.5 rounded-full bg-bg-tint text-blue-dark font-semibold uppercase tracking-wide">
-              Loan Application · Step 3
-            </span>
-          </div>
-        </div>
-      </header>
+      <StepHeader step={3} backTo={`/admin/app/${params.id}/step-2`} />
 
       <section className="max-w-[880px] mx-auto px-5 sm:px-7 py-8 space-y-5">
-        <LoanAppStepTracker
-          applicationId={loan.id}
-          displayId={loan.epc_business?.epc_display_id ?? null}
-          name={customerName}
-          createdAt={loan.created_at}
-          currentStep={3}
-        />
+        <StepTracker loan={loan} step={3} />
 
-        <div>
-          <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
-            Loan Requirements
-          </h1>
-          <p className="text-text-mid mt-2 text-[15px]">
-            Upload the proforma invoice and the latest electricity bill. Project,
-            loan, and connection details are prefilled from OCR — every field below
-            is editable so you can correct anything before saving.
-          </p>
-        </div>
+        <StepTitle title="Loan Requirements">
+          Upload the proforma invoice and the latest electricity bill. Project,
+          loan, and connection details are prefilled from OCR — every field below
+          is editable so you can correct anything before saving.
+        </StepTitle>
 
         {/* b. Document Upload */}
-        <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px]">Document upload</h2>
+        <FormSection title="Document upload">
           <div className="grid sm:grid-cols-2 gap-4">
             <DocSlot
               label="Proforma Invoice / Quotation"
@@ -665,19 +462,14 @@ function Inner() {
               onFile={(f) => void uploadDoc("ebill", f)}
             />
           </div>
-          {uploadError && (
-            <div className="p-3 rounded-input bg-red-50 border border-red-200 text-[13px] text-red-700">
-              {uploadError}
-            </div>
-          )}
-        </Card>
+          <ErrorBox message={uploadError} />
+        </FormSection>
 
         {/* c. Project & Loan Details */}
-        <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px]">Project &amp; loan details</h2>
+        <FormSection title="Project & loan details">
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
-              <p className="block mb-1.5 text-[13px] font-medium text-text-mid">Project size</p>
+              <p className={FIELD_LABEL}>Project size</p>
               <div className="flex gap-2">
                 <input
                   type="text"
@@ -720,12 +512,15 @@ function Inner() {
           </div>
           {/* Applied loan amount: 80 / 90 / 100 % of the project cost, or Custom. */}
           <div className="mt-3"><LoanShareChips cost={Number(totalCost) || 0} value={loanAmount} onPick={setLoanAmount} /></div>
-        </Card>
+        </FormSection>
 
         {/* d. Project Summary — read-only computed */}
         {(validCost || validLoan || sizeKw) && (
-          <Card className="p-6 bg-[#f0faf5] border-[#cdeadd] space-y-3">
-            <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Project summary</h2>
+          <FormSection
+            title="Project summary"
+            className="p-6 bg-[#f0faf5] border-[#cdeadd] space-y-3"
+            titleClassName={H16_GREEN}
+          >
             <div className="grid sm:grid-cols-2 gap-x-6 gap-y-2 text-[13px]">
               <SummaryRow label="Project size"
                 value={sizeKw ? `${projectSize} ${projectUnit.toUpperCase()} (${sizeKw.toLocaleString("en-IN")} KW)` : "—"} />
@@ -740,12 +535,11 @@ function Inner() {
               <SummaryRow label="Cost per KW"
                 value={costPerKw !== null ? fmtRupees(costPerKw) : "—"} />
             </div>
-          </Card>
+          </FormSection>
         )}
 
         {/* e. Electricity Connection */}
-        <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px]">Electricity connection</h2>
+        <FormSection title="Electricity connection">
           <div className="grid sm:grid-cols-2 gap-4">
             <Input
               label="Monthly electricity bill (₹)"
@@ -768,11 +562,10 @@ function Inner() {
               placeholder="From the bill"
             />
           </div>
-        </Card>
+        </FormSection>
 
         {/* f. Installation Address */}
-        <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px]">Installation address</h2>
+        <FormSection title="Installation address">
           <p className="text-[12px] text-text-mid -mt-2">
             Should match the address on the electricity bill. Edit if the site
             differs from what OCR pulled.
@@ -854,13 +647,14 @@ function Inner() {
               }}
             />
           </div>
-        </Card>
+        </FormSection>
 
         {/* g. Bill Ownership Confirmation */}
-        <Card className="p-6 bg-[#f0faf5] border-[#cdeadd] space-y-4">
-          <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">
-            Please confirm the electricity bill is in the name of the applicant.
-          </h2>
+        <FormSection
+          title="Please confirm the electricity bill is in the name of the applicant."
+          className="p-6 bg-[#f0faf5] border-[#cdeadd] space-y-4"
+          titleClassName={H16_GREEN}
+        >
           {/* Name on e-bill — always an editable field so it is captured even
               when the OCR can't read it off the bill (auto-filled when it can,
               otherwise the admin types it). */}
@@ -872,429 +666,41 @@ function Inner() {
             hint={ebillName ? "Auto-filled from the bill — edit if it doesn't match." : "Not auto-detected — type the name shown on the bill."}
           />
           <div className="grid sm:grid-cols-2 gap-3">
-            <button
-              type="button"
+            <OwnershipTile
+              active={ownership === "yes"}
               onClick={() => { setOwnership("yes"); setCoapp(EMPTY_COAPP); }}
-              className={[
-                "text-left rounded-input border-2 p-4 transition-colors",
-                ownership === "yes"
-                  ? "border-[#178a5c] bg-white"
-                  : "border-line bg-white hover:border-[#185fa5]",
-              ].join(" ")}
-            >
-              <p className="font-semibold text-[14px] text-[#0f3d2e]">
-                Yes, the bill is in the applicant&rsquo;s name
-              </p>
-              <p className="text-[12px] text-text-muted mt-1">
-                No co-applicant needed.
-              </p>
-            </button>
-            <button
-              type="button"
+              title="Yes, the bill is in the applicant’s name"
+              note="No co-applicant needed."
+            />
+            <OwnershipTile
+              active={ownership === "no"}
               onClick={() => setOwnership("no")}
-              className={[
-                "text-left rounded-input border-2 p-4 transition-colors",
-                ownership === "no"
-                  ? "border-[#178a5c] bg-white"
-                  : "border-line bg-white hover:border-[#185fa5]",
-              ].join(" ")}
-            >
-              <p className="font-semibold text-[14px] text-[#0f3d2e]">
-                No, the bill is not in the applicant&rsquo;s name (add a co-applicant)
-              </p>
-              <p className="text-[12px] text-text-muted mt-1">
-                Bill is on someone else&rsquo;s name.
-              </p>
-            </button>
+              title="No, the bill is not in the applicant’s name (add a co-applicant)"
+              note="Bill is on someone else’s name."
+            />
           </div>
-        </Card>
+        </FormSection>
 
         {/* h. Co-Applicant block (conditional) */}
         {ownership === "no" && (
-          <Card className="p-6 space-y-4">
-            <h2 className="font-display font-semibold text-[16px]">Co-applicant details</h2>
-
-            <div>
-              <p className="block mb-1.5 text-[13px] font-medium text-text-mid">
-                Co-applicant PAN card
-              </p>
-              <CoappPanTile
-                doc={coapp.pan_path ? {
-                  path: coapp.pan_path,
-                  uploaded_at: coapp.pan_uploaded_at ?? "",
-                  signed_url: coapp.pan_signed_url,
-                  file_name: "Co-applicant PAN",
-                } : null}
-                uploading={coappUploading}
-                onFile={(f) => void uploadCoappPan(f)}
-              />
-              {coappUploadError && (
-                <p className="mt-2 text-[12px] text-red-700">{coappUploadError}</p>
-              )}
-            </div>
-
-            <div className="grid sm:grid-cols-2 gap-4">
-              <Input
-                label="PAN number"
-                value={coapp.pan}
-                onChange={(e) => setCoapp({ ...coapp, pan: e.target.value.toUpperCase() })}
-                placeholder="AAAAA9999A"
-                maxLength={10}
-              />
-              <Input
-                label="Name"
-                value={coapp.name}
-                onChange={(e) => setCoapp({ ...coapp, name: e.target.value })}
-              />
-              <Input
-                label="Father's name"
-                value={coapp.father_name}
-                onChange={(e) => setCoapp({ ...coapp, father_name: e.target.value })}
-              />
-              <DatePicker
-                label="Date of birth"
-                value={coapp.dob}
-                onChange={(v) => setCoapp({ ...coapp, dob: v })}
-              />
-              <Select
-                label="Relation with applicant"
-                placeholder="Select relation"
-                options={RELATIONS.map((r) => ({ value: r, label: r }))}
-                value={coapp.relation}
-                onChange={(e) => setCoapp({ ...coapp, relation: e.target.value })}
-              />
-              <Input
-                label="Mobile number"
-                inputMode="numeric"
-                maxLength={10}
-                value={coapp.mobile}
-                onChange={(e) => setCoapp({ ...coapp, mobile: e.target.value.replace(/\D/g, "") })}
-                placeholder="10-digit"
-                error={coappMobileConflict ? "Cannot be the same as the applicant's mobile." : undefined}
-              />
-              <Input
-                label="Email"
-                type="email"
-                value={coapp.email}
-                onChange={(e) => setCoapp({ ...coapp, email: e.target.value })}
-                error={coappEmailConflict ? "Cannot be the same as the applicant's email." : undefined}
-              />
-            </div>
-
-            {/* Co-applicant Aadhaar KYC — mirrors the applicant's Step 2. */}
-            <div className="pt-4 border-t border-line space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-[13px] font-semibold text-text">Co-applicant Aadhaar (KYC)</p>
-                {(coapp.aadhaar_front_path || coapp.aadhaar_back_path) && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#f0faf5] text-[#0f3d2e] font-semibold uppercase tracking-wide border border-[#cdeadd]">
-                    Uploaded
-                  </span>
-                )}
-              </div>
-              <p className="text-[11px] text-text-muted">
-                Upload the co-applicant&rsquo;s Aadhaar front and back. Details are extracted automatically.
-              </p>
-              <CoappAadhaarPicker
-                onFiles={(front, back) => void uploadCoappAadhaar(front, back)}
-                uploading={coapp.aadhaar_uploading}
-                error={coapp.aadhaar_error}
-                hasFront={!!coapp.aadhaar_front_path}
-                hasBack={!!coapp.aadhaar_back_path}
-                frontUrl={coapp.aadhaar_front_signed_url}
-                backUrl={coapp.aadhaar_back_signed_url}
-              />
-
-              {(coapp.aadhaar_name || coapp.aadhaar_dob || coapp.aadhaar_number) && (
-                <div className="grid sm:grid-cols-2 gap-4 pt-2">
-                  <Input
-                    label="Aadhaar name"
-                    value={coapp.aadhaar_name}
-                    onChange={(e) => setCoapp({ ...coapp, aadhaar_name: e.target.value })}
-                  />
-                  <DatePicker
-                    label="Aadhaar DOB"
-                    value={coapp.aadhaar_dob}
-                    onChange={(v) => setCoapp({ ...coapp, aadhaar_dob: v })}
-                  />
-                  <Input
-                    label="Gender"
-                    value={coapp.aadhaar_gender}
-                    onChange={(e) => setCoapp({ ...coapp, aadhaar_gender: e.target.value })}
-                  />
-                  <div>
-                    <label className="block mb-1.5 text-[13px] font-medium text-text-mid">
-                      Aadhaar number
-                    </label>
-                    <input
-                      value={coapp.aadhaar_number.replace(/(\d{4})(?=\d)/g, "$1 ")}
-                      onChange={(e) => setCoapp({ ...coapp, aadhaar_number: e.target.value.replace(/\D/g, "").slice(0, 12) })}
-                      maxLength={14}
-                      inputMode="numeric"
-                      placeholder="0000 0000 0000"
-                      className="w-full px-4 py-3 rounded-input border-2 border-line font-mono text-[15px] tracking-wider outline-none focus:border-[#178a5c] bg-white"
-                    />
-                    <p className="mt-1 text-[11px] text-text-muted">12 digits, as printed on the card.</p>
-                  </div>
-                  <Input
-                    label="Care of"
-                    value={coapp.aadhaar_care_of}
-                    onChange={(e) => setCoapp({ ...coapp, aadhaar_care_of: e.target.value })}
-                  />
-                  <div className="sm:col-span-2">
-                    <label className="block mb-1.5 text-[13px] font-medium text-text-mid">
-                      Aadhaar address
-                    </label>
-                    <textarea
-                      value={coapp.aadhaar_address}
-                      onChange={(e) => setCoapp({ ...coapp, aadhaar_address: e.target.value })}
-                      rows={3}
-                      className="w-full rounded-input border border-line bg-white px-3.5 py-2.5 text-[14px] outline-none focus:border-blue resize-y"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          </Card>
+          <CoappSection
+            coapp={coapp}
+            setCoapp={setCoapp}
+            uploads={coappUploads}
+            mobileConflict={coappMobileConflict}
+            emailConflict={coappEmailConflict}
+          />
         )}
 
         {/* i. Prev / Next */}
-        <Card className="p-6">
-          {saveError && (
-            <div className="p-3 rounded-input bg-red-50 border border-red-200 text-[13px] text-red-700 mb-4">
-              {saveError}
-            </div>
-          )}
-          <div className="flex justify-between gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => router.push(`/admin/app/${loan.id}/step-2` as any)}
-            >
-              ← Previous
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              onClick={saveAndNext}
-              loading={saving}
-              disabled={saving}
-              title={canNext ? undefined : "Some fields are incomplete — you can still continue as admin."}
-            >
-              Next
-            </Button>
-          </div>
-        </Card>
+        <StepNav
+          error={saveError}
+          prevTo={`/admin/app/${loan.id}/step-2`}
+          onNext={saveAndNext}
+          saving={saving}
+          nextTitle={canNext ? undefined : INCOMPLETE_NOTE}
+        />
       </section>
     </main>
-  );
-}
-
-// ── Small helpers ────────────────────────────────────────────────────
-
-const ACCEPT = "image/*,application/pdf";
-
-function DocSlot({
-  label, doc, uploading, onFile,
-}: {
-  label: string;
-  doc: DocState;
-  uploading: boolean;
-  onFile: (f: File) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const has = !!doc;
-  const uploaded = has && doc ? new Date(doc.uploaded_at) : null;
-  return (
-    <div>
-      <p className="block mb-1.5 text-[13px] font-medium text-text-mid">{label}</p>
-      {has ? (
-        <div className="rounded-input border-2 border-[#178a5c] bg-[#f0faf5] p-4 space-y-2">
-          <p className="text-[13px] font-semibold text-[#0f3d2e]">{doc!.file_name}</p>
-          {uploaded && (
-            <p className="text-[11px] text-[#5a8a76]">
-              Uploaded on {fmtDateTime(uploaded)}
-            </p>
-          )}
-          <div className="flex items-center gap-2 pt-1">
-            {doc!.signed_url && (
-              <a
-                href={doc!.signed_url}
-                target="_blank"
-                rel="noopener"
-                title="View uploaded document"
-                aria-label="View uploaded document"
-                className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#185fa5] hover:underline"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                  <circle cx="12" cy="12" r="3" />
-                </svg>
-                View
-              </a>
-            )}
-            <button
-              type="button"
-              onClick={() => inputRef.current?.click()}
-              disabled={uploading}
-              className="text-[12px] font-semibold text-[#178a5c] hover:underline disabled:opacity-60"
-            >
-              {uploading ? "Uploading…" : "Re-upload"}
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          disabled={uploading}
-          className={[
-            "w-full h-[140px] rounded-input border-2 border-dashed transition-colors flex items-center justify-center text-center px-4",
-            "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
-            uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
-          ].join(" ")}
-        >
-          <div>
-            <p className="text-[13px] font-semibold">
-              {uploading ? "Uploading & extracting…" : "Click to upload"}
-            </p>
-            <p className="text-[11px] mt-1">Photo, scan, or PDF</p>
-          </div>
-        </button>
-      )}
-      <input
-        ref={inputRef}
-        type="file"
-        accept={ACCEPT}
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          e.target.value = "";
-          if (f) onFile(f);
-        }}
-        className="hidden"
-      />
-    </div>
-  );
-}
-
-function CoappPanTile({
-  doc, uploading, onFile,
-}: {
-  doc: DocState;
-  uploading: boolean;
-  onFile: (f: File) => void;
-}) {
-  return (
-    <DocSlot
-      label=""
-      doc={doc}
-      uploading={uploading}
-      onFile={onFile}
-    />
-  );
-}
-
-function SummaryRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex gap-3">
-      <dt className="min-w-[130px] text-text-muted">{label}</dt>
-      <dd className="font-semibold text-[#0f3d2e]">{value}</dd>
-    </div>
-  );
-}
-
-// Two-file picker for co-applicant Aadhaar (front + back). Fires the
-// callback only once BOTH files are selected so the server route can
-// process them together (same shape the applicant Step 2 uses).
-function CoappAadhaarPicker({
-  onFiles, uploading, error, hasFront, hasBack, frontUrl, backUrl,
-}: {
-  onFiles: (front: File, back: File) => void;
-  uploading: boolean;
-  error: string | null;
-  hasFront: boolean;
-  hasBack: boolean;
-  frontUrl?: string | null;
-  backUrl?: string | null;
-}) {
-  const frontRef = useRef<HTMLInputElement>(null);
-  const backRef  = useRef<HTMLInputElement>(null);
-  const [front, setFront] = useState<File | null>(null);
-  const [back,  setBack]  = useState<File | null>(null);
-
-  // Extraction fires ONLY from the explicit "Extract details" button below —
-  // the same mechanism the main applicant (Step 2) uses. The previous auto-fire
-  // useEffect had `onFiles` in its deps, and since the parent recreates that
-  // callback every render, it looped (upload → re-render → new onFiles →
-  // effect → upload …) — the source of the "Failed to fetch" + glitching.
-
-  return (
-    <div className="space-y-2">
-      <div className="grid sm:grid-cols-2 gap-3">
-        <div>
-          <button
-            type="button"
-            onClick={() => frontRef.current?.click()}
-            disabled={uploading}
-            className={[
-              "w-full h-[84px] rounded-input border-2 border-dashed text-center flex items-center justify-center px-3 transition-colors",
-              hasFront || front
-                ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
-                : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
-              uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
-            ].join(" ")}
-          >
-            <div>
-              <p className="text-[12px] font-semibold">Aadhaar Front</p>
-              <p className="text-[10px] mt-0.5">{front ? front.name : hasFront ? "Uploaded — click to replace" : "Click to select"}</p>
-            </div>
-          </button>
-          {frontUrl && (
-            <a href={frontUrl} target="_blank" rel="noopener" className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[#185fa5] hover:underline">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
-              View
-            </a>
-          )}
-        </div>
-        <div>
-          <button
-            type="button"
-            onClick={() => backRef.current?.click()}
-            disabled={uploading}
-            className={[
-              "w-full h-[84px] rounded-input border-2 border-dashed text-center flex items-center justify-center px-3 transition-colors",
-              hasBack || back
-                ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]"
-                : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
-              uploading ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
-            ].join(" ")}
-          >
-            <div>
-              <p className="text-[12px] font-semibold">Aadhaar Back</p>
-              <p className="text-[10px] mt-0.5">{back ? back.name : hasBack ? "Uploaded — click to replace" : "Click to select"}</p>
-            </div>
-          </button>
-          {backUrl && (
-            <a href={backUrl} target="_blank" rel="noopener" className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-[#185fa5] hover:underline">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>
-              View
-            </a>
-          )}
-        </div>
-      </div>
-      <input ref={frontRef} type="file" accept="image/*,application/pdf" className="hidden"
-             onChange={(e) => { const f = e.target.files?.[0]; if (f) setFront(f); e.target.value = ""; }} />
-      <input ref={backRef} type="file" accept="image/*,application/pdf" className="hidden"
-             onChange={(e) => { const f = e.target.files?.[0]; if (f) setBack(f); e.target.value = ""; }} />
-      <button
-        type="button"
-        onClick={() => { if (front && back && !uploading) onFiles(front, back); }}
-        disabled={!front || !back || uploading}
-        className="w-full inline-flex items-center justify-center gap-2 rounded-input bg-[#185fa5] text-white text-[13px] font-semibold px-4 py-2.5 hover:bg-[#134a80] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-      >
-        {uploading ? "Extracting details…" : "Extract details"}
-      </button>
-      <p className="text-[11px] text-text-muted">Select both front and back, then Extract — same Google Vision OCR as the main applicant.</p>
-      {error && <p className="text-[12px] text-red-700">{error}</p>}
-    </div>
   );
 }

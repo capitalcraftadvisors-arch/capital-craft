@@ -7,10 +7,11 @@
 // the stage-dependent action buttons. Each profile passes its OWN existing
 // handlers/buttons — this component never owns business logic.
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
+import { useCloseOnOutsideClick } from "@/lib/use-close-on-outside-click";
 
 export function TabButton({
-  label, icon, onClick, href, active, disabled, title, fullWidth,
+  label, icon, onClick, href, active, disabled, title,
 }: {
   label: string;
   icon?: ReactNode;
@@ -19,11 +20,9 @@ export function TabButton({
   active?: boolean;
   disabled?: boolean;
   title?: string;
-  fullWidth?: boolean; // vertical rail: full-width, left-aligned
 }) {
   const cls = [
     "inline-flex items-center gap-1.5 px-3 py-2 rounded-[8px] text-[13px] font-semibold transition-colors whitespace-nowrap",
-    fullWidth ? "w-full justify-start" : "",
     active
       ? "bg-[#0f3d2e] text-white"
       : "text-[#0f3d2e] hover:bg-[#eef6f1]",
@@ -50,29 +49,21 @@ export function TabButton({
 // downloadable. When there's a single item it still renders as a menu for a
 // consistent look across profiles.
 export function DownloadMenu({
-  items, icon, disabled, busyLabel, label = "Download", fullWidth, primary, outline,
+  items, icon, disabled, busyLabel, label = "Download", primary, outline,
 }: {
   items: Array<{ label: string; onClick: () => void; disabled?: boolean }>;
   icon?: ReactNode;
   disabled?: boolean;
   busyLabel?: string | null;
   label?: string;
-  fullWidth?: boolean; // vertical rail: full-width, left-aligned
   primary?: boolean;   // filled green button (a page's main action); menu opens right-aligned
   outline?: boolean;   // bordered button for a header action row; menu opens right-aligned
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
+  useCloseOnOutsideClick(ref, open, setOpen);
   return (
-    <div className={"relative" + (fullWidth ? " w-full" : "")} ref={ref}>
+    <div className="relative" ref={ref}>
       <button
         type="button"
         disabled={disabled}
@@ -81,8 +72,7 @@ export function DownloadMenu({
           "inline-flex items-center gap-1.5 px-3 py-2 rounded-[8px] text-[13px] font-semibold transition-colors whitespace-nowrap disabled:opacity-50 " +
           (primary ? "bg-[#178a5c] text-white border border-[#178a5c] hover:bg-[#12734c]"
             : outline ? "bg-white text-[#0f3d2e] border border-[#cdeadd] hover:bg-[#f0faf5]"
-            : "text-[#0f3d2e] hover:bg-[#eef6f1]") +
-          (fullWidth ? " w-full justify-start" : "")
+            : "text-[#0f3d2e] hover:bg-[#eef6f1]")
         }
       >
         {icon && <span className="shrink-0 inline-flex">{icon}</span>}
@@ -120,14 +110,7 @@ export function KebabMenu({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
+  useCloseOnOutsideClick(ref, open, setOpen);
   return (
     <div className="relative" ref={ref}>
       <button

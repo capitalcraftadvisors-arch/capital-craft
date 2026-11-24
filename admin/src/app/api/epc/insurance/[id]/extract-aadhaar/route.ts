@@ -9,7 +9,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { uploadBuffer } from "@/lib/gcs";
 import { extractAadhaar, geminiExtractAadhaar, cropAndUploadFace, type AadhaarFields } from "@/lib/aadhaar";
-import { compress, safeName, ACCEPTED } from "@/lib/insurance-server";
+import { compress } from "@/lib/insurance-server";
+import { ACCEPTED, safeName } from "@/lib/upload-rules";
 import { UUID_RE } from "@/lib/validators";
 
 export const runtime = "nodejs";

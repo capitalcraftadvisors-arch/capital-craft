@@ -23,14 +23,14 @@ import { BRAND_FIELDS, DISCOMS, STANDARD, STANDARD_BOM, STANDARD_EXTRAS, boqFiel
 import { centralSubsidyFor } from "@/lib/emi";
 import { INDIA_STATES, stateOfGstin } from "@/lib/india-states";
 import { amountInput, fmtRupees } from "@/lib/money";
+import { todayIST } from "@/lib/dates";
 import { rupeesInWords } from "@/lib/numberToWords";
 import { getBusiness } from "@/lib/auth";
 import { canWork, portalV2 } from "@/lib/epc-roles";
 import { fetchWhatsAppOn } from "@/lib/subscription";
 import { createProposal, whatsAppProposal } from "@/lib/proposals";
 import WhatsAppButton from "@/components/partner/WhatsAppButton";
-
-const today = () => new Date().toISOString().slice(0, 10);
+import { useCloseOnOutsideClick } from "@/lib/use-close-on-outside-click";
 
 export default function QuoteEditor({ params }: { params: { id: string } }) {
   const router = useRouter();
@@ -84,7 +84,7 @@ export default function QuoteEditor({ params }: { params: { id: string } }) {
       } else if (sp.get("from")) {
         const src = (await fetchQuote(sp.get("from")!)).doc;   // a copy: new number, today's dates
         const days = resolveQuoteDefaults(org, src.segment).validity;
-        d = { ...src, date: today(), valid_till: addDays(today(), days) };
+        d = { ...src, date: todayIST(), valid_till: addDays(todayIST(), days) };
         setDirty(true);
       } else {
         d = newQuoteDoc(sp.get("segment") === "commercial" ? "commercial" : "residential", org);
@@ -505,12 +505,7 @@ function Grid({ children }: { children: ReactNode }) {
 function AddItemMenu({ options, onPick }: { options: { label: string; item: QuoteItem }[]; onPick: (it: QuoteItem | null) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open]);
+  useCloseOnOutsideClick(ref, open, setOpen);
   const pick = (it: QuoteItem | null) => { setOpen(false); onPick(it ? { ...it } : null); };
   const opt = "block w-full text-left px-4 py-2 text-[13px] hover:bg-[#f0f5fc]";
   return (

@@ -8,6 +8,8 @@ export const ACCOUNT_RE = /^\d{9,18}$/;
 // An Indian PIN code: 6 digits, never starting with 0.
 export const PINCODE_RE = /^[1-9]\d{5}$/;
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// A full Aadhaar number: exactly 12 digits (spaces already stripped).
+export const AADHAAR_RE = /^\d{12}$/;
 // A GSTIN: 2-digit state code + PAN + entity digit + "Z" + check character (upper case).
 export const GSTIN_RE = /^\d{2}[A-Z]{5}\d{4}[A-Z][A-Z\d]Z[A-Z\d]$/;
 // A database row id (uuid) — checked before an id from the URL or body reaches a query.

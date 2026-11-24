@@ -12,7 +12,8 @@ import { useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import BackHeader from "@/components/PartnerBackHeader";
 import { authHeaders } from "@/lib/auth";
-import { fmtDate } from "@/lib/dates";
+import { fmtDateIST } from "@/lib/dates";
+import { stateSubsidyFor } from "@/lib/emi";
 import { fetchQuoteTemplate, type QuoteTemplate } from "@/lib/quotation-template";
 import { customState } from "@/lib/custom-template";
 import { markCustomTemplateSeen } from "@/components/partner/CustomTemplateBanner";
@@ -28,7 +29,6 @@ import {
   type BoqRow, type BoqCells, type BoqColumn,
 } from "@/lib/quotation-brands";
 
-function stateSubsidyFor(kw: number): number { if (!kw || kw <= 0) return 0; return kw >= 3 ? 78000 : Math.round(kw * 30000); }
 
 type Form = {
   customer_name: string; pincode: string; city: string; address: string; date: string; quote_no: string;
@@ -39,7 +39,7 @@ type Form = {
 };
 const BATTERY_UNITS = ["V", "Ah", "kWh", "VAh"];
 const EMPTY: Form = {
-  customer_name: "", pincode: "", city: "", address: "", date: fmtDate(new Date()), quote_no: "",
+  customer_name: "", pincode: "", city: "", address: "", date: "", quote_no: "", // date: set when a quotation starts
   kw: "", system_type: "Hybrid", battery: "", battery_unit: "V", total: "",
   subsidised: true, central_subsidy: "",
   make_panel: "", make_inverter: "", roof_type: "", make_structure: "",
@@ -115,7 +115,7 @@ function DownloadBar({ busy, error, onClick }: { busy: boolean; error: string | 
 }
 
 function Inner() {
-  const [f, setF] = useState<Form>(EMPTY);
+  const [f, setF] = useState<Form>(() => ({ ...EMPTY, date: fmtDateIST(new Date()) }));
   const merge = useBrandOptions();
   const { busy, error, setError, run } = useQuotationDownload();
   const [pinBusy, setPinBusy] = useState(false);

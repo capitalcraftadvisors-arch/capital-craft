@@ -15,7 +15,7 @@
 // resubmit lands from step-6, current_step stays 6.
 
 import { NextRequest, NextResponse } from "next/server";
-import { err, dbAs, requireLogin } from "@/lib/api";
+import { err, dbAs, requireLogin, loadLoanRow } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { logLoanActivityServer } from "@/lib/loan-activity-server";
 
@@ -36,13 +36,8 @@ export async function POST(
 
     const supabase = dbAs(token);
 
-    const { data: app, error: loadErr } = await supabase
-      .from("epc_applications")
-      .select("id, current_step, status")
-      .eq("id", appId)
-      .maybeSingle();
-    if (loadErr) return err(loadErr.message, 500);
-    if (!app)    return err("Loan application not found.", 404);
+    const app = await loadLoanRow(supabase, appId, "id, current_step, status");
+    if (app instanceof Response) return app;
     if ((app.current_step ?? 1) < 6) {
       return err("Complete Step 5 before submitting.", 409);
     }

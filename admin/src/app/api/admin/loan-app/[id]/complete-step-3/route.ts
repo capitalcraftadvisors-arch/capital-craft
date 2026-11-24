@@ -15,26 +15,15 @@
 //     (name, pan, dob, relation, mobile, email, pan_path).
 
 import { NextRequest, NextResponse } from "next/server";
-import { err, dbAs, requireLogin } from "@/lib/api";
-import { UUID_RE, MOBILE_RE, EMAIL_RE, PAN_RE, PINCODE_RE } from "@/lib/validators";
+import { err, dbAs, requireLogin, loadLoanRow, strOrNull, numOrNull } from "@/lib/api";
+import { UUID_RE, MOBILE_RE, EMAIL_RE, PAN_RE, PINCODE_RE, AADHAAR_RE } from "@/lib/validators";
+import { maskAadhaar } from "@/lib/aadhaar-mask";
 import { logLoanActivityServer } from "@/lib/loan-activity-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const UNITS      = new Set(["kw", "mw"]);
-
-function strOrNull(v: unknown): string | null {
-  if (v == null) return null;
-  const s = String(v).trim();
-  return s.length > 0 ? s : null;
-}
-
-function numOrNull(v: unknown): number | null {
-  if (v == null || v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
 
 export async function POST(
   req: NextRequest,
@@ -153,11 +142,11 @@ export async function POST(
           coapp_aadhaar_number_masked = coapp_aadhaar_number;
         } else {
           const digits = coapp_aadhaar_number.replace(/\D/g, "");
-          if (!/^\d{12}$/.test(digits)) {
+          if (!AADHAAR_RE.test(digits)) {
             return err("Co-applicant Aadhaar number must be exactly 12 digits.", 400);
           }
           coapp_aadhaar_number = digits;
-          coapp_aadhaar_number_masked = "xxxxxxxx" + digits.slice(-4);
+          coapp_aadhaar_number_masked = maskAadhaar(digits);
         }
       }
     }
@@ -173,13 +162,8 @@ export async function POST(
     // ── Persist + advance ─────────────────────────────────
     const supabase = dbAs(token);
 
-    const { data: app, error: loadErr } = await supabase
-      .from("epc_applications")
-      .select("id, current_step, borrower_mobile, borrower_email")
-      .eq("id", appId)
-      .maybeSingle();
-    if (loadErr) return err(loadErr.message, 500);
-    if (!app)    return err("Loan application not found.", 404);
+    const app = await loadLoanRow(supabase, appId, "id, current_step, borrower_mobile, borrower_email");
+    if (app instanceof Response) return app;
     if ((app.current_step ?? 1) < 3) return err("Complete Step 2 before Step 3.", 409);
 
     // Applicant vs co-applicant collision check (spec).

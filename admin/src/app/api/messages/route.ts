@@ -12,7 +12,7 @@
 // (all) or the owning EPC (own profiles / own messages).
 
 import { NextRequest, NextResponse } from "next/server";
-import { err, dbAs, requireLogin } from "@/lib/api";
+import { err, dbAs, requireLogin, strOrNull } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 
 export const runtime = "nodejs";
@@ -23,12 +23,6 @@ const CFG = {
   insurance: { msgTable: "insurance_messages", parentTable: "insurance_applications", fk: "insurance_application_id" },
 } as const;
 type Kind = keyof typeof CFG;
-
-function strOrNull(v: unknown): string | null {
-  if (v == null) return null;
-  const s = String(v).trim();
-  return s.length ? s : null;
-}
 
 export async function POST(req: NextRequest) {
   try {

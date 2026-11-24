@@ -22,7 +22,7 @@ import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { downloadBuffer, uploadBuffer, deleteObject } from "@/lib/gcs";
 import { geminiExtractInvoice } from "@/lib/doc-extractors";
-import { safeName } from "@/lib/insurance-server";
+import { safeName } from "@/lib/upload-rules";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

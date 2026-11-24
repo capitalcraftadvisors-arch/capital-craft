@@ -30,23 +30,31 @@ import { supabase } from "@/lib/supabase";
 import { authHeaders, getBusiness } from "@/lib/auth";
 import { computeCentralSubsidy, computeEmi, DEFAULT_INDICATIVE_ROI, TENURES } from "@/lib/emi";
 import { amountInWords } from "@/lib/numberToWords";
-import { amountInput, fmtRupees } from "@/lib/money";
-import { MOBILE_RE, EMAIL_RE, PINCODE_RE } from "@/lib/validators";
+import { PINCODE_RE } from "@/lib/validators";
 import { invalidateLoanBoards } from "@/lib/ops-board";
-import { professionsFor } from "@/lib/loan-form";
 import { withoutThumbs } from "@/lib/chat-draft";
 import LoanShareChips from "@/components/LoanShareChips";
 // The chat kit (src/components/chat) — this chat's green palette is LOAN_INTAKE_THEME.
 import { LOAN_INTAKE_THEME as THEME } from "@/components/chat/theme";
-import type { ChatMsg, Choice, Fetched, FileReceipt, Form, ReadConfirm } from "@/components/chat/types";
+import type { ChatMsg, Choice, FileReceipt, Form, ReadConfirm } from "@/components/chat/types";
 import { nowLabel } from "@/components/chat/time";
 import { useChatLog, useRmFirstName, useScrollToBottom } from "@/components/chat/hooks";
 import { ChatDock, ChatError, ChatMessages, EditingBanner } from "@/components/chat/ChatFrame";
 import { AdminChatHeader, AdminChatLoading, AdminComposer, ChoiceGrid, DonePanel } from "@/components/chat/AdminChrome";
 import { AdminTypingBubble, DateChip, MessageRow } from "@/components/chat/MessageRow";
-import { ConfirmCard, EditableRows, FetchedCard, ReadCardFrame } from "@/components/chat/ReadCards";
-import { DocDock, useDocDockFiles, type UploadSlot } from "@/components/chat/DocDock";
-import { AddFileButton, ContinueRow, DocSlotTable, FieldRows, ReadingLine, SlotFileChip } from "@/components/chat/DocSlotTable";
+import { ConfirmCard, FetchedCard } from "@/components/chat/ReadCards";
+import { DocDock, useDocDockFiles } from "@/components/chat/DocDock";
+// The chat's own parts (./_parts): the script, form rules, document slots + table, info sheet, edit picker, docks.
+import { SCRIPT, LEAD_SCRIPT, STEP_PAYLOAD, AMOUNT_FIELDS, choicesOf, fieldLabel, isTurnFilled, isEditableTurn, pendingOf, isProfileComplete } from "./_parts/script";
+import { hasCoapp, coappDecision, employmentReset, kwOf } from "./_parts/form-rules";
+import { DOC_TABLE_ROWS, billOptional, type DocUnit } from "./_parts/doc-slots";
+import { mapExtract, prefillFromApp } from "./_parts/form-map";
+import { amountText, parseInfoSheet, SHEET_ROWS, SHEET_AMOUNT_FIELDS, SheetConfirmCard } from "./_parts/info-sheet";
+import { editTableGroups, EditPickList } from "./_parts/EditPicker";
+import EpcPicker from "./_parts/EpcPicker";
+import DocTable from "./_parts/DocTable";
+import LoanConfigDock from "./_parts/LoanConfigDock";
+import { postLoanForm, sendLoanJson } from "./_parts/requests";
 
 export default function IntakePage() {
   return (
@@ -56,308 +64,11 @@ export default function IntakePage() {
   );
 }
 
-// A turn is one thing the chat asks/does. `when` gates conditional turns
-// (co-applicant), `save` marks a step boundary that persists to the server.
-type Turn = {
-  id: string;
-  bot: string;
-  kind: "epc" | "text" | "pincode" | "choice" | "consent" | "docs" | "save" | "loanconfig" | "leadsave" | "doc_table" | "paste";
-  field?: string;
-  placeholder?: string;
-  optional?: boolean;
-  choices?: Choice[] | ((f: Form) => Choice[]); // a function when the options depend on an earlier answer
-  validate?: (v: string) => string | null;
-  when?: (f: Form) => boolean;
-  // docs turn:
-  uploads?: UploadSlot[];
-  extractRoute?: string;
-  extraForm?: Record<string, string>;
-  docLabel?: string; // friendly name for the "skip / missing" note
-  uploadCategory?: string; // docs turn with NO OCR — POST the file to /api/upload under this category
-  pathField?: string;      // where to store the returned storage_path in the form
-  applicantPan?: boolean;  // reuse extract-coapp-pan OCR but map fields to the APPLICANT
-  // save turn:
-  step?: number;
-  method?: "POST" | "PATCH";
-  payload?: (f: Form) => Record<string, unknown>;
-};
-
-const choicesOf = (t: Turn, f: Form): Choice[] => (typeof t.choices === "function" ? t.choices(f) : t.choices ?? []);
-
-// A co-applicant is present when the name-check / paste set the flag, OR the RM
-// answered the explicit "co-applicant required?" question with Yes. Either one
-// reveals the co-applicant document slots in the table and its detail turns.
-const hasCoapp = (f: Form) => f._has_coapp === "1" || f.coapp_needed === "yes";
-// The co-applicant Yes / No answer is the decision (a "No" also drops one read earlier).
-const coappDecision = (turnId: string | undefined, value: string): Form =>
-  (turnId === "coapp_needed" && value ? { _has_coapp: value === "yes" ? "1" : "" } : {});
-// Changing the employment type clears a profession picked from the other list.
-const employmentReset = (turnId: string | undefined, value: string, f: Form): Form =>
-  (turnId === "employment_type" && value !== (f.employment_type || "") ? { profession: "", profession_other: "" } : {});
-// Is this doc turn's file already on the profile? Drives the standalone doc
-// turns' `when` gate (e.g. the bank statement self-skips once uploaded).
-function docProvided(turnId: string, f: Form): boolean {
-  const keys = DOC_PATHS[turnId] || [];
-  return keys.length > 0 && keys.every((k) => !!(f[k] && String(f[k]).trim()));
-}
-
-// Build one editable "read from the document" row from a form value.
-function frow(label: string, value: string | undefined, field: string): Fetched {
-  const v = (value ?? "").trim();
-  return { label, value: v, ok: !!v, field };
-}
-
 // The highest number among a saved chat's message ids ("m12" → 12). New ids
 // continue above it, so no two messages ever share an id.
 function maxMsgId(list: ChatMsg[]): number {
   return list.reduce((n, m) => Math.max(n, Number(String(m.id).replace(/\D/g, "")) || 0), 0);
 }
-
-const SCRIPT: Turn[] = [
-  // 1) EPC partner
-  { id: "epc", bot: "Which EPC partner is this application for?", kind: "epc" },
-  // 2) Installation pincode (→ state / district / city lookup)
-  { id: "install_pincode", bot: "Installation pincode?", kind: "pincode", field: "install_pincode" },
-  // 3) Info sheet — paste the labeled RM sheet; parsed locally (no AI), confirmed, written.
-  { id: "info_sheet", bot: "Paste the applicant's info sheet here — I'll read the labels and fill in the details for you to confirm. (Or skip and add them later.)", kind: "paste", optional: true, docLabel: "Info sheet" },
-  // 4) Residential / commercial (not on the sheet)
-  { id: "plant_use_type", bot: "Residential or commercial use?", kind: "choice", field: "plant_use_type", choices: [
-    { value: "residential", label: "Residential", sub: "Home / society" },
-    { value: "commercial", label: "Commercial", sub: "Shop / office / factory" },
-  ] },
-  // 4a) Solar system type (on/off grid). Asked when still unknown — the info
-  //     sheet may already carry it; a converted lead never does. Needed for the
-  //     lender summary + Credit Fair email.
-  { id: "system_type", bot: "Type of solar system?", kind: "choice", field: "system_type", optional: true,
-    when: (f) => !(f.system_type && f.system_type.trim()), choices: [
-      { value: "on_grid", label: "On-Grid" }, { value: "off_grid", label: "Off-Grid" }, { value: "hybrid", label: "Hybrid" },
-    ] },
-  // 4b) Applicant mobile — asked when missing (no info sheet).
-  { id: "borrower_mobile", bot: "Applicant's mobile number?", kind: "text", field: "borrower_mobile", placeholder: "10-digit mobile",
-    when: (f) => !(f.borrower_mobile && f.borrower_mobile.trim()),
-    validate: (v) => (!v.trim() || MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile, or skip.") },
-  { id: "lead_owner_name", bot: "Lead owner's name? (optional)", kind: "text", field: "lead_owner_name", placeholder: "Lead owner", optional: true,
-    when: (f) => !(f.lead_owner_name && f.lead_owner_name.trim()) },
-  // 4c) Applicant email — asked when missing (a converted lead may not carry one).
-  { id: "borrower_email", bot: "Applicant's email? (optional)", kind: "text", field: "borrower_email", placeholder: "name@example.com", optional: true,
-    when: (f) => !(f.borrower_email && f.borrower_email.trim()),
-    validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email, or skip.") },
-  // 4c) Co-applicant required? Asked when the decision hasn't been made yet (no
-  //     flag, no co-applicant name on file). "Yes" reveals the co-applicant
-  //     document slots in the table below and its detail turns.
-  { id: "coapp_needed", bot: "Is a co-applicant required for this application?", kind: "choice", field: "coapp_needed", optional: true,
-    when: (f) => !f.coapp_needed && f._has_coapp !== "1" && !(f.coapp_name && f.coapp_name.trim()), choices: [
-      { value: "yes", label: "Yes, add a co-applicant" }, { value: "no", label: "No co-applicant" },
-    ] },
-  // 5a) How the documents will be given. "Separate file per document" → the table
-  //     (drop each into its box). "One combined PDF" → the table shows a combined-PDF
-  //     box that auto-splits and fills the rows for review.
-  { id: "doc_choice", bot: "How do you have the applicant's documents?", kind: "choice", field: "_doc_choice", choices: [
-    { value: "separate", label: "Separate file for each document", sub: "Upload each into its own box" },
-    { value: "single", label: "One combined PDF", sub: "Everything together in a single PDF" },
-  ] },
-  // 5) Documents — one labeled slot table (see DocTable). The RM drops each
-  //    document into its own box; each box reads with its OWN dedicated extractor
-  //    (accurate), and the reads fire in PARALLEL as boxes fill (fast — no
-  //    per-document waiting). Rooftop photo + applicant photo are rows here; the
-  //    quotation stays its OWN step (below). Rows left "don't have it" are recorded
-  //    as pending and never block. Replaces the old bundle auto-sort + the
-  //    one-at-a-time review/re-ask turns.
-  { id: "doc_table", bot: "Now the documents. Drop each one into its box — I'll read it as it lands. Tick “Don't have it” for anything you can't add right now.", kind: "doc_table", docLabel: "Documents" },
-  // Co-applicant details the documents don't carry — only with a co-applicant.
-  { id: "coapp_relation", bot: "Co-applicant's relation to the applicant?", kind: "text", field: "coapp_relation", placeholder: "e.g. spouse", optional: true, when: hasCoapp },
-  { id: "coapp_mobile", bot: "Co-applicant's mobile number?", kind: "text", field: "coapp_mobile", placeholder: "10-digit mobile", optional: true, when: hasCoapp, validate: (v) => (!v.trim() || MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile, or skip.") },
-  { id: "coapp_email", bot: "Co-applicant's email?", kind: "text", field: "coapp_email", placeholder: "name@example.com", optional: true, when: hasCoapp, validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email, or skip.") },
-
-  // Bank statement — its own upload step (not one of the table's slots).
-  // Asked when there's no statement, or one is on file but its details were never read.
-  { id: "bank", bot: "Upload the bank statement.", kind: "docs", docLabel: "Bank statement", when: (f) => !docProvided("bank", f) || !f.bank_account_no,
-    uploads: [{ name: "file", label: "Bank statement" }], extractRoute: "extract-bank-statement", extraForm: { method: "manual_epdf" } },
-
-  // 6) Quotation / proforma — its own step (never in the table; Gemini tags it "other").
-  { id: "quotation", bot: "Upload the quotation / proforma invoice — I'll read the project cost & size.", kind: "docs", docLabel: "Quotation / invoice",
-    uploads: [{ name: "proforma", label: "Quotation / invoice" }], extractRoute: "extract-loan-docs" },
-  { id: "loan_amount", bot: "Loan amount required (₹)?", kind: "text", field: "loan_amount_required", placeholder: "e.g. 250000",
-    when: (f) => !(Number(f.loan_amount_required) > 0),
-    validate: (v) => (!v.trim() || /^\d+(\.\d{1,2})?$/.test(v.trim()) ? null : "Enter the amount in digits, e.g. 250000 or 250000.50.") },
-
-  // 11) Employment
-  { id: "employment_type", bot: "Employment type?", kind: "choice", field: "employment_type", choices: [
-    { value: "salaried", label: "Salaried" }, { value: "self_employed", label: "Self-employed" },
-  ] },
-  { id: "profession", bot: "Profession? (optional)", kind: "choice", field: "profession", optional: true, when: (f) => !!f.employment_type,
-    choices: (f) => professionsFor(f.employment_type).map((p) => ({ value: p, label: p })) },
-  { id: "profession_other", bot: "Please specify the profession.", kind: "text", field: "profession_other", placeholder: "e.g. Engineer", optional: true, when: (f) => f.profession === "Other" },
-  // Employer / business name may already be filled from the sheet — skip when so.
-  { id: "organization_name", bot: "Organization / business name? (optional)", kind: "text", field: "organization_name", placeholder: "Organization", optional: true, when: (f) => !(f.organization_name && f.organization_name.trim()) },
-  { id: "annual_income", bot: "Annual income (₹)? (optional)", kind: "text", field: "annual_income", placeholder: "e.g. 600000", optional: true },
-
-  // Additional documents (optional)
-  { id: "additional_docs", bot: "Any other documents to add? (optional — skip if none)", kind: "docs", docLabel: "Additional documents", optional: true,
-    uploads: [{ name: "file", label: "Additional document" }], uploadCategory: "other" },
-
-  // 12) Consent + loan configuration
-  { id: "consent", bot: "Does the customer consent to the Terms, Privacy & Cookie policies and allow credit-information access?", kind: "consent", field: "consent" },
-  { id: "loanconfig", bot: "Last step — loan configuration.", kind: "loanconfig" },
-
-  // ── Edit-only inline fields ──────────────────────────────────────────────────
-  // These never appear in the create flow (when:()=>false). They're re-asked ONLY
-  // when the RM ticks them in the edit table (a selected target bypasses `when`).
-  // Every field is in the update-fields allow-list, so answering persists it.
-  { id: "edit_borrower_email", bot: "Applicant's email?", kind: "text", field: "borrower_email", placeholder: "name@example.com", when: () => false, validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email, or skip.") },
-  { id: "edit_system_type", bot: "Type of solar system?", kind: "choice", field: "system_type", when: () => false, choices: [
-    { value: "on_grid", label: "On-Grid" }, { value: "off_grid", label: "Off-Grid" }, { value: "hybrid", label: "Hybrid" },
-  ] },
-];
-
-// The complete-step payloads, keyed by step. Persistence during the flow is via
-// update-fields (any order); these run in sequence only at final submit to walk
-// current_step 1→6, record consent, and submit.
-const STEP_PAYLOAD: Record<number, (f: Form) => Record<string, unknown>> = {
-  1: (f) => ({
-    borrower_name: f.borrower_name || "", borrower_mobile: f.borrower_mobile || "", borrower_email: f.borrower_email || "", lead_owner_name: f.lead_owner_name || "",
-    // borrower_pan + father name MUST be sent — complete-step-1 does .update() and
-    // would otherwise NULL them at "Create application", wiping the PAN OCR read
-    // during the chat (this was the "PAN uploaded but number blank" bug).
-    borrower_pan: f.borrower_pan || "", borrower_father_name: f.borrower_father_name || "",
-    install_pincode: f.install_pincode || "", install_state: f.install_state || "", install_district: f.install_district || "", install_city: f.install_city || "",
-    system_type: f.system_type || "", plant_use_type: f.plant_use_type || "",
-    // Consent is recorded only when the customer gave it (a skipped consent stays pending).
-    consent_policies: f.consent === "yes" ? ["terms_conditions", "privacy_policy", "cookie_policy"] : [],
-  }),
-  2: (f) => ({
-    aadhaar_name: f.aadhaar_name || "", aadhaar_dob: f.aadhaar_dob || "", aadhaar_gender: f.aadhaar_gender || "",
-    aadhaar_number: f.aadhaar_number || "", aadhaar_care_of: f.aadhaar_care_of || "", aadhaar_address: f.aadhaar_address || "",
-    aadhaar_front_path: f.aadhaar_front_path || "", aadhaar_back_path: f.aadhaar_back_path || "", aadhaar_face_path: f.aadhaar_face_path || "",
-  }),
-  3: (f) => ({
-    project_size: f.project_size || "", project_size_unit: f.project_size_unit || "kw",
-    total_project_cost: f.total_project_cost || "", loan_amount_required: f.loan_amount_required || "",
-    monthly_bill_amount: f.monthly_bill_amount || "", discom_name: f.discom_name || "", ca_number: f.ca_number || "",
-    ebill_address_line: f.ebill_address_line || "", ebill_name: f.ebill_name || "",
-    ebill_path: f.ebill_path || "", ebill_uploaded_at: f.ebill_uploaded_at || "",
-    proforma_invoice_path: f.proforma_invoice_path || "", proforma_uploaded_at: f.proforma_uploaded_at || "",
-    rooftop_photo_path: f.rooftop_photo_path || "", rooftop_photo_uploaded_at: f.rooftop_photo_uploaded_at || "",
-    install_pincode: f.install_pincode || "", install_state: f.install_state || "", install_city: f.install_city || "",
-    // Derive from the co-applicant decision: co-applicant present ⇒ bill not on
-    // the applicant alone. Keeps the profile's co-applicant section in sync with
-    // the explicit Yes/No answer (a co-applicant is optional, never forced).
-    bill_on_applicant_name: !hasCoapp(f),
-    coapp_name: f.coapp_name || "", coapp_mobile: f.coapp_mobile || "", coapp_email: f.coapp_email || "", coapp_father_name: f.coapp_father_name || "", coapp_dob: f.coapp_dob || "",
-    coapp_pan: f.coapp_pan || "", coapp_pan_path: f.coapp_pan_path || "", coapp_relation: f.coapp_relation || "",
-    coapp_aadhaar_name: f.coapp_aadhaar_name || "", coapp_aadhaar_dob: f.coapp_aadhaar_dob || "", coapp_aadhaar_gender: f.coapp_aadhaar_gender || "",
-    coapp_aadhaar_number: f.coapp_aadhaar_number || "", coapp_aadhaar_care_of: f.coapp_aadhaar_care_of || "", coapp_aadhaar_address: f.coapp_aadhaar_address || "",
-    coapp_aadhaar_front_path: f.coapp_aadhaar_front_path || "", coapp_aadhaar_back_path: f.coapp_aadhaar_back_path || "", coapp_aadhaar_face_path: f.coapp_aadhaar_face_path || "",
-  }),
-  4: (f) => ({
-    employment_type: f.employment_type || "", profession: f.profession || "", profession_other: f.profession_other || "", organization_name: f.organization_name || "", annual_income: f.annual_income || "",
-    bank_statement_method: f.bank_statement_method || "manual_epdf", bank_statement_path: f.bank_statement_path || "", bank_statement_uploaded_at: f.bank_statement_uploaded_at || "",
-    bank_account_holder: f.bank_account_holder || "", bank_name: f.bank_name || "", bank_account_no: f.bank_account_no || "",
-    bank_ifsc: f.bank_ifsc || "", bank_account_type: f.bank_account_type || "", bank_mobile: f.bank_mobile || "", bank_email: f.bank_email || "",
-  }),
-};
-
-// Lead capture flow — used when the EPC isn't a registered, lender-approved
-// partner. A full application can't exist without a registered EPC (DB rule),
-// so we capture the customer + typed EPC name as a loan_leads row for the Lead
-// tab; it's converted to a full application once the EPC is approved.
-const LEAD_SCRIPT: Turn[] = [
-  { id: "lead_name", bot: "Customer's full name?", kind: "text", field: "lead_name", placeholder: "Full name", validate: (v) => (v.trim().length < 2 ? "Enter the customer's name." : null) },
-  { id: "lead_mobile", bot: "Customer's phone number?", kind: "text", field: "lead_mobile", placeholder: "10-digit mobile", validate: (v) => (MOBILE_RE.test(v.trim()) ? null : "Enter a valid 10-digit mobile.") },
-  { id: "lead_email", bot: "Email? (optional)", kind: "text", field: "lead_email", placeholder: "name@example.com", optional: true, validate: (v) => (!v.trim() || EMAIL_RE.test(v.trim()) ? null : "Enter a valid email or skip.") },
-  { id: "lead_address", bot: "City / installation area? (optional)", kind: "text", field: "lead_address", placeholder: "City or area", optional: true },
-  { id: "lead_loan_amount", bot: "Approximate loan amount (₹)? (optional)", kind: "text", field: "lead_loan_amount", placeholder: "e.g. 200000", optional: true },
-  { id: "lead_project_size", bot: "Approximate system size in kW? (optional)", kind: "text", field: "lead_project_size", placeholder: "e.g. 5", optional: true },
-  { id: "lead_save", bot: "", kind: "leadsave" },
-];
-
-// ── Info-sheet paste parser (local, deterministic — no AI) ───────────────────
-// The RM pastes a labeled sheet; we split each line on the FIRST ":", normalize
-// the label, clean the value, and map it to a Form field. Everything the sheet
-// can carry (co-applicant included) is handled; the EPC is chosen separately and
-// is never overwritten (the merchant name is kept display-only).
-const normLabel = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-// Clean a text value: strip a leading dash, a trailing "/-", and surrounding space.
-function cleanText(raw: string): string {
-  return raw.replace(/^\s*[-–—]\s*/, "").replace(/\s*\/-\s*$/, "").trim();
-}
-// An amount (amounts / subsidy): drop commas, "/-", "Rs", "₹", spaces; paise kept.
-function amountText(raw: string): string {
-  return amountInput(cleanText(raw).replace(/rs\.?/gi, "").replace(/[,₹\s/-]/g, ""));
-}
-// The leading number in a value ("3KW" → 3, "5 YEAR" → 5, "5year" → 5).
-function leadingNumber(raw: string): string {
-  const m = cleanText(raw).match(/-?\d+(?:\.\d+)?/);
-  return m ? m[0] : "";
-}
-// Last 10 digits of a phone value.
-function last10(raw: string): string {
-  const d = cleanText(raw).replace(/\D/g, "");
-  return d.length >= 10 ? d.slice(-10) : d;
-}
-function normSystemType(raw: string): string {
-  const s = cleanText(raw).toLowerCase();
-  if (s.includes("off")) return "off_grid";
-  if (s.includes("hybrid")) return "hybrid";
-  if (s.includes("on")) return "on_grid";
-  return "";
-}
-
-function parseInfoSheet(text: string): Partial<Form> {
-  const out: Form = {};
-  const lines = String(text || "").split(/\r?\n/);
-  for (const line of lines) {
-    const ci = line.indexOf(":");
-    if (ci < 0) continue;
-    const nl = normLabel(line.slice(0, ci));
-    if (!nl) continue;
-    const rawVal = line.slice(ci + 1);
-    const val = cleanText(rawVal);
-    const isCo = nl.includes("coapp") || nl.includes("coapplicant") || (nl.startsWith("co") && nl.includes("app"));
-
-    // Co-applicant fields (checked first so "co-app name" never matches applicant).
-    if (isCo && nl.includes("name")) { if (val) { out.coapp_name = val; out._has_coapp = "1"; } continue; }
-    if (isCo && (nl.includes("mob") || nl.includes("phone") || nl.includes("contact"))) { if (val) out.coapp_mobile = last10(rawVal); continue; }
-    if (isCo && nl.includes("email")) { if (val) out.coapp_email = val; continue; }
-    // Employer / business, and the display-only merchant name (never the EPC).
-    if (nl.includes("employer") || nl.includes("business")) { if (val) out.organization_name = val; continue; }
-    if (nl.includes("merchant")) { if (val) out._merchant_name = val; continue; }
-    // Applicant contact
-    if (!isCo && (nl.includes("mob") || nl.includes("phone") || nl.includes("contact"))) { if (val) out.borrower_mobile = last10(rawVal); continue; }
-    if (!isCo && nl.includes("email")) { if (val) out.borrower_email = val; continue; }
-    if (!isCo && nl.includes("name") && (nl.includes("app") || nl.includes("borrower") || nl.includes("customer"))) { if (val) out.borrower_name = val; continue; }
-    // Loan / project money
-    if (nl.includes("project") && nl.includes("cost")) { const d = amountText(rawVal); if (d) out.total_project_cost = d; continue; }
-    if (nl.includes("loan") && nl.includes("tenure")) { const n = leadingNumber(rawVal); if (n) out.selected_tenure_years = String(parseInt(n, 10)); continue; }
-    if (nl.includes("tenure")) { const n = leadingNumber(rawVal); if (n) out.selected_tenure_years = String(parseInt(n, 10)); continue; }
-    if (nl.includes("loan") && nl.includes("amount")) { const d = amountText(rawVal); if (d) out.loan_amount_required = d; continue; }
-    if (nl.includes("subsidy")) { const d = amountText(rawVal); if (d) out.central_subsidy = d; continue; }
-    // System / capacity / place
-    if (nl.includes("capacity")) { const n = leadingNumber(rawVal); if (n) { out.project_size = n; out.project_size_unit = "kw"; } continue; }
-    if (nl.includes("grid")) { const st = normSystemType(rawVal); if (st) out.system_type = st; continue; }
-    if ((nl.includes("place") && nl.includes("install")) || nl.includes("installation") || nl.includes("location")) { if (val) out.install_city = val; continue; }
-  }
-  return out;
-}
-
-// The order + labels the parsed info sheet is shown in on the confirm card.
-const SHEET_ROWS: { field: string; label: string; render?: (v: string) => string }[] = [
-  { field: "borrower_name", label: "Applicant name" },
-  { field: "borrower_mobile", label: "Applicant mobile" },
-  { field: "borrower_email", label: "Applicant email" },
-  { field: "coapp_name", label: "Co-applicant name" },
-  { field: "coapp_mobile", label: "Co-applicant mobile" },
-  { field: "coapp_email", label: "Co-applicant email" },
-  { field: "organization_name", label: "Employer / business" },
-  { field: "_merchant_name", label: "Merchant (for reference)" },
-  { field: "total_project_cost", label: "Project cost", render: (v) => `₹${Number(v).toLocaleString("en-IN")}` },
-  { field: "loan_amount_required", label: "Loan amount", render: (v) => `₹${Number(v).toLocaleString("en-IN")}` },
-  { field: "central_subsidy", label: "Subsidy", render: (v) => `₹${Number(v).toLocaleString("en-IN")}` },
-  { field: "selected_tenure_years", label: "Loan tenure", render: (v) => `${v} year${v === "1" ? "" : "s"}` },
-  { field: "project_size", label: "Capacity", render: (v) => `${v} kW` },
-  { field: "system_type", label: "System", render: (v) => ({ on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" }[v] || v) },
-  { field: "install_city", label: "Place of installation" },
-];
 
 function Inner() {
   const router = useRouter();
@@ -530,10 +241,9 @@ function Inner() {
       const fd = new FormData();
       fd.append("path", form.bank_statement_path);
       fd.append("method", form.bank_statement_method || "manual_epdf");
-      const res = await fetch(`/api/admin/loan-app/${appId}/extract-bank-statement`, { method: "POST", headers: authHeaders(), body: fd });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't read the bank statement on file. Attach it again, or skip."); return; }
-      const { patch, fields } = mapExtract(t, j);
+      const r = await postLoanForm(appId, "extract-bank-statement", fd, "Couldn't read the bank statement on file. Attach it again, or skip.");
+      if (!r.ok) { setError(r.error); return; }
+      const { patch, fields } = mapExtract(t, r.data);
       merge(patch);
       void persistForm({ ...form, ...patch });
       const gaps = fields.filter((f) => !f.ok).map((f) => f.label);
@@ -801,10 +511,9 @@ function Inner() {
       // Applicant PAN reuses extract-coapp-pan — tell the route so it also files
       // the doc under category "borrower_pan" (the profile's Applicant-PAN slot).
       if (t.applicantPan) fd.append("applicant", "1");
-      const res = await fetch(`/api/admin/loan-app/${appId}/${t.extractRoute}`, { method: "POST", headers: authHeaders(), body: fd });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't read the document. Attach a clearer copy, or skip and fill it in later."); setBusy(false); return; }
-      const { patch, fields } = mapExtract(t, j);
+      const r = await postLoanForm(appId, t.extractRoute, fd, "Couldn't read the document. Attach a clearer copy, or skip and fill it in later.");
+      if (!r.ok) { setError(r.error); setBusy(false); return; }
+      const { patch, fields } = mapExtract(t, r.data);
       // Name fallback: if we still don't have the applicant's name, take one read
       // from THIS document (bank-statement holder or e-bill owner, honorific
       // stripped) so we never ask for a name a document already shows.
@@ -870,7 +579,8 @@ function Inner() {
     setSheetReview({ parsed: parsed as Form });
   }
   function editSheetField(field: string, value: string) {
-    setSheetReview((r) => r ? { ...r, parsed: { ...r.parsed, [field]: value } } : r);
+    const v = SHEET_AMOUNT_FIELDS.has(field) ? amountText(value) : value; // "1,80,000" → "180000"
+    setSheetReview((r) => r ? { ...r, parsed: { ...r.parsed, [field]: v } } : r);
   }
   function confirmSheet() {
     if (!sheetReview) return;
@@ -910,9 +620,8 @@ function Inner() {
     if (!appId) return true;
     setBusy(true); setError(null);
     try {
-      const res = await fetch(`/api/admin/loan-app/${appId}/update-fields`, { method: "PATCH", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(obj) });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j?.ok) { setError(j?.error || "Couldn't save the change."); return false; }
+      const r = await sendLoanJson(appId, "update-fields", obj, "Couldn't save the change.", "PATCH");
+      if (!r.ok) { setError(r.error); return false; }
       return true;
     } finally { setBusy(false); }
   }
@@ -921,24 +630,21 @@ function Inner() {
   // fields (co-applicant flag …) and advances current_step; step 5 only with a
   // loan configuration. update-fields already wrote the columns; these confirm.
   async function postStep(step: 1 | 2 | 3 | 4): Promise<boolean> {
-    const r = await fetch(`/api/admin/loan-app/${appId}/complete-step-${step}`, { method: step === 1 ? "PATCH" : "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(STEP_PAYLOAD[step](form)) });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok || !j?.ok) { setError(j?.error || `Couldn't save step ${step}.`); return false; }
+    const r = await sendLoanJson(appId, `complete-step-${step}`, STEP_PAYLOAD[step](form), `Couldn't save step ${step}.`, step === 1 ? "PATCH" : "POST");
+    if (!r.ok) { setError(r.error); return false; }
     return true;
   }
   async function runSteps(config: Record<string, unknown> | null): Promise<boolean> {
     for (const step of [1, 2, 3, 4] as const) if (!(await postStep(step))) return false;
     if (!config) { invalidateLoanBoards(); return true; }
-    const r5 = await fetch(`/api/admin/loan-app/${appId}/complete-step-5`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(config) });
-    const j5 = await r5.json().catch(() => ({}));
-    if (!r5.ok || !j5?.ok) { setError(j5?.error || "Couldn't save loan configuration."); return false; }
+    const r5 = await sendLoanJson(appId, "complete-step-5", config, "Couldn't save loan configuration.");
+    if (!r5.ok) { setError(r5.error); return false; }
     invalidateLoanBoards();
     return true;
   }
   async function submitApp(): Promise<boolean> {
-    const r6 = await fetch(`/api/admin/loan-app/${appId}/complete-step-6`, { method: "POST", headers: authHeaders({ "Content-Type": "application/json" }), body: JSON.stringify({}) });
-    const j6 = await r6.json().catch(() => ({}));
-    if (!r6.ok || !j6?.ok) { setError(j6?.error || "Couldn't submit the application."); return false; }
+    const r6 = await sendLoanJson(appId, "complete-step-6", {}, "Couldn't submit the application.");
+    if (!r6.ok) { setError(r6.error); return false; }
     invalidateLoanBoards();
     return true;
   }
@@ -1185,38 +891,9 @@ function Inner() {
               <button onClick={() => answerQ1(false)} className="flex-1 px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">No</button>
             </div>
           )}
-          {editStep === "pick" && (() => {
-            const groups = editTableGroups(form);
-            return (
-              <div className="flex flex-col gap-2">
-                <div className="text-[12px] text-text-muted">{pickSel.length} selected · tick documents to re-upload (re-read) or details to edit</div>
-                <div className="rounded-xl border border-line bg-white overflow-hidden max-h-[46vh] overflow-y-auto">
-                  {groups.map((g) => (
-                    <div key={g.title}>
-                      <div className="px-3 py-1.5 bg-[#eef7f2] border-y border-[#d7ebe1] text-[11px] font-semibold text-[#0f3d2e]">{g.title}</div>
-                      {g.rows.map((r) => {
-                        const on = pickSel.includes(r.key);
-                        return (
-                          <div key={r.key} onClick={() => setPickSel((s) => (on ? s.filter((x) => x !== r.key) : [...s, r.key]))}
-                            className="flex items-center gap-2.5 px-3 py-2 border-b border-line/70 last:border-b-0 cursor-pointer hover:bg-[#f7fcf9]">
-                            <input type="checkbox" checked={on} onChange={() => {}} onClick={(e) => e.stopPropagation()} className="w-4 h-4 accent-[#178a5c] cursor-pointer shrink-0" aria-label={r.label} />
-                            <span className="flex-1 text-[12.5px] text-text leading-snug">{r.label}</span>
-                            {r.doc
-                              ? (r.on ? <span className="text-[11px] font-semibold text-[#178a5c] shrink-0">On file</span> : <span className="text-[11px] font-semibold text-amber-600 shrink-0">Missing</span>)
-                              : <span className="text-[11.5px] text-text-muted text-right max-w-[46%] truncate shrink-0">{r.value}</span>}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-                </div>
-                <div className="flex gap-2 mt-1">
-                  <button onClick={editSelected} disabled={!pickSel.length} className="px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold disabled:opacity-50 hover:bg-[#12734c]">Edit selected{pickSel.length ? ` (${pickSel.length})` : ""} →</button>
-                  <button onClick={() => setEditStep("q1")} className="px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid">Back</button>
-                </div>
-              </div>
-            );
-          })()}
+          {editStep === "pick" && (
+            <EditPickList form={form} pickSel={pickSel} setPickSel={setPickSel} onEditSelected={editSelected} onBack={() => setEditStep("q1")} />
+          )}
           {editStep === "q2" && (
             <div className="flex gap-2">
               <button onClick={() => answerQ2(true)} className="flex-1 px-4 py-2.5 rounded-xl bg-[#178a5c] text-white text-[14px] font-semibold hover:bg-[#12734c]">Yes — complete it</button>
@@ -1235,42 +912,8 @@ function Inner() {
           {editing && <EditingBanner theme={THEME} onCancel={cancelEdit} />}
 
           {active.kind === "epc" && (
-            <div className="flex flex-col gap-2">
-              {/* The list is hidden behind the "EPCs list" button and opens
-                  UPWARD (dropup). Inside: a search that also lets you type a
-                  brand-new EPC name (→ captured as a lead). */}
-              {epcOpen && (
-                <div className="rounded-2xl border border-line bg-white shadow-lg overflow-hidden">
-                  <div className="p-2 border-b border-line">
-                    <input autoFocus value={epcSearch} onChange={(e) => setEpcSearch(e.target.value)} placeholder="Search, or type a new EPC name…" className="w-full border border-line rounded-lg px-3 py-2 text-[14px] bg-white focus:outline-none focus:border-[#178a5c]" />
-                  </div>
-                  <div className="max-h-[38vh] overflow-y-auto flex flex-col">
-                    {epcs.length === 0 ? (
-                      <div className="text-[13px] text-text-muted px-3 py-3">Loading partners…</div>
-                    ) : filteredEpcs.length === 0 ? (
-                      <div className="text-[13px] text-text-muted px-3 py-3">No approved EPC matches “{epcSearch.trim()}”.</div>
-                    ) : filteredEpcs.map((e) => (
-                      <button key={e.value} onClick={() => void answer(e.value, e.label, { createApp: true, editable: true })} className="text-left px-4 py-2.5 border-b border-line/60 last:border-0 hover:bg-[#f7fcf9] transition">
-                        <div className="text-[14px] font-semibold text-text">{e.label}</div>{e.sub && <div className="text-[12px] text-text-muted font-mono">{e.sub}</div>}
-                      </button>
-                    ))}
-                    {epcSearch.trim() && (
-                      <button onClick={() => startLead(epcSearch.trim())} className="text-left px-4 py-2.5 bg-[#f7fcf9] hover:bg-[#eef8f2] transition border-t border-line">
-                        <span className="text-[13px] font-semibold text-[#0f3d2e]">+ Use “{epcSearch.trim()}”</span>
-                        <span className="block text-[11px] text-text-muted">Not a registered partner — saved to your Leads to convert later.</span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-              {/* Dropup trigger */}
-              <button onClick={() => setEpcOpen((o) => !o)} className="flex items-center justify-between px-4 py-3 rounded-full border border-[#178a5c] bg-white text-[14px] font-semibold text-[#0f3d2e] hover:bg-[#f7fcf9] transition">
-                <span>EPCs list</span>
-                <span className="text-[12px] text-[#178a5c]">{epcOpen ? "▾" : "▴"}</span>
-              </button>
-              {/* Locked composer — the chat opens only after an EPC is chosen. */}
-              <div className="rounded-full border border-line bg-bg-soft px-4 py-2.5 text-[13px] text-text-muted select-none">Please select an EPC first</div>
-            </div>
+            <EpcPicker epcs={epcs} filteredEpcs={filteredEpcs} epcSearch={epcSearch} setEpcSearch={setEpcSearch} epcOpen={epcOpen} setEpcOpen={setEpcOpen}
+              onPick={(e) => void answer(e.value, e.label, { createApp: true, editable: true })} onNewLead={startLead} />
           )}
 
           {active.kind === "choice" && (
@@ -1340,668 +983,4 @@ function Inner() {
       )}
     </div>
   );
-}
-
-// ── Document-slot table ──────────────────────────────────────────────────────
-// The intake documents as fixed, labeled slots. Each ROW is one upload box; a
-// "read unit" is what one extractor call needs. Aadhaar reads BOTH sides in a
-// single extract-aadhaar call, so its front + back rows share one unit that fires
-// only once both files are present. Every other row is its own single-file unit.
-// Reads run in PARALLEL as boxes fill — no row waits on another.
-type DocSlot =
-  | "aadhaar_front" | "aadhaar_back" | "applicant_pan" | "ebill"
-  | "rooftop" | "selfie"
-  | "coapp_aadhaar_front" | "coapp_aadhaar_back" | "coapp_pan";
-type DocUnit = "aadhaar" | "applicant_pan" | "ebill" | "rooftop" | "selfie" | "coapp_aadhaar" | "coapp_pan";
-type DocRow = { slot: DocSlot; label: string; unit: DocUnit; lastOfUnit?: boolean; coappOnly?: boolean };
-
-// Column-1 rows, in order. Co-app rows appear only when a co-applicant is named.
-const DOC_TABLE_ROWS: DocRow[] = [
-  { slot: "aadhaar_front", label: "Applicant Aadhaar — front", unit: "aadhaar" },
-  { slot: "aadhaar_back",  label: "Applicant Aadhaar — back",  unit: "aadhaar", lastOfUnit: true },
-  { slot: "applicant_pan", label: "Applicant PAN",             unit: "applicant_pan", lastOfUnit: true },
-  { slot: "ebill",         label: "E-bill",                    unit: "ebill", lastOfUnit: true },
-  { slot: "rooftop",       label: "Rooftop photo",             unit: "rooftop", lastOfUnit: true },
-  { slot: "selfie",        label: "Applicant photo",           unit: "selfie", lastOfUnit: true },
-  { slot: "coapp_aadhaar_front", label: "Co-applicant Aadhaar — front", unit: "coapp_aadhaar", coappOnly: true },
-  { slot: "coapp_aadhaar_back",  label: "Co-applicant Aadhaar — back",  unit: "coapp_aadhaar", coappOnly: true, lastOfUnit: true },
-  { slot: "coapp_pan",           label: "Co-applicant PAN",             unit: "coapp_pan", coappOnly: true, lastOfUnit: true },
-];
-// The slot(s) that feed each read unit (order = FormData order for Aadhaar).
-const DOC_UNIT_PARTS: Record<DocUnit, DocSlot[]> = {
-  aadhaar: ["aadhaar_front", "aadhaar_back"],
-  applicant_pan: ["applicant_pan"], ebill: ["ebill"], rooftop: ["rooftop"], selfie: ["selfie"],
-  coapp_aadhaar: ["coapp_aadhaar_front", "coapp_aadhaar_back"], coapp_pan: ["coapp_pan"],
-};
-// Form key(s) that mark a whole unit already on the profile (edit-mode prefill).
-const DOC_UNIT_PATHS: Record<DocUnit, string[]> = {
-  aadhaar: ["aadhaar_front_path", "aadhaar_back_path"], applicant_pan: ["borrower_pan"], ebill: ["ebill_path"],
-  rooftop: ["rooftop_photo_path"], selfie: ["customer_photo_path"],
-  coapp_aadhaar: ["coapp_aadhaar_front_path", "coapp_aadhaar_back_path"], coapp_pan: ["coapp_pan_path"],
-};
-// The single form key that marks THIS row's own file present (prefill per row).
-const DOC_ROW_PATH: Record<DocSlot, string> = {
-  aadhaar_front: "aadhaar_front_path", aadhaar_back: "aadhaar_back_path",
-  applicant_pan: "borrower_pan", ebill: "ebill_path",
-  rooftop: "rooftop_photo_path", selfie: "customer_photo_path",
-  coapp_aadhaar_front: "coapp_aadhaar_front_path", coapp_aadhaar_back: "coapp_aadhaar_back_path",
-  coapp_pan: "coapp_pan_path",
-};
-// Editable "read from the document" rows for a unit, from the current form — the
-// same field mapping the old per-doc review cards used. Photo units have none.
-const DOC_UNIT_FIELDS: Partial<Record<DocUnit, (f: Form) => Fetched[]>> = {
-  aadhaar: (f) => [frow("Name", f.aadhaar_name || f.borrower_name, "aadhaar_name"), frow("DOB", f.aadhaar_dob, "aadhaar_dob"), frow("Gender", f.aadhaar_gender, "aadhaar_gender"), frow("Aadhaar", f.aadhaar_number, "aadhaar_number"), frow("Address", f.aadhaar_address, "aadhaar_address")],
-  applicant_pan: (f) => [frow("PAN", f.borrower_pan, "borrower_pan"), frow("Name", f.borrower_name, "borrower_name"), frow("Father", f.borrower_father_name, "borrower_father_name")],
-  ebill: (f) => [frow("Monthly bill (₹)", f.monthly_bill_amount, "monthly_bill_amount"), frow("DISCOM", f.discom_name, "discom_name"), frow("Bill name", f.ebill_name, "ebill_name"), frow("CA number", f.ca_number, "ca_number")],
-  coapp_aadhaar: (f) => [frow("Name", f.coapp_aadhaar_name || f.coapp_name, "coapp_aadhaar_name"), frow("DOB", f.coapp_aadhaar_dob, "coapp_aadhaar_dob"), frow("Aadhaar", f.coapp_aadhaar_number, "coapp_aadhaar_number"), frow("Address", f.coapp_aadhaar_address, "coapp_aadhaar_address")],
-  coapp_pan: (f) => [frow("PAN", f.coapp_pan, "coapp_pan"), frow("Name", f.coapp_name, "coapp_name"), frow("Father", f.coapp_father_name, "coapp_father_name")],
-};
-
-// Friendly per-unit label — used in the combined-PDF (single) review list.
-const UNIT_LABEL: Record<DocUnit, string> = {
-  aadhaar: "Applicant Aadhaar", applicant_pan: "Applicant PAN", ebill: "E-bill",
-  rooftop: "Rooftop photo", selfie: "Applicant photo",
-  coapp_aadhaar: "Co-applicant Aadhaar", coapp_pan: "Co-applicant PAN",
-};
-
-// Applicable rows / units for the current form (co-app rows only with a co-app).
-function docTableRowsFor(f: Form): DocRow[] { return DOC_TABLE_ROWS.filter((r) => !r.coappOnly || hasCoapp(f)); }
-function docTableUnitsFor(f: Form): DocUnit[] { return Array.from(new Set(docTableRowsFor(f).map((r) => r.unit))); }
-// An off-grid system has no grid connection — its e-bill is optional.
-const billOptional = (f: Form) => f.system_type === "off_grid";
-// Every applicable unit is on the profile → the doc_table turn is "filled".
-function docTableComplete(f: Form): boolean {
-  return docTableUnitsFor(f)
-    .filter((u) => !(u === "ebill" && billOptional(f)))
-    .every((u) => DOC_UNIT_PATHS[u].every((k) => !!(f[k] && String(f[k]).trim())));
-}
-
-type DocSlotFile = { file: File; thumb: string | null };
-// Upload + read ONE unit with its dedicated route, returning the form patch. The
-// mapping reuses mapExtract (identical to the old per-doc turns). Throws on a hard
-// failure; the caller catches it and shows a per-row "couldn't read" state.
-async function callDocRoute(unit: DocUnit, appId: string, files: Partial<Record<DocSlot, DocSlotFile>>, form: Form): Promise<Form> {
-  const auth = authHeaders();
-  const fileOf = (slot: DocSlot) => { const f = files[slot]?.file; if (!f) throw new Error("File missing — re-attach it."); return f; };
-  if (unit === "aadhaar" || unit === "coapp_aadhaar") {
-    const co = unit === "coapp_aadhaar";
-    const fd = new FormData();
-    fd.append("front", fileOf(co ? "coapp_aadhaar_front" : "aadhaar_front"));
-    fd.append("back",  fileOf(co ? "coapp_aadhaar_back"  : "aadhaar_back"));
-    const res = await fetch(`/api/admin/loan-app/${appId}/extract-aadhaar`, { method: "POST", headers: auth, body: fd });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the Aadhaar.");
-    return mapExtract({ id: unit, bot: "", kind: "docs", extractRoute: "extract-aadhaar", extraForm: co ? { _coapp: "1" } : undefined } as Turn, j).patch;
-  }
-  if (unit === "applicant_pan" || unit === "coapp_pan") {
-    const applicant = unit === "applicant_pan";
-    const fd = new FormData();
-    fd.append("file", fileOf(unit));
-    if (applicant) fd.append("applicant", "1"); // route files it under the borrower_pan slot
-    const res = await fetch(`/api/admin/loan-app/${appId}/extract-coapp-pan`, { method: "POST", headers: auth, body: fd });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the PAN.");
-    return mapExtract({ id: unit, bot: "", kind: "docs", extractRoute: "extract-coapp-pan", applicantPan: applicant } as Turn, j).patch;
-  }
-  if (unit === "ebill") {
-    const fd = new FormData();
-    fd.append("ebill", fileOf("ebill"));
-    const res = await fetch(`/api/admin/loan-app/${appId}/extract-loan-docs`, { method: "POST", headers: auth, body: fd });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read the bill.");
-    const patch = mapExtract({ id: "ebill", bot: "", kind: "docs", extractRoute: "extract-loan-docs" } as Turn, j).patch;
-    // Name fallback (mirrors old runDocs): take the bill's name if the applicant's
-    // is still unknown, honorific stripped, so we never re-ask a name a doc shows.
-    if (!form.borrower_name && !patch.borrower_name && patch.ebill_name) {
-      const nm = String(patch.ebill_name).replace(/^(m\/s|mr|mrs|ms|smt|shri|sri|dr)\.?\s+/i, "").trim();
-      if (nm.length >= 2) patch.borrower_name = nm;
-    }
-    return patch;
-  }
-  // rooftop / selfie → /api/upload (no OCR). category MUST match the profile slot:
-  // borrower_photo = rooftop, customer_photo = applicant photo.
-  const category = unit === "rooftop" ? "borrower_photo" : "customer_photo";
-  const pathField = unit === "rooftop" ? "rooftop_photo_path" : "customer_photo_path";
-  const fd = new FormData();
-  fd.append("file", fileOf(unit));
-  fd.append("table", "user_application_docs");
-  fd.append("category", category);
-  fd.append("application_id", appId);
-  fd.append("uploaded_by", "admin");
-  fd.append("replace", "true"); // one row per photo slot — re-upload replaces, never duplicates (→ no stray "Other documents" copy)
-  const res = await fetch("/api/upload", { method: "POST", headers: auth, body: fd });
-  const j = await res.json().catch(() => ({}));
-  if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't upload the photo.");
-  const patch: Form = { [pathField]: j.storage_path };
-  if (unit === "rooftop") patch.rooftop_photo_uploaded_at = new Date().toISOString();
-  return patch;
-}
-
-// The document-slot table shown inside the chat dock for the doc_table turn.
-// Column 1 = fixed label, Column 2 = upload box (tap / drop / paste) that reads
-// with the row's dedicated extractor the moment a file lands (in parallel; a
-// grouped Aadhaar reads once both sides are in), Column 3 = "Don't have it" skip.
-// Every read is caught → a failing row shows "couldn't read — try again" and never
-// blocks another. "Done with documents" enables once every row is uploaded or
-// skipped; pending rows are recorded on the parent (draft at submit).
-// Co-applicant visibility and edit-mode prefill both derive from `form`, so the
-// table needs nothing else from the parent beyond the callbacks.
-function DocTable({ appId, form, onPatch, onSkipChange, onDone, limitUnits }: {
-  appId: string; form: Form;
-  onPatch: (patch: Form) => void; onSkipChange: (label: string, skipped: boolean) => void;
-  onDone: (receipt: FileReceipt[]) => void;
-  limitUnits?: Set<DocUnit>;   // edit mode: show only these document units
-}) {
-  const [slotFiles, setSlotFiles] = useState<Partial<Record<DocSlot, DocSlotFile>>>({});
-  const [skipped, setSkipped] = useState<Partial<Record<DocSlot, boolean>>>({});
-  const [reads, setReads] = useState<Partial<Record<DocUnit, { status: "reading" | "done" | "error"; error?: string }>>>({});
-  const [replacing, setReplacing] = useState<Partial<Record<DocUnit, boolean>>>({});
-  // Optional shortcut: drop ONE combined PDF (all documents) → auto-split + fill
-  // the boxes below. The rows read `form`, so patching it here fills them.
-  const [combo, setCombo] = useState<{ status: "reading" | "done" | "error"; error?: string; filled?: number } | null>(null);
-  const [comboName, setComboName] = useState<string>("");
-  const filesRef = useRef<Partial<Record<DocSlot, DocSlotFile>>>({});
-  const mounted = useRef(true);
-  useEffect(() => () => { mounted.current = false; }, []);
-
-  const rows = docTableRowsFor(form).filter((r) => !limitUnits || limitUnits.size === 0 || limitUnits.has(r.unit));
-  const labelOf = (slot: DocSlot) => DOC_TABLE_ROWS.find((r) => r.slot === slot)!.label;
-  const rowPrefilled = (slot: DocSlot) => !!(form[DOC_ROW_PATH[slot]] && String(form[DOC_ROW_PATH[slot]]).trim());
-  const unitPrefilled = (u: DocUnit) => DOC_UNIT_PATHS[u].every((k) => !!(form[k] && String(form[k]).trim()));
-  const unitDone = (u: DocUnit) => !replacing[u] && (reads[u]?.status === "done" || unitPrefilled(u));
-  // A box is "open" (needs a file) when it has no fresh file, isn't skipped, and
-  // is either not on the profile or being replaced.
-  const rowOpen = (slot: DocSlot, u: DocUnit) => !slotFiles[slot] && !skipped[slot] && (!rowPrefilled(slot) || !!replacing[u]);
-  // A row is settled for "Continue" when skipped, freshly attached (and its read
-  // hasn't hard-failed), or already on the profile. An errored read blocks only
-  // softly — the RM can always tick "Don't have it".
-  const rowSettled = (slot: DocSlot, u: DocUnit) =>
-    !!skipped[slot] || (!!slotFiles[slot] && reads[u]?.status !== "error") || (!replacing[u] && rowPrefilled(slot));
-  const allSettled = rows.every((r) => rowSettled(r.slot, r.unit));
-
-  async function runUnit(unit: DocUnit, files: Partial<Record<DocSlot, DocSlotFile>>) {
-    setReads((s) => ({ ...s, [unit]: { status: "reading" } }));
-    try {
-      const patch = await callDocRoute(unit, appId, files, form);
-      onPatch(patch);
-      if (mounted.current) setReads((s) => ({ ...s, [unit]: { status: "done" } }));
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : "Couldn't read that — replace the file and try again.";
-      if (mounted.current) setReads((s) => ({ ...s, [unit]: { status: "error", error: msg } }));
-    }
-  }
-
-  // Combined-PDF shortcut → the auto-split route. Fills the table via onPatch;
-  // the RM then reviews the filled rows + adds anything it couldn't read.
-  async function runCombo(file: File) {
-    if (!(file.type.includes("pdf") || file.type.startsWith("image/"))) return;
-    setComboName(file.name || "combined PDF");
-    setCombo({ status: "reading" });
-    try {
-      const fd = new FormData();
-      fd.append("files", file);
-      if (form.borrower_name) fd.append("applicant_name", form.borrower_name);
-      if (form.coapp_name) fd.append("coapp_name", form.coapp_name);
-      const res = await fetch(`/api/admin/loan-app/${appId}/bundle-docs`, { method: "POST", headers: authHeaders(), body: fd });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || !j?.ok) throw new Error(j?.error || "Couldn't read that PDF.");
-      if (j.form && typeof j.form === "object") onPatch(j.form as Form);
-      const n = Array.isArray(j.documents) ? j.documents.length : 0;
-      if (mounted.current) setCombo({ status: "done", filled: n });
-    } catch (e) {
-      if (mounted.current) setCombo({ status: "error", error: e instanceof Error ? e.message : "Couldn't read that PDF." });
-    }
-  }
-
-  function pickFile(slot: DocSlot, unit: DocUnit, file: File) {
-    if (!(file.type.startsWith("image/") || file.type.includes("pdf"))) return;
-    const thumb = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
-    const next = { ...filesRef.current, [slot]: { file, thumb } };
-    filesRef.current = next;
-    setSlotFiles(next);
-    if (skipped[slot]) { setSkipped((s) => { const n = { ...s }; delete n[slot]; return n; }); onSkipChange(labelOf(slot), false); }
-    setReplacing((s) => (s[unit] ? { ...s, [unit]: false } : s));
-    // Fire the read once EVERY part of this unit has a file (Aadhaar = both sides).
-    if (DOC_UNIT_PARTS[unit].every((p) => next[p])) void runUnit(unit, next);
-  }
-
-  function toggleSkip(slot: DocSlot) {
-    const now = !skipped[slot];
-    setSkipped((s) => ({ ...s, [slot]: now }));
-    onSkipChange(labelOf(slot), now);
-    if (now) { const n = { ...filesRef.current }; delete n[slot]; filesRef.current = n; setSlotFiles(n); }
-  }
-
-  // "Replace" on a done unit → clear its file(s) + read so the box(es) re-open.
-  // Aadhaar clears BOTH sides (the extractor reads front + back together).
-  function replaceUnit(unit: DocUnit) {
-    const n = { ...filesRef.current };
-    for (const p of DOC_UNIT_PARTS[unit]) delete n[p];
-    filesRef.current = n; setSlotFiles(n);
-    setReads((s) => { const x = { ...s }; delete x[unit]; return x; });
-    setReplacing((s) => ({ ...s, [unit]: true }));
-  }
-  // "Replace" on a box before its read finishes (e.g. one Aadhaar side) → clear
-  // just that box; a done/prefilled unit clears wholesale.
-  function reopen(slot: DocSlot, unit: DocUnit) {
-    if (reads[unit]?.status === "done" || unitPrefilled(unit)) { replaceUnit(unit); return; }
-    const n = { ...filesRef.current }; delete n[slot]; filesRef.current = n; setSlotFiles(n);
-    setReads((s) => { const x = { ...s }; delete x[unit]; return x; });
-  }
-
-  function done() {
-    if (form._doc_choice === "single") { onDone(comboName ? [{ name: comboName, thumb: null }] : []); return; }
-    const receipt = rows.filter((r) => slotFiles[r.slot]).map((r) => ({ name: slotFiles[r.slot]!.file.name, thumb: slotFiles[r.slot]!.thumb }));
-    onDone(receipt);
-  }
-
-  // Paste (Ctrl+V) fills the first open box.
-  useEffect(() => {
-    const h = (e: ClipboardEvent) => {
-      const f = e.clipboardData?.files?.[0]; if (!f) return;
-      const target = rows.find((r) => rowOpen(r.slot, r.unit));
-      if (!target) return;
-      e.preventDefault();
-      pickFile(target.slot, target.unit, f);
-    };
-    window.addEventListener("paste", h);
-    return () => window.removeEventListener("paste", h);
-  });
-
-  // Column-2 content for a row (inline function, not a nested component — keeps the
-  // field editor from remounting when a sibling row's read updates the parent).
-  function cell(r: DocRow) {
-    if (skipped[r.slot]) return <span className="text-[11.5px] text-text-muted italic">skipped</span>;
-    if (rowOpen(r.slot, r.unit)) return <AddFileButton theme={THEME} onFile={(f) => pickFile(r.slot, r.unit, f)} />;
-    return <SlotFileChip theme={THEME} thumb={slotFiles[r.slot]?.thumb} onReplace={() => reopen(r.slot, r.unit)} />;
-  }
-
-  // The read strip shown under a unit's last row: reading / error+retry / editable
-  // fields / replacing. Returns null when the unit's boxes are still empty.
-  function unitStrip(unit: DocUnit) {
-    const rd = reads[unit];
-    if (rd?.status === "reading") return <ReadingLine theme={THEME} />;
-    if (rd?.status === "error") {
-      const canRetry = DOC_UNIT_PARTS[unit].every((p) => filesRef.current[p]);
-      return (
-        <span className="flex flex-wrap items-center gap-2 text-[11.5px]">
-          <span className="text-red-600">{rd.error || "Couldn't read that."}</span>
-          {canRetry && <button onClick={() => void runUnit(unit, filesRef.current)} className="text-[#178a5c] font-semibold hover:underline">Try again</button>}
-          <span className="text-text-muted">or use “Replace” above.</span>
-        </span>
-      );
-    }
-    if (unitDone(unit)) {
-      const build = DOC_UNIT_FIELDS[unit];
-      return build
-        ? <FieldRows theme={THEME} fields={build(form)} onEdit={(field, value) => onPatch({ [field]: value })} />
-        : <span className="text-[11.5px] text-[#178a5c] font-medium">Uploaded ✓</span>;
-    }
-    if (replacing[unit] && unitPrefilled(unit)) {
-      return (
-        <span className="flex items-center gap-2 text-[11.5px] text-text-muted">
-          Replacing — attach the file{DOC_UNIT_PARTS[unit].length > 1 ? "s" : ""} above, or
-          <button onClick={() => setReplacing((s) => ({ ...s, [unit]: false }))} className="text-[#178a5c] font-semibold hover:underline">keep the current one</button>
-        </span>
-      );
-    }
-    return null;
-  }
-
-  // ── SINGLE combined-PDF mode: one upload, OCR reads the whole PDF, review. ──
-  if (form._doc_choice === "single") {
-    const units = docTableUnitsFor(form);
-    const foundUnits = units.filter((u) => unitDone(u) || unitPrefilled(u));
-    const missingUnits = units.filter((u) => !(unitDone(u) || unitPrefilled(u)));
-    const canContinue = combo?.status === "done" || foundUnits.length > 0;
-    return (
-      <div className="flex flex-col gap-2">
-        <div className="rounded-xl border border-dashed border-[#cdeadd] bg-[#f7fcf9] px-3 py-3">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="text-[12.5px] text-text-mid">
-              <span className="font-semibold text-[#0f3d2e]">Upload the combined PDF</span> — I&rsquo;ll read every document inside it.
-            </div>
-            <label onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) void runCombo(f); }}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[#178a5c] bg-white px-3 py-1.5 cursor-pointer text-[12px] font-semibold text-[#178a5c] hover:bg-[#f0faf5] shrink-0">
-              {combo?.status === "reading"
-                ? <><span className="w-3.5 h-3.5 rounded-full border-2 border-[#178a5c]/30 border-t-[#178a5c] animate-spin" /> Reading…</>
-                : <>＋ {combo?.status === "done" ? "Re-upload PDF" : "Upload combined PDF"}</>}
-              <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void runCombo(f); e.currentTarget.value = ""; }} />
-            </label>
-          </div>
-          {combo?.status === "reading" && <div className="text-[11.5px] text-text-muted mt-1">Reading the PDF and pulling out each document…</div>}
-          {combo?.status === "error" && <div className="text-[11.5px] text-red-600 mt-1">{combo.error}</div>}
-        </div>
-
-        {combo?.status === "done" && (
-          <div className="rounded-xl border border-line bg-white divide-y divide-line/70">
-            {foundUnits.map((u) => {
-              const build = DOC_UNIT_FIELDS[u];
-              return (
-                <div key={u} className="px-3 py-2.5">
-                  <div className="text-[12px] font-semibold text-[#0f3d2e] mb-1">{UNIT_LABEL[u]} <span className="text-[#178a5c]">✓</span></div>
-                  {build ? <FieldRows theme={THEME} fields={build(form)} onEdit={(field, value) => onPatch({ [field]: value })} /> : <span className="text-[11.5px] text-text-muted">Uploaded</span>}
-                </div>
-              );
-            })}
-            {missingUnits.length > 0 && (
-              <div className="px-3 py-2.5 text-[11.5px] text-amber-700">
-                Not found in the PDF: {missingUnits.map((u) => UNIT_LABEL[u]).join(", ")}. Re-upload a fuller PDF, or continue and add them later.
-              </div>
-            )}
-          </div>
-        )}
-
-        <ContinueRow theme={THEME} label="Done with documents →" disabled={!canContinue} onClick={done} hint="Upload the combined PDF to continue." />
-      </div>
-    );
-  }
-
-  // ── SEPARATE mode: the labeled-slot table (one box per document). ──
-  return (
-    <div className="flex flex-col gap-2">
-      <DocSlotTable theme={THEME} rows={rows} skipped={skipped} onToggleSkip={toggleSkip} cell={cell} strip={(r) => unitStrip(r.unit)} />
-      <ContinueRow theme={THEME} label="Done with documents →" disabled={!allSettled} onClick={done} hint="Add or tick “Don't have it” for every row to continue." />
-    </div>
-  );
-}
-
-// Info-sheet confirm card — the parsed values, every one editable, shown before
-// they're written to the profile. Values are stored raw; friendly labels/format
-// (₹, "years", "kW", "On-Grid") are display-only.
-function SheetConfirmCard({ parsed, onEdit, onConfirm, onSkip }: {
-  parsed: Form; onEdit: (field: string, value: string) => void; onConfirm: () => void; onSkip: () => void;
-}) {
-  // Every row shown has a value (empty ones are left out), so none is "not found".
-  const rows = SHEET_ROWS.filter((r) => parsed[r.field] != null && String(parsed[r.field]).trim() !== "").map((r) => {
-    const raw = String(parsed[r.field]);
-    return { label: r.label, value: raw, ok: true, field: r.field, display: r.render ? r.render(raw) : raw };
-  });
-  return (
-    <ReadCardFrame theme={THEME} icon="📝" title="Read from the info sheet — check before continuing" width="max-w-[92%]">
-      <div className="p-3.5 flex flex-col gap-2">
-        <EditableRows theme={THEME} rows={rows} onSave={onEdit} />
-        <p className="text-[11px] text-text-muted leading-snug mt-0.5">The EPC partner stays as you chose it — the merchant name is kept only for reference.</p>
-        <div className="flex flex-wrap gap-2 mt-1">
-          <button onClick={onConfirm} className="px-3.5 py-1.5 rounded-lg bg-[#178a5c] text-white text-[12.5px] font-semibold hover:bg-[#12734c]">Confirm & continue →</button>
-          <button onClick={onSkip} className="px-3 py-1.5 rounded-lg border border-line text-[12.5px] text-text-mid hover:bg-bg-soft">Skip</button>
-        </div>
-      </div>
-    </ReadCardFrame>
-  );
-}
-
-function LoanConfigDock({ loanAmt, subsidyCase, setSubsidyCase, centralSub, setCentralSub, stateSub, setStateSub, tenure, setTenure, onFinish, finishLabel }: {
-  loanAmt: number; subsidyCase: "subsidy" | "non_subsidy"; setSubsidyCase: (s: "subsidy" | "non_subsidy") => void;
-  centralSub: string; setCentralSub: (s: string) => void; stateSub: string; setStateSub: (s: string) => void;
-  tenure: number | null; setTenure: (n: number) => void; onFinish: () => void; finishLabel: string;
-}) {
-  return (
-    <div className="flex flex-col gap-3 max-h-[52vh] overflow-y-auto pr-0.5">
-      <div>
-        <div className="text-[12px] text-text-muted mb-1">Subsidy case</div>
-        <div className="flex gap-2">
-          {(["subsidy", "non_subsidy"] as const).map((s) => (
-            <button key={s} onClick={() => setSubsidyCase(s)} className={["px-3 py-1.5 rounded-lg text-[13px] font-semibold border", subsidyCase === s ? "bg-[#178a5c] text-white border-[#178a5c]" : "bg-white border-line text-text-mid"].join(" ")}>{s === "subsidy" ? "Subsidy" : "Non-subsidy"}</button>
-          ))}
-        </div>
-      </div>
-      {subsidyCase === "subsidy" && (
-        <div className="grid grid-cols-2 gap-2">
-          <label className="text-[12px] text-text-muted">Central subsidy (₹)
-            <input value={centralSub} onChange={(e) => setCentralSub(amountInput(e.target.value))} className="mt-1 w-full border border-line rounded-lg px-2 py-1.5 text-[13px]" /></label>
-          <label className="text-[12px] text-text-muted">State subsidy (₹)
-            <input value={stateSub} onChange={(e) => setStateSub(amountInput(e.target.value))} placeholder="0" className="mt-1 w-full border border-line rounded-lg px-2 py-1.5 text-[13px]" /></label>
-        </div>
-      )}
-      <div>
-        <div className="text-[12px] text-text-muted mb-1">Tenure — live EMI on ₹{loanAmt.toLocaleString("en-IN")}</div>
-        <div className="grid grid-cols-5 gap-1.5">
-          {TENURES.map((t) => (
-            <button key={t} onClick={() => setTenure(t)} className={["px-1 py-2 rounded-lg text-center border", tenure === t ? "bg-[#178a5c] text-white border-[#178a5c]" : "bg-white border-line text-text-mid"].join(" ")}>
-              <div className="text-[13px] font-bold">{t}y</div>
-              <div className="text-[10px] opacity-80">{loanAmt > 0 ? fmtRupees(computeEmi(loanAmt, DEFAULT_INDICATIVE_ROI, t)) : "—"}</div>
-            </button>
-          ))}
-        </div>
-      </div>
-      <button onClick={onFinish} disabled={tenure == null} className="mt-1 px-4 py-2.5 rounded-lg bg-[#178a5c] text-white text-[14px] font-semibold disabled:opacity-60 hover:bg-[#12734c]">{finishLabel}</button>
-    </div>
-  );
-}
-
-// The name of a pending detail, as the question asks it.
-function fieldLabel(t: Turn): string {
-  if (t.kind === "consent") return "Consent";
-  if (t.kind === "loanconfig") return "Loan configuration";
-  return t.docLabel || t.bot.replace(/\?.*$/, "").trim() || t.field || "detail";
-}
-
-// Fields where we show the typed amount in words (Indian format) for confirmation.
-const AMOUNT_FIELDS = new Set(["loan_amount_required", "annual_income", "total_project_cost", "monthly_bill_amount", "lead_loan_amount"]);
-
-// The path column(s) that make a document turn "already present" in edit mode.
-const DOC_PATHS: Record<string, string[]> = {
-  pan: ["borrower_pan"],
-  aadhaar: ["aadhaar_front_path", "aadhaar_back_path"],
-  selfie: ["customer_photo_path"],
-  ebill: ["ebill_path"],
-  quotation: ["proforma_invoice_path"],
-  rooftop: ["rooftop_photo_path"],
-  coapp_pan: ["coapp_pan_path"],
-  coapp_aadhaar: ["coapp_aadhaar_front_path", "coapp_aadhaar_back_path"],
-  bank: ["bank_statement_path"],
-};
-
-// Is this turn's data already on the profile? Drives edit mode's "ask only
-// what's missing" — filled turns are skipped.
-function isTurnFilled(t: Turn, f: Form): boolean {
-  // Creation-time input aids (EPC pick, paste sheet) + transient `_` fields are
-  // never re-asked in edit mode.
-  if (t.kind === "epc" || t.kind === "paste") return true;
-  if (t.kind === "consent") return f.consent === "yes";
-  if (t.field && t.field.startsWith("_")) return true;
-  // The document table is "filled" when every applicable slot is on the profile.
-  if (t.kind === "doc_table") return docTableComplete(f);
-  if (t.kind === "docs") {
-    const keys = DOC_PATHS[t.id] || [];
-    // The bank statement counts once its details are read too (Bank details on the profile).
-    return keys.length > 0 && keys.every((k) => !!(f[k] && String(f[k]).trim())) && (t.id !== "bank" || !!f.bank_account_no);
-  }
-  if (t.kind === "loanconfig") return !!(f.selected_tenure_years && String(f.selected_tenure_years).trim());
-  if (t.field) return !!(f[t.field] && String(f[t.field]).trim());
-  return false;
-}
-
-// A turn the RM can fill/edit (drives the edit "pick" list + completeness). The
-// paste sheet is a creation aid, not an editable profile field.
-function isEditableTurn(t: Turn): boolean {
-  if (t.field && t.field.startsWith("_")) return false;
-  return t.kind === "text" || t.kind === "pincode" || t.kind === "choice" || t.kind === "docs" || t.kind === "doc_table" || t.kind === "loanconfig";
-}
-// The required (non-optional, applicable) details still missing — consent included.
-function pendingOf(f: Form): string[] {
-  return SCRIPT.filter((t) => !t.optional && (!t.when || t.when(f)) && (isEditableTurn(t) || t.kind === "consent") && !isTurnFilled(t, f))
-    .map(fieldLabel);
-}
-// Every required (non-optional, applicable) detail is present.
-const isProfileComplete = (f: Form) => pendingOf(f).length === 0;
-// The already-filled details, for the multi-select edit list.
-// ── Edit table (grouped "what to edit" picker — mirrors the EPC portal chatbot) ──
-// Each row maps to the turn(s) re-asked when it's ticked; document rows also carry
-// the doc_table `units` to re-open. The co-applicant group shows only when the
-// file has a co-applicant. Documents re-upload (re-OCR); details edit inline.
-const SYS_LABEL: Record<string, string> = { on_grid: "On-Grid", off_grid: "Off-Grid", hybrid: "Hybrid" };
-const USE_LABEL: Record<string, string> = { residential: "Residential", commercial: "Commercial" };
-type EditRow = { key: string; label: string; doc?: boolean; on?: boolean; value?: string; turns: string[]; units?: DocUnit[] };
-type EditGroup = { title: string; rows: EditRow[] };
-function editTableGroups(f: Form): EditGroup[] {
-  const fv = (k: string) => (f[k] || "").trim();
-  const on = (k: string) => !!fv(k);
-  const rupee = (k: string) => (fv(k) ? "₹" + Number(f[k]).toLocaleString("en-IN") : "");
-  const groups: EditGroup[] = [
-    { title: "Documents", rows: [
-      { key: "aadhaar", label: "Aadhaar (front & back)", doc: true, on: on("aadhaar_front_path"), turns: ["doc_table"], units: ["aadhaar"] },
-      { key: "pan", label: "PAN card", doc: true, on: on("borrower_pan"), turns: ["doc_table"], units: ["applicant_pan"] },
-      { key: "ebill", label: "Electricity bill", doc: true, on: on("ebill_path"), turns: ["doc_table"], units: ["ebill"] },
-      { key: "rooftop", label: "Rooftop photo", doc: true, on: on("rooftop_photo_path"), turns: ["doc_table"], units: ["rooftop"] },
-      { key: "selfie", label: "Applicant photo", doc: true, on: on("customer_photo_path"), turns: ["doc_table"], units: ["selfie"] },
-      { key: "bank", label: "Bank statement", doc: true, on: on("bank_statement_path"), turns: ["bank"] },
-      { key: "quotation", label: "Quotation / proforma invoice", doc: true, on: on("proforma_invoice_path"), turns: ["quotation"] },
-      { key: "additional", label: "Additional documents", doc: true, on: false, turns: ["additional_docs"] },
-    ] },
-    { title: "Applicant details", rows: [
-      { key: "name", label: "Name & father's name", value: fv("borrower_name") || "—", turns: ["doc_table"], units: ["applicant_pan"] },
-      { key: "mobile", label: "Mobile", value: fv("borrower_mobile") || "—", turns: ["borrower_mobile"] },
-      { key: "email", label: "Email", value: fv("borrower_email") || "—", turns: ["edit_borrower_email"] },
-      { key: "aadhaar_fields", label: "DOB · gender · address", value: "from Aadhaar", turns: ["doc_table"], units: ["aadhaar"] },
-      { key: "pincode", label: "Installation pincode", value: fv("install_pincode") || "—", turns: ["install_pincode"] },
-      { key: "system_type", label: "System type", value: SYS_LABEL[f.system_type] || "—", turns: ["edit_system_type"] },
-      { key: "use", label: "Property use", value: USE_LABEL[f.plant_use_type] || "—", turns: ["plant_use_type"] },
-      { key: "lead_owner", label: "Lead owner", value: fv("lead_owner_name") || "—", turns: ["lead_owner_name"] },
-      { key: "coapp", label: "Co-applicant", value: hasCoapp(f) ? "Yes" : f.coapp_needed === "no" ? "No" : "—", turns: ["coapp_needed"] },
-    ] },
-  ];
-  if (hasCoapp(f)) groups.push({ title: "Co-applicant", rows: [
-    { key: "coapp_aadhaar", label: "Co-applicant Aadhaar", doc: true, on: on("coapp_aadhaar_front_path"), turns: ["doc_table"], units: ["coapp_aadhaar"] },
-    { key: "coapp_pan", label: "Co-applicant PAN", doc: true, on: on("coapp_pan_path") || on("coapp_pan"), turns: ["doc_table"], units: ["coapp_pan"] },
-    { key: "coapp_relation", label: "Relation", value: fv("coapp_relation") || "—", turns: ["coapp_relation"] },
-    { key: "coapp_mobile", label: "Mobile", value: fv("coapp_mobile") || "—", turns: ["coapp_mobile"] },
-    { key: "coapp_email", label: "Email", value: fv("coapp_email") || "—", turns: ["coapp_email"] },
-  ] });
-  groups.push({ title: "Project & bill", rows: [
-    { key: "project", label: "Project size & total cost", value: [fv("project_size") && fv("project_size") + " " + (f.project_size_unit || "kw"), rupee("total_project_cost")].filter(Boolean).join(" · ") || "—", turns: ["quotation"] },
-    { key: "bill", label: "Monthly bill · DISCOM", value: [rupee("monthly_bill_amount"), fv("discom_name")].filter(Boolean).join(" · ") || "—", turns: ["doc_table"], units: ["ebill"] },
-  ] });
-  groups.push({ title: "Employment & bank", rows: [
-    { key: "employment", label: "Employment & profession", value: [f.employment_type, f.profession].filter(Boolean).join(" · ") || "—", turns: ["employment_type", "profession"] },
-    { key: "org_income", label: "Organization & annual income", value: [f.organization_name, rupee("annual_income")].filter(Boolean).join(" · ") || "—", turns: ["organization_name", "annual_income"] },
-    { key: "bank_details", label: "Bank a/c · IFSC · name · type", value: [f.bank_name, f.bank_ifsc].filter(Boolean).join(" · ") || "—", turns: ["bank"] },
-  ] });
-  groups.push({ title: "Loan configuration", rows: [
-    { key: "loan_amount", label: "Loan amount", value: rupee("loan_amount_required") || "—", turns: ["loan_amount"] },
-    { key: "loanconfig", label: "Subsidy · tenure · EMI", value: fv("selected_tenure_years") ? f.selected_tenure_years + " yr" : "—", turns: ["loanconfig"] },
-  ] });
-  return groups;
-}
-
-
-// Map an existing application row → the chat's form field map (all strings;
-// the boolean e-bill flag becomes "yes"/"no").
-const PREFILL_KEYS = [
-  "borrower_name", "borrower_mobile", "borrower_email", "borrower_pan", "borrower_father_name", "customer_photo_path", "lead_owner_name", "install_pincode", "install_state", "install_district", "install_city", "system_type", "plant_use_type",
-  "aadhaar_name", "aadhaar_dob", "aadhaar_gender", "aadhaar_number", "aadhaar_care_of", "aadhaar_address", "aadhaar_front_path", "aadhaar_back_path", "aadhaar_face_path",
-  "project_size", "project_size_unit", "total_project_cost", "loan_amount_required", "monthly_bill_amount", "discom_name", "ca_number", "ebill_address_line", "ebill_name", "ebill_path", "ebill_uploaded_at", "proforma_invoice_path", "proforma_uploaded_at", "rooftop_photo_path", "rooftop_photo_uploaded_at",
-  "coapp_name", "coapp_mobile", "coapp_email", "coapp_father_name", "coapp_dob", "coapp_pan", "coapp_pan_path", "coapp_relation", "coapp_aadhaar_name", "coapp_aadhaar_dob", "coapp_aadhaar_gender", "coapp_aadhaar_number", "coapp_aadhaar_care_of", "coapp_aadhaar_address", "coapp_aadhaar_front_path", "coapp_aadhaar_back_path", "coapp_aadhaar_face_path",
-  "employment_type", "profession", "profession_other", "organization_name", "annual_income", "bank_statement_method", "bank_statement_path", "bank_statement_uploaded_at", "bank_account_holder", "bank_name", "bank_account_no", "bank_ifsc", "bank_account_type", "bank_mobile", "bank_email",
-  "central_subsidy", "state_subsidy", "roi_percent", "selected_tenure_years", "selected_monthly_emi", "selected_subsidy_emi",
-];
-function prefillFromApp(a: Record<string, any>): Form {
-  const f: Form = {};
-  for (const k of PREFILL_KEYS) if (a[k] != null && a[k] !== "") f[k] = String(a[k]);
-  // Documents uploaded as rows (the partner chat, the multi-file uploaders) count
-  // as on file too — else the chat asks for a document the profile already shows.
-  const ROW_PATH: Record<string, string> = {
-    bank_statement: "bank_statement_path", customer_photo: "customer_photo_path", borrower_photo: "rooftop_photo_path",
-    quotation: "proforma_invoice_path", electricity_bill: "ebill_path",
-  };
-  for (const d of (Array.isArray(a.docs) ? a.docs : []) as { category: string; storage_path: string | null }[]) {
-    const k = ROW_PATH[d.category];
-    if (k && !f[k] && d.storage_path) f[k] = d.storage_path;
-  }
-  if (a.bill_on_applicant_name === true) { f.bill_on_applicant_name = "yes"; f.coapp_needed = "no"; }
-  else if (a.bill_on_applicant_name === false || a.coapp_name) { f.bill_on_applicant_name = "no"; f._has_coapp = "1"; f.coapp_needed = "yes"; }
-  if (a.consent_at) f.consent = "yes";
-  return f;
-}
-
-function kwOf(f: Form): number | null {
-  const s = Number(f.project_size);
-  if (!s) return null;
-  return f.project_size_unit === "mw" ? s * 1000 : s;
-}
-
-// Map an extract route's JSON response → { form patch, fetched-field list }.
-function mapExtract(turn: Turn, j: Record<string, any>): { patch: Form; fields: Fetched[] } {
-  const coapp = turn.extraForm?._coapp === "1";
-  const row = (label: string, value: any, field?: string): Fetched => {
-    const v = value == null || value === "" ? "" : String(value);
-    return { label, value: v, ok: !!v, field };
-  };
-  if (turn.extractRoute === "extract-aadhaar") {
-    const f = j.fields ?? {}, p = j.storage_paths ?? {};
-    if (coapp) return { patch: {
-      // Store the FULL 12-digit number when OCR read it (epc_applications is
-      // admin-only via RLS); fall back to the masked form only if OCR couldn't.
-      coapp_aadhaar_name: f.name ?? "", coapp_aadhaar_dob: f.dob ?? "", coapp_aadhaar_gender: f.gender ?? "", coapp_aadhaar_number: f.aadhaar_number ?? f.aadhaar_masked ?? "",
-      coapp_aadhaar_care_of: f.care_of ?? "", coapp_aadhaar_address: f.address ?? "",
-      coapp_aadhaar_front_path: p.front ?? "", coapp_aadhaar_back_path: p.back ?? "", coapp_aadhaar_face_path: p.face ?? "",
-      coapp_name: f.name ?? "", coapp_dob: f.dob ?? "",
-    }, fields: [row("Name", f.name, "coapp_aadhaar_name"), row("DOB", f.dob, "coapp_aadhaar_dob"), row("Aadhaar", f.aadhaar_number ?? f.aadhaar_masked)] };
-    return { patch: {
-      // Store the FULL 12-digit number when OCR read it (epc_applications is
-      // admin-only via RLS); fall back to the masked form only if OCR couldn't.
-      aadhaar_name: f.name ?? "", aadhaar_dob: f.dob ?? "", aadhaar_gender: f.gender ?? "", aadhaar_number: f.aadhaar_number ?? f.aadhaar_masked ?? "",
-      aadhaar_care_of: f.care_of ?? "", aadhaar_address: f.address ?? "",
-      aadhaar_front_path: p.front ?? "", aadhaar_back_path: p.back ?? "", aadhaar_face_path: p.face ?? "",
-      // Auto-fill the applicant identity so the RM doesn't type it (only when read).
-      ...(f.name ? { borrower_name: f.name } : {}),
-      ...(f.dob ? { borrower_dob: f.dob } : {}),
-    }, fields: [row("Name", f.name, "borrower_name"), row("DOB", f.dob, "aadhaar_dob"), row("Gender", f.gender, "aadhaar_gender"), row("Aadhaar", f.aadhaar_number ?? f.aadhaar_masked), row("Address", f.address, "aadhaar_address")] };
-  }
-  if (turn.extractRoute === "extract-coapp-pan") {
-    const f = j.fields ?? {};
-    if (turn.applicantPan) {
-      // Same PAN OCR, mapped to the APPLICANT.
-      return { patch: {
-        borrower_pan: f.pan ?? "",
-        _pan_name: f.name ?? "", // transient — used by the name check (not persisted)
-        ...(f.name ? { borrower_name: f.name } : {}),
-        ...(f.father_name ? { borrower_father_name: f.father_name } : {}),
-      }, fields: [row("PAN", f.pan, "borrower_pan"), row("Name", f.name, "borrower_name"), row("Father", f.father_name, "borrower_father_name")] };
-    }
-    return { patch: { coapp_pan: f.pan ?? "", coapp_name: f.name ?? "", coapp_father_name: f.father_name ?? "", coapp_dob: f.dob ?? "", coapp_pan_path: j.storage_path ?? "" },
-      fields: [row("PAN", f.pan, "coapp_pan"), row("Name", f.name, "coapp_name"), row("Father", f.father_name, "coapp_father_name")] };
-  }
-  if (turn.extractRoute === "extract-loan-docs") {
-    // The e-bill and the quotation are now separate turns, each calling this
-    // route with a single file — so only map the part that was uploaded, never
-    // overwriting the other's already-read values with blanks.
-    const pf = j.proforma?.fields ?? {}, eb = j.ebill?.fields ?? {};
-    const hasP = !!(j.proforma && (j.proforma.fields || j.proforma.storage_path));
-    const hasE = !!(j.ebill && (j.ebill.fields || j.ebill.storage_path));
-    const patch: Form = {};
-    const fields: Fetched[] = [];
-    if (hasP) {
-      patch.project_size = pf.project_size != null ? String(pf.project_size) : "";
-      patch.project_size_unit = pf.project_size_unit ?? "kw";
-      patch.total_project_cost = pf.total_project_cost != null ? String(pf.total_project_cost) : "";
-      patch.proforma_invoice_path = j.proforma?.storage_path ?? "";
-      patch.proforma_uploaded_at = j.proforma?.uploaded_at ?? "";
-      fields.push(row("System size", pf.project_size != null ? `${pf.project_size} ${pf.project_size_unit ?? "kW"}` : "", "project_size"));
-      fields.push(row("Project cost", pf.total_project_cost != null ? `₹${Number(pf.total_project_cost).toLocaleString("en-IN")}` : "", "total_project_cost"));
-    }
-    if (hasE) {
-      patch.monthly_bill_amount = eb.monthly_bill_amount != null ? String(eb.monthly_bill_amount) : "";
-      patch.discom_name = eb.discom_name ?? "";
-      patch.ca_number = eb.ca_number ?? "";
-      patch.ebill_address_line = eb.ebill_address_line ?? "";
-      patch.ebill_name = eb.ebill_name ?? "";
-      patch.ebill_path = j.ebill?.storage_path ?? "";
-      patch.ebill_uploaded_at = j.ebill?.uploaded_at ?? "";
-      fields.push(row("Monthly bill", eb.monthly_bill_amount != null ? `₹${eb.monthly_bill_amount}` : "", "monthly_bill_amount"));
-      fields.push(row("DISCOM", eb.discom_name, "discom_name"));
-      fields.push(row("Bill name", eb.ebill_name, "ebill_name"));
-      fields.push(row("CA number", eb.ca_number, "ca_number"));
-    }
-    return { patch, fields };
-  }
-  if (turn.extractRoute === "extract-bank-statement") {
-    const f = j.fields ?? {};
-    return { patch: {
-      bank_statement_method: j.method ?? "manual_epdf", bank_statement_path: j.storage_path ?? "", bank_statement_uploaded_at: new Date().toISOString(),
-      bank_account_holder: f.account_holder ?? "", bank_name: f.bank_name ?? "", bank_account_no: f.account_no ?? "", bank_ifsc: f.ifsc ?? "", bank_account_type: f.account_type ?? "", bank_mobile: f.mobile ?? "", bank_email: f.email ?? "",
-    }, fields: [row("Holder", f.account_holder, "bank_account_holder"), row("Bank", f.bank_name, "bank_name"), row("A/C no.", f.account_no, "bank_account_no"), row("IFSC", f.ifsc, "bank_ifsc"), row("Type", f.account_type, "bank_account_type")] };
-  }
-  return { patch: {}, fields: [] };
 }

@@ -7,7 +7,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { err } from "@/lib/api";
 import { uploadBuffer, deleteObject } from "@/lib/gcs";
-import { otherInsuranceRow, compress, safeName, ACCEPTED } from "@/lib/insurance-server";
+import { otherInsuranceRow, compress } from "@/lib/insurance-server";
+import { ACCEPTED, safeName } from "@/lib/upload-rules";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

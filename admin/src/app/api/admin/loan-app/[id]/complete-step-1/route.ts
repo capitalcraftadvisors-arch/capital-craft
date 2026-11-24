@@ -26,7 +26,7 @@
 //   }
 
 import { NextRequest, NextResponse } from "next/server";
-import { err, dbAs, requireLogin } from "@/lib/api";
+import { err, dbAs, requireLogin, loadLoanRow } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { logLoanActivityServer } from "@/lib/loan-activity-server";
 // Note: sendWhatsAppConfirmation is intentionally NOT imported here —
@@ -107,13 +107,8 @@ export async function PATCH(
     // Load the target row (no join — Supabase's inferred types choke on
     // aliased embeds inside PATCH handlers). We fetch the EPC row
     // separately below for the WhatsApp payload.
-    const { data: app, error: loadErr } = await supabase
-      .from("epc_applications")
-      .select("id, status, current_step, epc_business_id")
-      .eq("id", appId)
-      .maybeSingle();
-    if (loadErr) return err(loadErr.message, 500);
-    if (!app)    return err("Loan application not found.", 404);
+    const app = await loadLoanRow(supabase, appId, "id, status, current_step, epc_business_id");
+    if (app instanceof Response) return app;
     // Re-saves are allowed — the flow is editable end-to-end (the
     // Step-6 review's Edit links come back here). current_step never
     // rewinds; a re-save from an application already at step 6 keeps

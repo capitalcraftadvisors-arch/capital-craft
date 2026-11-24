@@ -29,8 +29,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { err, dbAs, requireLogin } from "@/lib/api";
-import { UUID_RE, MOBILE_RE, EMAIL_RE, PAN_RE, PINCODE_RE, IFSC_RE } from "@/lib/validators";
+import { err, dbAs, requireLogin, strOrNull, numOrNull } from "@/lib/api";
+import { UUID_RE, MOBILE_RE, EMAIL_RE, PAN_RE, PINCODE_RE, IFSC_RE, AADHAAR_RE } from "@/lib/validators";
+import { maskAadhaar } from "@/lib/aadhaar-mask";
 import { DEFAULT_INDICATIVE_ROI } from "@/lib/emi";
 import { isUndefinedColumn, omitKeys, UNDEFINED_COLUMN } from "@/lib/optional-column";
 import { toIsoDate } from "@/lib/dates";
@@ -62,16 +63,6 @@ async function customerCheck(db: SupabaseClient, mobile: string | null, pan: str
   const t = data as { mobile?: boolean; pan?: boolean; v2?: boolean; demo?: boolean } | null;
   const v2 = !!(t?.v2 ?? t?.demo);
   return { taken: v2 && (!!t?.mobile || !!t?.pan), v2 };
-}
-function strOrNull(v: unknown): string | null {
-  if (v == null) return null;
-  const s = String(v).trim();
-  return s.length > 0 ? s : null;
-}
-function numOrNull(v: unknown): number | null {
-  if (v == null || v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
 }
 function firstIp(req: NextRequest): string | null {
   const xff = req.headers.get("x-forwarded-for");
@@ -213,11 +204,11 @@ export async function POST(req: NextRequest) {
       const borrower_father_name = strOrNull(b.borrower_father_name);
 
       const aadhaar_number_raw = strOrNull(b.aadhaar_number)?.replace(/\D/g, "") ?? null;
-      if (aadhaar_number_raw && !/^\d{12}$/.test(aadhaar_number_raw)) {
+      if (aadhaar_number_raw && !AADHAAR_RE.test(aadhaar_number_raw)) {
         return err("Aadhaar number must be 12 digits.", 400);
       }
       const coapp_aadhaar_number_raw = strOrNull(b.coapp_aadhaar_number)?.replace(/\D/g, "") ?? null;
-      if (coapp_aadhaar_number_raw && !/^\d{12}$/.test(coapp_aadhaar_number_raw)) {
+      if (coapp_aadhaar_number_raw && !AADHAAR_RE.test(coapp_aadhaar_number_raw)) {
         return err("Co-applicant Aadhaar number must be 12 digits.", 400);
       }
       const coapp_pan = strOrNull(b.coapp_pan)?.toUpperCase() ?? null;
@@ -352,7 +343,7 @@ export async function POST(req: NextRequest) {
           aadhaar_dob:            strOrNull(b.aadhaar_dob),
           aadhaar_gender:         strOrNull(b.aadhaar_gender),
           aadhaar_number:         aadhaar_number_raw,
-          aadhaar_number_masked:  aadhaar_number_raw ? "xxxxxxxx" + aadhaar_number_raw.slice(-4) : null,
+          aadhaar_number_masked:  maskAadhaar(aadhaar_number_raw),
           aadhaar_care_of:        strOrNull(b.aadhaar_care_of),
           aadhaar_address:        strOrNull(b.aadhaar_address),
           aadhaar_front_path:     strOrNull(b.aadhaar_front_path),
@@ -400,7 +391,7 @@ export async function POST(req: NextRequest) {
           coapp_aadhaar_dob:           strOrNull(b.coapp_aadhaar_dob),
           coapp_aadhaar_gender:        strOrNull(b.coapp_aadhaar_gender),
           coapp_aadhaar_number:        coapp_aadhaar_number_raw,
-          coapp_aadhaar_number_masked: coapp_aadhaar_number_raw ? "xxxxxxxx" + coapp_aadhaar_number_raw.slice(-4) : null,
+          coapp_aadhaar_number_masked: maskAadhaar(coapp_aadhaar_number_raw),
           coapp_aadhaar_care_of:       strOrNull(b.coapp_aadhaar_care_of),
           coapp_aadhaar_address:       strOrNull(b.coapp_aadhaar_address),
           coapp_aadhaar_front_path:    strOrNull(b.coapp_aadhaar_front_path),

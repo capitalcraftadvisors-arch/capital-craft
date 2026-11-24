@@ -13,7 +13,7 @@
 // id; Page 3's Submit sends everything to /api/epc/loan-apply
 // phase=submit in one shot.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import Card from "@/components/ui/Card";
@@ -22,11 +22,13 @@ import Button from "@/components/ui/Button";
 import DatePicker from "@/components/ui/DatePicker";
 import FileUpload from "@/components/FileUpload";
 import EpcApplyTracker from "@/components/EpcApplyTracker";
+import { ApplyFrame, TextAreaField } from "@/components/loan-form";
 import { authHeaders } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 import { openDocument, openLoanDoc } from "@/lib/storage";
 import { extractPan } from "@/lib/ocr";
 import { MOBILE_RE, EMAIL_RE, PAN_RE } from "@/lib/validators";
+import { AadhaarNumberInput, AadhaarSides, DocCardHead, DocOnFile, EbillTile, PanTile, ToggleTile } from "./_parts/tiles";
 
 export type EpcApplyDocsPayload = {
   borrower_pan: string | null;
@@ -397,416 +399,231 @@ function Inner() {
   }
 
   return (
-    <main className="min-h-screen bg-bg-soft">
-      <header className="border-b border-line bg-white">
-        <div className="max-w-container mx-auto px-7 h-16 flex items-center justify-between">
-          <a href="/dashboard" className="font-display font-bold text-[20px] grad-text">Capital Craft</a>
-          <span className="text-[13px] text-text-muted">Loan Application</span>
-        </div>
-      </header>
+    <ApplyFrame>
+      <EpcApplyTracker step={2} />
 
-      <section className="max-w-[760px] mx-auto px-5 sm:px-7 py-10 space-y-6">
-        <EpcApplyTracker step={2} />
+      <div>
+        <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
+          Customer documents
+        </h1>
+      </div>
 
-        <div>
-          <h1 className="font-display text-[28px] sm:text-[32px] font-bold text-[#0f3d2e]">
-            Customer documents
-          </h1>
-        </div>
-
-        {/* Progress sticker — how many documents are done, and what's pending. */}
-        <Card className="p-4 sm:p-5">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-3">
-              <span className={[
-                "inline-flex items-center justify-center w-12 h-12 rounded-full text-[15px] font-bold",
-                doneCount === docItems.length ? "bg-[#e6f6ee] text-[#178a5c]" : "bg-[#eef3fc] text-[#1e3a8a]",
-              ].join(" ")}>{doneCount}/{docItems.length}</span>
-              <div>
-                <div className="text-[14px] font-semibold text-[#0f3d2e]">
-                  {doneCount === docItems.length ? "All documents uploaded" : `${doneCount} of ${docItems.length} documents uploaded`}
-                </div>
-                <div className="text-[12px] text-text-muted">
-                  {pendingLabels.length ? `Pending: ${pendingLabels.join(", ")}` : "Nothing pending — you can save."}
-                </div>
+      {/* Progress sticker — how many documents are done, and what's pending. */}
+      <Card className="p-4 sm:p-5">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            <span className={[
+              "inline-flex items-center justify-center w-12 h-12 rounded-full text-[15px] font-bold",
+              doneCount === docItems.length ? "bg-[#e6f6ee] text-[#178a5c]" : "bg-[#eef3fc] text-[#1e3a8a]",
+            ].join(" ")}>{doneCount}/{docItems.length}</span>
+            <div>
+              <div className="text-[14px] font-semibold text-[#0f3d2e]">
+                {doneCount === docItems.length ? "All documents uploaded" : `${doneCount} of ${docItems.length} documents uploaded`}
+              </div>
+              <div className="text-[12px] text-text-muted">
+                {pendingLabels.length ? `Pending: ${pendingLabels.join(", ")}` : "Nothing pending — you can save."}
               </div>
             </div>
           </div>
-          <div className="mt-3 h-2 rounded-full bg-line/60 overflow-hidden">
-            <div className="h-2 rounded-full bg-[#178a5c] transition-all" style={{ width: `${docItems.length ? (doneCount / docItems.length) * 100 : 0}%` }} />
-          </div>
-        </Card>
-
-        {/* PAN */}
-        <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between gap-2"><h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">PAN card</h2><DocStatus done={doneOf("pan")} /></div>
-          <FileUpload
-            applicationId={appId}
-            category="borrower_pan"
-            table="user_application_docs"
-            uploadedBy="epc"
-            onUploaded={(info) => void onPanUploaded(info)}
-            hint="Photo, scan, or PDF."
-          />
-          {panDocId && <DocOnFile label="PAN card on file" onView={() => void openDocument(panDocId)} />}
-          <Input
-            label="PAN number"
-            value={panNumber}
-            onChange={(e) => setPanNumber(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10))}
-            placeholder="AAAAA9999A"
-            maxLength={10}
-            hint="Read from the card automatically — correct it if wrong."
-          />
-        </Card>
-
-        {/* Aadhaar */}
-        <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between gap-2"><h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Aadhaar card</h2><DocStatus done={doneOf("aadhaar")} /></div>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <PickTile label="Aadhaar Front" file={aFront} onPick={(f) => { setAFront(f); setAPaths(null); }} busy={aBusy} done={!!aPaths} />
-            <PickTile label="Aadhaar Back"  file={aBack}  onPick={(f) => { setABack(f); setAPaths(null); }}  busy={aBusy} done={!!aPaths} />
-          </div>
-          {aPaths?.front && (
-            <div className="grid sm:grid-cols-2 gap-2">
-              <DocOnFile label="Aadhaar front" onView={() => void viewPath(aPaths.front)} />
-              {aPaths.back && <DocOnFile label="Aadhaar back" onView={() => void viewPath(aPaths.back)} />}
-            </div>
-          )}
-          {aBusy && <p className="text-[12px] text-text-muted">Extracting details…</p>}
-          {aErr && <p className="text-[12px] text-red-700">{aErr}</p>}
-          {aPaths && (
-            <div className="grid sm:grid-cols-2 gap-4 pt-1">
-              <Input label="Name" value={aName} onChange={(e) => setAName(e.target.value)} />
-              <DatePicker label="Date of birth" value={aDob} onChange={setADob} />
-              <Input label="Gender" value={aGender} onChange={(e) => setAGender(e.target.value)} />
-              <Input
-                label="Aadhaar number"
-                value={aNumber.replace(/(\d{4})(?=\d)/g, "$1 ")}
-                onChange={(e) => setANumber(e.target.value.replace(/\D/g, "").slice(0, 12))}
-                placeholder="0000 0000 0000"
-                maxLength={14}
-              />
-              <Input label="Care of" value={aCareOf} onChange={(e) => setACareOf(e.target.value)} />
-              <div className="sm:col-span-2">
-                <label className="block mb-1.5 text-[13px] font-medium text-text-mid">Address</label>
-                <textarea
-                  value={aAddress}
-                  onChange={(e) => setAAddress(e.target.value)}
-                  rows={2}
-                  className="w-full rounded-input border border-line bg-white px-3.5 py-2.5 text-[14px] outline-none focus:border-blue resize-y"
-                />
-              </div>
-            </div>
-          )}
-        </Card>
-
-        {/* E-bill */}
-        <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between gap-2"><h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Latest electricity bill</h2><DocStatus done={doneOf("ebill")} /></div>
-          <EbillTile ebill={ebill} busy={ebillBusy} onFile={(f) => void uploadEbill(f)} />
-          {ebill?.path && <DocOnFile label="Electricity bill on file" onView={() => void viewPath(ebill.path)} onRemove={() => setEbill(null)} />}
-          {ebillErr && <p className="text-[12px] text-red-700">{ebillErr}</p>}
-        </Card>
-
-        {/* Quotation / Proforma invoice */}
-        <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between gap-2"><h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Quotation / Proforma invoice</h2><DocStatus done={doneOf("quotation")} /></div>
-          <p className="text-[13px] text-text-mid -mt-2">
-            Upload the project quotation or proforma invoice for the solar system.
-          </p>
-          <FileUpload
-            applicationId={appId}
-            category="quotation"
-            table="user_application_docs"
-            uploadedBy="epc"
-            onUploaded={(info) => setQuotePath(info.storagePath)}
-            hint="Photo, scan, or PDF."
-          />
-          {quotePath && <DocOnFile label="Quotation on file" onView={() => void viewPath(quotePath)} onRemove={() => setQuotePath(null)} />}
-        </Card>
-
-        {/* Rooftop photo — geo-tagged */}
-        <Card className="p-6 space-y-4">
-          <div className="flex items-center justify-between gap-2"><h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">Rooftop photo (geo-tagged)</h2><DocStatus done={doneOf("rooftop")} /></div>
-          <p className="text-[13px] text-text-mid -mt-2">
-            Take a photo of the installation rooftop so the site can be verified.
-            Location is captured with the photo.
-          </p>
-          <FileUpload
-            applicationId={appId}
-            category="borrower_photo"
-            table="user_application_docs"
-            uploadedBy="epc"
-            captureGps
-            hint="Location is captured with the upload."
-            onUploaded={(info) => {
-              setRooftopPath(info.storagePath);
-              if ("geolocation" in navigator) {
-                navigator.geolocation.getCurrentPosition(
-                  (p) => setRooftopGps({
-                    lat: p.coords.latitude,
-                    lng: p.coords.longitude,
-                    captured_at: new Date().toISOString(),
-                  }),
-                  () => { /* silent — GPS optional */ },
-                  { timeout: 6000 },
-                );
-              }
-            }}
-          />
-          {rooftopPath && <DocOnFile label="Rooftop photo on file" onView={() => void viewPath(rooftopPath)} onRemove={() => { setRooftopPath(null); setRooftopGps(null); }} />}
-        </Card>
-
-        {/* Co-applicant toggle */}
-        <Card className="p-6 space-y-4">
-          <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">
-            Please confirm the electricity bill is in the name of the applicant.
-          </h2>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <ToggleTile
-              active={hasCoapp === false}
-              onClick={() => setHasCoapp(false)}
-              title="Yes, the bill is in the applicant's name"
-              desc="No co-applicant needed."
-            />
-            <ToggleTile
-              active={hasCoapp === true}
-              onClick={() => setHasCoapp(true)}
-              title="No, the bill is not in the applicant's name (add a co-applicant)"
-              desc="Capture the co-applicant's Aadhaar + PAN."
-            />
-          </div>
-
-          {hasCoapp && (
-            <div className="space-y-4 pt-2 border-t border-line">
-              <p className="text-[13px] font-semibold text-text">Co-applicant Aadhaar</p>
-              <div className="grid sm:grid-cols-2 gap-3">
-                <PickTile label="Aadhaar Front" file={cFront} onPick={(f) => { setCFront(f); setCPaths(null); }} busy={cBusy} done={!!cPaths} />
-                <PickTile label="Aadhaar Back"  file={cBack}  onPick={(f) => { setCBack(f); setCPaths(null); }}  busy={cBusy} done={!!cPaths} />
-              </div>
-              {cPaths?.front && (
-                <div className="grid sm:grid-cols-2 gap-2">
-                  <DocOnFile label="Aadhaar front" onView={() => void viewPath(cPaths.front)} />
-                  {cPaths.back && <DocOnFile label="Aadhaar back" onView={() => void viewPath(cPaths.back)} />}
-                </div>
-              )}
-              {cBusy && <p className="text-[12px] text-text-muted">Extracting details…</p>}
-              {cErr && <p className="text-[12px] text-red-700">{cErr}</p>}
-
-              <p className="text-[13px] font-semibold text-text pt-1">Co-applicant PAN</p>
-              <PanTile path={cPanPath} busy={cPanBusy} onFile={(f) => void uploadCoappPan(f)} />
-              {cPanPath && <DocOnFile label="Co-applicant PAN on file" onView={() => void viewPath(cPanPath)} onRemove={() => setCPanPath(null)} />}
-              {cPanErr && <p className="text-[12px] text-red-700">{cPanErr}</p>}
-
-              {(cPaths || cPanPath) && (
-                <div className="grid sm:grid-cols-2 gap-4 pt-1">
-                  <Input label="Name" value={cName} onChange={(e) => setCName(e.target.value)} />
-                  <DatePicker label="Date of birth" value={cDob} onChange={setCDob} />
-                  <Input
-                    label="PAN number"
-                    value={cPan}
-                    onChange={(e) => setCPan(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10))}
-                    placeholder="AAAAA9999A"
-                    maxLength={10}
-                  />
-                  <Input
-                    label="Aadhaar number"
-                    value={cNumber.replace(/(\d{4})(?=\d)/g, "$1 ")}
-                    onChange={(e) => setCNumber(e.target.value.replace(/\D/g, "").slice(0, 12))}
-                    placeholder="0000 0000 0000"
-                    maxLength={14}
-                  />
-                  <Input
-                    label="Mobile number"
-                    inputMode="numeric"
-                    maxLength={10}
-                    value={cMobile}
-                    onChange={(e) => setCMobile(e.target.value.replace(/\D/g, ""))}
-                    placeholder="10-digit"
-                    error={
-                      coappMobileConflict
-                        ? "Cannot be the same as the applicant's mobile."
-                        : cMobile && !MOBILE_RE.test(cMobile)
-                        ? "Enter a valid 10-digit mobile."
-                        : undefined
-                    }
-                  />
-                  <Input
-                    label="Email"
-                    type="email"
-                    value={cEmail}
-                    onChange={(e) => setCEmail(e.target.value)}
-                    placeholder="coapplicant@example.com"
-                    error={
-                      coappEmailConflict
-                        ? "Cannot be the same as the applicant's email."
-                        : cEmail && !EMAIL_RE.test(cEmail)
-                        ? "Enter a valid email address."
-                        : undefined
-                    }
-                  />
-                  <div className="sm:col-span-2">
-                    <label className="block mb-1.5 text-[13px] font-medium text-text-mid">Address</label>
-                    <textarea
-                      value={cAddress}
-                      onChange={(e) => setCAddress(e.target.value)}
-                      rows={2}
-                      className="w-full rounded-input border border-line bg-white px-3.5 py-2.5 text-[14px] outline-none focus:border-blue resize-y"
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </Card>
-
-        <Card className="p-6">
-          <div className="flex justify-between gap-2">
-            <Button type="button" variant="outline" onClick={() => router.push("/dashboard/apply" as any)}>
-              ← Previous
-            </Button>
-            <Button type="button" variant="primary" onClick={continueToLoan}>
-              Save &amp; continue
-            </Button>
-          </div>
-        </Card>
-      </section>
-    </main>
-  );
-}
-
-// ── Small tiles ──────────────────────────────────────────────────────
-
-// A small Uploaded / Pending pill for a document card header.
-function DocStatus({ done }: { done: boolean }) {
-  return done
-    ? <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-[#e6f6ee] text-[#178a5c] whitespace-nowrap">Uploaded</span>
-    : <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 whitespace-nowrap">Pending</span>;
-}
-
-// A compact "already on file" row shown in an edit card: View + optional Remove.
-function DocOnFile({ label, onView, onRemove }: { label: string; onView: () => void; onRemove?: () => void }) {
-  return (
-    <div className="flex items-center gap-3 text-[13px] rounded-input bg-[#f0faf5] border border-[#cdeadd] px-3.5 py-2">
-      <span className="text-[#178a5c] font-semibold shrink-0">✓ {label}</span>
-      <button type="button" onClick={onView} className="text-blue font-semibold hover:underline">View</button>
-      {onRemove && <button type="button" onClick={onRemove} className="text-red-600 hover:underline ml-auto">Remove</button>}
-    </div>
-  );
-}
-
-function PickTile({
-  label, file, onPick, busy, done,
-}: {
-  label: string; file: File | null; onPick: (f: File | null) => void;
-  busy: boolean; done: boolean;
-}) {
-  const ref = useRef<HTMLInputElement>(null);
-  const has = !!file || done;
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => ref.current?.click()}
-        disabled={busy}
-        className={[
-          "w-full h-[110px] rounded-input border-2 border-dashed flex items-center justify-center text-center px-3 transition-colors",
-          has ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]" : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
-          busy ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
-        ].join(" ")}
-      >
-        <div>
-          <p className="text-[13px] font-semibold">{label}</p>
-          <p className="text-[10px] mt-0.5">{file ? file.name : has ? "Uploaded" : "Click to select"}</p>
         </div>
-      </button>
-      <input ref={ref} type="file" accept="image/*,application/pdf" className="hidden"
-             onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onPick(f); }} />
-    </div>
-  );
-}
-
-function EbillTile({
-  ebill, busy, onFile,
-}: {
-  ebill: { file_name: string } | null; busy: boolean; onFile: (f: File) => void;
-}) {
-  const ref = useRef<HTMLInputElement>(null);
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => ref.current?.click()}
-        disabled={busy}
-        className={[
-          "w-full h-[110px] rounded-input border-2 border-dashed flex items-center justify-center text-center px-3 transition-colors",
-          ebill ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]" : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
-          busy ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
-        ].join(" ")}
-      >
-        <div>
-          <p className="text-[13px] font-semibold">
-            {busy ? "Uploading & reading…" : ebill ? ebill.file_name : "Click to upload"}
-          </p>
-          <p className="text-[10px] mt-0.5">{ebill ? "Click to replace" : "Photo, scan, or PDF"}</p>
+        <div className="mt-3 h-2 rounded-full bg-line/60 overflow-hidden">
+          <div className="h-2 rounded-full bg-[#178a5c] transition-all" style={{ width: `${docItems.length ? (doneCount / docItems.length) * 100 : 0}%` }} />
         </div>
-      </button>
-      <input ref={ref} type="file" accept="image/*,application/pdf" className="hidden"
-             onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onFile(f); }} />
-    </div>
-  );
-}
+      </Card>
 
-function PanTile({
-  path, busy, onFile,
-}: {
-  path: string | null; busy: boolean; onFile: (f: File) => void;
-}) {
-  const ref = useRef<HTMLInputElement>(null);
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => ref.current?.click()}
-        disabled={busy}
-        className={[
-          "w-full h-[90px] rounded-input border-2 border-dashed flex items-center justify-center text-center px-3 transition-colors",
-          path ? "border-[#178a5c] bg-[#f0faf5] text-[#0f3d2e]" : "border-[#185fa5] bg-white text-[#185fa5] hover:bg-[#f2f7fc]",
-          busy ? "opacity-60 cursor-not-allowed" : "cursor-pointer",
-        ].join(" ")}
-      >
-        <p className="text-[13px] font-semibold">
-          {busy ? "Uploading & reading…" : path ? "Uploaded — click to replace" : "Click to upload PAN"}
+      {/* PAN */}
+      <Card className="p-6 space-y-4">
+        <DocCardHead title="PAN card" done={doneOf("pan")} />
+        <FileUpload
+          applicationId={appId}
+          category="borrower_pan"
+          table="user_application_docs"
+          uploadedBy="epc"
+          onUploaded={(info) => void onPanUploaded(info)}
+          hint="Photo, scan, or PDF."
+        />
+        {panDocId && <DocOnFile label="PAN card on file" onView={() => void openDocument(panDocId)} />}
+        <Input
+          label="PAN number"
+          value={panNumber}
+          onChange={(e) => setPanNumber(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10))}
+          placeholder="AAAAA9999A"
+          maxLength={10}
+          hint="Read from the card automatically — correct it if wrong."
+        />
+      </Card>
+
+      {/* Aadhaar */}
+      <Card className="p-6 space-y-4">
+        <DocCardHead title="Aadhaar card" done={doneOf("aadhaar")} />
+        <AadhaarSides
+          front={aFront} back={aBack} paths={aPaths} busy={aBusy} err={aErr}
+          onFront={(f) => { setAFront(f); setAPaths(null); }}
+          onBack={(f) => { setABack(f); setAPaths(null); }}
+          onView={viewPath}
+        />
+        {aPaths && (
+          <div className="grid sm:grid-cols-2 gap-4 pt-1">
+            <Input label="Name" value={aName} onChange={(e) => setAName(e.target.value)} />
+            <DatePicker label="Date of birth" value={aDob} onChange={setADob} />
+            <Input label="Gender" value={aGender} onChange={(e) => setAGender(e.target.value)} />
+            <AadhaarNumberInput value={aNumber} onChange={setANumber} />
+            <Input label="Care of" value={aCareOf} onChange={(e) => setACareOf(e.target.value)} />
+            <TextAreaField label="Address" value={aAddress} onChange={setAAddress} rows={2} />
+          </div>
+        )}
+      </Card>
+
+      {/* E-bill */}
+      <Card className="p-6 space-y-4">
+        <DocCardHead title="Latest electricity bill" done={doneOf("ebill")} />
+        <EbillTile ebill={ebill} busy={ebillBusy} onFile={(f) => void uploadEbill(f)} />
+        {ebill?.path && <DocOnFile label="Electricity bill on file" onView={() => void viewPath(ebill.path)} onRemove={() => setEbill(null)} />}
+        {ebillErr && <p className="text-[12px] text-red-700">{ebillErr}</p>}
+      </Card>
+
+      {/* Quotation / Proforma invoice */}
+      <Card className="p-6 space-y-4">
+        <DocCardHead title="Quotation / Proforma invoice" done={doneOf("quotation")} />
+        <p className="text-[13px] text-text-mid -mt-2">
+          Upload the project quotation or proforma invoice for the solar system.
         </p>
-      </button>
-      <input ref={ref} type="file" accept="image/*,application/pdf" className="hidden"
-             onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) onFile(f); }} />
-    </div>
-  );
-}
+        <FileUpload
+          applicationId={appId}
+          category="quotation"
+          table="user_application_docs"
+          uploadedBy="epc"
+          onUploaded={(info) => setQuotePath(info.storagePath)}
+          hint="Photo, scan, or PDF."
+        />
+        {quotePath && <DocOnFile label="Quotation on file" onView={() => void viewPath(quotePath)} onRemove={() => setQuotePath(null)} />}
+      </Card>
 
-function ToggleTile({
-  active, onClick, title, desc,
-}: {
-  active: boolean; onClick: () => void; title: string; desc: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "text-left rounded-input border-2 p-4 transition-colors relative",
-        active ? "border-[#178a5c] bg-[#f0faf5]" : "border-line bg-white hover:border-[#185fa5]",
-      ].join(" ")}
-    >
-      <span className={[
-        "absolute top-3 right-3 w-4 h-4 rounded-full border-2 flex items-center justify-center",
-        active ? "border-[#178a5c]" : "border-line",
-      ].join(" ")} aria-hidden>
-        {active && <span className="w-2 h-2 rounded-full bg-[#178a5c]" />}
-      </span>
-      <p className={"font-display font-semibold text-[14px] pr-6 " + (active ? "text-[#0f3d2e]" : "text-text")}>{title}</p>
-      <p className="text-[12px] text-text-muted mt-1">{desc}</p>
-    </button>
+      {/* Rooftop photo — geo-tagged */}
+      <Card className="p-6 space-y-4">
+        <DocCardHead title="Rooftop photo (geo-tagged)" done={doneOf("rooftop")} />
+        <p className="text-[13px] text-text-mid -mt-2">
+          Take a photo of the installation rooftop so the site can be verified.
+          Location is captured with the photo.
+        </p>
+        <FileUpload
+          applicationId={appId}
+          category="borrower_photo"
+          table="user_application_docs"
+          uploadedBy="epc"
+          captureGps
+          hint="Location is captured with the upload."
+          onUploaded={(info) => {
+            setRooftopPath(info.storagePath);
+            if ("geolocation" in navigator) {
+              navigator.geolocation.getCurrentPosition(
+                (p) => setRooftopGps({
+                  lat: p.coords.latitude,
+                  lng: p.coords.longitude,
+                  captured_at: new Date().toISOString(),
+                }),
+                () => { /* silent — GPS optional */ },
+                { timeout: 6000 },
+              );
+            }
+          }}
+        />
+        {rooftopPath && <DocOnFile label="Rooftop photo on file" onView={() => void viewPath(rooftopPath)} onRemove={() => { setRooftopPath(null); setRooftopGps(null); }} />}
+      </Card>
+
+      {/* Co-applicant toggle */}
+      <Card className="p-6 space-y-4">
+        <h2 className="font-display font-semibold text-[16px] text-[#0f3d2e]">
+          Please confirm the electricity bill is in the name of the applicant.
+        </h2>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <ToggleTile
+            active={hasCoapp === false}
+            onClick={() => setHasCoapp(false)}
+            title="Yes, the bill is in the applicant's name"
+            desc="No co-applicant needed."
+          />
+          <ToggleTile
+            active={hasCoapp === true}
+            onClick={() => setHasCoapp(true)}
+            title="No, the bill is not in the applicant's name (add a co-applicant)"
+            desc="Capture the co-applicant's Aadhaar + PAN."
+          />
+        </div>
+
+        {hasCoapp && (
+          <div className="space-y-4 pt-2 border-t border-line">
+            <p className="text-[13px] font-semibold text-text">Co-applicant Aadhaar</p>
+            <AadhaarSides
+              front={cFront} back={cBack} paths={cPaths} busy={cBusy} err={cErr}
+              onFront={(f) => { setCFront(f); setCPaths(null); }}
+              onBack={(f) => { setCBack(f); setCPaths(null); }}
+              onView={viewPath}
+            />
+
+            <p className="text-[13px] font-semibold text-text pt-1">Co-applicant PAN</p>
+            <PanTile path={cPanPath} busy={cPanBusy} onFile={(f) => void uploadCoappPan(f)} />
+            {cPanPath && <DocOnFile label="Co-applicant PAN on file" onView={() => void viewPath(cPanPath)} onRemove={() => setCPanPath(null)} />}
+            {cPanErr && <p className="text-[12px] text-red-700">{cPanErr}</p>}
+
+            {(cPaths || cPanPath) && (
+              <div className="grid sm:grid-cols-2 gap-4 pt-1">
+                <Input label="Name" value={cName} onChange={(e) => setCName(e.target.value)} />
+                <DatePicker label="Date of birth" value={cDob} onChange={setCDob} />
+                <Input
+                  label="PAN number"
+                  value={cPan}
+                  onChange={(e) => setCPan(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10))}
+                  placeholder="AAAAA9999A"
+                  maxLength={10}
+                />
+                <AadhaarNumberInput value={cNumber} onChange={setCNumber} />
+                <Input
+                  label="Mobile number"
+                  inputMode="numeric"
+                  maxLength={10}
+                  value={cMobile}
+                  onChange={(e) => setCMobile(e.target.value.replace(/\D/g, ""))}
+                  placeholder="10-digit"
+                  error={
+                    coappMobileConflict
+                      ? "Cannot be the same as the applicant's mobile."
+                      : cMobile && !MOBILE_RE.test(cMobile)
+                      ? "Enter a valid 10-digit mobile."
+                      : undefined
+                  }
+                />
+                <Input
+                  label="Email"
+                  type="email"
+                  value={cEmail}
+                  onChange={(e) => setCEmail(e.target.value)}
+                  placeholder="coapplicant@example.com"
+                  error={
+                    coappEmailConflict
+                      ? "Cannot be the same as the applicant's email."
+                      : cEmail && !EMAIL_RE.test(cEmail)
+                      ? "Enter a valid email address."
+                      : undefined
+                  }
+                />
+                <TextAreaField label="Address" value={cAddress} onChange={setCAddress} rows={2} />
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+
+      <Card className="p-6">
+        <div className="flex justify-between gap-2">
+          <Button type="button" variant="outline" onClick={() => router.push("/dashboard/apply" as any)}>
+            ← Previous
+          </Button>
+          <Button type="button" variant="primary" onClick={continueToLoan}>
+            Save &amp; continue
+          </Button>
+        </div>
+      </Card>
+    </ApplyFrame>
   );
 }

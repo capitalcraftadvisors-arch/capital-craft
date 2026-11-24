@@ -14,24 +14,12 @@
 //   - bank_ifsc format validated (4 letters + 0 + 6 alphanum).
 
 import { NextRequest, NextResponse } from "next/server";
-import { err, dbAs, requireLogin } from "@/lib/api";
+import { err, dbAs, requireLogin, loadLoanRow, strOrNull, numOrNull } from "@/lib/api";
 import { UUID_RE, MOBILE_RE, EMAIL_RE, IFSC_RE } from "@/lib/validators";
 import { logLoanActivityServer } from "@/lib/loan-activity-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function strOrNull(v: unknown): string | null {
-  if (v == null) return null;
-  const s = String(v).trim();
-  return s.length > 0 ? s : null;
-}
-
-function numOrNull(v: unknown): number | null {
-  if (v == null || v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
 
 export async function POST(
   req: NextRequest,
@@ -86,13 +74,8 @@ export async function POST(
     // ── Persist + advance ──────────────────────────────────
     const supabase = dbAs(token);
 
-    const { data: app, error: loadErr } = await supabase
-      .from("epc_applications")
-      .select("id, current_step")
-      .eq("id", appId)
-      .maybeSingle();
-    if (loadErr) return err(loadErr.message, 500);
-    if (!app)    return err("Loan application not found.", 404);
+    const app = await loadLoanRow(supabase, appId, "id, current_step");
+    if (app instanceof Response) return app;
     if ((app.current_step ?? 1) < 4) return err("Complete Step 3 before Step 4.", 409);
 
     const nextStep = Math.max(app.current_step ?? 4, 5);

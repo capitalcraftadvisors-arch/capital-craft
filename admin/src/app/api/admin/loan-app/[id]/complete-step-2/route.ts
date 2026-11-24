@@ -11,18 +11,12 @@
 // check in case a future caller tries to shove raw digits through.
 
 import { NextRequest, NextResponse } from "next/server";
-import { err, dbAs, requireLogin } from "@/lib/api";
+import { err, dbAs, requireLogin, loadLoanRow, strOrNull } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { logLoanActivityServer } from "@/lib/loan-activity-server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-function strOrNull(v: unknown): string | null {
-  if (v == null) return null;
-  const s = String(v).trim();
-  return s.length > 0 ? s : null;
-}
 
 export async function POST(
   req: NextRequest,
@@ -71,13 +65,8 @@ export async function POST(
 
     // Idempotence guard: if already past Step 2 we still succeed but
     // don't rewind. Fresh state -> current_step becomes 3.
-    const { data: app, error: loadErr } = await supabase
-      .from("epc_applications")
-      .select("id, current_step")
-      .eq("id", appId)
-      .maybeSingle();
-    if (loadErr) return err(loadErr.message, 500);
-    if (!app)    return err("Loan application not found.", 404);
+    const app = await loadLoanRow(supabase, appId, "id, current_step");
+    if (app instanceof Response) return app;
     if ((app.current_step ?? 1) < 2) {
       return err("Complete Step 1 before Step 2.", 409);
     }

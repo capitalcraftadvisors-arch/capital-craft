@@ -12,7 +12,8 @@ import { UUID_RE } from "@/lib/validators";
 import { uploadBuffer } from "@/lib/gcs";
 import { visionDocumentText } from "@/lib/vision-server";
 import { geminiExtractPolicy } from "@/lib/doc-extractors";
-import { compress, safeName, parsePolicyPeriod, ACCEPTED } from "@/lib/insurance-server";
+import { compress, parsePolicyPeriod } from "@/lib/insurance-server";
+import { ACCEPTED, safeName } from "@/lib/upload-rules";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";

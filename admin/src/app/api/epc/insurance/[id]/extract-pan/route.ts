@@ -6,11 +6,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { err, dbAs, requireLogin } from "@/lib/api";
-import { uploadBuffer } from "@/lib/gcs";
 import { visionDocumentText } from "@/lib/vision-server";
 import { parsePanFields } from "@/lib/pan-parser";
 import { geminiExtractPan } from "@/lib/doc-extractors";
-import { compress, safeName, ACCEPTED } from "@/lib/insurance-server";
+import { storeInsuranceFile } from "@/lib/extract-server";
 import { UUID_RE } from "@/lib/validators";
 
 export const runtime = "nodejs";
@@ -25,14 +24,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const id = params.id;
     if (!UUID_RE.test(id)) return err("Invalid application id.", 400);
 
-    const form = await req.formData();
-    const file = form.get("file");
-    if (!(file instanceof File)) return err("PAN file is required.", 400);
-    if (!ACCEPTED.has(file.type)) return err("File must be JPEG, PNG, WebP, or PDF.", 400);
-
-    const { buf, mime } = await compress(file);
-    const path = `insurance/${id}/pan/${Date.now()}_${safeName(file.name, "pan")}`;
-    await uploadBuffer(path, buf, mime);
+    const stored = await storeInsuranceFile(await req.formData(), id, "pan", "PAN file is required.");
+    if (stored instanceof Response) return stored;
+    const { buf, mime, path } = stored;
 
     let fields = { pan: null as string | null, name: null as string | null, father_name: null as string | null, dob: null as string | null };
     const g = await geminiExtractPan([{ buffer: buf, mime }]);
