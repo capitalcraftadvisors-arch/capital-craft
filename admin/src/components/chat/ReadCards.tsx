@@ -54,7 +54,7 @@ export function EditableRows({ theme, rows, onSave }: {
       {rows.map((f, i) => (
         <div key={i} className="flex items-center justify-between gap-3 text-[13px] min-h-[24px]">
           <span className="text-text-muted shrink-0">{f.label}</span>
-          {editKey === f.field && f.field ? (
+          {editKey === `${i}:${f.field}` && f.field ? (
             <span className="flex items-center gap-1.5">
               <input autoFocus value={val} onChange={(e) => setVal(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { onSave(f.field!, val.trim()); setEditKey(null); } if (e.key === "Escape") setEditKey(null); }}
@@ -67,7 +67,7 @@ export function EditableRows({ theme, rows, onSave }: {
                 ? <span className="text-text font-medium text-right break-words">{f.display ?? f.value}</span>
                 : <span className="text-amber-600 text-[12px] italic">not found</span>}
               {f.field && (
-                <button onClick={() => { setEditKey(f.field!); setVal(f.ok ? f.value : ""); }} className={`opacity-60 hover:opacity-100 ${theme.accentText} text-[11px] hover:underline shrink-0`} aria-label="Edit">✎</button>
+                <button onClick={() => { setEditKey(`${i}:${f.field}`); setVal(f.ok ? f.value : ""); }} className={`opacity-60 hover:opacity-100 ${theme.accentText} text-[11px] hover:underline shrink-0`} aria-label="Edit">✎</button>
               )}
             </span>
           )}

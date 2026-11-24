@@ -85,7 +85,7 @@ const leadOwnerKey = () => `cc.leadOwner.${getBusiness()?.id ?? ""}`;
 const draftKey = () => { const b = getBusiness(); return `cc_chat:loan:${b?.id ?? ""}:${b?.member?.id ?? "owner"}`; };
 type LoanChatDraft = {
   appId: string; msgs: Msg[]; form: Form; idx: number; undo: { msgs: Msg[]; form: Form; idx: number }[];
-  subsidyCase: "subsidy" | "non_subsidy"; centralSub: string; stateSub: string; tenure: number | null;
+  subsidyCase: "subsidy" | "non_subsidy"; centralSub: string; tenure: number | null;
 };
 function lastLeadOwner(field: string): string {
   try { return (JSON.parse(localStorage.getItem(leadOwnerKey()) || "{}") as Form)[field] || ""; } catch { return ""; }
@@ -344,7 +344,6 @@ function ChatInner() {
   // Loan-config step (subsidy + tenure), mirroring the team chatbot's last step.
   const [subsidyCase, setSubsidyCase] = useState<"subsidy" | "non_subsidy">("subsidy");
   const [centralSub, setCentralSub] = useState("");
-  const [stateSub, setStateSub] = useState("");
   const [tenure, setTenure] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const started = useRef(false);
@@ -399,7 +398,7 @@ function ChatInner() {
           const { data } = await supabase().from("epc_applications").select("status").eq("id", d.appId).maybeSingle();
           if ((data as { status?: string } | null)?.status === "draft") {
             setAppId(d.appId); setMsgs(d.msgs); setForm(d.form); setIdx(d.idx); setUndoStack(d.undo ?? []);
-            setSubsidyCase(d.subsidyCase ?? "subsidy"); setCentralSub(d.centralSub ?? ""); setStateSub(d.stateSub ?? ""); setTenure(d.tenure ?? null);
+            setSubsidyCase(d.subsidyCase ?? "subsidy"); setCentralSub(d.centralSub ?? ""); setTenure(d.tenure ?? null);
             const nm = await fetchEpcName();
             if (nm && nm !== "there") setEpcName(nm);
             setReady(true);
@@ -460,19 +459,18 @@ function ChatInner() {
   // chat survives a refresh; cleared when the application is submitted.
   useEffect(() => {
     if (!ready || editMode || !appId || done) return;
-    const base = { appId, msgs: withoutThumbs(msgs), form, idx, subsidyCase, centralSub, stateSub, tenure };
+    const base = { appId, msgs: withoutThumbs(msgs), form, idx, subsidyCase, centralSub, tenure };
     saveChatDraft(draftKey(), { ...base, undo: undoStack.map((s) => ({ ...s, msgs: withoutThumbs(s.msgs) })) }, { ...base, undo: [] });
-  }, [ready, editMode, appId, done, msgs, form, idx, undoStack, subsidyCase, centralSub, stateSub, tenure]);
+  }, [ready, editMode, appId, done, msgs, form, idx, undoStack, subsidyCase, centralSub, tenure]);
 
   // Seed the loan-config defaults on arrival. When editing, prefer the values
-  // already on the application (subsidy / state subsidy / tenure); otherwise
+  // already on the application (subsidy / tenure); otherwise
   // compute the central subsidy from the plant size, as in a fresh application.
   useEffect(() => {
     if (turn?.id !== "tenure") return;
     const commercial = form.plant_use_type === "commercial";
     const existingCentral = form.central_subsidy != null && form.central_subsidy !== "" ? Number(form.central_subsidy) : null;
     setCentralSub(String(commercial ? 0 : (existingCentral ?? computeCentralSubsidy(Number(form.project_size) || 0))));
-    if (form.state_subsidy) setStateSub(String(form.state_subsidy));
     const t = Number(form.selected_tenure_years);
     if (Number.isFinite(t) && (TENURES as readonly number[]).includes(t)) setTenure(t);
     if (commercial) setSubsidyCase("non_subsidy");
@@ -546,13 +544,11 @@ function ChatInner() {
   // question and fix an answer. The created draft (appId) is kept.
   function pushUndo() { setUndoStack((s) => [...s.slice(-24), { msgs, form, idx }]); }
   function undo() {
-    setUndoStack((s) => {
-      if (!s.length) return s;
-      const snap = s[s.length - 1];
-      setMsgs(snap.msgs); setForm(snap.form); setIdx(snap.idx);
-      setError(null); setInput("");
-      return s.slice(0, -1);
-    });
+    if (!undoStack.length) return;
+    const snap = undoStack[undoStack.length - 1];
+    setUndoStack(undoStack.slice(0, -1));
+    setMsgs(snap.msgs); setForm(snap.form); setIdx(snap.idx);
+    setError(null); setInput("");
   }
 
   // ── Register: create the draft as soon as we have the mobile, so the
@@ -660,19 +656,17 @@ function ChatInner() {
   function editAnswer(turnId: string, pass?: string, value?: string) {
     const ti = script.findIndex((t) => t.id === turnId);
     if (ti < 0) return;
-    setUndoStack((s) => {
-      const i = s.findIndex((snap) => snap.idx === ti && snap.form._pass === pass);
-      if (i < 0) return s;
-      const snap = s[i];
-      // Prefill the box with the answer given (the live form may hold the other
-      // person's value once the roles are assigned or swapped).
-      if (script[ti].kind === "text" || script[ti].kind === "pincode" || script[ti].kind === "number") {
-        prefillRef.current = value || "";
-      }
-      setMsgs(snap.msgs); setForm(snap.form); setIdx(snap.idx);
-      setError(null);
-      return s.slice(0, i);
-    });
+    const i = undoStack.findIndex((snap) => snap.idx === ti && snap.form._pass === pass);
+    if (i < 0) return;
+    const snap = undoStack[i];
+    // Prefill the box with the answer given (the live form may hold the other
+    // person's value once the roles are assigned or swapped).
+    if (script[ti].kind === "text" || script[ti].kind === "pincode" || script[ti].kind === "number") {
+      prefillRef.current = value || "";
+    }
+    setUndoStack(undoStack.slice(0, i));
+    setMsgs(snap.msgs); setForm(snap.form); setIdx(snap.idx);
+    setError(null);
   }
 
   async function giveConsent() {
@@ -705,10 +699,11 @@ function ChatInner() {
       const loanAmt = Number(form.loan_amount_required) || 0;
       const tenure = Number(form.selected_tenure_years) || 0;
       // Subsidy is chosen in the loan-config step; commercial (C&I) is always 0.
+      // An EPC's application carries the central subsidy only — the state subsidy
+      // is saved as 0 for EPCs (owner's decision, 24/11), so the EMI leaves it out.
       const central = commercial ? 0 : (Number(form.central_subsidy) || 0);
-      const stateSubsidy = commercial ? 0 : (Number(form.state_subsidy) || 0);
       const monthlyEmi = tenure ? computeEmi(loanAmt, DEFAULT_INDICATIVE_ROI, tenure) : 0;
-      const subsidyEmi = tenure ? computeEmi(Math.max(0, loanAmt - central - stateSubsidy), DEFAULT_INDICATIVE_ROI, tenure) : 0;
+      const subsidyEmi = tenure ? computeEmi(Math.max(0, loanAmt - central), DEFAULT_INDICATIVE_ROI, tenure) : 0;
       const res = await fetch("/api/epc/loan-apply", {
         method: "POST",
         headers: { ...auth(), "Content-Type": "application/json" },
@@ -1013,12 +1008,10 @@ function ChatInner() {
               loanAmt={Number(form.loan_amount_required) || 0}
               subsidyCase={subsidyCase} setSubsidyCase={setSubsidyCase}
               centralSub={centralSub} setCentralSub={setCentralSub}
-              stateSub={stateSub} setStateSub={setStateSub}
               tenure={tenure} setTenure={setTenure}
               onFinish={() => {
                 const central = subsidyCase === "non_subsidy" ? 0 : (Number(centralSub) || 0);
-                const st = subsidyCase === "non_subsidy" ? 0 : (Number(stateSub) || 0);
-                merge({ selected_tenure_years: String(tenure), central_subsidy: String(central), state_subsidy: String(st) });
+                merge({ selected_tenure_years: String(tenure), central_subsidy: String(central) });
                 pushUndo(); advance();
               }}
             />
@@ -1109,7 +1102,7 @@ const UNIT_FIELDS: Partial<Record<Unit, (f: Form) => { label: string; field: str
 
 type SlotFile = { file: File; thumb: string | null };
 
-function DocTable({ appId, form, rows, docRows = [], review = false, extras, onPatch, onDone }: { appId: string; form: Form; rows: Row[]; docRows?: { id: string; category: string; storage_path: string | null }[]; review?: boolean; extras?: { bills: boolean; only?: ExtraKey[] }; onPatch: (p: Form) => void; onDone: (r: FileReceipt[]) => void }) {
+function DocTable({ appId, form, rows, docRows = [], review = false, extras, onPatch, onDone }: { appId: string; form: Form; rows: Row[]; docRows?: { id: string; category: string; storage_path: string | null }[]; review?: boolean; extras?: { bills: boolean; only?: ExtraKey[] }; onPatch: (p: Form) => void; onDone: () => void }) {
   const [extrasBusy, setExtrasBusy] = useState(false);
   const [files, setFiles] = useState<Partial<Record<Slot, SlotFile>>>({});
   const [skipped, setSkipped] = useState<Partial<Record<Slot, boolean>>>({});
@@ -1298,11 +1291,6 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
     // Re-open the picker for every part of this unit (front + back for Aadhaar).
     setReopened((s) => { const x = { ...s }; for (const p of parts) x[p] = true; return x; });
   }
-  function done() {
-    const receipt = rows.filter((r) => files[r.slot]).map((r) => ({ name: files[r.slot]!.file.name, thumb: files[r.slot]!.thumb }));
-    onDone(receipt);
-  }
-
   function cell(r: Row) {
     if (skipped[r.slot]) return <span className="text-[11.5px] text-text-muted italic">skipped</span>;
     if (rowOpen(r.slot, r.unit)) return <AddFileButton theme={THEME} onFile={(f) => pick(r.slot, r.unit, f)} />;
@@ -1334,7 +1322,7 @@ function DocTable({ appId, form, rows, docRows = [], review = false, extras, onP
       {/* An edit step for the any-number uploads alone has no table rows. */}
       {rows.length > 0 && <DocSlotTable theme={THEME} rows={rows} skipped={skipped} onToggleSkip={toggleSkip} cell={cell} strip={(r) => strip(r.unit)} />}
       {extras && <ExtraDocs appId={appId} form={form} docRows={docRows} bills={extras.bills} only={extras.only} onPatch={onPatch} onBusy={setExtrasBusy} />}
-      <ContinueRow theme={THEME} label="Continue →" onClick={done} disabled={!allSettled} hint="Add or tick “Don't have it” for every row to continue." />
+      <ContinueRow theme={THEME} label="Continue →" onClick={onDone} disabled={!allSettled} hint={reading || extrasBusy ? "" : "Add or tick “Don't have it” for every row to continue."} />
     </div>
   );
 }
@@ -1543,11 +1531,11 @@ function QuotationDock({ appId, form, onPatch, onDone }: { appId: string; form: 
 }
 
 // ── Tenure + submit ────────────────────────────────────────────────────────
-// Loan configuration — subsidy case + central/state subsidy + tenure with a
+// Loan configuration — subsidy case + central subsidy + tenure with a
 // live EMI, mirroring the team chatbot's last step.
-function LoanConfigDock({ loanAmt, subsidyCase, setSubsidyCase, centralSub, setCentralSub, stateSub, setStateSub, tenure, setTenure, onFinish }: {
+function LoanConfigDock({ loanAmt, subsidyCase, setSubsidyCase, centralSub, setCentralSub, tenure, setTenure, onFinish }: {
   loanAmt: number; subsidyCase: "subsidy" | "non_subsidy"; setSubsidyCase: (s: "subsidy" | "non_subsidy") => void;
-  centralSub: string; setCentralSub: (s: string) => void; stateSub: string; setStateSub: (s: string) => void;
+  centralSub: string; setCentralSub: (s: string) => void;
   tenure: number | null; setTenure: (n: number) => void; onFinish: () => void;
 }) {
   return (
@@ -1564,8 +1552,6 @@ function LoanConfigDock({ loanAmt, subsidyCase, setSubsidyCase, centralSub, setC
         <div className="grid grid-cols-2 gap-2">
           <label className="text-[12px] text-text-muted">Central subsidy (₹)
             <input value={centralSub} inputMode="numeric" onChange={(e) => setCentralSub(amountInput(e.target.value))} className="mt-1 w-full border border-line rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus:border-[#1e3a8a]" /></label>
-          <label className="text-[12px] text-text-muted">State subsidy (₹)
-            <input value={stateSub} inputMode="numeric" onChange={(e) => setStateSub(amountInput(e.target.value))} placeholder="0" className="mt-1 w-full border border-line rounded-lg px-2.5 py-1.5 text-[13px] focus:outline-none focus:border-[#1e3a8a]" /></label>
         </div>
       )}
       <div>

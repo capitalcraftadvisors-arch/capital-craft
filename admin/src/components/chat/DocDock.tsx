@@ -11,7 +11,7 @@
 // the files. The paste (Ctrl+V) listener stays in the page: each chat enables it
 // under its own conditions.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AdminChatTheme } from "./theme";
 
 export type UploadSlot = { name: string; label: string };
@@ -21,13 +21,19 @@ export type UploadSlot = { name: string; label: string };
  * thumbnail (blob: URL) for each.
  *   fillNextSlot(slots, file) puts a pasted file in the first empty slot.
  *   clearFiles() empties every slot (a new turn, Re-attach, a replace).
+ * A thumbnail stays valid until the page unmounts, then every one is revoked —
+ * not on a replace / clear, because the page hands the same blob: URLs to the
+ * chat's document receipts and the read card, which outlive the dock's slots.
  */
 export function useDocDockFiles() {
   const [files, setFiles] = useState<Record<string, File>>({});
   const [thumbs, setThumbs] = useState<Record<string, string | null>>({});
+  const made = useRef<string[]>([]);
+  useEffect(() => () => { made.current.forEach((u) => URL.revokeObjectURL(u)); made.current = []; }, []);
   function setFileFor(name: string, file: File) {
     setFiles((s) => ({ ...s, [name]: file }));
     const thumb = file.type.startsWith("image/") ? URL.createObjectURL(file) : null;
+    if (thumb) made.current.push(thumb);
     setThumbs((s) => ({ ...s, [name]: thumb }));
   }
   function clearFileFor(name: string) {
@@ -82,7 +88,7 @@ export function DocDock({ theme, uploads, files, thumbs, onPick, onClear, onRun,
                 {has
                   ? <button type="button" onClick={(e) => { e.preventDefault(); onClear(u.name); }} className="text-text-muted hover:text-red-500 text-[15px] leading-none px-1">×</button>
                   : <span className={`${theme.accentText} text-[12px] font-semibold`}>Add</span>}
-                <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(u.name, f); }} />
+                <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(u.name, f); e.currentTarget.value = ""; }} />
               </label>
             );
           })}

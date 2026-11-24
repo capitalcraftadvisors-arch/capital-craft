@@ -106,10 +106,10 @@ export function FieldRows({ theme, fields, onEdit }: { theme: ChatTheme; fields:
   const [val, setVal] = useState("");
   return (
     <div className="flex flex-col gap-1.5">
-      {fields.map((f) => (
+      {fields.map((f, i) => (
         <div key={f.field || f.label} className="flex items-center justify-between gap-3 text-[12.5px] min-h-[22px]">
           <span className="text-text-muted shrink-0">{f.label}</span>
-          {editKey === f.field && f.field ? (
+          {editKey === `${i}:${f.field}` && f.field ? (
             <span className="flex items-center gap-1.5">
               <input autoFocus value={val} onChange={(e) => setVal(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { onEdit(f.field!, val.trim()); setEditKey(null); } if (e.key === "Escape") setEditKey(null); }}
@@ -119,7 +119,7 @@ export function FieldRows({ theme, fields, onEdit }: { theme: ChatTheme; fields:
           ) : (
             <span className="flex items-center gap-2 min-w-0">
               {f.ok ? <span className="text-text font-medium text-right break-words">{f.value}</span> : <span className="text-amber-600 text-[11.5px] italic">not found</span>}
-              {f.field && <button onClick={() => { setEditKey(f.field!); setVal(f.ok ? f.value : ""); }} className={`opacity-60 hover:opacity-100 ${theme.accentText} text-[11px] hover:underline shrink-0`} aria-label="Edit">✎</button>}
+              {f.field && <button onClick={() => { setEditKey(`${i}:${f.field}`); setVal(f.ok ? f.value : ""); }} className={`opacity-60 hover:opacity-100 ${theme.accentText} text-[11px] hover:underline shrink-0`} aria-label="Edit">✎</button>}
             </span>
           )}
         </div>

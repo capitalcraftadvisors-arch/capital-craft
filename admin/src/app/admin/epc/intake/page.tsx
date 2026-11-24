@@ -398,7 +398,7 @@ function Inner() {
     if (bankStmtCount < 1) { setError("Please upload the last 12 months' bank statements."); return; }
     pushUser(`${bankStmtCount} bank statements uploaded`, { turnId: t.id });
     if (t.step) maybeBumpStep(t.step);
-    if (editing) setEditing(null); else advance();
+    advance();
   }
   function skipBankStatements() {
     const t = active; if (!t || editing) return;
@@ -423,8 +423,20 @@ function Inner() {
     const t = SCRIPT.find((x) => x.id === turnId);
     const nf: Form = { ...form, ...(t?.field ? { [t.field]: value } : {}) };
     setForm(nf);
-    setMsgs((m) => m.map((x, i) => (i === index ? { ...x, text: label, edited: true } : x)));
+    // index -1 = a question asked during the edit that had no answer yet → add the answer.
+    if (index < 0) pushUser(label, { turnId, field: t?.field, editable: true });
+    else setMsgs((m) => m.map((x, i) => (i === index ? { ...x, text: label, edited: true } : x)));
     if (t?.write) await patchBiz(t.write(value, nf));
+    // Designation changed to "Other" → ask the first pass's "Please specify" turn
+    // (re-editing its earlier answer if there is one) and save that answer.
+    if (turnId === "contact_designation" && value === "Other" && turn?.id !== "designation_other") {
+      const spec = SCRIPT.find((x) => x.id === "designation_other")!;
+      const at = msgs.findIndex((x) => x.from === "user" && x.turnId === spec.id);
+      if (at < 0) pushBot(spec.bot, spec.id);
+      setEditing({ index: at, turnId: spec.id });
+      setInput(at < 0 ? "" : form.contact_designation || "");
+      return;
+    }
     setEditing(null); setInput("");
   }
   function cancelEdit() { setEditing(null); setInput(""); setError(null); }
@@ -727,8 +739,8 @@ function Inner() {
               <div className="flex items-center justify-between gap-2">
                 <span className="text-[12px] text-text-muted">{bankStmtCount} uploaded</span>
                 <div className="flex items-center gap-2">
-                  {!editing && <button onClick={skipBankStatements} className="px-3 py-2 text-[13px] text-text-muted hover:text-text">Skip</button>}
-                  <button onClick={submitBankStatements} disabled={bankStmtCount < 1} className="px-4 py-2 rounded-xl bg-[#185fa5] text-white text-[14px] font-semibold hover:bg-[#124a82] disabled:opacity-50">{editing ? "Done" : "Continue →"}</button>
+                  <button onClick={skipBankStatements} className="px-3 py-2 text-[13px] text-text-muted hover:text-text">Skip</button>
+                  <button onClick={submitBankStatements} disabled={bankStmtCount < 1} className="px-4 py-2 rounded-xl bg-[#185fa5] text-white text-[14px] font-semibold hover:bg-[#124a82] disabled:opacity-50">Continue →</button>
                 </div>
               </div>
             </div>

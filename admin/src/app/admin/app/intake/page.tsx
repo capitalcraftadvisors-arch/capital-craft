@@ -107,6 +107,12 @@ function frow(label: string, value: string | undefined, field: string): Fetched 
   return { label, value: v, ok: !!v, field };
 }
 
+// The highest number among a saved chat's message ids ("m12" → 12). New ids
+// continue above it, so no two messages ever share an id.
+function maxMsgId(list: ChatMsg[]): number {
+  return list.reduce((n, m) => Math.max(n, Number(String(m.id).replace(/\D/g, "")) || 0), 0);
+}
+
 const SCRIPT: Turn[] = [
   // 1) EPC partner
   { id: "epc", bot: "Which EPC partner is this application for?", kind: "epc" },
@@ -361,6 +367,8 @@ function Inner() {
   const { msgs, setMsgs, idRef, uid, pushBot, pushUser, say, pushFetched, updateFetched } = useChatLog();
   const [idx, setIdx] = useState(0);
   const [form, setForm] = useState<Form>({});
+  const formRef = useRef<Form>(form); // the latest form, for the document reads (applyDocPatch)
+  formRef.current = form;
   const [appId, setAppId] = useState<string | null>(null);
   const [epcs, setEpcs] = useState<Choice[]>([]);
   const [input, setInput] = useState("");
@@ -371,6 +379,8 @@ function Inner() {
   const [confirm, setConfirm] = useState<ReadConfirm | null>(null);
   const [cfEdit, setCfEdit] = useState<string | null>(null); // which "Read from the document" field is being edited
   const [cfVal, setCfVal] = useState("");
+  // The card closed or changed → no field stays open in edit with old text.
+  useEffect(() => { setCfEdit(null); setCfVal(""); }, [confirm]);
   // Info-sheet paste → editable confirm card (raw parsed values).
   const [sheetReview, setSheetReview] = useState<{ parsed: Form } | null>(null);
   const [donId, setDonId] = useState<string | null>(null);
@@ -470,7 +480,7 @@ function Inner() {
           if (pf.central_subsidy) setCentralSub(pf.central_subsidy);
           if (pf.state_subsidy) setStateSub(pf.state_subsidy);
           if (pf.selected_tenure_years) setTenure(Number(pf.selected_tenure_years));
-          idRef.current = savedMsgs.length + 1000; // avoid key collisions with restored ids
+          idRef.current = maxMsgId(savedMsgs); // new ids start above the restored ones
           const nm = pf.borrower_name || "this applicant";
           const intro: ChatMsg = { id: uid(), from: "bot", text: `Editing ${nm}'s profile.`, time: nowLabel(), turnId: "edit_intro" };
           // Show the earlier chat (if any) as history, then the edit intro. Drop
@@ -483,7 +493,7 @@ function Inner() {
         }
         // 2) Non-edit resume — restore an in-progress chat if one exists.
         if (savedMsgs.length) {
-          idRef.current = savedMsgs.length + 1000;
+          idRef.current = maxMsgId(savedMsgs);
           setAppId(appParam);
           setForm((chat.form_state as Form) || {});
           setMsgs(savedMsgs);
@@ -536,8 +546,9 @@ function Inner() {
   useEffect(() => {
     if (resuming || !appId || donId) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => { void saveChat(); }, 700);
-    return () => { if (saveTimer.current) clearTimeout(saveTimer.current); };
+    // saveTimer is set only while a save is waiting (← flushes it — goBack).
+    saveTimer.current = setTimeout(() => { saveTimer.current = null; void saveChat(); }, 700);
+    return () => { if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; } };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [msgs, form, idx, appId, donId, resuming]);
 
@@ -616,14 +627,12 @@ function Inner() {
   // Undo — snapshot before each entry so the RM can step any action back.
   function pushUndo() { setUndoStack((s) => [...s.slice(-29), { msgs, form, idx, leadMode }]); }
   function undo() {
-    setUndoStack((s) => {
-      if (!s.length) return s;
-      const snap = s[s.length - 1];
-      setMsgs(snap.msgs); setForm(snap.form); setLeadMode(snap.leadMode);
-      setEditing(null); setError(null); setConfirm(null);
-      setIdx(snap.idx); // re-renders that turn fresh (question re-appears)
-      return s.slice(0, -1);
-    });
+    if (!undoStack.length) return;
+    const snap = undoStack[undoStack.length - 1];
+    setUndoStack((s) => s.slice(0, -1));
+    setMsgs(snap.msgs); setForm(snap.form); setLeadMode(snap.leadMode);
+    setEditing(null); setError(null); setConfirm(null);
+    setIdx(snap.idx); // re-renders that turn fresh (question re-appears)
   }
 
   // ── Answer the current (or edited) turn ──
@@ -696,6 +705,12 @@ function Inner() {
     const started = !!appId;
     if (started && !window.confirm("Close this chat? Your progress is saved — you can reopen this application to continue.")) return;
     if (started) await saveChat({ markUnderReview: mode === "create" });
+    router.push("/admin");
+  }
+  // Header ← — a save still waiting on the autosave timer goes out first, so
+  // the last edits aren't lost (no request when nothing is waiting).
+  async function goBack() {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; await saveChat(); }
     router.push("/admin");
   }
 
@@ -826,9 +841,13 @@ function Inner() {
   // reads fire in parallel, so nothing here blocks another row.
   function applyDocPatch(patch: Form) {
     // Functional merge keeps parallel reads (and a replace/re-upload) from
-    // clobbering each other: persist the FRESHLY-merged form, never the stale
-    // `form` closure — otherwise a re-uploaded doc's new values don't reflect.
-    setForm((prev) => { const next = { ...prev, ...patch }; void persistForm(next); return next; });
+    // clobbering each other: persist the FRESHLY-merged form (formRef — reads
+    // resolve between renders), never the stale `form` closure — otherwise a
+    // re-uploaded doc's new values don't reflect.
+    const next = { ...formRef.current, ...patch };
+    formRef.current = next;
+    setForm((prev) => ({ ...prev, ...patch }));
+    void persistForm(next);
   }
   // Record / clear a table row in the pending list (draft at submit; never blocks).
   function docSkipChange(label: string, skipped: boolean) {
@@ -1090,7 +1109,7 @@ function Inner() {
     <div className="h-screen flex flex-col overflow-hidden" style={THEME.canvas}>
       <AdminChatHeader theme={THEME} title={leadMode ? "New lead" : editMode ? "Edit profile" : "New application"}
         subtitle={leadMode ? "capturing a lead" : editMode ? "completing the profile" : "building the profile"}
-        progress={progress} onBack={() => router.push("/admin")} onClose={() => void closeChat()}>
+        progress={progress} onBack={() => void goBack()} onClose={() => void closeChat()}>
         <button onClick={undo} disabled={!undoStack.length || !!donId || !!leadDoneId} className="w-8 h-8 rounded-full hover:bg-white/10 grid place-items-center text-white/80 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent text-[17px] leading-none" aria-label="Undo last" title="Undo last">↶</button>
       </AdminChatHeader>
 
@@ -1139,7 +1158,7 @@ function Inner() {
 
         {error && <ChatError text={error} />}
 
-        {editMode && !donId && !turn && !resuming && (
+        {editMode && !donId && !turn && !resuming && !busy && !error && (
           <DonePanel theme={THEME} message="All set — the profile is up to date."
             actionLabel="Open the profile →" onAction={() => router.push(`/admin/app/${appId}/view`)} />
         )}

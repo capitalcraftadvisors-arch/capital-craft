@@ -94,6 +94,16 @@ function Inner() {
   const [pendingAmount, setPendingAmount] = useState<number | null>(null);
   const seq = useRef(0);
   const uid = () => "m" + ++seq.current;
+  // The current step's typed text, set aside while an earlier answer is redone (↺ / ✎).
+  const heldInput = useRef("");
+  // Picked-image previews (blob: URLs) — freed once their message is replaced, and on leaving.
+  const thumbs = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const now = new Set(msgs.flatMap((m) => (m.files ?? []).flatMap((f) => (f.thumb ? [f.thumb] : []))));
+    thumbs.current.forEach((u) => { if (!now.has(u)) URL.revokeObjectURL(u); });
+    thumbs.current = now;
+  }, [msgs]);
+  useEffect(() => () => thumbs.current.forEach((u) => URL.revokeObjectURL(u)), []);
 
   const active: Stage | null = editing ?? stage;
   const merge = (p: App) => setApp((a) => ({ ...a, ...p }));
@@ -115,11 +125,12 @@ function Inner() {
   // ── load + resume ──
   useEffect(() => {
     void (async () => {
-      const [{ data }, epc] = await Promise.all([
+      const [{ data, error: loadError }, epc] = await Promise.all([
         supabase().from("insurance_applications").select("*").eq("id", id).maybeSingle(),
         fetchEpcName().catch(() => ""),
       ]);
-      const row = (data ?? {}) as App;
+      if (loadError || !data) { setError("Application not found."); return; }
+      const row = data as App;
       setApp(row);
       const hello = epc && epc !== "there" ? ` ${epc}` : "";
       const out: Msg[] = [
@@ -156,7 +167,7 @@ function Inner() {
       case "plant": return [user(s, { text: "Plant photo · geo-tagged ✓", redo: true })];
       case "ebill": return [user(s, { files: [{ name: "Electricity bill", thumb: null }], redo: true })];
       case "address": return [user(s, { text: r.plant_address, redo: true })];
-      case "invoice": return [user(s, { files: [{ name: "Tax invoice / Quotation", thumb: null }], redo: true }), bot(s, `Amount read: ${fmtRupeesExact(r.invoice_amount)}`)];
+      case "invoice": return [user(s, { files: [{ name: "Tax invoice / Quotation", thumb: null }], redo: true }), bot(s, r.invoice_amount != null ? `Amount read: ${fmtRupeesExact(r.invoice_amount)}` : "I couldn't read the amount — you'll type it next.")];
       case "amount": return [user(s, { text: fmtRupeesExact(r.invoice_confirmed_amount), redo: true })];
       default: return [];
     }
@@ -171,10 +182,15 @@ function Inner() {
   }
   const nextOf = (s: Stage) => ORDER[ORDER.indexOf(s) + 1] ?? "review";
   // A stage finished: back to where we were when redoing it, else onward.
-  function finished(s: Stage) {
-    if (editing) { setEditing(null); setFiles({}); setError(null); setInput(""); return; }
+  async function finished(s: Stage) {
+    if (editing) { setEditing(null); setFiles({}); setError(null); setInput(heldInput.current); return; }
     // Step boundaries the review queue relies on (same as the form's Save & continue).
-    if (s === "gst") void post("save", { step: 1 });
+    if (s === "gst") {
+      setBusy(true);
+      const d = await post("save", { step: 1 });
+      setBusy(false);
+      if (!d) return;
+    }
     ask(nextOf(s));
   }
 
@@ -222,12 +238,12 @@ function Inner() {
       merge({ invoice_path: "x", invoice_amount: amt });
       answer(s, [sent, bot(s, amt != null ? `Amount read: ${fmtRupeesExact(amt)}` : "I couldn't read the amount — you'll type it next.")]);
     }
-    finished(s);
+    await finished(s);
   }
 
   function skipGst() {
     answer("gst", [user("gst", { text: "Don't have it", redo: true })]);
-    finished("gst");
+    void finished("gst");
   }
 
   async function uploadPlant(file: File, gps: Gps): Promise<{ ok: boolean; error?: string }> {
@@ -298,6 +314,7 @@ function Inner() {
   // ↺ / ✎ on a past answer: reopen that step in place.
   function redo(s: Stage) {
     if (busy || stage === "done") return;
+    if (!editing) heldInput.current = input;
     setEditing(s); setFiles({}); setError(null);
     setInput(s === "address" ? (app.plant_address ?? "") : s === "amount" ? String(app.invoice_confirmed_amount ?? "") : "");
   }
@@ -365,7 +382,7 @@ function Inner() {
             <EditingBanner theme={THEME} label="Changing your answer" onCancel={() => {
               // A half-done amount change goes back to the saved amount.
               if (editing === "mismatch" || editing === "amount") answer("amount", [user("amount", { text: fmtRupeesExact(app.invoice_confirmed_amount), redo: true })]);
-              setEditing(null); setError(null); setFiles({}); setPendingAmount(null);
+              setEditing(null); setError(null); setFiles({}); setPendingAmount(null); setInput(heldInput.current);
             }} />
           )}
 
