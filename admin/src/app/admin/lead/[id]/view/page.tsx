@@ -26,6 +26,7 @@ import { supabase } from "@/lib/supabase";
 import { authHeaders } from "@/lib/auth";
 import { notify } from "@/lib/notify";
 import { askConfirm } from "@/lib/confirm";
+import { adminLoanChatHref } from "@/lib/loan-form";
 
 type Lead = {
   id: string;
@@ -132,8 +133,9 @@ function Inner() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) { notify.error(data?.error || `Conversion failed (HTTP ${res.status}).`); setConverting(false); return; }
-      // replace: browser Back from the new loan never reopens the converted lead.
-      router.replace(`/admin/app/${data.application_id}/view`);
+      // Straight into the chat to finish the application (its ← goes to the new
+      // profile). replace: browser Back never reopens the converted lead.
+      router.replace(adminLoanChatHref(data.application_id));
     } catch (e) {
       notify.error("Conversion failed: " + (e as Error).message);
       setConverting(false);

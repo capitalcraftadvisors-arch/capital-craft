@@ -37,6 +37,7 @@ import EmailComposerModal from "@/components/EmailComposerModal";
 import { DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
 import { logLoanActivity } from "@/lib/loanAudit";
 import { loanDocChecklist } from "@/lib/loan-doc-checklist";
+import { adminLoanChatHref } from "@/lib/loan-form";
 import { loanChecks } from "@/lib/loan-verification";
 import { cachedLoanUpdateCount } from "@/lib/use-epc-updates";
 import { COMPLETION_CATEGORIES, firstDisbursedShown } from "@/lib/disbursement";
@@ -811,7 +812,7 @@ function Inner() {
   // Edit the application itself; each stage's details are edited in its stage.
   const editItems = aborted ? [] : [
     // Chatbot — asks only for what's still missing.
-    { label: "Continue in chat", onClick: () => router.push(`/admin/app/intake?app=${loan.id}&edit=1`) },
+    { label: "Continue in chat", onClick: () => router.push(adminLoanChatHref(loan.id)) },
     // The classic step-by-step wizard.
     { label: "Edit in form", onClick: () => router.push(`/admin/app/${loan.id}/step-1`) },
   ];

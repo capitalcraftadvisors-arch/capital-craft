@@ -5,13 +5,13 @@
 //     document labels, default CC/BCC) WITHOUT sending. The composer shows it so
 //     the admin can see exactly what's going and fix any missing field first.
 //   • "send"    → sends the email from capitalcraftadvisors@gmail.com using the
-//     (possibly edited) `detail` rows for the body, a link to every document, a
-//     single ZIP link, and the summary attached. Recipients (to/cc/bcc) are
-//     saved to email_contacts for future autocomplete.
+//     (possibly edited) `detail` rows for the body, a link to every document
+//     with a Download button beside it (lenders who can't save an image that
+//     opens in the browser), a single ZIP link, and the summary attached.
+//     Recipients (to/cc/bcc) are saved to email_contacts for future autocomplete.
 //
 // scope "completion" (the 2nd tranche): the 5 completion documents + the
-// "Additional documents" (0137), each with a Download button, and NO summary
-// sheet (the user, 25/11). The send is stamped on tranche2_emailed_at (0138) —
+// "Additional documents" (0137), and NO summary sheet (the user, 25/11). The send is stamped on tranche2_emailed_at (0138) —
 // the Loans list shows that date once the 2nd disbursement is in.
 //
 // Admin-only. Keeps the Download-ZIP button untouched.
@@ -197,7 +197,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         ? `Please find the completion (2nd tranche) documents for <b>${esc(borrowerName)}</b> below. Kindly review and release the second tranche.`
         : `Please find the applicant details for <b>${esc(borrowerName)}</b> below, along with the supporting documents. Kindly review and revert at the earliest.`,
       logTag: "send-to-lender",
-      ...(isCompletion ? { summarySheet: false, downloadButtons: true } : {}),
+      downloadButtons: true,
+      ...(isCompletion ? { summarySheet: false } : {}),
     });
     if (isCompletion) {
       const { error: stampErr } = await supabase.from("epc_applications").update({ tranche2_emailed_at: new Date().toISOString() }).eq("id", appId);

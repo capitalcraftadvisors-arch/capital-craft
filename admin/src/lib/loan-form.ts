@@ -9,6 +9,10 @@
 import { supabase } from "@/lib/supabase";
 
 export type LoanForm = Record<string, string>;
+
+/** The admin chatbot on a saved application — it loads the profile and asks only
+ *  for what's still missing (the profile's "Continue in chat", a converted lead). */
+export const adminLoanChatHref = (id: string) => `/admin/app/intake?app=${id}&edit=1`;
 // The electricity connection's category (0109) — asked by the EPC chatbot.
 export const CATEGORY_LABEL: Record<string, string> = { domestic: "Domestic", non_domestic: "Non-domestic" };
 

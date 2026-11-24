@@ -19,6 +19,7 @@ import Button from "@/components/ui/Button";
 import RowLink from "@/components/RowLink";
 import { ACCENTS } from "@/components/AdminSidebar";
 import { authHeaders, getBusiness } from "@/lib/auth";
+import { adminLoanChatHref } from "@/lib/loan-form";
 import { useAdminNames } from "@/lib/use-admin-names";
 
 type LeadRow = {
@@ -163,7 +164,7 @@ export default function LoanLeadsTab() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) { notify.error(data?.error || `Conversion failed (HTTP ${res.status}).`); setConverting(null); return; }
-      router.push(`/admin/app/${data.application_id}/view`);
+      router.push(adminLoanChatHref(data.application_id)); // straight into the chat to finish it
     } catch (e) {
       notify.error("Conversion failed: " + (e as Error).message);
       setConverting(null);
