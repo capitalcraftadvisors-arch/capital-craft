@@ -70,7 +70,7 @@ grant execute on function epc_projects_from_loans(uuid) to authenticated;
 -- can see the project (the loan itself needs the Loans module); never to Site staff.
 create or replace function epc_project_lender(p_app uuid)
 returns table (paid numeric, share numeric, first_amount numeric, first_date date, second_amount numeric, second_date date)
-language sql stable security definer set search_path = public as $
+language sql stable security definer set search_path = public as $$
   select coalesce(a.first_disbursement_amount, 0) + coalesce(a.second_disbursement_amount, 0),
          greatest(coalesce(a.sanctioned_amount, a.loan_amount_required, 0)
                     - coalesce(a.first_processing_fee, 0) - coalesce(a.first_legal_charges, 0) - coalesce(a.first_cersai_charges, 0),
@@ -81,7 +81,7 @@ language sql stable security definer set search_path = public as $
      and a.epc_business_id = nullif(auth.jwt() ->> 'business_id', '')::uuid
      and a.status <> 'rejected' and a.aborted_at is null
      and epc_member_role() in ('OWNER', 'ADMIN', 'VIEWER', 'SALES')
-$;
+$$;
 revoke all on function epc_project_lender(uuid) from public;
 grant execute on function epc_project_lender(uuid) to authenticated;
 
