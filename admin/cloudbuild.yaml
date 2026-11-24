@@ -14,12 +14,13 @@
 #                      pastes an inline value into the console, next push
 #                      flips it back to the secret reference.
 #
-# Manual deploy (fallback while auto-deploy is being proven, or for emergency):
-#   cd "D:\capital craft\capitalcraft-repo\admin"
+# Manual deploy (step 1 of every deploy; run from admin/). In PowerShell keep
+# the --update-secrets value in double quotes: the comma is an operator there.
 #   gcloud run deploy capitalcraft-app --source=. --region=asia-southeast1 `
 #     --service-account=50204473772-compute@developer.gserviceaccount.com `
-#     --update-secrets=APP_JWT_SECRET=APP_JWT_SECRET:latest `
-#     --allow-unauthenticated
+#     "--update-secrets=APP_JWT_SECRET=APP_JWT_SECRET:latest,GMAIL_APP_PASSWORD=GMAIL_APP_PASSWORD:latest" `
+#     --memory=2Gi --allow-unauthenticated --quiet
+# Step 2 is the push to main, which runs this file and redeploys from git.
 # =============================================================================
 
 steps:
