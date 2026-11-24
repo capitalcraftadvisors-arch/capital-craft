@@ -19,6 +19,10 @@
 //
 // LEGACY: a single 'completion_plant_photo' from the earlier build is shown
 // read-only if present, so nothing already uploaded is orphaned.
+//
+// LOCK (0138): once the EPC sends its 2nd-tranche documents, its slots are
+// view-only — except the ones the team reopened with Message to EPC. The
+// Capital Craft team is never locked (the DB enforces the same rule).
 
 import { useEffect, useState } from "react";
 import FileUpload, { UPLOAD_BOX_COMPACT } from "@/components/FileUpload";
@@ -28,16 +32,7 @@ import { getDocumentUrl, deleteDocument, downloadDocument } from "@/lib/storage"
 import { askConfirm } from "@/lib/confirm";
 import { notify } from "@/lib/notify";
 import { I } from "@/components/view/ViewKit";
-
-export const COMPLETION_CATEGORIES = [
-  "completion_invoice",
-  "completion_panel_photo",
-  "completion_inverter_photo",
-  "completion_meter_photo",
-  "completion_report",
-] as const;
-
-export type CompletionCategory = typeof COMPLETION_CATEGORIES[number];
+import { COMPLETION_CATEGORIES, COMPLETION_OTHER, type CompletionCategory } from "@/lib/disbursement";
 
 // Tranche-1 admin documents — uploaded here alongside the completion set but
 // NOT part of the 2nd-tranche review gate (they belong to the 1st tranche).
@@ -69,9 +64,13 @@ type Props = {
   /** The approving lender is Solfin: no MMR / Advance Receipt — no upload slot
    *  and not counted (one uploaded earlier still shows, to view or remove). */
   noAdvanceReceipt?: boolean;
+  /** The EPC sent its 2nd-tranche documents (0138): view-only, except `reopened`. */
+  locked?: boolean;
+  /** 2nd-tranche categories the team reopened with Message to EPC. */
+  reopened?: string[];
 };
 
-export default function CompletionDocsSection({ applicationId, uploadedBy, refreshKey, onCountChange, mode = "all", noAdvanceReceipt }: Props) {
+export default function CompletionDocsSection({ applicationId, uploadedBy, refreshKey, onCountChange, mode = "all", noAdvanceReceipt, locked = false, reopened = [] }: Props) {
   const [docs, setDocs] = useState<DocRow[]>([]);
   const [tick, setTick] = useState(0);
 
@@ -83,7 +82,7 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
         .select("id, category, file_name, mime_type")
         .eq("application_id", applicationId)
         // Also pull the legacy plant photo (read-only) + the Tranche-1 docs.
-        .in("category", [...COMPLETION_CATEGORIES, "completion_plant_photo", ...TRANCHE1_DOCS.map((d) => d.category)] as unknown as string[]);
+        .in("category", [...COMPLETION_CATEGORIES, COMPLETION_OTHER.category, "completion_plant_photo", ...TRANCHE1_DOCS.map((d) => d.category)]);
       if (cancelled) return;
       const rows = (data ?? []) as DocRow[];
       setDocs(rows);
@@ -104,6 +103,8 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
 
   const byCat = (c: string) => docs.find((d) => d.category === c) ?? null;
   const legacyPlant = byCat("completion_plant_photo");
+  const canEdit = (c: string) => !locked || reopened.includes(c);
+  const refresh = () => setTick((n) => n + 1);
 
   // Remove a tranche/completion doc immediately (row + GCS object), then
   // refresh so the slot falls back to its uploader. The docsUploaded/docsTotal
@@ -156,21 +157,23 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
       )}
       <div className={grid}>
       {/* 1 — Invoice / tax invoice */}
-      <DocSlot title="Invoice / tax invoice" doc={byCat("completion_invoice")} onOpen={open} onRemove={removeDoc}>
-        <FileUpload
-          applicationId={applicationId}
-          table="user_application_docs"
-          category="completion_invoice"
-          uploadedBy={uploadedBy}
-          maxFiles={1}
-          label=""
-          compact
-          onUploaded={() => setTick((n) => n + 1)}
-        />
+      <DocSlot title="Invoice / tax invoice" doc={byCat("completion_invoice")} onOpen={open} onRemove={canEdit("completion_invoice") ? removeDoc : undefined}>
+        {canEdit("completion_invoice") ? (
+          <FileUpload
+            applicationId={applicationId}
+            table="user_application_docs"
+            category="completion_invoice"
+            uploadedBy={uploadedBy}
+            maxFiles={1}
+            label=""
+            compact
+            onUploaded={refresh}
+          />
+        ) : <LockedBox />}
       </DocSlot>
 
       {/* 2-4 — Three geo-tagged site photos (upload only). */}
-      {GEO_PHOTOS.map((p) => (
+      {GEO_PHOTOS.map((p) => canEdit(p.category) ? (
         <div key={p.category}>
           <SlotTitle title={`${p.title} (geo-tagged)`} />
           <GeoOfficeUpload
@@ -180,41 +183,52 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
             label=""
             uploadOnly
             compact
+            onUploaded={refresh}
+            onRemoved={refresh}
           />
         </div>
+      ) : (
+        <DocSlot key={p.category} title={`${p.title} (geo-tagged)`} doc={byCat(p.category)} onOpen={open}>
+          <LockedBox />
+        </DocSlot>
       ))}
 
       {/* 5 — Work completion / commission report */}
-      <DocSlot title="Work Completion Report / Commission Report" doc={byCat("completion_report")} onOpen={open} onRemove={removeDoc}>
-        <FileUpload
-          applicationId={applicationId}
-          table="user_application_docs"
-          category="completion_report"
-          uploadedBy={uploadedBy}
-          maxFiles={1}
-          label=""
-          compact
-          onUploaded={() => setTick((n) => n + 1)}
-        />
+      <DocSlot title="Work Completion Report / Commission Report" doc={byCat("completion_report")} onOpen={open} onRemove={canEdit("completion_report") ? removeDoc : undefined}>
+        {canEdit("completion_report") ? (
+          <FileUpload
+            applicationId={applicationId}
+            table="user_application_docs"
+            category="completion_report"
+            uploadedBy={uploadedBy}
+            maxFiles={1}
+            label=""
+            compact
+            onUploaded={refresh}
+          />
+        ) : <LockedBox />}
       </DocSlot>
 
-      {/* Optional extra / supporting documents. Stored under "other", so they are
-          NEVER part of the required completion set and can't affect the
-          upload-count gate (docsUploaded/docsTotal count only COMPLETION_CATEGORIES). */}
-      <div>
-        <SlotTitle title="Additional documents (optional)" />
-        <FileUpload
-          applicationId={applicationId}
-          table="user_application_docs"
-          category="other"
-          uploadedBy={uploadedBy}
-          maxFiles={10}
-          label=""
-          compact
-          slot
-          onUploaded={() => setTick((n) => n + 1)}
-        />
-      </div>
+      {/* Optional extra / supporting documents (completion_other, 0137 — before
+          that they were saved as the application's "other"). NEVER part of the
+          required set, so they can't affect the n/5 count. Locked and empty → hidden. */}
+      {(canEdit(COMPLETION_OTHER.category) || byCat(COMPLETION_OTHER.category)) && (
+        <div>
+          <SlotTitle title={`${COMPLETION_OTHER.label} (optional)`} />
+          <FileUpload
+            applicationId={applicationId}
+            table="user_application_docs"
+            category={COMPLETION_OTHER.category}
+            uploadedBy={uploadedBy}
+            maxFiles={10}
+            label=""
+            compact
+            slot
+            readOnly={!canEdit(COMPLETION_OTHER.category)}
+            onUploaded={refresh}
+          />
+        </div>
+      )}
 
       {/* Legacy single plant photo from the earlier build — read-only. */}
       {legacyPlant && (
@@ -225,6 +239,15 @@ export default function CompletionDocsSection({ applicationId, uploadedBy, refre
       </div>
       </>
       )}
+    </div>
+  );
+}
+
+// A locked, empty slot (the team removed a sent document): same size, nothing to do.
+function LockedBox() {
+  return (
+    <div className={`${UPLOAD_BOX_COMPACT} grid place-items-center rounded-input border border-dashed border-cc-line text-cc-muted`} aria-label="Locked">
+      {I.lock}
     </div>
   );
 }

@@ -21,6 +21,7 @@ type LoanCategory =
   // Post-first-disbursement completion docs (migration 0043). Shared slots —
   // uploaded by either the admin (on behalf) or the EPC.
   | "completion_invoice" | "completion_plant_photo" | "completion_report"
+  | "completion_other" // 2nd-tranche "Additional documents" (0137)
   // Tranche-1 admin docs (migration 0056).
   | "feasibility_report" | "mmr_advance_receipt";
 
@@ -61,6 +62,8 @@ type Props = {
   // A document slot (tranche docs): each file also has Download, and once a file
   // is in, the upload box gives way to a small "+" on the last file's row.
   slot?: boolean;
+  // View / download only — no upload box, no remove (a sent, locked 2nd tranche).
+  readOnly?: boolean;
 };
 
 /** The compact upload box's height — shared with GeoOfficeUpload and the
@@ -88,7 +91,7 @@ export default function FileUpload(props: Props) {
     businessId, stakeholderId, applicationId,
     category, table, maxFiles = 1, uploadedBy,
     onUploaded, captureGps = false, extraMetadata, label, hint, uploadHint,
-    dedupe = false, onCountChange, hideIds, compact = false, slot = false,
+    dedupe = false, onCountChange, hideIds, compact = false, slot = false, readOnly = false,
   } = props;
   const inputRef = useRef<HTMLInputElement>(null);
   const [docs, setDocs] = useState<DocRow[]>([]);
@@ -237,7 +240,7 @@ export default function FileUpload(props: Props) {
     setThumbs((t) => { const c = { ...t }; delete c[d.id]; return c; });
   }
 
-  const canUploadMore = docs.length < maxFiles;
+  const canUploadMore = !readOnly && docs.length < maxFiles;
   const listed = hideIds?.length ? docs.filter((d) => !hideIds.includes(d.id)) : docs;
   const filledSlot = slot && listed.length > 0;
   // Rendered in the upload box, or (filled slot) in the small "+".
@@ -305,15 +308,17 @@ export default function FileUpload(props: Props) {
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 21h16" /></svg>
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => removeDoc(d)}
-                title="Remove"
-                aria-label="Remove"
-                className="p-1.5 rounded hover:bg-red-50 text-red-600 transition-colors"
-              >
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
-              </button>
+              {!readOnly && (
+                <button
+                  type="button"
+                  onClick={() => removeDoc(d)}
+                  title="Remove"
+                  aria-label="Remove"
+                  className="p-1.5 rounded hover:bg-red-50 text-red-600 transition-colors"
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></svg>
+                </button>
+              )}
               {filledSlot && canUploadMore && n === listed.length - 1 && (
                 <label title="Add another" aria-label="Add another"
                   className={"p-1.5 rounded hover:bg-bg-tint text-cc-blue transition-colors cursor-pointer" + (uploading ? " opacity-50 pointer-events-none" : "")}>

@@ -10,6 +10,8 @@
 // with its result and an Undo until the page is reopened.
 // One query per list on open (+ the letters of the pending loans); decisions
 // update the list locally (no refetch).
+// Back from a profile opened here returns here, to the same scroll, with that
+// row blinking — as on the Loans / EPC lists (components/view/hooks + kit).
 
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
@@ -28,6 +30,8 @@ import { getDocumentUrl } from "@/lib/storage";
 import { approveEpcReview, rememberPendingCount, PENDING_FILTER, REVIEW_LABEL, REVIEW_TAB, type ReviewItem } from "@/lib/review";
 import { invalidate } from "@/lib/list-cache";
 import { shortEpcName } from "@/lib/epc-name";
+import { clearReturn, rememberReturn } from "@/components/view/hooks";
+import { highlightRowStyle, useReturnHighlight } from "../_console/kit";
 
 type Row = Record<string, any>;
 
@@ -48,6 +52,17 @@ const epcShort = (b: Row | null | undefined) => {
 };
 const epc = (r: Row) => epcShort(r.epc_business);
 
+// Leaving for a profile: Back there comes here; this row (its key) blinks.
+const SCROLL_KEY = "pendings.scroll";
+const ROW_KEY = "pendings.lastRowId";
+function rememberRow(rowKey: string, href: string) {
+  rememberReturn("/admin/pendings", href);
+  try {
+    sessionStorage.setItem(SCROLL_KEY, String(window.scrollY));
+    sessionStorage.setItem(ROW_KEY, rowKey);
+  } catch { /* storage blocked */ }
+}
+
 function Inner() {
   const router = useRouter();
   const allowed = isMainAdmin(getBusiness());
@@ -63,6 +78,7 @@ function Inner() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reload, setReload] = useState(0); // bumped by clicking Pendings in the sidebar
+  useEffect(() => { clearReturn(); }, []);
 
   useEffect(() => {
     if (!allowed) { router.replace("/admin"); return; }
@@ -111,6 +127,12 @@ function Inner() {
   }, [allowed, router, reload]);
 
   const loaded = rows != null && epcRows != null && requests != null;
+  const blinkId = useReturnHighlight(SCROLL_KEY, ROW_KEY, loaded ? (rows?.length ?? 0) + (epcRows?.length ?? 0) + (requests?.length ?? 0) : 0);
+  const rowStyle = (rowKey: string) => highlightRowStyle(blinkId === rowKey);
+  // A link into a profile that remembers the way back (and the row).
+  const go = (rowKey: string, href: string, className: string, children: ReactNode) => (
+    <Link href={href} className={className} onClick={() => rememberRow(rowKey, href)}>{children}</Link>
+  );
   const byId = new Map((rows ?? []).map((r) => [r.id as string, r]));
   const stillPending = items.filter(({ id, k }) => byId.get(id)?.[`${k}_review_status`] === "pending").length;
   const count = stillPending + (epcRows?.length ?? 0) + (requests?.length ?? 0);
@@ -141,10 +163,8 @@ function Inner() {
   const btn = "px-2.5 py-1 border border-line rounded-[8px] text-[12px] font-semibold text-text hover:bg-bg-tint whitespace-nowrap";
   const acts = "flex items-center gap-1.5 justify-end";
   const tabOf = REVIEW_TAB;
-  const viewLink = (id: string, k: ReviewItem) => (
-    <Link href={`/admin/app/${id}/view?tab=${tabOf[k]}`} className={btn}>View</Link>
-  );
-  const editLink = (href: string) => <Link href={href} className={btn}>Edit</Link>;
+  const viewLink = (id: string, k: ReviewItem) => go(id + k, `/admin/app/${id}/view?tab=${tabOf[k]}`, btn, "View");
+  const editLink = (id: string, k: ReviewItem, href: string) => go(id + k, href, btn, "Edit");
   const letterBtn = (id: string, category: string, label: string) => {
     const d = letters.find((x) => x.application_id === id && x.category === category);
     return d ? (
@@ -175,14 +195,14 @@ function Inner() {
           <Section title="EPC pendings" n={epcRows?.length ?? 0} loading={!epcRows}>
             <Table head={["EPC", "EPC ID", "Contact", "Mobile", ""]}>
               {(epcRows ?? []).map((r) => (
-                <tr key={r.id} className="border-t border-line">
-                  <Td wrap><Link href={`/admin/epc/${r.id}/view`} className="font-semibold text-text hover:underline">{epcShort(r)}</Link></Td>
+                <tr key={r.id} className="border-t border-line" style={rowStyle("epc" + r.id)}>
+                  <Td wrap>{go("epc" + r.id, `/admin/epc/${r.id}/view`, "font-semibold text-text hover:underline", epcShort(r))}</Td>
                   <Td>{r.epc_display_id || "—"}</Td>
                   <Td wrap>{r.contact_name || "—"}</Td>
                   <Td>{r.contact_mobile ? `+91 ${r.contact_mobile}` : "—"}</Td>
                   <Td>
                     <div className={acts}>
-                      <Link href={`/admin/epc/${r.id}/view`} className={btn}>View</Link>
+                      {go("epc" + r.id, `/admin/epc/${r.id}/view`, btn, "View")}
                       <button type="button" onClick={() => void approveEpc(r.id)} disabled={busy != null}
                         className="px-2.5 py-1 bg-cc-green text-white rounded-[8px] text-[12px] font-semibold hover:bg-cc-green-hover disabled:opacity-60 whitespace-nowrap">
                         {busy === r.id + "epc" ? "Approving…" : "Approve"}
@@ -198,8 +218,8 @@ function Inner() {
           <Section title="Custom template requests" n={requests?.length ?? 0} loading={!requests}>
             <Table head={["EPC", "Uploaded", "Sample quotation", ""]}>
               {(requests ?? []).map((r) => (
-                <tr key={r.id} className="border-t border-line">
-                  <Td wrap><Link href={`/admin/epc/${r.id}/view`} className="font-semibold text-text hover:underline"><span title={r.name}>{shortEpcName(r.name) || "—"}</span></Link></Td>
+                <tr key={r.id} className="border-t border-line" style={rowStyle("req" + r.id)}>
+                  <Td wrap>{go("req" + r.id, `/admin/epc/${r.id}/view`, "font-semibold text-text hover:underline", <span title={r.name}>{shortEpcName(r.name) || "—"}</span>)}</Td>
                   <Td>{fmtDate(r.at)}</Td>
                   <Td>
                     <div className="flex items-center gap-1.5">
@@ -211,7 +231,7 @@ function Inner() {
                       ))}
                     </div>
                   </Td>
-                  <Td><div className={acts}><Link href={`/admin/epc/${r.id}/view`} className={btn}>Open EPC</Link></div></Td>
+                  <Td><div className={acts}>{go("req" + r.id, `/admin/epc/${r.id}/view`, btn, "Open EPC")}</div></Td>
                 </tr>
               ))}
             </Table>
@@ -220,8 +240,8 @@ function Inner() {
           <Section title="Approval pendings" n={approvals.filter((r) => r.approval_review_status === "pending").length} total={approvals.length} loading={!rows}>
             <Table head={["Applicant", "Loan ID", "EPC", "Lender", "Approved amount", "Tenure", "EMI", "Filled by", ""]}>
               {approvals.map((r) => (
-                <tr key={r.id} className="border-t border-line">
-                  <Td wrap><Link href={`/admin/app/${r.id}/view?tab=approved`} className="font-semibold text-text hover:underline">{name(r)}</Link></Td>
+                <tr key={r.id} className="border-t border-line" style={rowStyle(r.id + "approval")}>
+                  <Td wrap>{go(r.id + "approval", `/admin/app/${r.id}/view?tab=approved`, "font-semibold text-text hover:underline", name(r))}</Td>
                   <Td>{r.loan_display_id || "—"}</Td>
                   <Td wrap>{epc(r)}</Td>
                   <Td>{r.approved_lender ? lenderLabelIn(lenders, String(r.approved_lender)) : "—"}</Td>
@@ -234,7 +254,7 @@ function Inner() {
                       {viewLink(r.id, "approval")}
                       {letterBtn(r.id, "sanction_letter", "Sanction letter")}
                       {letterBtn(r.id, "disbursement_advice", "Advice")}
-                      {r.approval_review_status === "pending" && editLink(`/admin/app/${r.id}/approval?edit=approval&from=pendings`)}
+                      {r.approval_review_status === "pending" && editLink(r.id, "approval", `/admin/app/${r.id}/approval?edit=approval&from=pendings`)}
                       {decide(r, "approval")}
                     </div>
                   </Td>
@@ -248,8 +268,8 @@ function Inner() {
               {disbs.map(({ r, k }) => {
                 const first = k === "disb1";
                 return (
-                  <tr key={r.id + k} className="border-t border-line">
-                    <Td wrap><Link href={`/admin/app/${r.id}/view?tab=${tabOf[k]}`} className="font-semibold text-text hover:underline">{name(r)}</Link></Td>
+                  <tr key={r.id + k} className="border-t border-line" style={rowStyle(r.id + k)}>
+                    <Td wrap>{go(r.id + k, `/admin/app/${r.id}/view?tab=${tabOf[k]}`, "font-semibold text-text hover:underline", name(r))}</Td>
                     <Td>{r.loan_display_id || "—"}</Td>
                     <Td wrap>{epc(r)}</Td>
                     <Td>{REVIEW_LABEL[k]}</Td>
@@ -259,7 +279,7 @@ function Inner() {
                     <Td>
                       <div className={acts}>
                         {viewLink(r.id, k)}
-                        {r[`${k}_review_status`] === "pending" && editLink(`/admin/app/${r.id}/disbursement`)}
+                        {r[`${k}_review_status`] === "pending" && editLink(r.id, k, `/admin/app/${r.id}/disbursement`)}
                         {decide(r, k)}
                       </div>
                     </Td>

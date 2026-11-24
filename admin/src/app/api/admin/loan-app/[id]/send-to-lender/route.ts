@@ -9,12 +9,18 @@
 //     single ZIP link, and the summary attached. Recipients (to/cc/bcc) are
 //     saved to email_contacts for future autocomplete.
 //
+// scope "completion" (the 2nd tranche): the 5 completion documents + the
+// "Additional documents" (0137), each with a Download button, and NO summary
+// sheet (the user, 25/11). The send is stamped on tranche2_emailed_at (0138) —
+// the Loans list shows that date once the 2nd disbursement is in.
+//
 // Admin-only. Keeps the Download-ZIP button untouched.
 
 import { NextRequest, NextResponse } from "next/server";
 import { err, dbAs, requireLogin } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { fmtRupees } from "@/lib/money";
+import { COMPLETION_DOCS, COMPLETION_OTHER } from "@/lib/disbursement";
 import { isMainAdmin } from "@/lib/hierarchy";
 import { creditFairEmailRows } from "@/lib/lender-summary";
 import { readSendFields, sendLenderPack, titleCaseCategory, type ComposerBody } from "@/lib/lender-pack";
@@ -57,26 +63,29 @@ function loanDocList(loan: Record<string, any>, docs: Array<{ category: string; 
   return list;
 }
 
-// 2nd-tranche completion documents (uploaded in the disbursement section). Sent
+// 2nd-tranche completion documents (uploaded in the disbursement section), in
+// their order, then the additional ones (numbered when there are several). Sent
 // to the lender who APPROVED the loan, so they can release the 2nd tranche.
 const COMPLETION_LABELS: Record<string, string> = {
-  completion_invoice: "Final invoice",
-  completion_report: "Completion report",
-  completion_panel_photo: "Customer with panel",
-  completion_inverter_photo: "Customer with inverter",
-  completion_meter_photo: "Customer with meter",
-  completion_plant_photo: "Plant photo",
+  ...Object.fromEntries(COMPLETION_DOCS.map((d) => [d.category, d.label])),
+  completion_plant_photo: "Plant photo", // legacy single photo
 };
 function completionDocList(docs: Array<{ category: string; storage_path: string }>): Array<{ label: string; path: string }> {
+  const order = Object.keys(COMPLETION_LABELS);
   const seen = new Set<string>();
-  const list: Array<{ label: string; path: string }> = [];
-  for (const d of docs ?? []) {
-    const label = COMPLETION_LABELS[d.category];
-    if (!label || !d.storage_path || seen.has(d.storage_path)) continue;
+  const once = (d: { storage_path: string }) => {
+    if (!d.storage_path || seen.has(d.storage_path)) return false;
     seen.add(d.storage_path);
-    list.push({ label, path: d.storage_path });
-  }
-  return list;
+    return true;
+  };
+  const named = (docs ?? []).filter((d) => d.category in COMPLETION_LABELS && once(d))
+    .sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category))
+    .map((d) => ({ label: COMPLETION_LABELS[d.category], path: d.storage_path }));
+  const extras = (docs ?? []).filter((d) => d.category === COMPLETION_OTHER.category && once(d));
+  return [
+    ...named,
+    ...extras.map((d, i) => ({ label: extras.length > 1 ? `Additional document ${i + 1}` : "Additional document", path: d.storage_path })),
+  ];
 }
 function completionDetail(loan: Record<string, any>, epcName: string): [string, string][] {
   return [
@@ -188,7 +197,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         ? `Please find the completion (2nd tranche) documents for <b>${esc(borrowerName)}</b> below. Kindly review and release the second tranche.`
         : `Please find the applicant details for <b>${esc(borrowerName)}</b> below, along with the supporting documents. Kindly review and revert at the earliest.`,
       logTag: "send-to-lender",
+      ...(isCompletion ? { summarySheet: false, downloadButtons: true } : {}),
     });
+    if (isCompletion) {
+      const { error: stampErr } = await supabase.from("epc_applications").update({ tranche2_emailed_at: new Date().toISOString() }).eq("id", appId);
+      if (stampErr) console.warn("[send-to-lender] tranche2_emailed_at:", stampErr.message);
+    }
 
     await logLoanActivityServer(supabase, appId, "email_sent", claims.business_id ?? null, { detail: `Emailed ${isCompletion ? "completion documents" : "to"} ${lenderLabel} — ${to}` });
 

@@ -23,7 +23,7 @@ import { invalidate } from "@/lib/list-cache";
 import CommentsSection from "@/components/CommentsSection";
 import OwnershipCard from "@/components/OwnershipCard";
 import { LoanActivityList } from "@/components/LoanActivityLogModal";
-import { COMPLETION_CATEGORIES, TRANCHE1_DOCS } from "@/components/CompletionDocsSection";
+import { TRANCHE1_DOCS } from "@/components/CompletionDocsSection";
 import { type ApprovalDetails } from "@/components/ApprovalDetailsTable";
 import LoanLenderPickerModal, { type PickerLender } from "@/components/LoanLenderPickerModal";
 import LoanLenderStatusBox from "@/components/LoanLenderStatusBox";
@@ -39,7 +39,7 @@ import { logLoanActivity } from "@/lib/loanAudit";
 import { loanDocChecklist } from "@/lib/loan-doc-checklist";
 import { loanChecks } from "@/lib/loan-verification";
 import { cachedLoanUpdateCount } from "@/lib/use-epc-updates";
-import { firstDisbursedShown } from "@/lib/disbursement";
+import { COMPLETION_CATEGORIES, firstDisbursedShown } from "@/lib/disbursement";
 import { fmtDate, fmtDateTime } from "@/lib/dates";
 import { fmtRupees } from "@/lib/money";
 import { initialsOf } from "@/lib/names";
@@ -50,7 +50,7 @@ import {
   I, DocViewer, FillCount, fillText, fillTone, HAction, ProgressTabs, CopyButton, Section, StatCards,
   type ViewDocSlot, type ViewerItem, type StageState,
 } from "@/components/view/ViewKit";
-import { returnFor, takeReturn, useStacked } from "@/components/view/hooks";
+import { backLabel, returnFor, takeReturn, useStacked } from "@/components/view/hooks";
 import LoanApprovalForm from "@/components/LoanApprovalForm";
 import ApprovalSummary from "@/components/ApprovalSummary";
 import ReviewBar from "@/components/ReviewBar";
@@ -443,9 +443,7 @@ function Inner() {
   // Tranche ZIPs are offered in the Download menu only when that tranche's
   // documents actually exist (no empty-tranche ZIP).
   const tranche1Exists = docs.some((d) => ["feasibility_report", "mmr_advance_receipt"].includes(d.category));
-  const tranche2Exists = docs.some((d) =>
-    ["completion_invoice", "completion_panel_photo", "completion_inverter_photo", "completion_meter_photo", "completion_report"].includes(d.category),
-  );
+  const tranche2Exists = docs.some((d) => (COMPLETION_CATEGORIES as readonly string[]).includes(d.category));
 
   // Change review — undo the current lender decision (and any abort) and move
   // the application back to Docs Sent so the admin can Approve/Reject again.
@@ -852,8 +850,8 @@ function Inner() {
           <div className="flex items-center gap-3.5 min-w-0">
             <button
               onClick={goBack}
-              title={returnTo === "/admin/board" ? "Back to Task Manager" : "Back to console"}
-              aria-label={returnTo === "/admin/board" ? "Back to Task Manager" : "Back to console"}
+              title={backLabel(returnTo, "Back to console")}
+              aria-label={backLabel(returnTo, "Back to console")}
               className="w-9 h-9 -ml-2 rounded-full grid place-items-center text-cc-muted hover:bg-cc-icon-hover hover:text-cc-ink shrink-0"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>

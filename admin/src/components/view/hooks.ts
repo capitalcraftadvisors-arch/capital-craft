@@ -5,12 +5,20 @@
 
 import { useEffect, useState } from "react";
 
-// Where a case profile's Back goes. The Task Manager stashes
-// { to: "/admin/board", href } in sessionStorage ("ccReturnTo") when it opens a
-// case; it only counts for THAT case (href under the profile's own base path),
-// so a key left behind never sends another profile's Back to the board.
-// Blocked storage just means Back goes to its usual place.
+// Where a case profile's Back goes. The Task Manager and Pendings stash
+// { to: "/admin/board" | "/admin/pendings", href } in sessionStorage
+// ("ccReturnTo") when they open a case; it only counts for THAT case (href under
+// the profile's own base path), so a key left behind never sends another
+// profile's Back there. Blocked storage just means Back goes to its usual place.
 const RETURN_KEY = "ccReturnTo";
+const RETURN_LABEL: Record<string, string> = {
+  "/admin/board": "Back to Task Manager",
+  "/admin/pendings": "Back to Pendings",
+};
+/** The Back button's words for a stashed return path, else the page's own. */
+export function backLabel(returnTo: string | null, fallback: string): string {
+  return (returnTo && RETURN_LABEL[returnTo]) || fallback;
+}
 export function rememberReturn(to: string, href: string) {
   try { sessionStorage.setItem(RETURN_KEY, JSON.stringify({ to, href })); } catch { /* storage blocked */ }
 }

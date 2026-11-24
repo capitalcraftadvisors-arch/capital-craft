@@ -21,7 +21,7 @@ import Modal, { OVERLAY } from "@/components/ui/Modal";
 import CommentsSection from "@/components/CommentsSection";
 import OwnershipCard from "@/components/OwnershipCard";
 import { I, SectionCard, KV } from "@/components/view/ViewKit";
-import { returnFor, takeReturn } from "@/components/view/hooks";
+import { backLabel, returnFor, takeReturn } from "@/components/view/hooks";
 import { supabase } from "@/lib/supabase";
 import { authHeaders } from "@/lib/auth";
 import { notify } from "@/lib/notify";
@@ -172,7 +172,7 @@ function Inner() {
             }}
             className="text-[14px] text-cc-muted hover:text-cc-ink inline-flex items-center gap-1"
           >
-            {returnTo === "/admin/board" ? "← Back to Task Manager" : "← Back to Leads"}
+            ← {backLabel(returnTo, "Back to Leads")}
           </button>
         </div>
       </header>

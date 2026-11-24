@@ -95,12 +95,13 @@ export const OUTLINE_FILL: Record<"green" | "yellow" | "red" | "neutral", string
 export const IDLE_TEXT: Record<"green" | "yellow" | "red" | "neutral", string> = { green: "#178a5c", yellow: "#854f0b", red: "#b42318", neutral: "#64748b" };
 
 // The next action a case needs, derived from its stage. null = nothing to do
-// (aborted / fully disbursed / off-board, a rejected non-loan case) — excluded
-// from My Day. Rejected loans stay, in their own last tab, below the work.
-export const isRejectedLoan = (c: OpsCase) => c.source === "loan" && c.column === "rejected";
+// (aborted / off-board, a rejected non-loan case) — excluded from My Day.
+// Closed loans — rejected, and fully disbursed (2nd Phase) — stay, each in its
+// own tab, below the work and not counted as work.
+export const isClosedLoan = (c: OpsCase) => c.source === "loan" && (c.column === "rejected" || c.column === "phase2");
 export function nextAction(c: OpsCase): { text: string; cta: string; tone?: string } | null {
   if ((c.outcome === "rejected" && c.source !== "loan") || c.column === "abort" || c.column == null) return null;
-  if (isRejectedLoan(c)) return { text: c.statusLabel, cta: "Open", tone: "#64748b" };
+  if (isClosedLoan(c)) return { text: c.statusLabel, cta: "Open", tone: "#64748b" };
   if (c.source === "loan") {
     // The admin sent a stage back — fixing it comes first.
     const back = c.reviews?.find((v) => v.status === "sent_back");
@@ -111,8 +112,7 @@ export function nextAction(c: OpsCase): { text: string; cta: string; tone?: stri
       case "docs_pending":      return { text: "Collect the pending documents", cta: "Open" };
       case "approved":          return { text: "Record the disbursement", cta: "Open" };
       case "phase1":            return { text: "Record the 2nd disbursement", cta: "Open" };
-      case "phase2":            return null; // fully disbursed — done
-      default:                  return { text: c.statusLabel, cta: "Open" };
+      default:                 return { text: c.statusLabel, cta: "Open" };
     }
   }
   // Non-loan sources: hide terminal states (already done) so My Day stays a

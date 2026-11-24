@@ -9,6 +9,7 @@ import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import MessageThread from "@/components/MessageThread";
 import type { MsgKind } from "@/lib/messages";
+import { TRANCHE2_KEYS } from "@/lib/disbursement";
 
 export default function EpcMessagesPage() {
   return (
@@ -25,7 +26,10 @@ function Inner() {
   const id = params.id;
 
   function onEdit(docTags: string[]) {
-    if (kind === "loan") {
+    // Only 2nd-tranche documents reopened → the 2nd-tranche page, where they upload.
+    if (kind === "loan" && docTags.length && docTags.every((t) => TRANCHE2_KEYS.includes(t))) {
+      router.push(`/dashboard/${id}/disbursement`);
+    } else if (kind === "loan") {
       const doc = docTags.length ? `&doc=${encodeURIComponent(docTags.join(","))}` : "";
       router.push(`/dashboard/apply/chat?id=${id}&edit=1${doc}&from=msg`); // ← in the chat comes back here
     } else {

@@ -24,6 +24,7 @@ import { useAdminNames } from "@/lib/use-admin-names";
 import { useEpcUpdates } from "@/lib/use-epc-updates";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import RowLink from "@/components/RowLink";
+import { I } from "@/components/view/ViewKit";
 import { notify } from "@/lib/notify";
 import { nameCase, initialsOf } from "@/lib/names";
 import {
@@ -96,6 +97,8 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
     first_disbursement_amount: number | null;
     first_disbursement_date: string | null;
     second_disbursement_amount: number | null;
+    // When the 2nd-tranche documents were last emailed to the lender (0138).
+    tranche2_emailed_at?: string | null;
     // The lender's 1st-disbursement charges (0111) — Credit Fair's shown amount adds them.
     first_processing_fee?: number | null; first_legal_charges?: number | null; first_cersai_charges?: number | null;
     status: string; created_at: string; created_by: string; created_by_user_id: string | null;
@@ -230,9 +233,10 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
         "epc_business:epc_business_id(contact_name, trade_name, legal_name, epc_display_id)",
       )
       .order("created_at", { ascending: false });
-    // tranche2_* (0125) feed the bell's 2nd-tranche count — same request; until
-    // 0125 is everywhere, retry without them.
-    let res = await appsSel(`${TRANCHE2_COLS}, `);
+    // tranche2_* (0125, 0138) feed the bell's 2nd-tranche count and the "Sent"
+    // date of a fully disbursed loan — same request; until they are everywhere,
+    // retry without them.
+    let res = await appsSel(`${TRANCHE2_COLS}, tranche2_emailed_at, `);
     const hasT2 = !isUndefinedColumn(res.error, "tranche2_");
     if (!hasT2) res = await appsSel("");
     const rows = (res.data ?? []) as unknown as Row[];
@@ -767,7 +771,7 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
                         aria-label="Email to lender"
                         className="grid place-items-center w-8 h-8 rounded-[8px] border border-cc-line bg-white text-cc-green hover:bg-cc-wash hover:border-cc-green transition-colors"
                       >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>
+                        {I.mail}
                       </button>
                       <button
                         type="button"
@@ -780,10 +784,13 @@ export default function AppsTab({ period, pFrom, pTo, onRows }: TabPeriodProps &
                         <UnseenBadge n={unseen} />
                       </button>
                     </div>
-                    {/* When the documents were last emailed to a lender. */}
-                    {r.aborted_at == null && lenderSentAt[r.id] && (
+                    {/* When the documents were last emailed to a lender. Fully
+                        disbursed: when the 2nd-tranche documents were — "—" if never. */}
+                    {r.aborted_at == null && (r.second_disbursement_amount != null ? (
+                      <p className="text-[11px] text-cc-faint whitespace-nowrap">{r.tranche2_emailed_at ? `Sent ${fmtDate(r.tranche2_emailed_at)}` : "—"}</p>
+                    ) : lenderSentAt[r.id] && (
                       <p className="text-[11px] text-cc-faint whitespace-nowrap">Sent {fmtDate(lenderSentAt[r.id])}</p>
-                    )}
+                    ))}
                   </div>
                 </td>
               </tr>

@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { err, dbAs, requireLogin, strOrNull } from "@/lib/api";
 import { UUID_RE } from "@/lib/validators";
 import { errText } from "@/lib/errors";
+import { TRANCHE2_KEYS } from "@/lib/disbursement";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -84,7 +85,7 @@ export async function POST(req: NextRequest) {
     if (action === "resolve") {
       const patch: Record<string, unknown> = { attention_status: "resolved", attention_resolved_at: now, attention_resolved_by: sender };
       if (sender === "epc") patch.epc_last_activity_at = now; // surfaces to admin as an unseen update
-      if (kind === "loan") patch.edit_allow = []; // a resolved issue closes the edit grant
+      if (kind === "loan") { patch.edit_allow = []; patch.tranche2_allow = []; } // a resolved issue closes the edit grants
       const { error } = await supabase.from(parentTable).update(patch).eq("id", parentId);
       if (error) return err(error.message, 403);
       return NextResponse.json({ ok: true });
@@ -140,11 +141,19 @@ export async function POST(req: NextRequest) {
         };
         // Loan: the ticked edit-table rows OPEN editing for the EPC (the grant).
         // Accumulate across messages; the resubmit/resolve clears it (0085).
+        // 2nd-tranche documents go to their own grant (tranche2_allow, 0138),
+        // cleared by the EPC's next Send.
         const tags = Array.isArray(b.doc_tags) ? (b.doc_tags as unknown[]).filter((x): x is string => typeof x === "string") : [];
         if (kind === "loan" && tags.length) {
-          const { data: cur } = await supabase.from(parentTable).select("edit_allow").eq("id", parentId).maybeSingle();
-          const prev = Array.isArray((cur as { edit_allow?: unknown })?.edit_allow) ? ((cur as { edit_allow: string[] }).edit_allow) : [];
-          patch.edit_allow = [...new Set([...prev, ...tags])];
+          const t2Tags = tags.filter((t) => TRANCHE2_KEYS.includes(t));
+          const appTags = tags.filter((t) => !TRANCHE2_KEYS.includes(t));
+          const { data: cur } = await supabase.from(parentTable).select(t2Tags.length ? "edit_allow, tranche2_allow" : "edit_allow").eq("id", parentId).maybeSingle();
+          const prev = (col: string) => {
+            const v = (cur as Record<string, unknown> | null)?.[col];
+            return Array.isArray(v) ? (v as string[]) : [];
+          };
+          if (appTags.length) patch.edit_allow = [...new Set([...prev("edit_allow"), ...appTags])];
+          if (t2Tags.length) patch.tranche2_allow = [...new Set([...prev("tranche2_allow"), ...t2Tags])];
         }
         await supabase.from(parentTable).update(patch).eq("id", parentId);
       } else {

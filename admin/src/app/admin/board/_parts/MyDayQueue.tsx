@@ -10,7 +10,7 @@ import ActivityLogModal from "@/components/ActivityLogModal";
 import { columnsFor, type OpsCase, type CaseSource } from "@/lib/ops-board";
 import { waTel, waUrl, WA_LANGS, type WaLang } from "@/lib/wa-link";
 import { fmtRupees } from "@/lib/money";
-import { COMMENT_TBL, attention, loanOutline, OUTLINE_FILL, IDLE_TEXT, isRejectedLoan, nextAction, WAIT_COLOR, waitingOn, type WaitParty } from "./rules";
+import { COMMENT_TBL, attention, loanOutline, OUTLINE_FILL, IDLE_TEXT, isClosedLoan, nextAction, WAIT_COLOR, waitingOn, type WaitParty } from "./rules";
 import { WA_PENDING, WA_INTENTS, WA_INTENTS_EPC, waPendingFor, buildWaMessage, type WaIntent } from "./whatsapp";
 import { tmState, saveTm } from "./tm-state";
 
@@ -107,12 +107,14 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
   };
   const counts: Record<CaseSource, number> = { loan: 0, lead: 0, insurance: 0, epc: 0 };
   for (const c of items) counts[c.source]++;
-  const lvlOf = (c: OpsCase) => (c.source === "loan" ? loanOutline(c) : attention(c, 1));
+  // A closed loan (rejected / 2nd Phase) has no TAT here — pale fill, never "urgent".
+  const lvlOf = (c: OpsCase) => (isClosedLoan(c) ? "neutral" : c.source === "loan" ? loanOutline(c) : attention(c, 1));
   const ql = q.trim().toLowerCase();
   const inSrc = items.filter((c) => c.source === src);
   // Stage sub-tabs — the board columns for this source that actually have cases
   // needing action, each with a live count. Lets the day be worked stage by
-  // stage (e.g. "Docs Pending", "1st Phase" = 1st tranche done / 2nd due).
+  // stage (e.g. "Docs Pending", "1st Phase" = 1st tranche done / 2nd due,
+  // "2nd Phase" = fully disbursed).
   const stageCounts = new Map<string, number>();
   for (const c of inSrc) if (c.column) stageCounts.set(c.column, (stageCounts.get(c.column) ?? 0) + 1);
   const presentStages = columnsFor(src).filter((s) => (stageCounts.get(s.key) ?? 0) > 0);
@@ -122,10 +124,10 @@ export default function MyDayQueue({ items, onOpen, q, onSearch, showOwner, owne
   const shown = ql ? byColour.filter((c) => `${c.name} ${c.lender ?? ""} ${c.epcName ?? ""} ${c.ownerName ?? ""}`.toLowerCase().includes(ql)) : byColour;
   const urgent = shown.filter((c) => lvlOf(c) === "red").length;
   // Rank the day: idle days × loan value → biggest exposure first, work top-down;
-  // rejected loans last (shown, but not counted as work below).
+  // closed loans (rejected / 2nd Phase) last (shown, but not counted as work below).
   const rankVal = (c: OpsCase) => Math.max(1, Math.floor(c.stageHours / 24)) * (c.amount || 1);
-  const ranked = [...shown].sort((a, b) => Number(isRejectedLoan(a)) - Number(isRejectedLoan(b)) || rankVal(b) - rankVal(a));
-  const work = shown.filter((c) => !isRejectedLoan(c));
+  const ranked = [...shown].sort((a, b) => Number(isClosedLoan(a)) - Number(isClosedLoan(b)) || rankVal(b) - rankVal(a));
+  const work = shown.filter((c) => !isClosedLoan(c));
   const custCases = work.filter((c) => waitingOn(c) === "Customer");
   const blocked = work.filter((c) => Math.floor(c.stageHours / 24) >= 2).reduce((s, c) => s + (c.amount || 0), 0);
   const recoverable = custCases.reduce((s, c) => s + (c.amount || 0), 0);

@@ -137,9 +137,10 @@ export async function POST(req: NextRequest) {
       }
       const { data: existing } = await q;
       if (existing && existing.length > 0) {
+        // Row first: a refused delete (RLS, a locked 2nd tranche — 0138) keeps its file.
         for (const e of existing as { id: string; storage_path: string }[]) {
-          await deleteObject(e.storage_path);
-          await supabase.from(allowedTable).delete().eq("id", e.id);
+          const { data: gone } = await supabase.from(allowedTable).delete().eq("id", e.id).select("id");
+          if (gone?.length) await deleteObject(e.storage_path);
         }
       }
     }

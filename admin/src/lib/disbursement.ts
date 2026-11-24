@@ -151,3 +151,32 @@ export function displayAmount(loan: {
   const n = loan.loan_amount_required ?? loan.loan_amount;
   return n == null ? null : Number(n);
 }
+
+// ── The 2nd-tranche (completion) documents ──────────────────────────────────
+// ONE list for the upload slots, the lender email, the lock (0138) and the rows
+// the team can reopen with Message to EPC. The 5 are required (the n/5 count);
+// the "Additional documents" (0137) are optional and never counted.
+export const COMPLETION_DOCS = [
+  { category: "completion_invoice",        label: "Final invoice" },
+  { category: "completion_panel_photo",    label: "Customer with panel" },
+  { category: "completion_inverter_photo", label: "Customer with inverter" },
+  { category: "completion_meter_photo",    label: "Customer with meter" },
+  { category: "completion_report",         label: "Completion report" },
+] as const;
+export type CompletionCategory = typeof COMPLETION_DOCS[number]["category"];
+export const COMPLETION_CATEGORIES: readonly CompletionCategory[] = COMPLETION_DOCS.map((d) => d.category);
+export const COMPLETION_OTHER = { category: "completion_other", label: "Additional documents" } as const;
+/** Every 2nd-tranche document the EPC sends — what locks, and what can be reopened. */
+export const TRANCHE2_KEYS: readonly string[] = [...COMPLETION_CATEGORIES, COMPLETION_OTHER.category];
+
+/** A 2nd-tranche document's name ("Final invoice"), or null for any other key. */
+export function completionLabel(key: string): string | null {
+  if (key === COMPLETION_OTHER.category) return COMPLETION_OTHER.label;
+  return COMPLETION_DOCS.find((d) => d.category === key)?.label ?? null;
+}
+
+/** The EPC's 2nd-tranche documents are sent and locked (0138); `reopened` = what
+ *  the team opened again with Message to EPC. */
+export function tranche2Lock(l: { tranche2_submitted_at?: string | null; tranche2_allow?: string[] | null }): { locked: boolean; reopened: string[] } {
+  return { locked: !!l.tranche2_submitted_at, reopened: Array.isArray(l.tranche2_allow) ? l.tranche2_allow : [] };
+}

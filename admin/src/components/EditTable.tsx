@@ -14,12 +14,15 @@ import { openLoanDoc } from "@/lib/storage";
 import { CATEGORY_LABEL, type LoanForm, type LoanDocRow } from "@/lib/loan-form";
 import { DOC_CATEGORY } from "@/lib/loan-doc-checklist";
 import { SYSTEM_LABEL, PLANT_USE_LABEL } from "@/lib/loan-labels";
+import { COMPLETION_DOCS, COMPLETION_OTHER } from "@/lib/disbursement";
 
 export type EditItem = { key: string; label: string; doc?: boolean; on?: boolean; path?: string | null; rowId?: string; value?: string };
 
 // The grouped rows for an application, shared so callers can reason about which
-// keys exist (e.g. select-all in the admin window).
-export function editGroups(form: LoanForm, docRows: LoanDocRow[]): { title: string; items: EditItem[] }[] {
+// keys exist (e.g. select-all in the admin window). `tranche2` (admin window,
+// 1st disbursement in, 2nd not yet) adds the 2nd-tranche documents — ticking one
+// reopens it for the EPC after its Send (tranche2_allow, 0138).
+export function editGroups(form: LoanForm, docRows: LoanDocRow[], opts: { tranche2?: boolean } = {}): { title: string; items: EditItem[] }[] {
   const has = (k: string) => !!(form[k] && String(form[k]).trim());
   const panRow = docRows.find((d) => d.category === "borrower_pan");
   const hasCoapp = has("coapp_aadhaar_front_path") || has("coapp_pan_path") || has("coapp_pan") || has("coapp_aadhaar_number") || has("coapp_mobile");
@@ -71,20 +74,29 @@ export function editGroups(form: LoanForm, docRows: LoanDocRow[]): { title: stri
       { key: "loan_amount", label: "Loan amount", value: form.loan_amount_required ? `₹${Number(form.loan_amount_required).toLocaleString("en-IN")}` : "—" },
       { key: "loan_config", label: "Loan configuration", value: form.selected_tenure_years ? `${form.selected_tenure_years} yr tenure` : "—" },
     ] },
+    ...(opts.tranche2 ? [{ title: "2nd tranche documents", items: [
+      ...COMPLETION_DOCS.map((d): EditItem => {
+        const r = docRows.find((x) => x.category === d.category);
+        return { key: d.category, label: d.label, doc: true, on: !!r, rowId: r?.id, path: r?.storage_path ?? undefined };
+      }),
+      many(COMPLETION_OTHER.category, COMPLETION_OTHER.label, COMPLETION_OTHER.category),
+    ] }] : []),
   ];
 }
 
-export default function EditTable({ appId, form, docRows, value, onChange, accent = "#1e3a8a" }: {
+export default function EditTable({ appId, form, docRows, value, onChange, accent = "#1e3a8a", tranche2 }: {
   appId: string;
   form: LoanForm;
   docRows: LoanDocRow[];
   value: string[];
   onChange: (keys: string[]) => void;
   accent?: string;
+  /** Admin window: add the 2nd-tranche documents (see editGroups). */
+  tranche2?: boolean;
 }) {
   const sel = new Set(value);
   const toggle = (k: string) => { const n = new Set(sel); n.has(k) ? n.delete(k) : n.add(k); onChange([...n]); };
-  const groups = editGroups(form, docRows);
+  const groups = editGroups(form, docRows, { tranche2 });
   return (
     <div className="rounded-xl border border-line bg-white overflow-hidden">
       {groups.map((g) => (

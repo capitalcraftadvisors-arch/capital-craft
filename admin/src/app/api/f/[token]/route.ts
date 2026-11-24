@@ -1,6 +1,7 @@
 // GET /api/f/<token> — a document link we sent out (lender email, customer
 // WhatsApp). Checks the signed token (lib/file-links) and redirects to a fresh
-// 15-minute Google Cloud link for that file. Public by design: the recipient
+// 15-minute Google Cloud link for that file — a download link (the lender
+// email's Download button) makes the browser save it under its name. Public by design: the recipient
 // has no portal login; the token itself is the permission.
 
 import { NextRequest, NextResponse } from "next/server";
@@ -19,7 +20,7 @@ export async function GET(_req: NextRequest, { params }: { params: { token: stri
     });
   }
   try {
-    return NextResponse.redirect(await getSignedReadUrl(r.path, 900), 302);
+    return NextResponse.redirect(await getSignedReadUrl(r.path, 900, r.download ? { downloadName: r.download } : undefined), 302);
   } catch {
     return new NextResponse("This file is no longer available.", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   }

@@ -55,7 +55,7 @@ import {
   HAction, ProgressTabs, Section, StatCards,
   type FieldRow, type StageState,
 } from "@/components/view/ViewKit";
-import { returnFor, takeReturn, useStacked } from "@/components/view/hooks";
+import { backLabel, returnFor, takeReturn, useStacked } from "@/components/view/hooks";
 import { DocumentsBySteps, expectedEpcSlots, missingEpcDocs, roleLabel, type Doc, type Stakeholder } from "./_parts/EpcDocuments";
 import { EpcHealthPanel } from "./_parts/EpcHealth";
 import LenderLines, { type LenderRow } from "./_parts/LenderLines";
@@ -472,8 +472,8 @@ function Inner() {
           <div className="flex items-center gap-3.5 min-w-0">
             <button
               onClick={() => router.push(takeReturn(`/admin/epc/${params.id}/`) ?? "/admin")}
-              title={returnTo === "/admin/board" ? "Back to Task Manager" : "Back to console"}
-              aria-label={returnTo === "/admin/board" ? "Back to Task Manager" : "Back to console"}
+              title={backLabel(returnTo, "Back to console")}
+              aria-label={backLabel(returnTo, "Back to console")}
               className="w-9 h-9 -ml-2 rounded-full grid place-items-center text-cc-muted hover:bg-cc-icon-hover hover:text-cc-ink shrink-0"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7" /></svg>

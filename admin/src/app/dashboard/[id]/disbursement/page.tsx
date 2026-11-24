@@ -10,16 +10,21 @@
 // Amounts are READ-ONLY here. That isn't just a UI choice: migration 0044's
 // trg_disbursement_admin_only rejects any non-admin write to the disbursement
 // columns, so an EPC can't set them through the API either.
+//
+// Send (0138): once all 5 are in, the EPC sends them to Capital Craft and they
+// LOCK — like a submitted loan application. The team reopens chosen documents
+// with Message to EPC; the EPC replaces them and sends again (locked again).
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import { supabase } from "@/lib/supabase";
+import { notify } from "@/lib/notify";
 import CompletionDocsSection from "@/components/CompletionDocsSection";
 import { I, SectionCard, KV, Pill } from "@/components/view/ViewKit";
 import {
   deadlineState, DEADLINE_PILL, remainingAmount, firstCharges,
-  DISBURSEMENT_WINDOW_DAYS,
+  DISBURSEMENT_WINDOW_DAYS, tranche2Lock,
 } from "@/lib/disbursement";
 import { fmtRupeesExact } from "@/lib/money";
 import { fmtDate } from "@/lib/dates";
@@ -41,6 +46,7 @@ function Inner() {
   const [loading, setLoading] = useState(true);
   const [docsUploaded, setDocsUploaded] = useState(0);
   const [docsTotal, setDocsTotal] = useState(3);
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -69,6 +75,27 @@ function Inner() {
   const firstSaved = loan.first_disbursement_amount != null;
   const remaining = remainingAmount(sanctioned, loan.first_disbursement_amount, firstCharges(loan));
   const allDocsIn = docsUploaded >= docsTotal;
+  const { locked, reopened } = tranche2Lock(loan);
+  const sentLocked = locked && reopened.length === 0;
+
+  // Send the 2nd-tranche documents → locked (the DB stamps the time). After a
+  // reopening it also answers the team's message, as an application re-submit does.
+  async function sendDocs() {
+    if (!loan || sending) return;
+    setSending(true);
+    const now = new Date().toISOString();
+    const { data, error } = await supabase().from("epc_applications").update({
+      tranche2_submitted_at: now,
+      tranche2_allow: [],
+      ...(loan.attention_status === "open" ? {
+        attention_status: "resolved", attention_resolved_at: now, attention_resolved_by: "epc", epc_last_activity_at: now,
+      } : {}),
+    }).eq("id", loan.id).select("*").maybeSingle();
+    setSending(false);
+    if (error || !data) { notify.error("Couldn't send — please try again."); return; }
+    setLoan(data);
+    notify.success("Sent to Capital Craft.");
+  }
 
   return (
     <main className="min-h-screen bg-white">
@@ -159,18 +186,28 @@ function Inner() {
 
           <SectionCard title={`Completion documents (${docsUploaded}/${docsTotal})`} accent="blue" icon={I.files}>
             <p className="text-[13px] text-cc-muted mb-4">
-              Upload all three to release the second disbursement.
+              Upload all {docsTotal}, then send them to Capital Craft.
             </p>
             <CompletionDocsSection
               applicationId={loan.id}
               uploadedBy="epc"
+              locked={locked}
+              reopened={reopened}
               onCountChange={(u, t) => { setDocsUploaded(u); setDocsTotal(t); }}
             />
-            {allDocsIn && loan.completion_docs_status !== "approved" && (
-              <p className="text-[13px] text-cc-green font-medium mt-4">
-                All three uploaded — our team will review them shortly.
-              </p>
-            )}
+            <div className="mt-4">
+              {sentLocked ? (
+                <p className="inline-flex items-center gap-1.5 text-[13px] text-cc-green font-medium">
+                  {I.lock} Sent to Capital Craft · {fmtDate(loan.tranche2_submitted_at)} — our team will review them shortly.
+                </p>
+              ) : (
+                <button type="button" onClick={() => void sendDocs()} disabled={!allDocsIn || sending}
+                  title={allDocsIn ? undefined : `Upload all ${docsTotal} first`}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[8px] text-[13px] font-semibold bg-cc-green text-white hover:bg-cc-green-hover disabled:opacity-50">
+                  {I.send} {sending ? "Sending…" : locked ? "Send again" : "Send to Capital Craft"}
+                </button>
+              )}
+            </div>
           </SectionCard>
         </div>
       </div>

@@ -32,6 +32,8 @@ function Inner() {
   const [form, setForm] = useState<LoanForm | null>(null);
   const [docRows, setDocRows] = useState<LoanDocRow[]>([]);
   const [sel, setSel] = useState<string[]>([]);
+  // 1st disbursement in, 2nd not yet → the 2nd-tranche documents can be reopened too.
+  const [tranche2, setTranche2] = useState(false);
 
   useEffect(() => {
     // Opening the thread marks it seen for this admin → refresh the console's
@@ -40,11 +42,12 @@ function Inner() {
     void (async () => {
       const { form: f, docRows: rows, row } = await hydrateLoanForm(id);
       setForm(f); setDocRows(rows);
+      setTranche2(row.first_disbursement_amount != null && row.second_disbursement_amount == null);
       setCtx({ name: row.borrower_name || row.aadhaar_name || "(unnamed)", ref: row.loan_display_id || id.slice(0, 8).toUpperCase() });
     })();
   }, [id]);
 
-  const allKeys = form ? editGroups(form, docRows).flatMap((g) => g.items.map((i) => i.key)) : [];
+  const allKeys = form ? editGroups(form, docRows, { tranche2 }).flatMap((g) => g.items.map((i) => i.key)) : [];
 
   return (
     <main className="min-h-screen bg-bg-soft">
@@ -81,7 +84,7 @@ function Inner() {
             </div>
             <div className="flex-1 overflow-y-auto p-3">
               {form ? (
-                <EditTable appId={id} form={form} docRows={docRows} value={sel} onChange={setSel} />
+                <EditTable appId={id} form={form} docRows={docRows} value={sel} onChange={setSel} tranche2={tranche2} />
               ) : (
                 <p className="text-[13px] text-text-muted text-center py-10">Loading application…</p>
               )}

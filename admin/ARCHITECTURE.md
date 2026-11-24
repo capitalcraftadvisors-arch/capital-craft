@@ -85,6 +85,8 @@ Big pages keep their pieces in a `_parts/` folder next to `page.tsx`.
 | Uploading or opening a file | `lib/storage`: `uploadDocument`, `openDocument`, `openLoanDoc`, `saveDownload` |
 | Server-side file and OCR steps | `lib/extract-server`, `lib/vision-server`, `lib/gemini-extract` |
 | Which loan documents are required | `lib/loan-doc-checklist` (the only rule) |
+| The 2nd-tranche documents, their names and the EPC's lock | `lib/disbursement`: `COMPLETION_DOCS`, `COMPLETION_OTHER`, `TRANCHE2_KEYS`, `completionLabel`, `tranche2Lock` |
+| A profile's Back to the list that opened it (+ the row blink) | `components/view/hooks`: `rememberReturn` / `takeReturn` / `backLabel`; `useReturnHighlight` in `app/admin/_console/kit` |
 | Loan labels and display IDs | `lib/loan-labels` |
 | The lender list | `useLenders` / `addLender` (`lib/lenders`); per-loan lender rows in `lib/loan-lenders` |
 | Sending a lender pack | `lib/lender-pack` |

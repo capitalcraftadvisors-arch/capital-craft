@@ -2,6 +2,8 @@
 // both the admin profile message window and the EPC portal. Loan + insurance
 // share the same shapes; `kind` selects the table/route.
 
+import { completionLabel } from "@/lib/disbursement";
+
 export type MsgKind = "loan" | "insurance";
 export type MsgSender = "admin" | "epc";
 
@@ -59,7 +61,7 @@ const EDIT_KEY_LABELS: Record<string, string> = {
 
 export function docTagLabel(v: string | null | undefined): string | null {
   if (!v) return null;
-  return DOC_TAGS.find((d) => d.value === v)?.label ?? EDIT_KEY_LABELS[v] ?? null;
+  return DOC_TAGS.find((d) => d.value === v)?.label ?? EDIT_KEY_LABELS[v] ?? completionLabel(v);
 }
 
 // One-tap issue templates. Comprehensive across the documents/fields we ask for;

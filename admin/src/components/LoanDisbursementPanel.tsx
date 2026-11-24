@@ -39,6 +39,7 @@ import { askConfirm } from "@/lib/confirm";
 import {
   remainingAmount, DISBURSEMENT_WINDOW_DAYS,
   FIRST_CHARGES, firstCharges, type FirstChargeKey,
+  completionLabel, tranche2Lock,
 } from "@/lib/disbursement";
 
 type Loan = Record<string, any>;
@@ -210,6 +211,7 @@ export default function LoanDisbursementPanel({
   const typedCharges = firstCharges(charges);
   const docsReview: string | null = loan.completion_docs_status ?? null;
   const allDocsIn = docsUploaded >= docsTotal;
+  const t2Reopened = tranche2Lock(loan).reopened;
   const secondUnlocked = docsReview === "approved";
   const showFirst = part !== "second";
   const showSecond = part !== "first";
@@ -364,6 +366,9 @@ export default function LoanDisbursementPanel({
                 {loan.completion_reviewed_at && (
                   <KV k="Reviewed" v={`${fmtDate(loan.completion_reviewed_at)}${loan.completion_reviewed_by ? ` · ${loan.completion_reviewed_by}` : ""}`} />
                 )}
+                {/* The EPC's Send locks its documents (0138); Message to EPC reopens them. */}
+                {loan.tranche2_submitted_at && <KV k="Sent by EPC" v={fmtDate(loan.tranche2_submitted_at)} />}
+                {t2Reopened.length > 0 && <KV k="Reopened for EPC" v={t2Reopened.map(completionLabel).filter(Boolean).join(", ")} />}
               </div>
               {!allDocsIn && docsReview !== "approved" && (
                 <p className="text-[12px] text-warn-ink mt-2">
@@ -381,7 +386,7 @@ export default function LoanDisbursementPanel({
                     title={allDocsIn ? "Email the completion documents to the lender" : "Upload all completion documents first"}
                     className="inline-flex items-center gap-1.5 px-4 py-2 rounded-[8px] text-[13px] font-semibold bg-cc-green text-white hover:bg-cc-green-hover disabled:opacity-50"
                   >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>
+                    {I.mail}
                     Email to {lenderName(loan.approved_lender) || "lender"}
                   </button>
                 )}

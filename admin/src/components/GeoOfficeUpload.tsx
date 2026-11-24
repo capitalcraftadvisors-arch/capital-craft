@@ -55,6 +55,8 @@ type Props = {
   // Seed an already-uploaded photo when using uploadFn (no DB row to read).
   initialGps?: Gps | null;
   onUploaded?: (gps: Gps) => void;
+  /** After the stored photo is deleted (a parent's document count). */
+  onRemoved?: () => void;
   // Hide the live-camera tile and offer upload only (insurance photos are
   // taken on the customer's site beforehand, then uploaded).
   uploadOnly?: boolean;
@@ -316,7 +318,7 @@ export const LOCATION_OFF_MSG = "Turn on location (GPS) and allow location acces
 
 export default function GeoOfficeUpload({
   category, label, businessId, applicationId, uploadedBy, hint,
-  uploadFn, initialGps, onUploaded, uploadOnly, compact = false,
+  uploadFn, initialGps, onUploaded, onRemoved, uploadOnly, compact = false,
 }: Props) {
   // Which table this slot lives in. Loan completion photos hang off the
   // application; EPC office photos off the business.
@@ -550,6 +552,7 @@ export default function GeoOfficeUpload({
     setThumb(null);
     setGps(null);
     setAddress(null);
+    onRemoved?.();
   }
 
   // Open the uploaded file: a stored row via its signed URL, otherwise (custom-

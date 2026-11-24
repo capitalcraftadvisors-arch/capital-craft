@@ -16,7 +16,7 @@ import { fmtAgo } from "@/lib/dates";
 import { getBusiness, isMainAdmin } from "@/lib/auth";
 import { REVIEW_COLS, REVIEW_LABEL, loanReviews, reviewNotices } from "@/lib/review";
 import { markNotifSeen, notifSeen, onNotifSeen } from "@/lib/notif-seen";
-import { TRANCHE2_COLS, TRANCHE2_TOTAL, onTranche2, publishTranche2, readTranche2, tranche2Href, tranche2Of, type Tranche2 } from "@/lib/tranche2";
+import { TRANCHE2_COLS, TRANCHE2_TOTAL, onTranche2, publishTranche2, readTranche2, tranche2Href, tranche2Of, useUnreadTranche2, type Tranche2 } from "@/lib/tranche2";
 import { useCloseOnOutsideClick } from "@/lib/use-close-on-outside-click";
 
 type Source = "loan" | "epc" | "lead" | "insurance";
@@ -126,11 +126,11 @@ export default function NotificationBell() {
         .select("id, business_id, created_at, epc_business:business_id(trade_name, legal_name, contact_name, epc_quotation_templates(ready_at))")
         .eq("category", "custom_quote_sample").gte("created_at", since)
         .order("created_at", { ascending: false }).limit(30),
-      // Loans whose EPC uploaded 2nd-tranche documents, 2nd disbursement not paid (0125).
+      // Loans whose EPC uploaded (0125) or sent (0138) 2nd-tranche documents, 2nd disbursement not paid.
       !isCC ? empty : db.from("epc_applications")
         .select(`id, aadhaar_name, borrower_name, second_disbursement_amount, ${TRANCHE2_COLS}, epc_business:epc_business_id(trade_name, legal_name, contact_name)`)
-        .not("tranche2_epc_at", "is", null).is("second_disbursement_amount", null)
-        .order("tranche2_epc_at", { ascending: false }).limit(50),
+        .or("tranche2_epc_at.not.is.null,tranche2_submitted_at.not.is.null").is("second_disbursement_amount", null)
+        .order("tranche2_epc_at", { ascending: false, nullsFirst: false }).limit(50),
     ]);
     // Saved for every page's bell (lib/tranche2); shown from that list, not from here.
     if (isCC && !("error" in tr && tr.error)) {
@@ -199,8 +199,10 @@ export default function NotificationBell() {
 
   // 2nd-tranche uploads come from the list the pages already loaded (lib/tranche2),
   // so the red count shows on every page without asking the database.
-  const [t2, setT2] = useState<Tranche2[]>([]);
+  // Minus the cases this person marked read (My Day's list).
+  const [t2All, setT2] = useState<Tranche2[]>([]);
   useEffect(() => { setT2(readTranche2()); return onTranche2(setT2); }, []);
+  const t2 = useUnreadTranche2(t2All);
   const all = useMemo(() => [
     ...items,
     ...t2.map((t): Notif => ({

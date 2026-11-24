@@ -69,7 +69,7 @@ const NAMED_SLOT_CATEGORIES = new Set<string>([
   "borrower_pan", "customer_photo", "borrower_photo", "quotation", "electricity_bill",
   "bank_statement", "sanction_letter", "disbursement_advice", "feasibility_report", "mmr_advance_receipt",
   "completion_invoice", "completion_panel_photo", "completion_inverter_photo",
-  "completion_meter_photo", "completion_report", "rooftop_photo_extra",
+  "completion_meter_photo", "completion_report", "completion_other", "rooftop_photo_extra",
 ]);
 
 export function buildLoanDocGroups(loan: Loan, docsIn: Doc[]): LoanDocGroup[] {
@@ -201,6 +201,9 @@ export function buildLoanDocGroups(loan: Loan, docsIn: Doc[]): LoanDocGroup[] {
       slot("comp_inverter", "Inverter photo (geo-tagged)", ["completion_inverter_photo"], null),
       slot("comp_meter",    "Meter photo (geo-tagged)",    ["completion_meter_photo"],    null),
       slot("comp_report",   "Work completion report",      ["completion_report"],         null),
+      // The 2nd-tranche "Additional documents" (0137), each by its file name.
+      ...docs.filter((d) => d.category === "completion_other").map((d) =>
+        fromRow(`comp_other-${d.id}`, d.file_name ? d.file_name.replace(/\.[^.]+$/, "") : "Additional document", d)),
     ],
   });
 

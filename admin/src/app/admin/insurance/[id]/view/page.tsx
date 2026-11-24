@@ -14,7 +14,7 @@ import { saveDownload } from "@/lib/storage";
 import { fmtRupees } from "@/lib/money";
 import { notify } from "@/lib/notify";
 import { I, SectionCard, KV, Pill, DocGrid, StatusBtn, type ViewDocSlot } from "@/components/view/ViewKit";
-import { returnFor, takeReturn } from "@/components/view/hooks";
+import { backLabel, returnFor, takeReturn } from "@/components/view/hooks";
 import InsuranceUpload from "@/components/InsuranceUpload";
 import OwnershipCard from "@/components/OwnershipCard";
 import ProfileTabBar, { TabButton } from "@/components/ProfileTabBar";
@@ -184,7 +184,7 @@ function Inner() {
     <main className="min-h-screen bg-white">
       <header className="border-b border-cc-line bg-white sticky top-0 z-30">
         <div className="w-full px-5 sm:px-8 h-14 flex items-center justify-between">
-          <button onClick={() => router.push(takeReturn(`/admin/insurance/${params.id}/`) ?? "/admin")} className="text-[14px] text-cc-muted hover:text-cc-ink inline-flex items-center gap-1">{returnTo === "/admin/board" ? "← Back to Task Manager" : "← Back to console"}</button>
+          <button onClick={() => router.push(takeReturn(`/admin/insurance/${params.id}/`) ?? "/admin")} className="text-[14px] text-cc-muted hover:text-cc-ink inline-flex items-center gap-1">← {backLabel(returnTo, "Back to console")}</button>
           <img src="/brand/capital-craft.png" alt="Capital Craft" className="h-7 w-auto object-contain" />
         </div>
       </header>

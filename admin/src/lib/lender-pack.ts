@@ -5,6 +5,8 @@
 //                     document → the ZIP uploaded → the email (detail table, a link per
 //                     document, the ZIP link, summary.xlsx attached) → the addresses
 //                     saved to email_contacts for the composer's autocomplete.
+//                     `summarySheet: false` leaves summary.xlsx out (ZIP + attachment);
+//                     `downloadButtons` adds a Download button beside each document.
 // Each route keeps its own lookups, checks, wording and activity log.
 
 import type { NextRequest, NextResponse } from "next/server";
@@ -80,18 +82,27 @@ export async function sendLenderPack(req: NextRequest, supabase: SupabaseClient,
   introHtml: string;
   /** The console-log tag, e.g. "send-to-lender". */
   logTag: string;
+  /** summary.xlsx in the ZIP + attached (default true). */
+  summarySheet?: boolean;
+  /** A Download button beside each document link (default false). */
+  downloadButtons?: boolean;
 }): Promise<number> {
   const { to, cc, bcc, subject, toName, detail } = p.mail;
 
   // summary.xlsx built from the (edited) detail rows.
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet(p.sheetName);
-  ws.columns = [{ width: 34 }, { width: 50 }];
-  const title = ws.addRow([p.sheetTitle, ""]);
-  title.font = { bold: true, size: 14 };
-  ws.addRow([]);
-  for (const [k, v] of detail) { const r = ws.addRow([k, v]); r.getCell(1).font = { bold: true, color: { argb: "FF0F3D2E" } }; }
-  const xlsxBuffer = Buffer.from(await wb.xlsx.writeBuffer());
+  let xlsxBuffer: Buffer | null = null;
+  if (p.summarySheet !== false) {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet(p.sheetName);
+    ws.columns = [{ width: 34 }, { width: 50 }];
+    const title = ws.addRow([p.sheetTitle, ""]);
+    title.font = { bold: true, size: 14 };
+    ws.addRow([]);
+    for (const [k, v] of detail) { const r = ws.addRow([k, v]); r.getCell(1).font = { bold: true, color: { argb: "FF0F3D2E" } }; }
+    xlsxBuffer = Buffer.from(await wb.xlsx.writeBuffer());
+  }
+  // Each document's name in the ZIP (and when downloaded): "<label> - <name>.<ext>".
+  const fileName = (d: PackDoc) => `${safe(`${d.label} - ${p.name}`)}${extOf(d.path)}`;
 
   // flat ZIP + per-doc signed links.
   const archive = archiver("zip", { zlib: { level: 6 } });
@@ -99,10 +110,10 @@ export async function sendLenderPack(req: NextRequest, supabase: SupabaseClient,
   archive.on("data", (c: Buffer) => chunks.push(c));
   archive.on("warning", (e) => console.warn(`[${p.logTag}] zip warn:`, e));
   const zipDone = new Promise<void>((resolve, reject) => { archive.on("end", () => resolve()); archive.on("error", reject); });
-  archive.append(xlsxBuffer, { name: "summary.xlsx" });
+  if (xlsxBuffer) archive.append(xlsxBuffer, { name: "summary.xlsx" });
   const buffers = new Map<string, Buffer>();
   for (const d of p.docs) {
-    try { const buf = await downloadBuffer(d.path); buffers.set(d.path, buf); archive.append(buf, { name: `${safe(`${d.label} - ${p.name}`)}${extOf(d.path)}` }); }
+    try { const buf = await downloadBuffer(d.path); buffers.set(d.path, buf); archive.append(buf, { name: fileName(d) }); }
     catch (e) { console.warn(`[${p.logTag}] skip ${d.path}:`, e); }
   }
   void archive.finalize();
@@ -116,10 +127,16 @@ export async function sendLenderPack(req: NextRequest, supabase: SupabaseClient,
   const origin = publicOrigin(req);
   const zipUrl = fileLinkUrl(origin, zipPath);
 
-  const links: Array<{ label: string; url: string }> = [];
-  for (const d of p.docs) { if (!buffers.has(d.path)) continue; links.push({ label: d.label, url: fileLinkUrl(origin, d.path) }); }
+  const links: Array<{ label: string; url: string; download: string | null }> = [];
+  for (const d of p.docs) {
+    if (!buffers.has(d.path)) continue;
+    links.push({ label: d.label, url: fileLinkUrl(origin, d.path), download: p.downloadButtons ? fileLinkUrl(origin, d.path, { download: fileName(d) }) : null });
+  }
 
-  const linksHtml = links.map((l) => `<li style="margin:4px 0"><a href="${esc(l.url)}" style="color:#178a5c">${esc(l.label)}</a></li>`).join("");
+  // Some lenders can't save an image that opens in the browser — Download saves it.
+  const downloadHtml = (url: string) =>
+    ` <a href="${esc(url)}" style="display:inline-block;margin-left:10px;padding:1px 10px;border:1px solid #178a5c;border-radius:6px;color:#178a5c;font-size:12px;font-weight:600;text-decoration:none">Download</a>`;
+  const linksHtml = links.map((l) => `<li style="margin:6px 0"><a href="${esc(l.url)}" style="color:#178a5c">${esc(l.label)}</a>${l.download ? downloadHtml(l.download) : ""}</li>`).join("");
   const detailHtml = `<table style="border-collapse:collapse;margin:8px 0 18px;font-size:13px">${detail
     .map(([k, v]) => `<tr><td style="padding:3px 16px 3px 0;color:#5a8a76;vertical-align:top;white-space:nowrap">${esc(k)}</td><td style="padding:3px 0;font-weight:600;color:#12271f">${esc(v || "—")}</td></tr>`)
     .join("")}</table>`;
@@ -131,7 +148,7 @@ export async function sendLenderPack(req: NextRequest, supabase: SupabaseClient,
         <p style="margin:16px 0 6px"><b>Documents</b></p>
         <ul style="margin:0 0 16px;padding-left:20px">${linksHtml || "<li>(no documents on file)</li>"}</ul>
         <p><b>Download all as a single ZIP:</b> <a href="${esc(zipUrl)}" style="color:#178a5c">${esc(zipName)}</a></p>
-        <p style="color:#5a8a76;font-size:12.5px">A summary sheet is attached.</p>
+        ${xlsxBuffer ? `<p style="color:#5a8a76;font-size:12.5px">A summary sheet is attached.</p>` : ""}
         <p style="margin-top:18px">Regards,<br/>Capital Craft Advisors</p>
       </div>`;
 
@@ -141,7 +158,7 @@ export async function sendLenderPack(req: NextRequest, supabase: SupabaseClient,
     ...(bcc.length ? { bcc } : {}),
     subject,
     html,
-    attachments: [{ filename: "summary.xlsx", content: xlsxBuffer }],
+    ...(xlsxBuffer ? { attachments: [{ filename: "summary.xlsx", content: xlsxBuffer }] } : {}),
   });
 
   await saveContacts(supabase, [to, ...cc, ...bcc]);
