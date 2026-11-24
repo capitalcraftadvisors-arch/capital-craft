@@ -6,7 +6,7 @@ import { amountInput } from "@/lib/money";
 import { LOAN_INTAKE_THEME as THEME } from "@/components/chat/theme";
 import type { Form } from "@/components/chat/types";
 import { EditableRows, ReadCardFrame } from "@/components/chat/ReadCards";
-import { SYSTEM_LABEL } from "@/lib/loan-labels";
+import { PLANT_USE_LABEL, SYSTEM_LABEL } from "@/lib/loan-labels";
 
 // ── Info-sheet paste parser (local, deterministic — no AI) ───────────────────
 // The RM pastes a labeled sheet; we split each line on the FIRST ":", normalize
@@ -40,6 +40,29 @@ function normSystemType(raw: string): string {
   return "";
 }
 
+// A value that IS a use word: "house" → residential, "shop" → commercial. An
+// address ("Shop no 3, near Power House") is "" — it stays the place.
+function normUseType(raw: string): string {
+  const s = cleanText(raw).toLowerCase().replace(/[^a-z]/g, "");
+  if (/^(house|home|ghar|residential|residence|flat|apartment|bungalow|villa|society)$/.test(s)) return "residential";
+  if (/^(shop|office|factory|commercial|industrial|industry|showroom|godown|warehouse)$/.test(s)) return "commercial";
+  return "";
+}
+// The subsidy case from "yes" / "no" (or "subsidy" / "non subsidy"); "" otherwise.
+function subsidyCase(raw: string): string {
+  const s = cleanText(raw).toLowerCase();
+  if (/^(non[\s-]?subsidy|no|n)\b/.test(s)) return "non_subsidy";
+  if (/^(yes|y|subsidy)\b/.test(s)) return "subsidy";
+  return "";
+}
+// A tenure the loan configuration offers, in years (1–5): "5 year" → 5, "60 months" → 5.
+function tenureYears(raw: string): string {
+  const n = Number(leadingNumber(raw));
+  if (!n) return "";
+  const years = Math.round(/mon|mth/i.test(raw) ? n / 12 : n);
+  return years >= 1 && years <= 5 ? String(years) : "";
+}
+
 export function parseInfoSheet(text: string): Partial<Form> {
   const out: Form = {};
   const lines = String(text || "").split(/\r?\n/);
@@ -65,14 +88,25 @@ export function parseInfoSheet(text: string): Partial<Form> {
     if (!isCo && nl.includes("name") && (nl.includes("app") || nl.includes("borrower") || nl.includes("customer"))) { if (val) out.borrower_name = val; continue; }
     // Loan / project money
     if (nl.includes("project") && nl.includes("cost")) { const d = amountText(rawVal); if (d) out.total_project_cost = d; continue; }
-    if (nl.includes("loan") && nl.includes("tenure")) { const n = leadingNumber(rawVal); if (n) out.selected_tenure_years = String(parseInt(n, 10)); continue; }
-    if (nl.includes("tenure")) { const n = leadingNumber(rawVal); if (n) out.selected_tenure_years = String(parseInt(n, 10)); continue; }
+    if (nl.includes("tenure")) { const y = tenureYears(rawVal); if (y) out.selected_tenure_years = y; continue; }
     if (nl.includes("loan") && nl.includes("amount")) { const d = amountText(rawVal); if (d) out.loan_amount_required = d; continue; }
-    if (nl.includes("subsidy")) { const d = amountText(rawVal); if (d) out.central_subsidy = d; continue; }
+    // Subsidy: "yes" / "no" (the loan configuration's subsidy case) and/or an amount ("Yes 78,000/-").
+    if (nl.includes("subsidy")) {
+      const sc = subsidyCase(rawVal);
+      if (sc) out._subsidy_case = sc;
+      const d = amountText(rawVal);
+      if (sc !== "non_subsidy" && /\d/.test(d)) out.central_subsidy = d;
+      continue;
+    }
     // System / capacity / place
     if (nl.includes("capacity")) { const n = leadingNumber(rawVal); if (n) { out.project_size = n; out.project_size_unit = "kw"; } continue; }
     if (nl.includes("grid")) { const st = normSystemType(rawVal); if (st) out.system_type = st; continue; }
-    if ((nl.includes("place") && nl.includes("install")) || nl.includes("installation") || nl.includes("location")) { if (val) out.install_city = val; continue; }
+    // Place of installation: "house" / "shop" is the property use; anything else is the place.
+    if ((nl.includes("place") && nl.includes("install")) || nl.includes("installation") || nl.includes("location")) {
+      const use = normUseType(rawVal);
+      if (use) out.plant_use_type = use; else if (val) out.install_city = val;
+      continue;
+    }
   }
   return out;
 }
@@ -90,13 +124,32 @@ export const SHEET_ROWS: { field: string; label: string; render?: (v: string) =>
   { field: "total_project_cost", label: "Project cost", render: (v) => `₹${Number(v).toLocaleString("en-IN")}` },
   { field: "loan_amount_required", label: "Loan amount", render: (v) => `₹${Number(v).toLocaleString("en-IN")}` },
   { field: "central_subsidy", label: "Subsidy", render: (v) => `₹${Number(v).toLocaleString("en-IN")}` },
+  { field: "_subsidy_case", label: "Subsidy", render: (v) => (v === "subsidy" ? "Yes" : v === "non_subsidy" ? "No" : v) },
   { field: "selected_tenure_years", label: "Loan tenure", render: (v) => `${v} year${v === "1" ? "" : "s"}` },
   { field: "project_size", label: "Capacity", render: (v) => `${v} kW` },
   { field: "system_type", label: "System", render: (v) => SYSTEM_LABEL[v] || v },
   { field: "install_city", label: "Place of installation" },
+  { field: "plant_use_type", label: "Property use", render: (v) => PLANT_USE_LABEL[v] || v },
 ];
 // The sheet's amount rows — a hand edit is cleaned the same way the parser cleans them.
 export const SHEET_AMOUNT_FIELDS = new Set(["total_project_cost", "loan_amount_required", "central_subsidy"]);
+
+// A hand edit on the confirm card, cleaned like the parser cleans the sheet — the
+// fixed-choice rows only take a value the profile can store (a wrong one would
+// make every later save of the chat fail).
+const SHEET_CHOICE_EDITS: Record<string, { clean: (v: string) => string; error: string }> = {
+  selected_tenure_years: { clean: tenureYears, error: "Enter a tenure of 1 to 5 years." },
+  _subsidy_case: { clean: subsidyCase, error: "Enter Yes or No." },
+  plant_use_type: { clean: normUseType, error: "Enter Residential or Commercial." },
+  system_type: { clean: normSystemType, error: "Enter On-Grid, Off-Grid or Hybrid." },
+};
+export function cleanSheetEdit(field: string, value: string): { value: string } | { error: string } {
+  if (SHEET_AMOUNT_FIELDS.has(field)) return { value: amountText(value) }; // "1,80,000" → "180000"
+  const rule = SHEET_CHOICE_EDITS[field];
+  if (!rule) return { value };
+  const v = rule.clean(value);
+  return v ? { value: v } : { error: rule.error };
+}
 
 // Info-sheet confirm card — the parsed values, every one editable, shown before
 // they're written to the profile. Values are stored raw; friendly labels/format

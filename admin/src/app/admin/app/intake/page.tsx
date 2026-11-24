@@ -50,7 +50,7 @@ import { SCRIPT, LEAD_SCRIPT, STEP_PAYLOAD, AMOUNT_FIELDS, choicesOf, fieldLabel
 import { hasCoapp, coappDecision, employmentReset, kwOf } from "./_parts/form-rules";
 import { DOC_TABLE_ROWS, billOptional, type DocUnit } from "./_parts/doc-slots";
 import { mapExtract, prefillFromApp } from "./_parts/form-map";
-import { amountText, parseInfoSheet, SHEET_ROWS, SHEET_AMOUNT_FIELDS, SheetConfirmCard } from "./_parts/info-sheet";
+import { cleanSheetEdit, parseInfoSheet, SHEET_ROWS, SheetConfirmCard } from "./_parts/info-sheet";
 import { editTableGroups, EditPickList } from "./_parts/EditPicker";
 import EpcPicker from "./_parts/EpcPicker";
 import DocTable from "./_parts/DocTable";
@@ -108,7 +108,8 @@ function Inner() {
   // chat is stamped through step 1 only when it wasn't.
   const [consentOnFile, setConsentOnFile] = useState(false);
   // Edit-in-chat intro: Q1 (edit filled?) → pick list → re-ask; Q2 (complete?) → ask missing.
-  const [editStep, setEditStep] = useState<"q1" | "pick" | "q2" | "flow" | "done" | null>(null);
+  // q1 edit filled? → pick list | q2 complete? → sheet_q info sheet? → flow
+  const [editStep, setEditStep] = useState<"q1" | "pick" | "q2" | "sheet_q" | "flow" | "done" | null>(null);
   const [editStage, setEditStage] = useState<"selected" | "complete">("complete");
   const [editTargets, setEditTargets] = useState<Set<string>>(new Set());
   // Document units to show when re-opening the doc_table in edit mode (empty = all).
@@ -273,7 +274,8 @@ function Inner() {
     if (editMode) {
       if (editStep !== "flow") return; // paused during the Q1/Q2 intro
       if (editStage === "selected") { if (!editTargets.has(turn.id)) { setIdx((i) => i + 1); return; } } // re-ask only the picked ones
-      else if (isTurnFilled(turn, form)) { setIdx((i) => i + 1); return; } // "complete" → ask only missing
+      // "complete" → ask only missing; the info sheet only when the RM said she has one.
+      else if (isTurnFilled(turn, form) && !(turn.kind === "paste" && form._sheet_first === "1")) { setIdx((i) => i + 1); return; }
     }
     if (turn.kind === "leadsave") { void createLead(); return; }
     // Bank statement already on file but never read → read it, don't ask for it.
@@ -288,6 +290,8 @@ function Inner() {
       const sheetSub = Number(form.central_subsidy);
       setCentralSub(Number.isFinite(sheetSub) && form.central_subsidy ? String(sheetSub) : String(form.plant_use_type === "commercial" ? 0 : computeCentralSubsidy(kwOf(form))));
       if (form.selected_tenure_years && tenure == null) { const t = Number(form.selected_tenure_years); if (TENURES.includes(t as (typeof TENURES)[number])) setTenure(t); }
+      if (form._subsidy_case === "subsidy" || form._subsidy_case === "non_subsidy") setSubsidyCase(form._subsidy_case);
+      else if (form.central_subsidy === "0" && !(Number(form.state_subsidy) > 0)) setSubsidyCase("non_subsidy"); // a saved "no subsidy"
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx, leadMode, editStep, editStage]);
@@ -306,6 +310,7 @@ function Inner() {
     if (editStep === "q1") pushBot("Do you want to edit any pre-filled details now?", "edit_q1");
     else if (editStep === "pick") pushBot("Select the details you'd like to edit, then tap “Edit selected”.", "edit_pick");
     else if (editStep === "q2") pushBot("This profile isn't complete yet. Do you want to complete it now?", "edit_q2");
+    else if (editStep === "sheet_q") pushBot("Do you have the applicant's info sheet?", "edit_sheet_q");
   }, [editStep, editMode, pushBot]);
 
   // Keep the view pinned to the newest message. The FIRST scroll after load jumps
@@ -585,8 +590,10 @@ function Inner() {
     setSheetReview({ parsed: parsed as Form });
   }
   function editSheetField(field: string, value: string) {
-    const v = SHEET_AMOUNT_FIELDS.has(field) ? amountText(value) : value; // "1,80,000" → "180000"
-    setSheetReview((r) => r ? { ...r, parsed: { ...r.parsed, [field]: v } } : r);
+    const c = cleanSheetEdit(field, value);
+    if ("error" in c) { setError(c.error); return; }
+    setError(null);
+    setSheetReview((r) => r ? { ...r, parsed: { ...r.parsed, [field]: c.value } } : r);
   }
   function confirmSheet() {
     if (!sheetReview) return;
@@ -594,18 +601,33 @@ function Inner() {
     const patch: Form = {};
     for (const r of SHEET_ROWS) { const v = sheetReview.parsed[r.field]; if (v != null && String(v).trim() !== "") patch[r.field] = String(v).trim(); }
     if (patch.coapp_name && patch.coapp_name.trim()) patch._has_coapp = "1";
-    const nextForm = { ...form, ...patch };
+    // "Subsidy: no" is kept on the profile as ₹0 subsidies (the case itself isn't a column).
+    if (patch._subsidy_case === "non_subsidy") { patch.central_subsidy = "0"; patch.state_subsidy = "0"; }
+    // The sheet changes what a saved loan configuration was worked out on → its
+    // EMIs no longer hold: clear them, so the configuration is asked again (pre-filled).
+    if (["selected_tenure_years", "loan_amount_required", "central_subsidy", "state_subsidy"].some((k) => patch[k] != null && patch[k] !== (form[k] ?? ""))) {
+      patch.selected_monthly_emi = ""; patch.selected_subsidy_emi = "";
+    }
+    if (patch.selected_tenure_years) setTenure(Number(patch.selected_tenure_years));
+    const nextForm = { ...form, ...patch, _sheet_first: "" };
     setForm(nextForm);
     pushUser("Info-sheet details confirmed", { turnId: "info_sheet" });
     void persistForm(nextForm);
     setSheetReview(null); setInput("");
-    advance();
+    afterSheet();
   }
   function skipSheet() {
     pushUndo();
     pushUser("— skipped —", { turnId: "info_sheet", editable: false });
     setSheetReview(null); setInput("");
-    advance();
+    afterSheet();
+  }
+  // Edit: the sheet was asked first (before the pincode) → go back to the start
+  // so every question it didn't answer is asked. Create: the next turn.
+  function afterSheet() {
+    if (form._sheet_first !== "1") { advance(); return; }
+    merge({ _sheet_first: "" });
+    setIdx(1);
   }
 
   // ── Persistence ──
@@ -654,8 +676,9 @@ function Inner() {
     invalidateLoanBoards();
     return true;
   }
-  // The saved loan configuration (from the profile), for step 5.
-  const savedConfig = (f: Form) => (f.selected_tenure_years ? {
+  // The saved loan configuration (from the profile), for step 5 — only once it was
+  // saved with its EMI (a tenure from the info sheet alone isn't one).
+  const savedConfig = (f: Form) => (f.selected_tenure_years && Number(f.selected_monthly_emi) > 0 ? {
     roi_percent: Number(f.roi_percent) || DEFAULT_INDICATIVE_ROI, central_subsidy: Number(f.central_subsidy) || 0, state_subsidy: Number(f.state_subsidy) || 0,
     selected_tenure_years: Number(f.selected_tenure_years), selected_monthly_emi: Number(f.selected_monthly_emi) || 0, selected_subsidy_emi: Number(f.selected_subsidy_emi) || 0,
   } : null);
@@ -679,7 +702,7 @@ function Inner() {
     setBusy(true); setError(null);
     try {
       if (!(await runSteps(config ?? savedConfig(form)))) return;
-      const pending = pendingOf(config ? { ...form, selected_tenure_years: String(config.selected_tenure_years) } : form);
+      const pending = pendingOf(config ? { ...form, selected_tenure_years: String(config.selected_tenure_years), selected_monthly_emi: String(config.selected_monthly_emi) } : form);
       if (pending.length) {
         say("bot", `Saved as a draft — still pending: ${pending.join(", ")}.`);
       } else {
@@ -731,7 +754,11 @@ function Inner() {
   }
 
   // ── Edit-in-chat Q1/Q2 ──
-  function startFlow(stage: "selected" | "complete") { setEditStage(stage); setEditStep("flow"); setIdx(1); }
+  // `sheetFirst`: start at the info sheet (the RM has one), then back to the start.
+  function startFlow(stage: "selected" | "complete", sheetFirst = false) {
+    setEditStage(stage); setEditStep("flow");
+    setIdx(sheetFirst ? script.findIndex((t) => t.kind === "paste") : 1);
+  }
   function answerQ1(yes: boolean) {
     pushUser(yes ? "Yes — edit some details" : "No", {});
     if (yes) { setPickSel([]); setEditStep("pick"); return; }
@@ -741,9 +768,15 @@ function Inner() {
   }
   function answerQ2(yes: boolean) {
     pushUser(yes ? "Yes — complete it" : "No, later", {});
-    if (yes) startFlow("complete");
+    if (yes) setEditStep("sheet_q");
     else if (unfinished) void finishEdit();
     else { say("bot", "Okay — your changes are saved. You can finish it anytime."); setDonId(appId); setEditStep("done"); }
+  }
+  // Yes → paste the sheet first; its details are then never asked again. No → the usual questions.
+  function answerSheetQ(yes: boolean) {
+    pushUser(yes ? "Yes — paste the sheet" : "No", {});
+    merge({ _sheet_first: yes ? "1" : "" });
+    startFlow("complete", yes);
   }
   function editSelected() {
     if (!pickSel.length) return;
@@ -819,7 +852,7 @@ function Inner() {
   const progApplicable = script.filter((t) => isEditableTurn(t) && (!t.when || t.when(form)));
   const progFilled = progApplicable.filter((t) => isTurnFilled(t, form)).length;
   const progress = progApplicable.length ? Math.min(100, Math.round((progFilled / progApplicable.length) * 100)) : 0;
-  const showEditIntro = editMode && (editStep === "q1" || editStep === "pick" || editStep === "q2");
+  const showEditIntro = editMode && (editStep === "q1" || editStep === "pick" || editStep === "q2" || editStep === "sheet_q");
   const showDock = !donId && !leadDoneId && !showEditIntro && active && !confirm && !sheetReview && active.kind !== "save" && active.kind !== "leadsave" && (editing ? true : turn === active);
 
   if (resuming) return <AdminChatLoading theme={THEME} label="Restoring your chat…" />;
@@ -896,7 +929,7 @@ function Inner() {
         )}
       </ChatMessages>
 
-      {/* Edit-in-chat intro: Q1 (edit filled?) → pick list → Q2 (complete?) */}
+      {/* Edit-in-chat intro: Q1 (edit filled?) → pick list → Q2 (complete?) → info sheet? */}
       {showEditIntro && (
         <ChatDock>
           {editStep === "q1" && (
@@ -912,6 +945,12 @@ function Inner() {
             <div className="flex gap-2">
               <button onClick={() => answerQ2(true)} className="flex-1 px-4 py-2.5 rounded-xl bg-cc-green text-white text-[14px] font-semibold hover:bg-cc-green-hover">Yes — complete it</button>
               <button onClick={() => answerQ2(false)} className="flex-1 px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">No, later</button>
+            </div>
+          )}
+          {editStep === "sheet_q" && (
+            <div className="flex gap-2">
+              <button onClick={() => answerSheetQ(true)} className="flex-1 px-4 py-2.5 rounded-xl bg-cc-green text-white text-[14px] font-semibold hover:bg-cc-green-hover">Yes — paste the sheet</button>
+              <button onClick={() => answerSheetQ(false)} className="flex-1 px-4 py-2.5 rounded-xl border border-line text-[14px] text-text-mid hover:bg-bg-soft">No</button>
             </div>
           )}
         </ChatDock>

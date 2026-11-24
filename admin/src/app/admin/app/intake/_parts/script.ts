@@ -49,8 +49,9 @@ export const SCRIPT: Turn[] = [
   { id: "install_pincode", bot: "Installation pincode?", kind: "pincode", field: "install_pincode" },
   // 3) Info sheet — paste the labeled RM sheet; parsed locally (no AI), confirmed, written.
   { id: "info_sheet", bot: "Paste the applicant's info sheet here — I'll read the labels and fill in the details for you to confirm. (Or skip and add them later.)", kind: "paste", optional: true, docLabel: "Info sheet" },
-  // 4) Residential / commercial (not on the sheet)
-  { id: "plant_use_type", bot: "Residential or commercial use?", kind: "choice", field: "plant_use_type", choices: [
+  // 4) Residential / commercial (the sheet's "Place of installation: house" fills it)
+  { id: "plant_use_type", bot: "Residential or commercial use?", kind: "choice", field: "plant_use_type",
+    when: (f) => !(f.plant_use_type && f.plant_use_type.trim()), choices: [
     { value: "residential", label: "Residential", sub: "Home / society" },
     { value: "commercial", label: "Commercial", sub: "Shop / office / factory" },
   ] },
@@ -238,7 +239,8 @@ export function isTurnFilled(t: Turn, f: Form): boolean {
     // The bank statement counts once its details are read too (Bank details on the profile).
     return keys.length > 0 && keys.every((k) => !!(f[k] && String(f[k]).trim())) && (t.id !== "bank" || !!f.bank_account_no);
   }
-  if (t.kind === "loanconfig") return !!(f.selected_tenure_years && String(f.selected_tenure_years).trim());
+  // Saved = a tenure AND its EMI (the info sheet gives only a tenure — then it's still asked, pre-filled).
+  if (t.kind === "loanconfig") return !!(f.selected_tenure_years && String(f.selected_tenure_years).trim()) && Number(f.selected_monthly_emi) > 0;
   if (t.field) return !!(f[t.field] && String(f[t.field]).trim());
   return false;
 }
