@@ -42,7 +42,7 @@ import SubscriptionCard from "@/components/SubscriptionCard";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import { invalidate } from "@/lib/list-cache";
 import { DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
-import { computeEpcHealth } from "@/lib/epc-score";
+import { computeEpcHealth, submittedLoans } from "@/lib/epc-score";
 import { fmtDate, fmtDateTime, localIsoDate } from "@/lib/dates";
 import DateField from "@/components/ui/DateField";
 import Modal, { OVERLAY } from "@/components/ui/Modal";
@@ -347,7 +347,8 @@ function Inner() {
   // approval (a date entered by hand).
   const withWhen = (what: ReactNode, when: string | null | undefined, dateOnly = false) =>
     (when ? <>{what}<br />{dateOnly ? fmtDate(when) : fmtDateTime(when)}</> : what);
-  const liveApps = loans.filter((l) => !l.aborted_at).length;
+  // Submitted applications (drafts left out, aborted / rejected in) — the same count as EPC Health.
+  const submittedApps = submittedLoans(loans).length;
 
   const stages: Array<{ key: EpcStage; label: string; sub?: ReactNode; icon: ReactNode; state: StageState }> = [
     {
@@ -375,7 +376,7 @@ function Inner() {
     {
       key: "active", label: "Active", icon: I.activity,
       state: approvedRows.length ? "done" : "pending",
-      sub: approvedRows.length ? `${liveApps} application${liveApps === 1 ? "" : "s"}` : "Pending",
+      sub: approvedRows.length ? `${submittedApps} application${submittedApps === 1 ? "" : "s"}` : "Pending",
     },
   ];
   const stageNow: EpcStage = stages.find((s) => s.state !== "done")?.key ?? "active";
@@ -526,7 +527,7 @@ function Inner() {
               { label: "Documents", value: fillText(docsHave, docSlots.length), tone: fillTone(docsHave, docSlots.length) },
               { label: "Sent to lenders", value: String(sentRows.length), sub: sentRows.length ? names(sentRows) : undefined, tone: sentRows.length ? "text-cc-blue" : "text-cc-blank" },
               { label: "Approved by lenders", value: String(approvedRows.length), sub: approvedRows.length ? names(approvedRows) : undefined, tone: approvedRows.length ? "text-cc-green" : "text-cc-blank" },
-              { label: "Loan applications", value: String(liveApps), tone: liveApps ? undefined : "text-cc-blank" },
+              { label: "Loan applications", value: String(submittedApps), tone: submittedApps ? undefined : "text-cc-blank" },
             ]}
           />
         </div>

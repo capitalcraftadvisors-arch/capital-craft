@@ -39,6 +39,13 @@ function isDead(l: EpcLoan): boolean {
 
 const APPROVED = new Set(["approved", "rfd", "sent_to_nbfc", "disbursed"]);
 
+/** The applications an EPC submitted — drafts aren't a transaction; aborted and
+ *  rejected ones count (as cancelled). The EPC profile's "Loan applications" and
+ *  EPC Health both count these, so the two always agree. */
+export function submittedLoans<T extends Pick<EpcLoan, "status">>(all: T[]): T[] {
+  return all.filter((l) => l.status !== "draft");
+}
+
 export type HealthBucket = {
   submitted: number;
   approved: number;
@@ -122,7 +129,7 @@ function inProgress(l: EpcLoan): boolean {
 }
 
 export function computeEpcHealth(all: EpcLoan[]): EpcHealth | null {
-  const loans = all.filter((l) => l.status !== "draft"); // drafts aren't a transaction
+  const loans = submittedLoans(all);
   if (loans.length === 0) return null;
 
   const res = bucket(loans.filter(isRes));
