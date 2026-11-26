@@ -1,6 +1,6 @@
 // An EPC's staff logins (epc_members, 0119) — the Users & roles page. RLS lets
 // the owner / an admin manage them; passwords go through set_member_password
-// (a hash only — nobody can read one back).
+// (a hash, plus a copy only the CC main admin reads on Stakeholders → EPCs, 0142).
 
 import { supabase } from "./supabase";
 import { authHeaders } from "./auth";

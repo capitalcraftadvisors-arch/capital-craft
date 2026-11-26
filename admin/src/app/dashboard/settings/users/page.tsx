@@ -4,7 +4,8 @@
 // KYC contact) is always there; it — or an admin, for Sales / Viewer — adds
 // staff with a role and the modules they use, resets passwords and switches
 // logins off. A new password is shown once here (copy it, or send it by email /
-// WhatsApp) and must be changed at the first login; nobody can read it back, CC included.
+// WhatsApp) and must be changed at the first login; only the CC main admin can read
+// it back (Stakeholders → EPCs, 0142).
 
 import { useEffect, useState } from "react";
 import { Card, Row } from "@/components/partner/SettingsKit";

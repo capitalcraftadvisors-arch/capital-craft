@@ -1,16 +1,25 @@
 // Login passwords (migration 0094) — client side. The password is generated
 // and emailed by the server (/api/admin/login-password/[id]); logins check a
-// bcrypt hash. Nobody can read a password back (0136): a forgotten one is reset
-// and the new one sent by email or WhatsApp.
+// bcrypt hash. An EPC login also keeps a readable copy that only the main admin
+// reads back (0142, Stakeholders → EPCs); Capital Craft team logins never do.
 
 import { supabase } from "./supabase";
 import { authHeaders } from "./auth";
 
+export type LoginPassword = { at: string; password: string | null };
+
+/** Each login's password: when it was set, and (main admin, EPC logins) the password itself.
+ *  Takes account ids and EPC staff member ids; logins without a password are absent. */
+export async function loginPasswords(ids: string[]): Promise<Map<string, LoginPassword>> {
+  if (!ids.length) return new Map();
+  const { data } = await supabase().rpc("login_password_status", { p_business_ids: ids });
+  return new Map(((data ?? []) as { business_id: string; updated_at: string; password: string | null }[])
+    .map((r) => [r.business_id, { at: r.updated_at, password: r.password }]));
+}
+
 /** When each account's password was last set (accounts without one are absent). */
 export async function loginPasswordStatus(businessIds: string[]): Promise<Map<string, string>> {
-  if (!businessIds.length) return new Map();
-  const { data } = await supabase().rpc("login_password_status", { p_business_ids: businessIds });
-  return new Map(((data ?? []) as { business_id: string; updated_at: string }[]).map((r) => [r.business_id, r.updated_at]));
+  return new Map([...(await loginPasswords(businessIds))].map(([id, v]) => [id, v.at]));
 }
 
 /** Main admin: a new one-time password for an EPC owner's login (changed at its next login). */

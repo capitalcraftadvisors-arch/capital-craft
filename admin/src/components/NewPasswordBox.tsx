@@ -2,7 +2,8 @@
 
 // A new login password, shown once — copy it, email it (always from the Capital
 // Craft Gmail) or send it on WhatsApp. Used by the Partner Portal's Users &
-// roles and Stakeholders → EPCs. Nobody can read a password back later (0136).
+// roles and Stakeholders → EPCs. Later only the CC main admin can read an EPC login's
+// password, on Stakeholders → EPCs (0142).
 
 import { useState } from "react";
 import { CopyButton } from "@/components/view/ViewKit";

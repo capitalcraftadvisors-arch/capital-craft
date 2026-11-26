@@ -1,9 +1,10 @@
 "use client";
 
 // Stakeholders → EPCs (main admin): every EPC's Partner Portal logins — its
-// owner and its team members (0119). Nobody can read a password (0136); when an
-// EPC asks for one, Reset makes a new one-time password, shown once to send by
-// email or WhatsApp, and the EPC sets its own at the next login.
+// owner and its team members (0119), with each login's password (0142: kept when
+// it's issued, set or typed at a right login). Reset makes a new one-time
+// password, shown once to send by email or WhatsApp; the EPC sets its own at
+// the next login.
 // One read when the tab opens (kept 5 minutes), no polling.
 
 import { useEffect, useMemo, useState } from "react";
@@ -11,7 +12,7 @@ import NewPasswordBox, { type NewLogin } from "@/components/NewPasswordBox";
 import Modal, { OVERLAY } from "@/components/ui/Modal";
 import { supabase } from "@/lib/supabase";
 import { getCached, setCached } from "@/lib/list-cache";
-import { epcPasswordMail, loginPasswordStatus, loginShareText, sendPasswordDraft, setEpcLoginPassword } from "@/lib/passwords";
+import { epcPasswordMail, loginPasswords, loginShareText, sendPasswordDraft, setEpcLoginPassword, type LoginPassword } from "@/lib/passwords";
 import { emailMemberPassword, setMemberPassword } from "@/lib/members";
 import { generateStrongPassword } from "@/lib/password-gen";
 import { ROLE_LABEL, type StaffRole } from "@/lib/epc-roles";
@@ -26,7 +27,7 @@ type Epc = {
   contact_name: string | null; contact_mobile: string | null; contact_email: string | null;
   last_login_at: string | null; epc_members: Member[];
 };
-type Loaded = { epcs: Epc[]; pwSet: [string, string][] };
+type Loaded = { epcs: Epc[]; pw: [string, LoginPassword][] };
 type Open = { login: NewLogin; onEmail: (to: string) => Promise<{ ok: boolean; sentTo?: string; error?: string }> };
 
 const KEY = "stake.epcLogins";
@@ -43,21 +44,21 @@ export default function EpcLoginsTab() {
 
   useEffect(() => {
     const hit = getCached<Loaded>(KEY, TTL);
-    if (hit) { setData(hit); return; }
+    if (hit?.pw) { setData(hit); return; }
     void (async () => {
       const { data: rows } = await supabase().from("epc_business")
         .select("id, trade_name, legal_name, contact_name, contact_mobile, contact_email, last_login_at, epc_members(id, name, mobile, email, member_role, active, last_login_at)")
         .neq("business_type", "admin").not("contact_mobile", "is", null)
         .order("trade_name", { ascending: true, nullsFirst: false });
       const epcs = (rows ?? []) as Epc[];
-      const pw = await loginPasswordStatus(epcs.map((e) => e.id));
-      const v = { epcs, pwSet: [...pw] };
+      const pw = await loginPasswords(epcs.flatMap((e) => [e.id, ...e.epc_members.map((m) => m.id)]));
+      const v = { epcs, pw: [...pw] };
       setCached(KEY, v);
       setData(v);
     })();
   }, []);
 
-  const pwSet = useMemo(() => new Map(data?.pwSet ?? []), [data]);
+  const pwOf = useMemo(() => new Map(data?.pw ?? []), [data]);
   const shown = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!data || !s) return data?.epcs ?? [];
@@ -65,19 +66,23 @@ export default function EpcLoginsTab() {
       .some((x) => (x ?? "").toLowerCase().includes(s)));
   }, [data, q]);
 
+  function keep(id: string, password: string) {
+    const v: LoginPassword = { at: new Date().toISOString(), password };
+    setData((d) => {
+      if (!d) return d;
+      const next = { ...d, pw: [...d.pw.filter(([k]) => k !== id), [id, v] as [string, LoginPassword]] };
+      setCached(KEY, next);
+      return next;
+    });
+  }
+
   async function resetOwner(e: Epc) {
-    if (pwSet.has(e.id) && !(await askConfirm(`Reset ${companyOf(e)}'s password? The current one stops working.`, { danger: true }))) return;
+    if (pwOf.has(e.id) && !(await askConfirm(`Reset ${companyOf(e)}'s password? The current one stops working.`, { danger: true }))) return;
     const pw = generateStrongPassword(14);
     setBusy(e.id);
     try {
       await setEpcLoginPassword(e.id, pw);
-      const at = new Date().toISOString();
-      setData((d) => {
-        if (!d) return d;
-        const v = { ...d, pwSet: [...d.pwSet.filter(([id]) => id !== e.id), [e.id, at] as [string, string]] };
-        setCached(KEY, v);
-        return v;
-      });
+      keep(e.id, pw);
       const name = e.contact_name || companyOf(e);
       const epc = { tradeName: companyOf(e), contactName: e.contact_name, mobile: e.contact_mobile };
       setOpen({
@@ -98,6 +103,7 @@ export default function EpcLoginsTab() {
     setBusy(m.id);
     try {
       await setMemberPassword(m.id, pw);
+      keep(m.id, pw);
       setOpen({
         login: { name: m.name, mobile: m.mobile, email: m.email, password: pw,
           shareText: loginShareText({ name: m.name, company: companyOf(e), mobile: m.mobile, password: pw }) },
@@ -106,6 +112,11 @@ export default function EpcLoginsTab() {
     } catch (err) { notify.error(errText(err)); }
     finally { setBusy(null); }
   }
+
+  const passwordCell = (id: string) => {
+    const p = pwOf.get(id)?.password;
+    return <td className="px-4 py-2.5 font-mono text-text select-all whitespace-nowrap">{p || "—"}</td>;
+  };
 
   const resetBtn = (id: string, onClick: () => void) => (
     <button type="button" onClick={onClick} disabled={busy !== null}
@@ -127,12 +138,13 @@ export default function EpcLoginsTab() {
           <thead>
             <tr>
               <th className={th}>EPC</th><th className={th}>Login</th><th className={th}>Role</th><th className={th}>Mobile</th>
-              <th className={th}>Email</th><th className={th}>Password</th><th className={th}>Last login</th><th className={th} />
+              <th className={th}>Email</th><th className={th}>Password</th><th className={th}>Status</th>
+              <th className={th}>Last login</th><th className={th} />
             </tr>
           </thead>
           <tbody>
             {shown.map((e) => {
-              const at = pwSet.get(e.id);
+              const at = pwOf.get(e.id)?.at;
               return [
                 <tr key={e.id} className="border-t border-line">
                   <td className="px-4 py-2.5 font-semibold text-text">{companyOf(e)}</td>
@@ -140,6 +152,7 @@ export default function EpcLoginsTab() {
                   <td className={td}>{ROLE_LABEL.OWNER}</td>
                   <td className={td}>{e.contact_mobile}</td>
                   <td className={td}>{e.contact_email || "—"}</td>
+                  {passwordCell(e.id)}
                   <td className="px-4 py-2.5">
                     {at
                       ? <span className="text-cc-green font-semibold">Set on {fmtDate(at)}</span>
@@ -155,6 +168,7 @@ export default function EpcLoginsTab() {
                     <td className={td}>{m.active ? ROLE_LABEL[m.member_role] : "Switched off"}</td>
                     <td className={td}>{m.mobile}</td>
                     <td className={td}>{m.email || "—"}</td>
+                    {passwordCell(m.id)}
                     <td className="px-4 py-2.5 text-cc-green font-semibold">Set</td>
                     <td className={td + " whitespace-nowrap"}>{m.last_login_at ? fmtDateTime(m.last_login_at) : "—"}</td>
                     <td className="px-4 py-2.5 text-right">{resetBtn(m.id, () => void resetMember(e, m))}</td>
