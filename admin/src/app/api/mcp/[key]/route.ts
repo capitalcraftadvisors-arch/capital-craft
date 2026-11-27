@@ -3,8 +3,9 @@
 // Model Context Protocol over Streamable HTTP, JSON responses (no SSE needed):
 // initialize, ping, tools/list, tools/call. The connector key in the URL is
 // opaque (migration 0095); it is exchanged at the `auth` edge function for a
-// 5-minute SELECT-only JWT (role mcp_reader) acting as its owner, cached per
-// instance until it nears expiry. The tools (lib/mcp-tools) are read-only.
+// 5-minute SELECT-only JWT (role mcp_reader) acting as the link's Capital Craft
+// team login, cached per instance until it nears expiry. The tools
+// (lib/mcp-tools) are read-only: portal data + the website's own code.
 
 import { NextRequest, NextResponse } from "next/server";
 import { FUNCTIONS_URL } from "@/lib/supabase-config";
@@ -17,8 +18,12 @@ export const dynamic = "force-dynamic";
 
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const INSTRUCTIONS =
-  "Capital Craft portal (solar-loan and insurance distribution, India), read-only. Use loan_summary for counts / amounts over a period, " +
-  "search_* to list records, get_loan / get_epc for one record. Amounts are rupees; dates DD/MM/YYYY; FY = April–March.";
+  "Capital Craft portal (solar-loan and insurance distribution, India), read-only. Data: loan_summary for counts / amounts over a period, " +
+  "search_* to list records, get_loan / get_epc for one record. How the portal works (how a number or score is worked out, what a " +
+  "status, button or page does, why something happens): the live website code is readable with list_code / search_code / read_code — " +
+  "admin/ARCHITECTURE.md is the map, admin/src the website, backend/supabase/migrations the database rules. Look it up in the code " +
+  "rather than guessing or asking the user to paste anything, then answer in plain words for the Capital Craft team (no code unless " +
+  "asked). Amounts are rupees; dates DD/MM/YYYY; FY = April–March.";
 
 type RpcMsg = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, any> };
 
@@ -50,7 +55,7 @@ async function handle(msg: RpcMsg, jwt: string): Promise<object | null> {
       return rpcResult(id, {
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "capital-craft-portal", version: "1.0.0" },
+        serverInfo: { name: "capital-craft-portal", version: "1.1.0" },
         instructions: INSTRUCTIONS,
       });
     }

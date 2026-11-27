@@ -1,16 +1,19 @@
-// Server-only. The Claude connector's (MCP) READ-ONLY tools over portal data.
+// Server-only. The Claude connector's (MCP) READ-ONLY tools over portal data,
+// plus the website's own code (list_code / search_code / read_code, lib/mcp-code)
+// so Claude can also answer how the portal works.
 //
 // Every query runs through RLS with a short-lived mcp_reader JWT (migration
-// 0095): SELECT-only at the database, scoped to what the connector's owner
-// (the main admin) may see. No tool writes anything. Aadhaar / PAN / bank
-// numbers are never returned. Dates are DD/MM/YYYY (India time); amounts are
-// exact rupees.
+// 0095): SELECT-only at the database, scoped to what the link's Capital Craft
+// team login may see. No tool writes anything. Aadhaar / PAN / bank numbers
+// are never returned. Dates are DD/MM/YYYY (India time); amounts are exact rupees.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fmtDateIST as dt } from "./dates";
 import { remainingAmount, firstCharges, FIRST_CHARGE_COLS } from "./disbursement";
 import { PENDING_FILTER } from "./review";
 import { DEFAULT_LOAN_LENDERS, lenderLabelIn } from "./loan-lenders";
+import { computeEpcHealth, EPC_LOAN_COLS, scoreTone } from "./epc-score";
+import { listCode, readCode, searchCode } from "./mcp-code";
 
 type Args = Record<string, unknown>;
 type Row = Record<string, any>;
@@ -278,7 +281,7 @@ export const MCP_TOOLS: McpTool[] = [
   },
   {
     name: "get_epc",
-    description: "One EPC partner by EPC ID or name: contact, stage, lender statuses, and its loan applications counted by stage.",
+    description: "One EPC partner by EPC ID or name: contact, stage, lender statuses, its loan applications counted by stage, and its EPC Health score (the profile's \"EPC SCORE x/100\", all periods) with each part's % and weight — the formula is admin/src/lib/epc-score.tsx.",
     inputSchema: { type: "object", properties: { epc: { type: "string", description: "EPC ID or name." } }, required: ["epc"] },
     async run(db, args) {
       const s = clean(args.epc);
@@ -294,14 +297,22 @@ export const MCP_TOOLS: McpTool[] = [
       const r = found.find((x) => String(x.epc_display_id).toLowerCase() === s.toLowerCase()) ?? found[0];
       const ls = (await lenderMap(db, [r.id])).get(r.id) ?? [];
       const { data: loans, error: lErr } = await db.from("epc_applications")
-        .select("status, aborted_at, first_disbursement_amount, second_disbursement_amount").eq("epc_business_id", r.id);
+        .select(EPC_LOAN_COLS).eq("epc_business_id", r.id);
       fail(lErr);
       const byStage: Record<string, number> = {};
       for (const x of (loans ?? []) as Row[]) byStage[loanStage(x)] = (byStage[loanStage(x)] ?? 0) + 1;
+      const h = computeEpcHealth((loans ?? []) as Row[]);
       return {
         ...epcRow(r, ls),
         lender_status: ls.map((x) => ({ lender: lender(x.lender), docs_sent: !!x.docs_given, approved: !!x.approved, rejected: !!x.rejected })),
         loan_applications: { total: (loans ?? []).length, by_stage: byStage },
+        epc_health: h && {
+          score: h.score, rating: scoreTone(h.score).label,
+          parts: h.parts.map((p) => ({ part: p.label, pct: p.pct, weight: p.weight })),
+          submitted: h.total.submitted, approved: h.total.approved, rejected_or_aborted: h.total.rejected,
+          in_progress_by_age: { up_to_60_days: h.tat.le60, days_60_to_90: h.tat.d60_90, over_90_days: h.tat.gt90 },
+          repeat_customers: h.repeat,
+        },
       };
     },
   },
@@ -361,5 +372,33 @@ export const MCP_TOOLS: McpTool[] = [
       }));
       return { count: rows.length, rows };
     },
+  },
+  {
+    name: "list_code",
+    description: "The portal website's code (live version): list the files in a folder. admin/src = the website (Next.js), backend/supabase/migrations = database rules (SQL), admin/ARCHITECTURE.md = the map.",
+    inputSchema: { type: "object", properties: {
+      folder: { type: "string", description: "Folder path, e.g. admin/src/lib. Empty = every file." },
+    } },
+    run: (_db, args) => listCode(args.folder),
+  },
+  {
+    name: "search_code",
+    description: "Search the portal website's code (live version) for text — a label shown on screen, a field or function name. Returns matching lines with file and line number; then read_code the file.",
+    inputSchema: { type: "object", properties: {
+      query: { type: "string", description: "Text to find, case-insensitive. Separate alternatives with |, e.g. EPC SCORE|computeEpcHealth." },
+      folder: { type: "string", description: "Only this folder, e.g. admin/src or backend/supabase/migrations." },
+      limit: { type: "number", description: "Max lines (default 50, max 200)." },
+    }, required: ["query"] },
+    run: (_db, args) => searchCode(args.query, args.folder, limitOf(args.limit)),
+  },
+  {
+    name: "read_code",
+    description: "Read a file of the portal website's code (live version), with line numbers — up to 400 lines per call.",
+    inputSchema: { type: "object", properties: {
+      path: { type: "string", description: "File path as list_code / search_code give it, e.g. admin/src/lib/epc-score.tsx." },
+      from: { type: "number", description: "First line (default 1)." },
+      to: { type: "number", description: "Last line (default from + 399)." },
+    }, required: ["path"] },
+    run: (_db, args) => readCode(args.path, args.from, args.to),
   },
 ];

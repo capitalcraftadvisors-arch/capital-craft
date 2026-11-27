@@ -42,7 +42,7 @@ import SubscriptionCard from "@/components/SubscriptionCard";
 import EmailComposerModal from "@/components/EmailComposerModal";
 import { invalidate } from "@/lib/list-cache";
 import { DownloadMenu, KebabMenu } from "@/components/ProfileTabBar";
-import { computeEpcHealth, submittedLoans } from "@/lib/epc-score";
+import { computeEpcHealth, EPC_LOAN_COLS, submittedLoans } from "@/lib/epc-score";
 import { fmtDate, fmtDateTime, localIsoDate } from "@/lib/dates";
 import DateField from "@/components/ui/DateField";
 import Modal, { OVERLAY } from "@/components/ui/Modal";
@@ -115,7 +115,7 @@ function Inner() {
         supabase().from("epc_documents").select("id, category, file_name, mime_type, stakeholder_id, metadata").eq("business_id", params.id),
         supabase().from("epc_lender_status").select("lender, docs_given, approved, rejected, docs_given_at, approved_at, rejected_at").eq("business_id", params.id),
         supabase().from("epc_admin_info").select("*").eq("business_id", params.id).maybeSingle(),
-        supabase().from("epc_applications").select("status, aborted_at, plant_use_type, loan_display_id, sanctioned_amount, first_disbursement_amount, second_disbursement_amount, created_at, borrower_pan, borrower_mobile").eq("epc_business_id", params.id),
+        supabase().from("epc_applications").select(EPC_LOAN_COLS).eq("epc_business_id", params.id),
       ]);
       setBiz(b);
       setDocs((d ?? []) as Doc[]);

@@ -26,11 +26,12 @@
 //
 // To roll back from ES256 to HS256: unset APP_SIGNING_JWK, redeploy.
 //
-// Claude connector (MCP, migration 0095) — owner accounts only (0096):
-//   { action: "mcp_create" }  + the owner's Bearer token
+// Claude connector (MCP, migration 0095) — the owner (0096) makes the links,
+// one per Capital Craft team login (0143):
+//   { action: "mcp_create", for? }  + the owner's Bearer token; for = a team login's id (default: the owner)
 //       -> { ok, key, expires_at }   a new opaque connector key (shown once)
 //   { action: "mcp_exchange", key }
-//       -> { ok, token }   a 5-minute JWT with role mcp_reader (SELECT-only)
+//       -> { ok, token }   a 5-minute JWT with role mcp_reader (SELECT-only), as the link's login
 // =========================================================
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
@@ -202,12 +203,12 @@ async function isOwner(id: string): Promise<boolean> {
   const { data } = await supabase.from("owner_accounts").select("business_id").eq("business_id", id).maybeSingle();
   return !!data;
 }
-// A main-admin-level owner account (Claude connector links are owner-only).
+// A main-admin-level owner account (only the owner makes Claude connector links).
 const ownerAdmin = async (b: { id: string; business_type: string | null; role: string | null } | null) =>
   !!b && b.business_type === "admin" && (!b.role || b.role === "MAIN_ADMIN") && await isOwner(b.id);
 
-// Owner → a new opaque connector key (only its hash is stored).
-async function mcpCreate(req: Request): Promise<Response> {
+// Owner → a new opaque connector key for itself or a team login (only its hash is stored).
+async function mcpCreate(req: Request, forId: unknown): Promise<Response> {
   const c = await callerClaims(req);
   if (!c || c.role !== "authenticated") return json({ ok: false, error: "unauthorized" }, 401);
   const { data: me } = await supabase.from("epc_business")
@@ -215,16 +216,22 @@ async function mcpCreate(req: Request): Promise<Response> {
   if (!(await ownerAdmin(me))) {
     return json({ ok: false, error: "Only the owner can create a Claude connector." }, 403);
   }
+  let target = me.id as string;
+  if (typeof forId === "string" && forId && forId !== me.id) {
+    const { data: t } = await supabase.from("epc_business").select("id, business_type").eq("id", forId).maybeSingle();
+    if (!t || t.business_type !== "admin") return json({ ok: false, error: "A connector link is for a Capital Craft team login." }, 400);
+    target = t.id;
+  }
   const raw = new Uint8Array(32);
   crypto.getRandomValues(raw);
   const key = "ccmcp_" + btoa(String.fromCharCode(...raw)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   const expiresAt = new Date(Date.now() + MCP_KEY_DAYS * 86400000);
-  const { error } = await supabase.from("mcp_tokens").insert({ business_id: me.id, key_hash: await sha256Hex(key), expires_at: expiresAt.toISOString() });
+  const { error } = await supabase.from("mcp_tokens").insert({ business_id: target, key_hash: await sha256Hex(key), expires_at: expiresAt.toISOString() });
   if (error) return json({ ok: false, error: error.message }, 500);
   return json({ ok: true, key, expires_at: expiresAt.toISOString() });
 }
 
-// Valid connector key → a 5-minute SELECT-only JWT acting as its owner.
+// Valid connector key → a 5-minute SELECT-only JWT acting as the link's team login.
 async function mcpExchange(key: unknown): Promise<Response> {
   if (typeof key !== "string" || !key.startsWith("ccmcp_")) return json({ ok: false, error: "invalid key" }, 401);
   const { data: t } = await supabase.from("mcp_tokens")
@@ -232,8 +239,8 @@ async function mcpExchange(key: unknown): Promise<Response> {
   if (!t || t.revoked_at || new Date(t.expires_at).getTime() < Date.now()) return json({ ok: false, error: "invalid key" }, 401);
   const { data: owner } = await supabase.from("epc_business")
     .select("id, business_type, role, allowed_modules").eq("id", t.business_id).maybeSingle();
-  // Owner (main-admin level) only — re-checked on every use, so a change ends access.
-  if (!owner || !(await ownerAdmin(owner))) return json({ ok: false, error: "invalid key" }, 401);
+  // A Capital Craft team login only — re-checked on every use, so a change ends access.
+  if (!owner || owner.business_type !== "admin") return json({ ok: false, error: "invalid key" }, 401);
   const token = await sign({
     sub: owner.id,
     role: "mcp_reader",                // SELECT-only database role (0095)
@@ -251,7 +258,7 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    if (body?.action === "mcp_create") return await mcpCreate(req);
+    if (body?.action === "mcp_create") return await mcpCreate(req, body.for);
     if (body?.action === "mcp_exchange") return await mcpExchange(body.key);
     if (body?.action === "change_password") return await changePassword(body.change_token, body.new_password);
     const { password } = body;

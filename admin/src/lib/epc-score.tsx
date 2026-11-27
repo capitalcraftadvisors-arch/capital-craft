@@ -30,6 +30,8 @@ export type EpcLoan = {
   borrower_pan?: string | null;
   borrower_mobile?: string | null;
 };
+/** The epc_applications columns an EpcLoan needs (EPC profile + the Claude connector's get_epc). */
+export const EPC_LOAN_COLS = "status, aborted_at, plant_use_type, loan_display_id, sanctioned_amount, first_disbursement_amount, second_disbursement_amount, created_at, borrower_pan, borrower_mobile";
 
 // A dead application — rejected OR aborted. Aborted profiles count as rejected
 // in EPC Health (and never as approved / in-progress).

@@ -54,7 +54,7 @@ app/
     f/[token]         90-day file links in lender emails
     cron/followups    daily reminders (Cloud Scheduler, x-cron-key)
     gozerobils/leads  leads from gozerobils (x-api-key)
-    mcp/[key]         read-only Claude connector
+    mcp/[key]         read-only Claude connector: portal data (lib/mcp-tools) + the live code from GitHub (lib/mcp-code)
     leads             public customer form
 components/
   ui/          Button, Card, Input, Select, DateField, Modal, ConfirmHost
