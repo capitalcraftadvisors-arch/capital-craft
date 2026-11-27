@@ -5,12 +5,16 @@
 // opaque (migration 0095); it is exchanged at the `auth` edge function for a
 // 5-minute SELECT-only JWT (role mcp_reader) acting as the link's Capital Craft
 // team login, cached per instance until it nears expiry. The tools
-// (lib/mcp-tools) are read-only: portal data + the website's own code.
+// (lib/mcp-tools) are read-only: portal data + the website's own code. Every
+// tool call is logged with the user's question (mcp_calls, migration 0144) so
+// the owner sees what the team asks (Pri → Claude connector → Questions asked).
 
 import { NextRequest, NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { FUNCTIONS_URL } from "@/lib/supabase-config";
 import { dbAs } from "@/lib/api";
 import { MCP_TOOLS } from "@/lib/mcp-tools";
+import { GAP_TOOL } from "@/lib/claude-questions";
 import { errText } from "@/lib/errors";
 
 export const runtime = "nodejs";
@@ -23,7 +27,23 @@ const INSTRUCTIONS =
   "status, button or page does, why something happens): the live website code is readable with list_code / search_code / read_code — " +
   "admin/ARCHITECTURE.md is the map, admin/src the website, backend/supabase/migrations the database rules. Look it up in the code " +
   "rather than guessing or asking the user to paste anything, then answer in plain words for the Capital Craft team (no code unless " +
-  "asked). Amounts are rupees; dates DD/MM/YYYY; FY = April–March.";
+  "asked). Every tool takes question: the user's question word for word. If the portal can't fully answer, call " + GAP_TOOL + " once " +
+  "with what was missing. Amounts are rupees; dates DD/MM/YYYY; FY = April–March.";
+
+// Every tool also takes the user's question, logged with the call.
+const QUESTION = { type: "string", description: "The user's question that led to this call, word for word." };
+const withQuestion = (s: Record<string, any>) =>
+  ({ ...s, properties: { question: QUESTION, ...(s.properties ?? {}) }, required: ["question", ...(s.required ?? [])] });
+
+// One tool call → mcp_calls (0144), as the link's login. Never fails the call.
+async function logCall(db: SupabaseClient, question: unknown, tool: string, args: Record<string, unknown>, error: string | null) {
+  try {
+    const { error: e } = await db.rpc("mcp_log_call", {
+      p_question: typeof question === "string" ? question : null, p_tool: tool, p_args: args, p_ok: !error, p_error: error,
+    });
+    if (e) console.warn("[mcp] log failed:", e.message);
+  } catch (e) { console.warn("[mcp] log failed:", errText(e)); }
+}
 
 type RpcMsg = { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, any> };
 
@@ -55,7 +75,7 @@ async function handle(msg: RpcMsg, jwt: string): Promise<object | null> {
       return rpcResult(id, {
         protocolVersion: PROTOCOL_VERSIONS.includes(asked) ? asked : PROTOCOL_VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "capital-craft-portal", version: "1.1.0" },
+        serverInfo: { name: "capital-craft-portal", version: "1.2.0" },
         instructions: INSTRUCTIONS,
       });
     }
@@ -63,15 +83,19 @@ async function handle(msg: RpcMsg, jwt: string): Promise<object | null> {
       return rpcResult(id, {});
     case "tools/list":
       return rpcResult(id, {
-        tools: MCP_TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: t.inputSchema, annotations: { readOnlyHint: true } })),
+        tools: MCP_TOOLS.map((t) => ({ name: t.name, description: t.description, inputSchema: withQuestion(t.inputSchema), annotations: { readOnlyHint: true } })),
       });
     case "tools/call": {
       const tool = MCP_TOOLS.find((t) => t.name === msg.params?.name);
       if (!tool) return rpcError(id, -32602, `Unknown tool: ${String(msg.params?.name)}`);
+      const { question, ...args } = (msg.params?.arguments ?? {}) as Record<string, unknown>;
+      const db = dbAs(jwt);
       try {
-        const out = await tool.run(dbAs(jwt), (msg.params?.arguments ?? {}) as Record<string, unknown>);
+        const out = await tool.run(db, args);
+        await logCall(db, question, tool.name, args, null);
         return rpcResult(id, { content: [{ type: "text", text: JSON.stringify(out) }] });
       } catch (e) {
+        await logCall(db, question, tool.name, args, errText(e));
         return rpcResult(id, { content: [{ type: "text", text: errText(e) }], isError: true });
       }
     }

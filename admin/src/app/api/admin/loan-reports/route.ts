@@ -17,6 +17,7 @@ import { fetchLenders, lenderLabelIn, type Lender } from "@/lib/loan-lenders";
 import { deadlineState, remainingAmount, firstCharges, FIRST_CHARGE_COLS } from "@/lib/disbursement";
 import { fmtDate, fmtDateIST, todayIST } from "@/lib/dates";
 import { errText } from "@/lib/errors";
+import { GREEN, sheetHeader } from "@/lib/excel-sheet";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +26,7 @@ const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const DAY_MS = 86_400_000;
 // ₹ with Indian grouping (lakh / crore).
 const RUPEE_FMT = '[>=10000000]"₹"##\\,##\\,##\\,##0;[>=100000]"₹"##\\,##\\,##0;"₹"##,##0';
-const GREEN = "FF178A5C", GREEN_TINT = "FFE6F6EE", GREY = "FF9AA5A0", RED = "FFDC2626";
+const GREEN_TINT = "FFE6F6EE", GREY = "FF9AA5A0", RED = "FFDC2626";
 
 type Loan = {
   loan_display_id: string | null; borrower_name: string | null; aadhaar_name: string | null;
@@ -88,44 +89,6 @@ export async function GET(req: NextRequest) {
 }
 
 // ── Sheet helpers ────────────────────────────────────────────────────────────
-// A title line, then a two-row header: single columns span both rows, a pair
-// ("1st disbursement" → Date | Amount) spans two columns.
-type Col = { label: string; width: number; pair?: [string, string] };
-function header(ws: ExcelJS.Worksheet, title: string, cols: Col[]): number {
-  const total = cols.reduce((n, c) => n + (c.pair ? 2 : 1), 0);
-  ws.addRow([title]).font = { bold: true, size: 14, color: { argb: GREEN } };
-  ws.mergeCells(1, 1, 1, total);
-  ws.addRow([]);
-  const r1 = ws.getRow(3), r2 = ws.getRow(4);
-  let c = 1;
-  for (const col of cols) {
-    if (col.pair) {
-      r1.getCell(c).value = col.label;
-      ws.mergeCells(3, c, 3, c + 1);
-      r2.getCell(c).value = col.pair[0];
-      r2.getCell(c + 1).value = col.pair[1];
-      ws.getColumn(c).width = 13;
-      ws.getColumn(c + 1).width = col.width;
-      c += 2;
-    } else {
-      r1.getCell(c).value = col.label;
-      ws.mergeCells(3, c, 4, c);
-      ws.getColumn(c).width = col.width;
-      c += 1;
-    }
-  }
-  for (const r of [r1, r2]) {
-    for (let i = 1; i <= total; i++) {
-      const cell = r.getCell(i);
-      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
-      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: GREEN } };
-      cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
-      cell.border = { top: { style: "thin", color: { argb: "FFCDEADD" } }, bottom: { style: "thin", color: { argb: "FFCDEADD" } }, left: { style: "thin", color: { argb: "FFCDEADD" } }, right: { style: "thin", color: { argb: "FFCDEADD" } } };
-    }
-  }
-  ws.views = [{ state: "frozen", ySplit: 4 }];
-  return total;
-}
 function money(row: ExcelJS.Row, cols: number[]) {
   for (const c of cols) row.getCell(c).numFmt = RUPEE_FMT;
 }
@@ -142,7 +105,7 @@ async function monthly(wb: ExcelJS.Workbook, loans: Loan[], lenders: Lender[], m
   const rows = loans.filter((l) => inMonth(l.first_disbursement_date) || inMonth(l.second_disbursement_date));
   const monthName = new Date(`${month}-01T00:00:00`).toLocaleString("en-IN", { month: "long", year: "numeric" });
   const ws = wb.addWorksheet("Disbursements");
-  header(ws, `Lender-wise disbursements — ${monthName}`, [
+  sheetHeader(ws, `Lender-wise disbursements — ${monthName}`, [
     { label: "EPC name", width: 28 }, { label: "Borrower name", width: 24 }, { label: "Lender name", width: 16 },
     { label: "Project cost", width: 14 }, { label: "Applied loan", width: 14 }, { label: "Approved loan", width: 14 },
     { label: "ROI", width: 9 }, { label: "Tenure", width: 10 }, { label: "Processing fees", width: 14 },
@@ -210,7 +173,7 @@ async function pending(wb: ExcelJS.Workbook, loans: Loan[], lenders: Lender[]) {
     .map((l) => ({ l, days: Math.max(0, Math.floor((today.getTime() - start(l.first_disbursement_date!).getTime()) / DAY_MS)) }))
     .sort((a, b) => b.days - a.days);
   const ws = wb.addWorksheet("2nd tranche pending");
-  header(ws, `2nd tranche pending — as on ${fmtDateIST(todayIso)}`, [
+  sheetHeader(ws, `2nd tranche pending — as on ${fmtDateIST(todayIso)}`, [
     { label: "EPC name", width: 28 }, { label: "Borrower name", width: 24 }, { label: "Lender name", width: 16 },
     { label: "Project cost", width: 14 }, { label: "Approved loan", width: 14 },
     { label: "2nd disbursement", width: 14, pair: ["Due date", "Amount"] },

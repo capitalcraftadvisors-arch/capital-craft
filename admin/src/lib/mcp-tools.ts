@@ -14,6 +14,7 @@ import { PENDING_FILTER } from "./review";
 import { DEFAULT_LOAN_LENDERS, lenderLabelIn } from "./loan-lenders";
 import { computeEpcHealth, EPC_LOAN_COLS, scoreTone } from "./epc-score";
 import { listCode, readCode, searchCode } from "./mcp-code";
+import { GAP_TOOL } from "./claude-questions";
 
 type Args = Record<string, unknown>;
 type Row = Record<string, any>;
@@ -400,5 +401,14 @@ export const MCP_TOOLS: McpTool[] = [
       to: { type: "number", description: "Last line (default from + 399)." },
     }, required: ["path"] },
     run: (_db, args) => readCode(args.path, args.from, args.to),
+  },
+  {
+    // Writes nothing itself: the route logs every call (mcp_calls, 0144), this one included.
+    name: GAP_TOOL,
+    description: "After answering, call this once if the portal couldn't fully answer the user's question — say what was missing (data, a report, a feature). It only notes it for the Capital Craft team, who use these notes to improve the portal.",
+    inputSchema: { type: "object", properties: {
+      missing: { type: "string", description: "What was missing, in one sentence." },
+    }, required: ["missing"] },
+    run: async () => ({ noted: true }),
   },
 ];
